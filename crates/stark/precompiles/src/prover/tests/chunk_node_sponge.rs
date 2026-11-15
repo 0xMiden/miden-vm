@@ -9,11 +9,8 @@ use miden_core::{
 };
 use miden_crypto::hash::keccak::Keccak256;
 use miden_stark::{
-    air::{BaseAir, ConstraintDegrees},
-    lookup::{
-        LookupAir, ProverLookupBuilder,
-        debug::{ValidateLayout, ValidateLookupAir},
-    },
+    air::native::{ConstraintDegrees, LiftedAir},
+    lookup::{ProverLookupBuilder, native::LookupAir},
 };
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
@@ -39,7 +36,7 @@ use crate::prover::{
             },
         },
     },
-    logup::{Challenges, NUM_LOGUP_VALUES, NUM_RANDOMNESS},
+    logup::Challenges,
     primitives::byte_pair_lut::BytePairLutRequires,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::Session,
@@ -79,24 +76,16 @@ fn layout_and_lookup_shape_match_design() {
     assert_eq!(NUM_MAIN_COLS, 47);
     assert_eq!(NUM_AUX_COLS, 7);
     assert_eq!(NUM_AUX_COLS, chunk_node::NUM_AUX_COLS + SPONGE_NUM_AUX_COLS);
-    assert_eq!(<ChunkNodeSpongeAir as BaseAir<Felt>>::width(&ChunkNodeSpongeAir), NUM_MAIN_COLS);
+    assert_eq!(ChunkNodeSpongeAir.spec().main_width, NUM_MAIN_COLS);
     assert_eq!(
-        ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&ChunkNodeSpongeAir),
+        crate::prover::tests::raw_degrees(&ChunkNodeSpongeAir),
         ConstraintDegrees { base: 5, ext: 5 },
     );
     assert_eq!(log_quotient_degree(&ChunkNodeSpongeAir), 2);
 
-    ValidateLookupAir::validate(
+    miden_stark::lookup::native::validate_native(
         &ChunkNodeSpongeAir,
-        ValidateLayout {
-            preprocessed_width: ChunkNodeSpongeAir.preprocessed_width(),
-            trace_width: ChunkNodeSpongeAir.width(),
-            num_public_values: 0,
-            num_periodic_columns: ChunkNodeSpongeAir.periodic_columns().len(),
-            permutation_width: NUM_AUX_COLS,
-            num_permutation_challenges: NUM_RANDOMNESS,
-            num_permutation_values: NUM_LOGUP_VALUES,
-        },
+        &miden_stark::air::native::LiftedAir::spec(&ChunkNodeSpongeAir),
     )
     .unwrap_or_else(|err| panic!("ChunkNodeSpongeAir lookup validation failed: {err}"));
 }

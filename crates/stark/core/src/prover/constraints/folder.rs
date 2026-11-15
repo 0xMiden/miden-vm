@@ -9,10 +9,7 @@ use core::marker::PhantomData;
 
 use p3_field::{Algebra, BasedVectorSpace, ExtensionField, Field, PackedField};
 
-use crate::{
-    air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow, native},
-    selectors::Selectors,
-};
+use crate::air::native;
 
 /// Packed constraint folder for SIMD-optimized prover evaluation.
 ///
@@ -36,23 +33,6 @@ where
     P: PackedField<Scalar = F>,
     PE: Algebra<EF> + Algebra<P> + BasedVectorSpace<P> + Copy + Send + Sync,
 {
-    /// Main trace two-row window (packed base field)
-    pub main: RowWindow<'a, P>,
-    /// Preprocessed trace two-row window (packed base field); empty when the
-    /// AIR declares no preprocessed columns.
-    pub preprocessed: RowWindow<'a, P>,
-    /// Aux/permutation trace two-row window (packed extension field)
-    pub aux: RowWindow<'a, PE>,
-    /// Randomness for aux trace (packed extension field)
-    pub packed_randomness: &'a [PE],
-    /// Public values (base field scalars)
-    pub public_values: &'a [F],
-    /// Periodic column values (packed base field)
-    pub periodic_values: &'a [P],
-    /// Permutation values (packed extension field)
-    pub permutation_values: &'a [PE],
-    /// Constraint selectors (packed base field)
-    pub selectors: Selectors<P>,
     /// Base-field alpha powers, reordered to match base constraint emission order.
     /// `base_alpha_powers[d][j]` = d-th basis coefficient of alpha power for j-th base constraint.
     pub base_alpha_powers: &'a [Vec<F>],
@@ -125,87 +105,6 @@ where
     }
 }
 
-impl<'a, F, EF, P, PE> AirBuilder for ProverConstraintFolder<'a, F, EF, P, PE>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    P: PackedField<Scalar = F>,
-    PE: Algebra<EF> + Algebra<P> + BasedVectorSpace<P> + Copy + Send + Sync,
-{
-    type F = F;
-    type Expr = P;
-    type Var = P;
-    type PreprocessedWindow = RowWindow<'a, P>;
-    type MainWindow = RowWindow<'a, P>;
-    type PublicVar = F;
-    type PeriodicVar = P;
-
-    #[inline]
-    fn main(&self) -> Self::MainWindow {
-        self.main
-    }
-
-    #[inline]
-    fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        &self.preprocessed
-    }
-
-    #[inline]
-    fn is_first_row(&self) -> Self::Expr {
-        self.selectors.is_first_row
-    }
-
-    #[inline]
-    fn is_last_row(&self) -> Self::Expr {
-        self.selectors.is_last_row
-    }
-
-    #[inline]
-    fn is_transition(&self) -> Self::Expr {
-        self.selectors.is_transition
-    }
-
-    #[inline]
-    fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
-        self.record_base(x.into());
-    }
-
-    #[inline]
-    fn assert_zeros<const N: usize, I: Into<Self::Expr>>(&mut self, array: [I; N]) {
-        self.record_bases(array.map(Into::into));
-    }
-
-    #[inline]
-    fn public_values(&self) -> &[Self::PublicVar] {
-        self.public_values
-    }
-
-    #[inline]
-    fn periodic_values(&self) -> &[Self::PeriodicVar] {
-        self.periodic_values
-    }
-}
-
-impl<'a, F, EF, P, PE> ExtensionBuilder for ProverConstraintFolder<'a, F, EF, P, PE>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    P: PackedField<Scalar = F>,
-    PE: Algebra<EF> + Algebra<P> + BasedVectorSpace<P> + Copy + Send + Sync,
-{
-    type EF = EF;
-    type ExprEF = PE;
-    type VarEF = PE;
-
-    #[inline]
-    fn assert_zero_ext<I>(&mut self, x: I)
-    where
-        I: Into<Self::ExprEF>,
-    {
-        self.record_ext(x.into());
-    }
-}
-
 impl<F, EF, P, PE> native::LiftedAirBuilder for ProverConstraintFolder<'_, F, EF, P, PE>
 where
     F: Field,
@@ -233,33 +132,6 @@ where
     }
 }
 
-impl<'a, F, EF, P, PE> PermutationAirBuilder for ProverConstraintFolder<'a, F, EF, P, PE>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    P: PackedField<Scalar = F>,
-    PE: Algebra<EF> + Algebra<P> + BasedVectorSpace<P> + Copy + Send + Sync,
-{
-    type MP = RowWindow<'a, PE>;
-    type RandomVar = PE;
-    type PermutationVar = PE;
-
-    #[inline]
-    fn permutation(&self) -> Self::MP {
-        self.aux
-    }
-
-    #[inline]
-    fn permutation_randomness(&self) -> &[Self::RandomVar] {
-        self.packed_randomness
-    }
-
-    #[inline]
-    fn permutation_values(&self) -> &[Self::PermutationVar] {
-        self.permutation_values
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use alloc::vec;
@@ -274,18 +146,6 @@ mod tests {
     fn folder<'a>(base: &'a [Vec<Felt>], ext: &'a [QuadFelt]) -> Folder<'a> {
         // Native evaluation receives independent frame/input buffers, not these legacy fields.
         ProverConstraintFolder {
-            main: RowWindow::from_two_rows(&[], &[]),
-            preprocessed: RowWindow::from_two_rows(&[], &[]),
-            aux: RowWindow::from_two_rows(&[], &[]),
-            packed_randomness: &[],
-            public_values: &[],
-            periodic_values: &[],
-            permutation_values: &[],
-            selectors: Selectors {
-                is_first_row: PackedFelt::ZERO,
-                is_last_row: PackedFelt::ZERO,
-                is_transition: PackedFelt::ZERO,
-            },
             base_alpha_powers: base,
             ext_alpha_powers: ext,
             constraint_index: 0,
@@ -337,20 +197,10 @@ mod tests {
         native::LiftedAirBuilder::emit_base(&mut native, base1, native::ConstraintMeta::default());
         native::LiftedAirBuilder::emit_ext(&mut native, ext1, native::ConstraintMeta::default());
 
-        let mut legacy = folder(&base_weights, &ext_weights);
-        ExtensionBuilder::assert_zero_ext(&mut legacy, ext0);
-        AirBuilder::assert_zeros(&mut legacy, [base0, PackedFelt::ZERO]);
-        ExtensionBuilder::assert_zero_ext(&mut legacy, ext0);
-        AirBuilder::assert_zero(&mut legacy, base0);
-        ExtensionBuilder::assert_zero_ext(&mut legacy, PackedQuadFelt::ZERO);
-        AirBuilder::assert_zero(&mut legacy, base1);
-        ExtensionBuilder::assert_zero_ext(&mut legacy, ext1);
         assert_eq!(native.constraint_index, 8);
         assert_eq!(native.base_constraints.len(), 4);
         assert_eq!(native.ext_constraints.len(), 4);
-        assert_eq!(legacy.constraint_index, 8);
         let actual = native.finalize_constraints();
-        let old = legacy.finalize_constraints();
         for lane in 0..PackedFelt::WIDTH {
             // Global weights descend from alpha^7 to alpha^0; zeros still occupy their slots.
             let expected = extension_lane(ext0, lane) * (alpha.exp_u64(7) + alpha.exp_u64(4))
@@ -358,12 +208,10 @@ mod tests {
                 + QuadFelt::from(base1.as_slice()[lane]) * alpha
                 + extension_lane(ext1, lane);
             assert_eq!(extension_lane(actual, lane), expected);
-            assert_eq!(extension_lane(old, lane), expected);
         }
     }
 
     #[test]
-    #[cfg(feature = "testing")]
     fn direct_dummy_kernel_binds_packed_uniforms_across_independent_row_buffers() {
         use crate::{air::native::AirKernel, testing::airs::miden::DummyMidenAir};
 

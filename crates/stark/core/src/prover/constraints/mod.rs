@@ -2,10 +2,9 @@
 //!
 //! - `evaluate_constraints_into`: SIMD-parallel constraint evaluation on the quotient domain
 //! - `folder`: SIMD-optimized constraint folder and finalization
-//! - `layout`: Constraint layout discovery (base vs extension) and alpha decomposition
+//! - checked descriptor layouts supply global assertion order and alpha decomposition
 
 mod folder;
-pub(crate) mod layout;
 mod packed_row_bitrev;
 
 use alloc::vec::Vec;
@@ -22,7 +21,7 @@ use p3_maybe_rayon::prelude::*;
 use packed_row_bitrev::collect_vertically_packed_row_pair_bitrev_into;
 
 use crate::{
-    air::{LiftedAir, RowWindow, symbolic::ConstraintLayout},
+    air::native::{self, AirKernel, ConstraintLayout},
     domain::{Coset, EvaluationDomain},
     prover::periodic::PeriodicLde,
 };
@@ -98,8 +97,8 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
     F: TwoAdicField,
     EF: ExtensionField<F>,
     PackedExt<F, EF>: Algebra<EF> + Algebra<PackedVal<F>> + BasedVectorSpace<PackedVal<F>>,
-    A: LiftedAir<F, EF>,
-    A::EvalData<PackedVal<F>, PackedExt<F, EF>>: Sync,
+    A: AirKernel<F = F>,
+    A::Prepared<PackedVal<F>, PackedExt<F, EF>>: Sync,
 {
     type P<F> = PackedVal<F>;
     type PE<F, EF> = PackedExt<F, EF>;
@@ -128,10 +127,10 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
     }
 
     // ─── Decompose alpha powers by constraint layout ───
-    let aux_ef_width = air.aux_width();
+    let aux_ef_width = air.descriptor().spec().aux_width;
     let constraint_count = layout.total_constraints();
-    let base_count = layout.base_indices.len();
-    let ext_count = layout.ext_indices.len();
+    let base_count = layout.base_indices().len();
+    let ext_count = layout.ext_indices().len();
     let (base_alpha_powers, ext_alpha_powers) = layout.decompose_alpha(alpha);
 
     // Main trace width
@@ -151,11 +150,13 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
         permutation_values.iter().copied().map(Into::into).collect();
 
     let packed_public_values: Vec<P<F>> = public_values.iter().copied().map(Into::into).collect();
-    let data = air.prepare(crate::air::EvalInputs {
-        public_values: &packed_public_values,
-        challenges: &packed_randomness,
-        aux_values: &packed_perm_values,
-    });
+    let session = air
+        .bind(native::UniformInputs {
+            public_values: &packed_public_values,
+            challenges: &packed_randomness,
+            exports: &packed_perm_values,
+        })
+        .expect("validated prover uniform inputs match the descriptor");
 
     let main_vals = main_on_gj.inner.values;
     let aux_vals = aux_on_gj.inner.values;
@@ -185,7 +186,7 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
                 quotient_degree,
                 main_buf,
             );
-            let main_mat = RowMajorMatrixView::new(main_buf.as_slice(), main_width);
+            let (main_current, main_next) = main_buf.split_at(main_width);
 
             // Get preprocessed trace as packed row pair (when present). For AIRs
             // without preprocessed columns, the window is empty and the AIR must
@@ -197,11 +198,10 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
                     quotient_degree,
                     preproc_buf,
                 );
-                let m = RowMajorMatrixView::new(preproc_buf.as_slice(), preprocessed_width);
-                RowWindow::from_view(&m)
+                let (current, next) = preproc_buf.split_at(preprocessed_width);
+                native::Rows { current, next }
             } else {
-                let empty: &[P<F>] = &[];
-                RowWindow::from_two_rows(empty, empty)
+                native::Rows { current: &[], next: &[] }
             };
 
             // Get aux trace as packed row pair and convert to packed extension field
@@ -221,7 +221,7 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
                     aux_base_buf[i * EF::DIMENSION + j]
                 }));
             }
-            let aux_mat = RowMajorMatrixView::new(aux_pe_buf.as_slice(), aux_ef_width);
+            let (aux_current, aux_next) = aux_pe_buf.split_at(aux_ef_width);
 
             // Get packed periodic values
             let periodic_values: Vec<P<F>> = periodic_lde.packed_values_at(i_start).collect();
@@ -229,14 +229,6 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
             // Build packed folder and evaluate constraints
             let mut folder: ProverConstraintFolder<'_, F, EF, P<F>, PE<F, EF>> =
                 ProverConstraintFolder {
-                    main: RowWindow::from_view(&main_mat),
-                    preprocessed,
-                    aux: RowWindow::from_view(&aux_mat),
-                    packed_randomness: &packed_randomness,
-                    public_values,
-                    periodic_values: &periodic_values,
-                    permutation_values: &packed_perm_values,
-                    selectors,
                     base_alpha_powers: &base_alpha_powers,
                     ext_alpha_powers: &ext_alpha_powers,
                     constraint_index: 0,
@@ -246,9 +238,18 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
                     _phantom: PhantomData,
                 };
 
-            #[cfg(debug_assertions)]
-            crate::air::debug::check_builder_shape(air, &folder);
-            air.eval(&mut folder, &data);
+            let frame = native::AirFrame {
+                main: native::Rows { current: main_current, next: main_next },
+                preprocessed,
+                aux: native::Rows { current: aux_current, next: aux_next },
+                periodic: &periodic_values,
+                selectors: native::Selectors {
+                    first: selectors.is_first_row,
+                    last: selectors.is_last_row,
+                    transition: selectors.is_transition,
+                },
+            };
+            session.eval(&frame, &mut folder);
             let folded = folder.finalize_constraints();
 
             // Unpack the folded result, multiply by 1/Z_H (modular indexing since Z_H

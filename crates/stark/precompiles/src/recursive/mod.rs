@@ -34,7 +34,7 @@ use miden_core::{
 use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
     StarkConfig, VerifierInstance,
-    air::{LiftedAir, Statement},
+    air::{Statement, native::AirKernel},
     config::observe_protocol_params,
     proof::{StarkProof, StarkProofData},
     recursive::advice::{
@@ -183,8 +183,15 @@ fn build_verifier_advice(
         Vec::new(),
     )
     .map_err(|_| PvmRecursiveVerifierInputsError::InvalidProofShape("invalid PVM statement"))?;
-    let verifier_instance =
-        VerifierInstance::new(&config, &statement, Some(commitments::EIDOS.into()))?;
+    let verifier_instance = VerifierInstance::new(
+        &config,
+        &statement,
+        Some(miden_stark::SetupIdentity::new::<Challenge, _, _>(
+            commitments::EIDOS.into(),
+            statement.airs(),
+            &config,
+        )),
+    )?;
     let mut challenger = config.challenger();
     observe_protocol_params(config.pcs(), &mut challenger);
     let (stark, _digest) = StarkProof::from_data(&verifier_instance, &proof_data, challenger)?;
@@ -209,9 +216,12 @@ fn build_advice(
     // native stable (height, instance-index) order.
     let proof_order = proof_order_from_log_heights(&log_heights);
     let airs = ChipletAir::all();
-    if stark.all_aux_values.iter().zip(proof_order).any(|(values, air_index)| {
-        values.len() != <ChipletAir as LiftedAir<Felt, Challenge>>::num_aux_values(&airs[air_index])
-    }) {
+    if stark
+        .all_aux_values
+        .iter()
+        .zip(proof_order)
+        .any(|(values, air_index)| values.len() != airs[air_index].descriptor().spec().num_exports)
+    {
         return Err(PvmRecursiveVerifierInputsError::InvalidProofShape(
             "unexpected proof-ordered aux-final group width",
         ));

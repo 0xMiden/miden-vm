@@ -5,8 +5,8 @@ use p3_matrix::dense::RowMajorMatrix;
 use thiserror::Error;
 
 use super::{
-    AirDescriptor, AirFrame, AirSpec, AuxTrace, AuxTraceInputs, DescriptorError, Frame, Inputs,
-    LiftedAir, LiftedAirBuilder, ProverAir, UniformInputs,
+    AirDescriptor, AirFrame, AirSpec, AuxTrace, AuxTraceInputs, ConstraintDegrees, DescriptorError,
+    Frame, Inputs, LiftedAir, LiftedAirBuilder, ProverAir, UniformInputs,
 };
 
 /// A uniform input slice does not match the analyzed relation's declaration.
@@ -31,6 +31,19 @@ pub enum QuotientAllocationError {
     BelowConservative { allocated: usize, conservative: usize },
 }
 
+/// Scalar descriptor projection used by allocation-free memory budgeting.
+///
+/// A kernel override must equal its immutable descriptor's widths and raw degree diagnostics.
+/// Generated kernels emit both from the same checked capture. This projection carries no degree
+/// recipe and cannot replace actual-height validation before proof execution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct KernelGeometry {
+    pub main_width: usize,
+    pub aux_width: usize,
+    pub preprocessed_width: usize,
+    pub raw_degrees: ConstraintDegrees,
+}
+
 /// Resolve a kernel's execution allocation without shrinking the protocol's conservative floor.
 ///
 /// The default is the power-of-two ceiling of `max(1, raw_degree - 1)`. A hint may preserve or
@@ -40,7 +53,7 @@ pub enum QuotientAllocationError {
 pub fn resolve_quotient_chunks<K: AirKernel + ?Sized>(
     kernel: &K,
 ) -> Result<usize, QuotientAllocationError> {
-    let raw_degree = kernel.descriptor().analysis().raw_degrees().max();
+    let raw_degree = kernel.geometry().raw_degrees.max();
     quotient_allocation(raw_degree, kernel.quotient_chunks())
 }
 
@@ -82,6 +95,21 @@ pub trait AirKernel: Sync {
     type Prepared<B: Algebra<Self::F>, E: Algebra<B>>;
 
     fn descriptor(&self) -> &AirDescriptor<Self::F>;
+
+    /// Return scalar geometry without source evaluation or fixed-data construction.
+    ///
+    /// The default reads the descriptor. Generated wrappers override this with compile-time
+    /// values so cold memory queries need not allocate their complete descriptor first.
+    fn geometry(&self) -> KernelGeometry {
+        let descriptor = self.descriptor();
+        let spec = descriptor.spec();
+        KernelGeometry {
+            main_width: spec.main_width,
+            aux_width: spec.aux_width,
+            preprocessed_width: spec.preprocessed_width(),
+            raw_degrees: descriptor.analysis().raw_degrees(),
+        }
+    }
 
     /// Optional quotient chunk allocation for execution, preserving or raising the default.
     ///

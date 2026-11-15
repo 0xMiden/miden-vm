@@ -1,14 +1,23 @@
 //! Process-wide fixed VM preprocessing cache.
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 use core::any::{Any, TypeId};
 
 use miden_air::vm::MidenMultiAir;
 use miden_core::{Felt, field::QuadFelt};
-use miden_stark::{Preprocessed, StarkConfig, air::Statement};
+use miden_stark::{
+    Preprocessed, PreprocessedValidationError, StarkConfig,
+    air::{Statement, native::AirKernel},
+    lmcs::Lmcs,
+};
 
 type PreprocessedSetup<SC> = Preprocessed<Felt, <SC as StarkConfig<Felt, QuadFelt>>::Lmcs>;
-type SetupCell<SC> = std::sync::OnceLock<Option<std::sync::Arc<PreprocessedSetup<SC>>>>;
-type PreprocessedCache = std::collections::HashMap<(TypeId, u8), Box<dyn Any + Send + Sync>>;
+type CachedSetup<SC> = Result<
+    Option<std::sync::Arc<PreprocessedSetup<SC>>>,
+    std::sync::Arc<PreprocessedValidationError>,
+>;
+type SetupCell<SC> = std::sync::OnceLock<CachedSetup<SC>>;
+type CacheKey = (TypeId, u8, usize, Vec<[u8; 32]>);
+type PreprocessedCache = std::collections::HashMap<CacheKey, Box<dyn Any + Send + Sync>>;
 static PREPROCESSED_SETUPS: std::sync::OnceLock<std::sync::Mutex<PreprocessedCache>> =
     std::sync::OnceLock::new();
 
@@ -16,18 +25,23 @@ static PREPROCESSED_SETUPS: std::sync::OnceLock<std::sync::Mutex<PreprocessedCac
 ///
 /// The verifier only needs the fixed setup commitment. The prover needs the
 /// full setup tree so it can open preprocessed rows during PCS queries. The
-/// setup depends only on the concrete config type and LDE blowup, so it is
-/// cached per `(TypeId, log_blowup)` across proves.
+/// setup is cached by concrete config type, PCS blowup, LMCS alignment and ordered
+/// descriptor fingerprints, preserving the trusted association across proves.
 #[cfg(feature = "std")]
 pub(crate) fn cached_preprocessed_setup<SC>(
     statement: &Statement<Felt, QuadFelt, MidenMultiAir>,
     config: &SC,
-) -> Option<std::sync::Arc<PreprocessedSetup<SC>>>
+) -> CachedSetup<SC>
 where
     SC: StarkConfig<Felt, QuadFelt> + 'static,
     PreprocessedSetup<SC>: Send + Sync + 'static,
 {
-    let key = (TypeId::of::<SC>(), config.pcs().log_blowup());
+    let key = (
+        TypeId::of::<SC>(),
+        config.pcs().log_blowup(),
+        config.lmcs().alignment(),
+        statement.airs().iter().map(|air| air.descriptor().fingerprint()).collect(),
+    );
     // Hold the map lock only while finding the cell. Each setup initializes once, without
     // blocking cache hits or construction for other configurations and blowup factors.
     let cell = {
@@ -43,8 +57,12 @@ where
             .clone()
     };
 
-    cell.get_or_init(|| Preprocessed::build(statement, config).map(std::sync::Arc::new))
-        .clone()
+    cell.get_or_init(|| {
+        Preprocessed::build(statement, config)
+            .map(|setup| setup.map(std::sync::Arc::new))
+            .map_err(std::sync::Arc::new)
+    })
+    .clone()
 }
 
 #[cfg(test)]
@@ -70,7 +88,7 @@ mod tests {
         let config = eidos_config(params, air_config::RELATION_DIGEST);
         let cached = std::thread::scope(|scope| {
             let handles = core::array::from_fn::<_, 4, _>(|_| {
-                scope.spawn(|| cached_preprocessed_setup(&statement, &config).unwrap())
+                scope.spawn(|| cached_preprocessed_setup(&statement, &config).unwrap().unwrap())
             });
             let setups = handles.map(|handle| handle.join().unwrap());
             assert!(setups.iter().all(|setup| Arc::ptr_eq(setup, &setups[0])));
@@ -92,7 +110,7 @@ mod tests {
         )
         .unwrap();
         let larger_config = eidos_config(larger_params, air_config::RELATION_DIGEST);
-        let larger = cached_preprocessed_setup(&statement, &larger_config).unwrap();
+        let larger = cached_preprocessed_setup(&statement, &larger_config).unwrap().unwrap();
         assert!(!Arc::ptr_eq(&cached, &larger));
         assert_ne!(cached.commitment(), larger.commitment());
     }

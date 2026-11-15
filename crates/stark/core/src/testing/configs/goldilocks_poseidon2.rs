@@ -15,7 +15,7 @@ use rand::{SeedableRng, rngs::SmallRng};
 
 pub use super::{Felt, PackedFelt, PackedQuadFelt, QuadFelt};
 use crate::{
-    air::{LiftedAir, MultiAir, ProverStatement, Statement},
+    air::{MultiAir, ProverStatement, Statement, native},
     testing::TEST_SEED,
 };
 
@@ -143,7 +143,8 @@ pub fn generate_pow4_trace(start: Felt, height: usize) -> RowMajorMatrix<Felt> {
 pub fn prove_and_verify_statement<MA>(prover_statement: ProverStatement<Felt, QuadFelt, MA>)
 where
     MA: MultiAir<Felt, QuadFelt>,
-    <MA::Air as LiftedAir<Felt, QuadFelt>>::EvalData<PackedFelt, PackedQuadFelt>: Sync,
+    MA::Air: native::ProverAir<QuadFelt> + native::LiftedAir<F = Felt>,
+    <MA::Air as native::AirKernel>::Prepared<PackedFelt, PackedQuadFelt>: Sync,
 {
     let config = test_config();
 
@@ -166,21 +167,21 @@ where
     assert_eq!(output.digest, reparse_digest);
 }
 
-/// Minimal [`MultiAir`] wrapper for tests: a list of AIRs, each building its own
-/// aux trace via [`LiftedAir::build_aux_trace`].
-pub struct TestMultiAir<A> {
-    pub airs: Vec<A>,
+/// Minimal [`MultiAir`] wrapper over ready native kernels. Witness and fixed-factory
+/// capabilities are required only by helpers that actually construct them.
+pub struct TestMultiAir<K: native::AirKernel<F = Felt>> {
+    pub airs: Vec<K>,
 }
 
-impl<A> TestMultiAir<A> {
-    pub fn new(airs: Vec<A>) -> Self {
+impl<K: native::AirKernel<F = Felt>> TestMultiAir<K> {
+    pub fn new(airs: Vec<K>) -> Self {
         Self { airs }
     }
 }
 
 impl<A> MultiAir<Felt, QuadFelt> for TestMultiAir<A>
 where
-    A: LiftedAir<Felt, QuadFelt>,
+    A: native::AirKernel<F = Felt>,
 {
     type Air = A;
 
@@ -192,10 +193,11 @@ where
 /// Prove and verify multiple traces sharing one AIR.
 pub fn prove_and_verify<A>(air: &A, air_inputs: &[Felt], traces: &[RowMajorMatrix<Felt>])
 where
-    A: LiftedAir<Felt, QuadFelt> + Clone,
-    A::EvalData<PackedFelt, PackedQuadFelt>: Sync,
+    A: native::ProverAir<QuadFelt> + native::LiftedAir<F = Felt> + Clone,
 {
-    let airs: Vec<A> = core::iter::repeat_n(air.clone(), traces.len()).collect();
+    let airs: Vec<_> = core::iter::repeat_n(air.clone(), traces.len())
+        .map(|source| native::DirectKernel::new(source).expect("valid test source"))
+        .collect();
     let traces_owned: Vec<RowMajorMatrix<Felt>> = traces.to_vec();
     let air_inputs = (0..airs.len()).map(|i| (i, air_inputs.to_vec())).collect();
     let statement = Statement::new(TestMultiAir::new(airs), air_inputs, Vec::new())

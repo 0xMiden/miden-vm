@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn each_chiplet_preserves_its_degree_and_quotient_budget() {
-        use miden_stark::air::ConstraintDegrees;
+        use miden_stark::air::native::{AirKernel, ConstraintDegrees, DirectKernel};
         let expected = [
             (5, 5, 2),
             (3, 3, 1),
@@ -315,11 +315,11 @@ mod tests {
             (5, 5, 2),
         ];
         for (air, (base, ext, log_quotient)) in ChipletAir::all().into_iter().zip(expected) {
-            let derived = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air);
+            let kernel = DirectKernel::new(air).expect("precompile source descriptor");
+            let derived = kernel.descriptor().analysis().raw_degrees();
             assert_eq!(derived, ConstraintDegrees { base, ext }, "{air:?}");
-            assert_eq!(air.constraint_degree(), derived, "{air:?}: declared degree");
             assert_eq!(
-                miden_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air),
+                miden_stark::log_quotient_degree(&kernel).unwrap(),
                 log_quotient,
                 "{air:?}: quotient factor"
             );

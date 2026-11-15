@@ -77,3 +77,41 @@ pub trait ProverAir<EF: ExtensionField<Self::F>>: LiftedAir {
         inputs: AuxTraceInputs<'_, Self::F, EF>,
     ) -> Result<AuxTrace<EF>, Self::Error>;
 }
+
+// Borrowed local/debug consumers retain the original source and its witness capability. These
+// forwards neither capture a descriptor nor construct any data on their own.
+impl<A: LiftedAir + ?Sized> LiftedAir for &A {
+    type F = A::F;
+
+    fn spec(&self) -> AirSpec<'_, Self::F> {
+        A::spec(self)
+    }
+
+    fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Self::F>> {
+        A::build_preprocessed_trace(self)
+    }
+
+    fn eval<B: LiftedAirBuilder<F = Self::F>>(
+        &self,
+        frame: &Frame<'_, B>,
+        inputs: Inputs<'_, B>,
+        sink: &mut B,
+    ) {
+        A::eval(self, frame, inputs, sink);
+    }
+}
+
+impl<A, EF> ProverAir<EF> for &A
+where
+    A: ProverAir<EF> + ?Sized,
+    EF: ExtensionField<A::F>,
+{
+    type Error = A::Error;
+
+    fn build_aux_trace(
+        &self,
+        inputs: AuxTraceInputs<'_, Self::F, EF>,
+    ) -> Result<AuxTrace<EF>, Self::Error> {
+        A::build_aux_trace(self, inputs)
+    }
+}

@@ -1,15 +1,4 @@
-//! Debug helpers for lifted AIRs.
-//!
-//! Two flavours of helpers live here:
-//!
-//! - **Structural assertion** ([`assert_prover_setup`]) — a panic-based check over
-//!   [`crate::air::debug::assert_multi_air_valid`]. Call it from tests / setup; the prover and
-//!   verifier hot paths trust the AIR's structural contract.
-//! - **Constraint checker** ([`check_constraints`]) — evaluates AIR constraints row-by-row on
-//!   concrete trace values and panics on the first nonzero constraint. It derives deterministic
-//!   debug challenges; it does not replay the prover transcript.
-
-extern crate alloc;
+//! Structural checks and concrete row diagnostics for native AIR kernels.
 
 use alloc::{vec, vec::Vec};
 
@@ -19,27 +8,15 @@ use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
     air::{
-        AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, MultiAir, PermutationAirBuilder,
-        ProverStatement, RowWindow, debug::assert_multi_air_valid,
+        MultiAir, ProverStatement,
+        debug::assert_multi_air_valid,
+        native::{self, AirKernel},
     },
     order::TraceOrder,
+    prover::periodic::periodic_matrix,
 };
 
-// ============================================================================
-// Structural assertions (over crate::air::debug)
-// ============================================================================
-
-/// Assert the AIR's structural contract via [`assert_multi_air_valid`].
-///
-/// Only the *trusted* structural contract is asserted here. The AIR ↔ PCS
-/// compatibility bound (`log_quotient_degree <= log_blowup`) is a validated
-/// runtime input — prover and verifier surface it as
-/// [`DomainError::ConstraintDegreeTooHigh`](crate::DomainError) — so it is not
-/// re-checked here.
-///
-/// The preprocessed bundle's shape (tree presence, per-trace width, per-AIR
-/// height) is validated at [`ProverInstance::new`](crate::ProverInstance::new)
-/// construction time, so it is not re-checked here.
+/// Assert descriptor structure without materializing fixed matrices or witnesses.
 pub fn assert_prover_setup<F, EF, MA>(prover_statement: &ProverStatement<F, EF, MA>)
 where
     F: Field,
@@ -49,331 +26,248 @@ where
     assert_multi_air_valid::<F, EF, MA>(prover_statement.statement().multi_air());
 }
 
-// ============================================================================
-// Public API
-// ============================================================================
-
-/// Evaluate AIR constraints against concrete trace values and panic on failure.
+/// Check concrete constraints using explicitly supplied, setup-owned fixed matrices.
 ///
-/// Base-field constraints are checked before auxiliary-trace construction, whose builders may
-/// assume valid selectors. The full constraint check then uses the constructed auxiliary traces.
-/// Each AIR sees its own public-input slice from the [`ProverStatement`].
+/// The optional slice is in instance order. It is shared by both row passes and auxiliary
+/// construction; this function never invokes fixed-data factories. Base assertions are checked
+/// before auxiliary construction, then the complete relation and external closure are checked.
 ///
-/// Uses [`LiftedAir::prepare`], [`LiftedAir::eval`], and
-/// [`LiftedAir::build_aux_trace_with_preprocessed`], matching the prover's entry points. Each
-/// preprocessed trace is shared by the auxiliary builder and both constraint-checking passes.
-///
-/// Derives auxiliary-trace challenges from the supplied challenger using only
-/// statement-owned data plus the instance count and log trace heights. This is
-/// a local constraint debugger: it intentionally skips protocol commitments
-/// (including any preprocessed setup commitment), so sampled challenges need
-/// not match a full proof transcript produced by
-/// [`ProverInstance::prove`](crate::ProverInstance::prove).
-///
-/// # Panics
-///
-/// - If trace dimensions don't match their AIR
-/// - If any constraint evaluates to nonzero on any row
+/// Challenges observe only the statement and instance heights, preserving the local debugger's
+/// derivation rather than replaying proof commitments. Constraint failures and witness errors panic.
 pub fn check_constraints<F, EF, MA, Ch>(
     prover_statement: &ProverStatement<F, EF, MA>,
+    preprocessed: Option<&[Option<RowMajorMatrix<F>>]>,
     mut challenger: Ch,
 ) where
     F: Field,
     EF: ExtensionField<F>,
     MA: MultiAir<F, EF>,
+    MA::Air: native::ProverAir<EF> + native::LiftedAir<F = F>,
     Ch: CanObserve<F> + CanSample<F>,
 {
     let statement = prover_statement.statement();
     let airs = statement.airs();
     let traces = prover_statement.traces();
-    let air_inputs = statement.air_inputs();
-    let aux_inputs = statement.aux_inputs();
-    assert!(!airs.is_empty(), "no instances provided");
-    assert_eq!(airs.len(), traces.len(), "airs and traces counts must match");
-
-    // Seed deterministic debug challenges from statement/height observations only.
-    // Do not observe setup/trace commitments or replay the prover transcript here.
-    let trace_heights: Vec<usize> = traces.iter().map(Matrix::height).collect();
-    let trace_order = TraceOrder::from_trace_heights::<F, EF, _>(airs, &trace_heights)
+    assert_multi_air_valid::<F, EF, MA>(statement.multi_air());
+    if let Some(fixed) = preprocessed {
+        assert_eq!(fixed.len(), airs.len(), "fixed matrix count must match instances");
+    }
+    for (instance, (kernel, main)) in airs.iter().zip(traces).enumerate() {
+        let spec = kernel.descriptor().spec();
+        let fixed = preprocessed.and_then(|tables| tables[instance].as_ref());
+        assert_eq!(
+            fixed.is_some(),
+            spec.preprocessed.is_some(),
+            "instance {instance}: fixed presence"
+        );
+        if let Some(table) = fixed {
+            let shape = spec.preprocessed.expect("fixed presence was checked");
+            assert_eq!(table.width(), shape.width, "instance {instance}: fixed width");
+            assert_eq!(
+                table.values.len(),
+                main.height() * shape.width,
+                "instance {instance}: fixed raw rows"
+            );
+            assert_eq!(
+                main.height(),
+                1usize << shape.log_height,
+                "instance {instance}: fixed native height"
+            );
+        }
+        let chunks = native::resolve_quotient_chunks(kernel).expect("valid kernel allocation");
+        kernel
+            .descriptor()
+            .analysis()
+            .degree_profile()
+            .validate_capacity(main.height(), chunks)
+            .expect("allocation must fit the actual trace height");
+    }
+    let trace_heights: Vec<_> = traces.iter().map(Matrix::height).collect();
+    let order = TraceOrder::from_trace_heights(airs, &trace_heights)
         .expect("trace heights must satisfy the AIR contracts");
-    statement.observe(&mut challenger, trace_order.log_heights());
-    trace_order.observe_shape::<F, _>(&mut challenger);
-    let max_num_randomness = airs.iter().map(LiftedAir::num_randomness).max().unwrap_or(0);
-    let challenges: Vec<EF> = (0..max_num_randomness)
+    statement.observe(&mut challenger, order.log_heights());
+    order.observe_shape::<F, _>(&mut challenger);
+    let max_challenges = airs
+        .iter()
+        .map(|kernel| kernel.descriptor().spec().num_challenges)
+        .max()
+        .unwrap_or(0);
+    let challenges: Vec<EF> = (0..max_challenges)
         .map(|_| EF::from_basis_coefficients_fn(|_| challenger.sample()))
         .collect();
-
-    let mut aux_traces = Vec::with_capacity(airs.len());
-    let mut aux_values_per_air = Vec::with_capacity(airs.len());
-    let preprocessed: Vec<_> = airs.iter().map(BaseAir::preprocessed_trace).collect();
-    for (i, (air, main)) in airs.iter().zip(traces.iter()).enumerate() {
-        let num_randomness = air.num_randomness();
-        // Auxiliary builders may assume selectors are boolean. Check base-field constraints
-        // first so malformed witnesses fail an AIR constraint before reaching those assumptions.
+    let mut auxiliaries = Vec::with_capacity(airs.len());
+    for (instance, (kernel, main)) in airs.iter().zip(traces).enumerate() {
+        let spec = kernel.descriptor().spec();
+        let fixed = preprocessed.and_then(|tables| tables[instance].as_ref());
         check_single_trace(
-            air,
+            kernel,
             main,
-            preprocessed[i].as_ref(),
+            fixed,
             None,
-            &vec![EF::ZERO; air.num_aux_values()],
-            &air_inputs[i],
-            &challenges,
-            i,
+            &vec![EF::ZERO; spec.num_exports],
+            &statement.air_inputs()[instance],
+            &challenges[..spec.num_challenges],
+            instance,
         );
-        let (aux_trace, aux_values) = air.build_aux_trace_with_preprocessed(
-            main,
-            preprocessed[i].as_ref(),
-            &air_inputs[i],
-            aux_inputs,
-            &challenges[..num_randomness],
-        );
-        aux_traces.push(aux_trace);
-        aux_values_per_air.push(aux_values);
-    }
-
-    // Mirror the verifier's external-assertion check: the cross-AIR
-    // interactions must hold for these aux values and public inputs. Each
-    // assertion is a concrete value, so a zero-check is exact.
-    let aux_views: Vec<&[EF]> = aux_values_per_air.iter().map(Vec::as_slice).collect();
-    let assertions = statement
-        .eval_external(&challenges, &aux_views, trace_order.log_heights())
-        .expect("eval_external failed during check_constraints");
-    for (k, assertion) in assertions.iter().enumerate() {
-        assert_eq!(*assertion, EF::ZERO, "external assertion {k} is non-zero");
-    }
-
-    for (i, ((air, main), (aux_trace, aux_values))) in airs
-        .iter()
-        .zip(traces.iter())
-        .zip(aux_traces.iter().zip(aux_values_per_air.iter()))
-        .enumerate()
-    {
-        // `check_builder_shape` validates row-window widths per row, but aux trace
-        // height is invisible to a single row window — check it here so a short aux
-        // trace fails cleanly rather than via an opaque row-slice panic.
+        let auxiliary = native::ProverAir::build_aux_trace(
+            kernel,
+            native::AuxTraceInputs {
+                main,
+                preprocessed: fixed,
+                public_values: &statement.air_inputs()[instance],
+                statement: statement.aux_inputs(),
+                challenges: &challenges[..spec.num_challenges],
+            },
+        )
+        .unwrap_or_else(|error| {
+            panic!("instance {instance}: auxiliary witness construction failed: {error}")
+        });
         assert_eq!(
-            aux_trace.height(),
-            main.height(),
-            "instance {i}: aux trace height mismatch: expected {}, got {}",
-            main.height(),
-            aux_trace.height()
+            auxiliary.columns.width(),
+            spec.aux_width,
+            "instance {instance}: auxiliary width"
         );
-
+        assert_eq!(
+            auxiliary.columns.values.len(),
+            main.height() * spec.aux_width,
+            "instance {instance}: auxiliary raw rows"
+        );
+        assert_eq!(auxiliary.exports.len(), spec.num_exports, "instance {instance}: export count");
+        auxiliaries.push(auxiliary);
+    }
+    let views: Vec<_> = auxiliaries.iter().map(|aux| aux.exports.as_slice()).collect();
+    let assertions = statement
+        .eval_external(&challenges, &views, order.log_heights())
+        .expect("eval_external failed during check_constraints");
+    for (assertion, value) in assertions.into_iter().enumerate() {
+        assert_eq!(value, EF::ZERO, "external assertion {assertion} is non-zero");
+    }
+    for (instance, ((kernel, main), auxiliary)) in
+        airs.iter().zip(traces).zip(&auxiliaries).enumerate()
+    {
+        let spec = kernel.descriptor().spec();
         check_single_trace(
-            air,
+            kernel,
             main,
-            preprocessed[i].as_ref(),
-            Some(aux_trace),
-            aux_values,
-            &air_inputs[i],
-            &challenges,
-            i,
+            preprocessed.and_then(|tables| tables[instance].as_ref()),
+            Some(&auxiliary.columns),
+            &auxiliary.exports,
+            &statement.air_inputs()[instance],
+            &challenges[..spec.num_challenges],
+            instance,
         );
     }
 }
 
-/// Check constraints row by row, or only base-field constraints when no auxiliary trace is
-/// supplied.
 #[allow(clippy::too_many_arguments)]
-fn check_single_trace<F, EF, A>(
-    air: &A,
+fn check_single_trace<F, EF, K>(
+    kernel: &K,
     main: &RowMajorMatrix<F>,
-    preprocessed: Option<&RowMajorMatrix<F>>,
-    aux_trace: Option<&RowMajorMatrix<EF>>,
-    aux_values: &[EF],
+    fixed: Option<&RowMajorMatrix<F>>,
+    auxiliary: Option<&RowMajorMatrix<EF>>,
+    exports: &[EF],
     public_values: &[F],
     challenges: &[EF],
-    instance_index: usize,
+    instance: usize,
 ) where
     F: Field,
     EF: ExtensionField<F>,
-    A: LiftedAir<F, EF>,
+    K: AirKernel<F = F>,
 {
+    let descriptor = kernel.descriptor();
+    let spec = descriptor.spec();
     let height = main.height();
+    let periodic = periodic_matrix(&spec.periodic_columns);
+    let dummy_aux = vec![EF::ZERO; spec.aux_width];
+    let session = kernel
+        .bind(native::UniformInputs { public_values, challenges, exports })
+        .expect("debug uniforms must match the descriptor");
+    for row in 0..height {
+        let next = (row + 1) % height;
+        let main_current = main.row_slice(row).expect("main current row");
+        let main_next = main.row_slice(next).expect("main next row");
+        let fixed_current = fixed.map(|table| table.row_slice(row).expect("fixed current row"));
+        let fixed_next = fixed.map(|table| table.row_slice(next).expect("fixed next row"));
+        let aux_current =
+            auxiliary.map(|trace| trace.row_slice(row).expect("auxiliary current row"));
+        let aux_next = auxiliary.map(|trace| trace.row_slice(next).expect("auxiliary next row"));
+        let periodic_row = periodic
+            .as_ref()
+            .map(|matrix| matrix.row_slice(row % matrix.height()).expect("periodic row"));
+        let frame = native::AirFrame {
+            main: native::Rows { current: &main_current, next: &main_next },
+            preprocessed: native::Rows {
+                current: fixed_current.as_deref().unwrap_or(&[]),
+                next: fixed_next.as_deref().unwrap_or(&[]),
+            },
+            aux: native::Rows {
+                current: aux_current.as_deref().unwrap_or(&dummy_aux),
+                next: aux_next.as_deref().unwrap_or(&dummy_aux),
+            },
+            periodic: periodic_row.as_deref().unwrap_or(&[]),
+            selectors: native::Selectors {
+                first: F::from_bool(row == 0),
+                last: F::from_bool(row + 1 == height),
+                transition: F::from_bool(row + 1 < height),
+            },
+        };
+        let mut sink = DebugConstraintBuilder {
+            descriptor,
+            instance,
+            row,
+            ordinal: 0,
+            check_extension: auxiliary.is_some(),
+            _ef: core::marker::PhantomData,
+        };
+        session.eval(&frame, &mut sink);
+        debug_assert_eq!(sink.ordinal, descriptor.analysis().layout().total_constraints());
+    }
+}
 
-    // Setup height must match the main trace; row-window validation checks its width.
-    if let Some(preproc) = preprocessed {
-        assert_eq!(
-            preproc.height(),
-            height,
-            "instance {instance_index}: preprocessed trace height mismatch: expected {height}, got {}",
-            preproc.height()
+struct DebugConstraintBuilder<'a, F: Field, EF> {
+    descriptor: &'a native::AirDescriptor<F>,
+    instance: usize,
+    row: usize,
+    ordinal: usize,
+    check_extension: bool,
+    _ef: core::marker::PhantomData<EF>,
+}
+
+impl<F: Field, EF> DebugConstraintBuilder<'_, F, EF> {
+    fn failed(&self, class: &str, ordinal: usize, value: impl core::fmt::Debug) -> ! {
+        let instance = self.instance;
+        let row = self.row;
+        if let Some(label) = self.descriptor.label(ordinal) {
+            panic!(
+                "{class} constraint not satisfied: instance {instance}, row {row}, constraint {ordinal} ({label}): {value:?}"
+            );
+        }
+        panic!(
+            "{class} constraint not satisfied: instance {instance}, row {row}, constraint {ordinal}: {value:?}"
         );
     }
-
-    let periodic_matrix = air.periodic_columns_matrix();
-    let dummy_aux_row = vec![EF::ZERO; air.aux_width()];
-    let challenges = &challenges[..air.num_randomness()];
-    let data = air.prepare(crate::air::EvalInputs { public_values, challenges, aux_values });
-    for row in 0..height {
-        let next_row = (row + 1) % height;
-
-        // Main trace rows.
-        let main_current = main.row_slice(row).unwrap();
-        let main_next = main.row_slice(next_row).unwrap();
-
-        // Aux trace rows.
-        let aux_current = aux_trace.map(|trace| trace.row_slice(row).unwrap());
-        let aux_next = aux_trace.map(|trace| trace.row_slice(next_row).unwrap());
-
-        // Periodic values for this row via modulo indexing into the periodic table.
-        let periodic_row = periodic_matrix.as_ref().map(|m| m.row_slice(row % m.height()).unwrap());
-        let periodic_values: &[F] = periodic_row.as_deref().unwrap_or(&[]);
-
-        // Preprocessed rows (empty window when the AIR declares none).
-        let preprocessed_current = preprocessed.map(|m| m.row_slice(row).unwrap());
-        let preprocessed_next = preprocessed.map(|m| m.row_slice(next_row).unwrap());
-
-        let mut builder = DebugConstraintBuilder {
-            main: RowWindow::from_two_rows(&main_current, &main_next),
-            preprocessed: RowWindow::from_two_rows(
-                preprocessed_current.as_deref().unwrap_or(&[]),
-                preprocessed_next.as_deref().unwrap_or(&[]),
-            ),
-            permutation: RowWindow::from_two_rows(
-                aux_current.as_deref().unwrap_or(&dummy_aux_row),
-                aux_next.as_deref().unwrap_or(&dummy_aux_row),
-            ),
-            randomness: challenges,
-            public_values,
-            periodic_values,
-            permutation_values: aux_values,
-            is_first_row: F::from_bool(row == 0),
-            is_last_row: F::from_bool(row == height - 1),
-            is_transition: F::from_bool(row != height - 1),
-            instance_index,
-            row_index: row,
-            check_extension_constraints: aux_trace.is_some(),
-        };
-
-        #[cfg(debug_assertions)]
-        crate::air::debug::check_builder_shape(air, &builder);
-
-        air.eval(&mut builder, &data);
-    }
 }
 
-// ============================================================================
-// DebugConstraintBuilder
-// ============================================================================
-
-/// Lightweight constraint builder that checks constraints against concrete trace values.
-///
-/// Checks base-field constraints and, once the auxiliary trace is available, extension-field
-/// constraints. Panics immediately on a nonzero constraint.
-/// Uses base field `F` for the main trace and extension field `EF` for the auxiliary
-/// (permutation) trace, matching the actual field layout of lifted STARK traces.
-struct DebugConstraintBuilder<'a, F: Field, EF: ExtensionField<F>> {
-    main: RowWindow<'a, F>,
-    preprocessed: RowWindow<'a, F>,
-    permutation: RowWindow<'a, EF>,
-    randomness: &'a [EF],
-    public_values: &'a [F],
-    periodic_values: &'a [F],
-    permutation_values: &'a [EF],
-    is_first_row: F,
-    is_last_row: F,
-    is_transition: F,
-    instance_index: usize,
-    row_index: usize,
-    check_extension_constraints: bool,
-}
-
-impl<'a, F, EF> AirBuilder for DebugConstraintBuilder<'a, F, EF>
-where
-    F: Field,
-    EF: ExtensionField<F>,
+impl<F: Field, EF: ExtensionField<F>> native::LiftedAirBuilder
+    for DebugConstraintBuilder<'_, F, EF>
 {
     type F = F;
     type Expr = F;
-    type Var = F;
-    type PreprocessedWindow = RowWindow<'a, F>;
-    type MainWindow = RowWindow<'a, F>;
-    type PublicVar = F;
-    type PeriodicVar = F;
+    type ExtExpr = EF;
 
-    fn main(&self) -> Self::MainWindow {
-        self.main
-    }
-
-    fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        &self.preprocessed
-    }
-
-    fn is_first_row(&self) -> Self::Expr {
-        self.is_first_row
-    }
-
-    fn is_last_row(&self) -> Self::Expr {
-        self.is_last_row
-    }
-
-    fn is_transition(&self) -> Self::Expr {
-        self.is_transition
-    }
-
-    fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
-        assert_eq!(
-            x.into(),
-            F::ZERO,
-            "constraint not satisfied at instance {}, row {}",
-            self.instance_index,
-            self.row_index
-        );
-    }
-
-    fn public_values(&self) -> &[Self::PublicVar] {
-        self.public_values
-    }
-
-    fn periodic_values(&self) -> &[Self::PeriodicVar] {
-        self.periodic_values
-    }
-}
-
-impl<F, EF> ExtensionBuilder for DebugConstraintBuilder<'_, F, EF>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    type EF = EF;
-    type ExprEF = EF;
-    type VarEF = EF;
-
-    fn assert_zero_ext<I>(&mut self, x: I)
-    where
-        I: Into<Self::ExprEF>,
-    {
-        if self.check_extension_constraints {
-            assert_eq!(
-                x.into(),
-                EF::ZERO,
-                "ext constraint not satisfied at instance {}, row {}",
-                self.instance_index,
-                self.row_index
-            );
+    fn emit_base(&mut self, value: F, _meta: native::ConstraintMeta<'_>) {
+        let ordinal = self.ordinal;
+        self.ordinal += 1;
+        if value != F::ZERO {
+            self.failed("base", ordinal, value);
         }
     }
-}
 
-impl<'a, F, EF> PermutationAirBuilder for DebugConstraintBuilder<'a, F, EF>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    type MP = RowWindow<'a, EF>;
-    type RandomVar = EF;
-    type PermutationVar = EF;
-
-    fn permutation(&self) -> Self::MP {
-        self.permutation
-    }
-
-    fn permutation_randomness(&self) -> &[Self::RandomVar] {
-        self.randomness
-    }
-
-    fn permutation_values(&self) -> &[Self::PermutationVar] {
-        self.permutation_values
+    fn emit_ext(&mut self, value: EF, _meta: native::ConstraintMeta<'_>) {
+        let ordinal = self.ordinal;
+        self.ordinal += 1;
+        if self.check_extension && value != EF::ZERO {
+            self.failed("ext", ordinal, value);
+        }
     }
 }

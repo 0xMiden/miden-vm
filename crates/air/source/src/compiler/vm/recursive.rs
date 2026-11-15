@@ -2,7 +2,7 @@ use miden_ace::{
     AceError,
     compiler::{AceConfig, LayoutKind},
 };
-use miden_core::{Felt, field::QuadFelt};
+use miden_stark::air::native::DirectKernel;
 
 use super::multi_air::build_canonical_multi_air_ace_circuit;
 use crate::vm::AIRS;
@@ -15,7 +15,10 @@ use crate::vm::AIRS;
 fn recursive_verifier_num_quotient_chunks() -> usize {
     let max_log_quotient_degree = AIRS
         .iter()
-        .map(miden_stark::log_quotient_degree::<Felt, QuadFelt, _>)
+        .map(|air| {
+            let kernel = DirectKernel::new(air).expect("canonical VM source descriptor");
+            miden_stark::log_quotient_degree(&kernel).expect("canonical VM quotient allocation")
+        })
         .max()
         .expect("the Miden AIR set is non-empty");
     1usize << max_log_quotient_degree

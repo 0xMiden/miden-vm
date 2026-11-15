@@ -144,11 +144,13 @@ where
     .map_err(|e| ProvingError(e.to_string()))?;
 
     #[cfg(feature = "std")]
-    let preprocessed_arc = cached_preprocessed_setup(prover_statement.statement(), config);
+    let preprocessed_arc = cached_preprocessed_setup(prover_statement.statement(), config)
+        .map_err(|error| ProvingError(error.to_string()))?;
     #[cfg(feature = "std")]
     let preprocessed = preprocessed_arc.as_deref();
     #[cfg(not(feature = "std"))]
-    let preprocessed_owned = Preprocessed::build(prover_statement.statement(), config);
+    let preprocessed_owned = Preprocessed::build(prover_statement.statement(), config)
+        .map_err(|error| ProvingError(error.to_string()))?;
     #[cfg(not(feature = "std"))]
     let preprocessed = preprocessed_owned.as_ref();
 

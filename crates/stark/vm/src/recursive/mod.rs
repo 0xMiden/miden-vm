@@ -197,7 +197,11 @@ fn build_from_proof_bytes(
         aux_inputs,
     )
     .map_err(|e| RecursiveVerifierInputsError::StatementAssembly(e.to_string()))?;
-    let preprocessed_commitment = Some(config::EIDOS_PREPROCESSED_COMMITMENT.into());
+    let preprocessed_commitment = Some(miden_stark::SetupIdentity::new::<Challenge, _, _>(
+        config::EIDOS_PREPROCESSED_COMMITMENT.into(),
+        statement.airs(),
+        &config,
+    ));
     let verifier_instance = VerifierInstance::new(&config, &statement, preprocessed_commitment)?;
 
     let (stark, _digest) = StarkProof::from_data(&verifier_instance, &proof, challenger)?;
@@ -367,6 +371,7 @@ mod tests {
         )
         .expect("valid Miden statement shape");
         let commitment: [u64; 4] = Preprocessed::build(&statement, &config)
+            .expect("canonical VM fixed setup is valid")
             .expect("And8 declares a preprocessed table")
             .commitment()
             .into();

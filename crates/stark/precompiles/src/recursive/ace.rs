@@ -87,6 +87,7 @@ pub(crate) fn structured_orders() -> Vec<[usize; NUM_CHIPLETS]> {
 #[cfg(test)]
 mod tests {
     use alloc::{format, string::String, vec::Vec};
+    use miden_stark::air::native::AirKernel;
 
     use miden_ace::InputKey;
     use miden_air::precompiles::policy::precompile_pcs_params;
@@ -249,7 +250,8 @@ mod tests {
             .map(|air| {
                 (
                     format!("{:?}", air.0),
-                    miden_stark::log_quotient_degree::<Felt, QuadFelt, ChipletAir>(air),
+                    miden_stark::log_quotient_degree(air)
+                        .expect("canonical quotient allocation is valid"),
                 )
             })
             .collect();
@@ -276,23 +278,17 @@ mod tests {
     #[test]
     fn pvm_canonical_ace_shape_matches_current_air() {
         assert!(
-            ChipletAir::all().iter().all(|air| {
-                <ChipletAir as miden_stark::air::LiftedAir<Felt, QuadFelt>>::max_periodic_length(
-                    air,
-                ) <= 128
-            }),
+            ChipletAir::all()
+                .iter()
+                .all(|air| { air.descriptor().spec().max_periodic_length() <= 128 }),
             "long periodic tables make every recursive proof pay for dense SHA program polynomials"
         );
         let canonical = build_canonical_precompile_ace_circuit().expect("canonical circuit");
         // BytePairLut is the only chiplet with a preprocessed trace, so the combined
         // preprocessed region must be nonempty.
         assert!(canonical.layout().counts.preprocessed_width > 0);
-        let num_aux_values: usize = ChipletAir::all()
-            .iter()
-            .map(|air| {
-                <ChipletAir as miden_stark::air::LiftedAir<Felt, QuadFelt>>::num_aux_values(air)
-            })
-            .sum();
+        let num_aux_values: usize =
+            ChipletAir::all().iter().map(|air| air.descriptor().spec().num_exports).sum();
         assert_eq!(canonical.layout().counts.num_aux_boundary, num_aux_values);
 
         let circuit = build_pvm_recursive_verifier_ace_circuit().expect("recursive circuit");
@@ -378,7 +374,7 @@ mod tests {
     fn pvm_aux_boundaries_match_the_canonical_read_layout() {
         let derived: Vec<usize> = ChipletAir::all()
             .iter()
-            .map(miden_stark::air::LiftedAir::<Felt, QuadFelt>::num_aux_values)
+            .map(|air| air.descriptor().spec().num_exports)
             .collect();
         assert_eq!(
             derived,
@@ -415,7 +411,7 @@ mod tests {
     #[test]
     fn pvm_public_input_hook_matches_the_statement_schema() {
         use miden_air::precompiles::ChipletMultiAir;
-        use miden_stark::air::{BaseAir, MultiAir};
+        use miden_stark::air::MultiAir;
 
         use crate::recursive::ace_constants::PVM_PREPROCESSED_COMMITMENT;
 
@@ -423,8 +419,11 @@ mod tests {
             concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/pvm/public_inputs.masm");
 
         let multi_air = ChipletMultiAir::new();
-        let num_public_values: usize =
-            multi_air.airs().iter().map(BaseAir::num_public_values).sum();
+        let num_public_values: usize = multi_air
+            .airs()
+            .iter()
+            .map(|air| air.descriptor().spec().num_public_values)
+            .sum();
         assert_eq!(masm_const(HOOK_PATH, "NUM_PUBLIC_VALUES"), num_public_values as u64);
         assert_eq!(masm_const(HOOK_PATH, "MAX_AUX_INPUTS"), multi_air.max_aux_inputs() as u64);
         assert_eq!(masm_const(HOOK_PATH, "NUM_AUX_INPUTS"), 0);
@@ -537,21 +536,19 @@ mod tests {
 
     #[test]
     fn pvm_wrapper_matches_the_relation_contract() {
-        use miden_core::utils::Matrix;
-        use miden_stark::air::{BaseAir, LiftedAir};
-
         assert_eq!(masm_const(PVM_WRAPPER_PATH, "NUM_CHIPLETS"), NUM_CHIPLETS as u64);
         let airs = ChipletAir::all();
         let derived_minima: Vec<u64> = airs
             .iter()
             .map(|air| {
-                let periodic_min = air.max_periodic_length().max(2);
+                let spec = air.descriptor().spec();
+                let periodic_min = spec.max_periodic_length().max(2);
                 let preprocessed_min =
-                    air.preprocessed_trace().map(|trace| trace.height()).unwrap_or(0);
+                    spec.preprocessed.map_or(0, |shape| 1usize << shape.log_height);
                 let min_height = periodic_min.max(preprocessed_min);
                 assert!(min_height.is_power_of_two());
                 let log_height = min_height.ilog2();
-                if let Some(fixed) = air.log_preprocessed_height() {
+                if let Some(fixed) = spec.preprocessed.map(|shape| shape.log_height) {
                     assert_eq!(
                         u32::from(fixed),
                         log_height,
@@ -568,7 +565,7 @@ mod tests {
                 let wrapper_checks_equality =
                     matches!(air.0, miden_air_definitions::precompiles::ChipletAir::BytePairLut);
                 assert_eq!(
-                    air.log_preprocessed_height().is_some(),
+                    air.descriptor().spec().preprocessed.is_some(),
                     wrapper_checks_equality,
                     "the PVM wrapper's height check for {air:?} differs from its native policy"
                 );

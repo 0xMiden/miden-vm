@@ -18,7 +18,10 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_crypto::hash::blake::Blake3_256;
-use miden_stark::air::{BaseAir, LiftedAir, MultiAir, Statement};
+use miden_stark::air::{
+    BaseAir, LiftedAir, MultiAir, Statement,
+    native::{self, DirectKernel},
+};
 
 const BASE: &str = "614c9f3608e6cc0a80397e8aa60315558f3069f7";
 const FORMAT: &str = "native-air-base-observation-v1";
@@ -221,7 +224,7 @@ fn observe_air<A: LiftedAir<Felt, QuadFelt>>(air: &A) -> Record {
 
 struct AuthoredAirs<A>(Vec<A>);
 
-impl<A: LiftedAir<Felt, QuadFelt>> MultiAir<Felt, QuadFelt> for AuthoredAirs<A> {
+impl<A: native::AirKernel<F = Felt>> MultiAir<Felt, QuadFelt> for AuthoredAirs<A> {
     type Air = A;
 
     fn airs(&self) -> &[A] {
@@ -230,7 +233,7 @@ impl<A: LiftedAir<Felt, QuadFelt>> MultiAir<Felt, QuadFelt> for AuthoredAirs<A> 
 }
 
 /// Rebuild setup through source factories, using the existing canonical PCS presets.
-fn setup_record<A: LiftedAir<Felt, QuadFelt>>(
+fn setup_record<A: LiftedAir<Felt, QuadFelt> + native::LiftedAir<F = Felt>>(
     airs: Vec<A>,
     params: miden_stark::pcs::PcsParams,
     relation: [Felt; 4],
@@ -241,10 +244,15 @@ fn setup_record<A: LiftedAir<Felt, QuadFelt>>(
         .filter(|(_, air)| air.num_public_values() != 0)
         .map(|(index, air)| (index, vec![Felt::ZERO; air.num_public_values()]))
         .collect();
-    let statement = Statement::new(AuthoredAirs(airs), public, vec![]).unwrap();
+    let kernels = airs
+        .into_iter()
+        .map(|air| DirectKernel::new(air).expect("authored source descriptor"))
+        .collect();
+    let statement = Statement::new(AuthoredAirs(kernels), public, vec![]).unwrap();
     let blake = miden_stark::config::blake3_256_config(params, relation);
     let blake_root: [u8; 32] = miden_stark::Preprocessed::build(&statement, &blake)
-        .unwrap()
+        .expect("authored fixed setup is valid")
+        .expect("canonical source registry declares a fixed table")
         .commitment()
         .into();
     let eidos = miden_stark::config::eidos_config(
@@ -253,12 +261,14 @@ fn setup_record<A: LiftedAir<Felt, QuadFelt>>(
         miden_core::program::domain::STARK_TRANSCRIPT,
     );
     let eidos_root: [u64; 4] = miden_stark::Preprocessed::build(&statement, &eidos)
-        .unwrap()
+        .expect("authored fixed setup is valid")
+        .expect("canonical source registry declares a fixed table")
         .commitment()
         .into();
     let keccak = miden_stark::config::keccak_config(params, relation);
     let keccak_root: [u64; 4] = miden_stark::Preprocessed::build(&statement, &keccak)
-        .unwrap()
+        .expect("authored fixed setup is valid")
+        .expect("canonical source registry declares a fixed table")
         .commitment()
         .into();
     vec![
@@ -322,7 +332,12 @@ fn protocols() -> [(String, Record); 2] {
         .collect();
     let max_log_quotient = precompiles::ChipletAir::all()
         .iter()
-        .map(miden_stark::log_quotient_degree::<Felt, QuadFelt, _>)
+        .map(|air| {
+            miden_stark::log_quotient_degree(
+                &DirectKernel::new(air).expect("authored source descriptor"),
+            )
+            .expect("authored quotient allocation")
+        })
         .max()
         .unwrap();
     pvm_record.push(("raw-widths", format!("{raw_widths:?}")));

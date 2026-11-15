@@ -78,6 +78,7 @@ pub mod lookup;
 pub mod memory;
 mod order;
 pub mod pcs;
+mod plan;
 mod preprocessed;
 pub mod proof;
 pub mod prover;
@@ -97,7 +98,8 @@ pub use domain::{
     DomainError, QuotientRecompositionInputs, log_quotient_degree, quotient_recomposition_inputs,
 };
 pub use order::ShapeError;
-pub use preprocessed::{Preprocessed, PreprocessedValidationError};
+pub use plan::PlanError;
+pub use preprocessed::{Preprocessed, PreprocessedValidationError, SetupIdentity};
 pub use prover::{ProverError, ProverInstance};
 pub use verifier::{VerifierError, VerifierInstance};
 

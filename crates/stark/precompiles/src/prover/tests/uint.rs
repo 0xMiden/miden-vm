@@ -10,17 +10,13 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_stark::{
-    air::{BaseAir, ConstraintDegrees, LiftedAir},
-    lookup::{
-        Challenges, LookupAir, LookupMessage, ProverLookupBuilder,
-        debug::{ValidateLayout, ValidateLookupAir},
-    },
+    air::native::{ConstraintDegrees, LiftedAir},
+    lookup::{Challenges, LookupMessage, ProverLookupBuilder},
 };
 use proptest::prelude::*;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::prover::{
-    logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     math::{U256, from_limbs16, mac_reduce, to_limbs16, to_limbs32},
     primitives::byte_pair_lut::{
         BytePairLutAir, BytePairLutRequires, Range16Msg, generate_trace as bpl_trace,
@@ -38,9 +34,8 @@ use crate::prover::{
             NUM_MAIN_COLS as MUL_NUM_MAIN_COLS, UintMulAir, trace::UintMulRequires,
         },
         store_mul::{
-            AUX_WIDTH as STORE_MUL_AUX_WIDTH, NUM_LOGUP_COLS as STORE_MUL_NUM_LOGUP_COLS,
-            NUM_MAIN_COLS as STORE_MUL_NUM_MAIN_COLS, UintStoreMulAir,
-            trace::generate_trace as store_mul_trace,
+            NUM_LOGUP_COLS as STORE_MUL_NUM_LOGUP_COLS, NUM_MAIN_COLS as STORE_MUL_NUM_MAIN_COLS,
+            UintStoreMulAir, trace::generate_trace as store_mul_trace,
         },
         trace::{UintStoreRequires, generate_trace},
     },
@@ -104,8 +99,8 @@ fn fold_balance<A>(
     challenges: &Challenges<QuadFelt>,
     net: &mut HashMap<QuadFelt, Felt>,
 ) where
-    A: LiftedAir<Felt, QuadFelt> + Sync,
-    for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
+    A: miden_stark::air::native::LiftedAir<F = Felt>,
+    for<'a> A: miden_stark::lookup::native::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
     let fractions = lookup_fractions(air, main, challenges);
     for &(multiplicity, denom) in fractions.fractions() {
@@ -314,58 +309,40 @@ fn uint_store_empty_pads_to_one_block() {
 fn uint_store_shape_and_degree_match_design() {
     let air = UintStoreAir;
 
-    assert_eq!(air.width(), 18);
-    assert_eq!(air.aux_width(), 12);
-    assert_eq!(
-        ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
-        ConstraintDegrees { base: 3, ext: 3 }
-    );
+    assert_eq!(air.spec().main_width, 18);
+    assert_eq!(air.spec().aux_width, 12);
+    assert_eq!(crate::prover::tests::raw_degrees(&air), ConstraintDegrees { base: 3, ext: 3 });
     // Flattened to lqd 1: ordinary two-fraction columns fold to degree `(2, 2)`,
     // while the anchor is degree `(2, 1)`. The folded closing check on the `bound`
     // row adds no new multiplication chain, mirroring `UintMulAir`'s `c` row.
     assert_eq!(crate::prover::tests::log_quotient_degree(&air), 1);
 
-    let layout = ValidateLayout {
-        preprocessed_width: air.preprocessed_width(),
-        trace_width: air.width(),
-        num_public_values: 0,
-        num_periodic_columns: air.periodic_columns().len(),
-        permutation_width: air.aux_width(),
-        num_permutation_challenges: NUM_RANDOMNESS,
-        num_permutation_values: NUM_LOGUP_VALUES,
-    };
-    ValidateLookupAir::validate(&air, layout)
-        .unwrap_or_else(|err| panic!("UintStoreAir lookup validation failed: {err}"));
+    miden_stark::lookup::native::validate_native(
+        &air,
+        &miden_stark::air::native::LiftedAir::spec(&air),
+    )
+    .unwrap_or_else(|err| panic!("UintStoreAir lookup validation failed: {err}"));
 }
 
 #[test]
 fn uint_store_mul_shape_and_degree_match_design() {
     let air = UintStoreMulAir;
 
-    assert_eq!(air.width(), 44);
-    assert_eq!(air.aux_width(), 24);
+    assert_eq!(air.spec().main_width, 44);
+    assert_eq!(air.spec().aux_width, 24);
     assert_eq!(STORE_MUL_NUM_LOGUP_COLS, 21);
     let mut expected_shape = [2usize; 21];
     expected_shape[0] = 1;
     expected_shape[1] = 1;
     assert_eq!(crate::prover::tests::lookup_column_shape(&air), &expected_shape);
-    assert_eq!(
-        ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
-        ConstraintDegrees { base: 3, ext: 3 }
-    );
+    assert_eq!(crate::prover::tests::raw_degrees(&air), ConstraintDegrees { base: 3, ext: 3 });
     assert_eq!(crate::prover::tests::log_quotient_degree(&air), 1);
 
-    let layout = ValidateLayout {
-        preprocessed_width: air.preprocessed_width(),
-        trace_width: air.width(),
-        num_public_values: 0,
-        num_periodic_columns: air.periodic_columns().len(),
-        permutation_width: STORE_MUL_AUX_WIDTH,
-        num_permutation_challenges: NUM_RANDOMNESS,
-        num_permutation_values: NUM_LOGUP_VALUES,
-    };
-    ValidateLookupAir::validate(&air, layout)
-        .unwrap_or_else(|err| panic!("UintStoreMulAir lookup validation failed: {err}"));
+    miden_stark::lookup::native::validate_native(
+        &air,
+        &miden_stark::air::native::LiftedAir::spec(&air),
+    )
+    .unwrap_or_else(|err| panic!("UintStoreMulAir lookup validation failed: {err}"));
 }
 
 #[test]
@@ -391,11 +368,44 @@ fn uint_store_mul_registers_match_standalone_with_nonzero_cycle_sums() {
             STORE_MUL_NUM_MAIN_COLS,
         );
         let challenges = [rand_qf(&mut rng), rand_qf(&mut rng)];
-        let (merged, _) = UintStoreMulAir.build_aux_trace(&main, &[], &[], &challenges);
+        let merged = miden_stark::air::native::ProverAir::build_aux_trace(
+            &UintStoreMulAir,
+            miden_stark::air::native::AuxTraceInputs {
+                main: &main,
+                preprocessed: None,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        )
+        .expect("native integer witness inputs are valid")
+        .columns;
         let store_main = extract_band(&main, 0..NUM_MAIN_COLS);
         let mul_main = extract_band(&main, NUM_MAIN_COLS..STORE_MUL_NUM_MAIN_COLS);
-        let (store, _) = UintStoreAir.build_aux_trace(&store_main, &[], &[], &challenges);
-        let (mul, _) = UintMulAir.build_aux_trace(&mul_main, &[], &[], &challenges);
+        let store = miden_stark::air::native::ProverAir::build_aux_trace(
+            &UintStoreAir,
+            miden_stark::air::native::AuxTraceInputs {
+                main: &store_main,
+                preprocessed: None,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        )
+        .expect("native integer witness inputs are valid")
+        .columns;
+        let mul = miden_stark::air::native::ProverAir::build_aux_trace(
+            &UintMulAir,
+            miden_stark::air::native::AuxTraceInputs {
+                main: &mul_main,
+                preprocessed: None,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        )
+        .expect("native integer witness inputs are valid")
+        .columns;
         assert_eq!(
             store.values[512 * store.width() + store.width() - 1] != QuadFelt::ZERO,
             nonzero_columns.contains(&0),

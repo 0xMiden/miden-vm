@@ -35,7 +35,7 @@ extern crate alloc;
 use miden_core::Felt;
 use miden_stark::air::native::{
     AirAnalysis, AirDescriptor, AirSpec, ConstraintDegrees, ConstraintLayout,
-    DegreeOp, DegreeProfile, DescriptorParts,
+    DegreeOp, DegreeProfile, DescriptorParts, KernelGeometry,
 };
 ",
     );
@@ -87,13 +87,15 @@ use miden_stark::air::native::{
         } else {
             "None".to_string()
         };
+        let geometry = format!("{}_GEOMETRY", item.name.to_uppercase());
+        writeln!(out, "pub const {geometry}: KernelGeometry = KernelGeometry {{ main_width: {}, aux_width: {}, preprocessed_width: {}, raw_degrees: ConstraintDegrees {{ base: {}, ext: {} }} }};", spec.main_width, spec.aux_width, spec.preprocessed_width(), degrees.base, degrees.ext).unwrap();
         writeln!(
             out,
             r#"
 /// Checked source descriptor for `{}`.
 pub fn descriptor_{}() -> AirDescriptor<Felt> {{
     let spec = AirSpec {{
-        main_width: {}, aux_width: {}, num_public_values: {},
+        main_width: {geometry}.main_width, aux_width: {geometry}.aux_width, num_public_values: {},
         num_challenges: {}, num_exports: {}, preprocessed: {preprocessed},
         periodic_columns: alloc::borrow::Cow::Owned(alloc::vec![{columns}]),
     }};
@@ -102,7 +104,7 @@ pub fn descriptor_{}() -> AirDescriptor<Felt> {{
     let ops: alloc::vec::Vec<DegreeOp> = alloc::vec![{ops}];
     let profile = DegreeProfile::new(ops, alloc::vec!{:?})
         .expect("validated generated degree recipe");
-    let analysis = AirAnalysis::new(layout, ConstraintDegrees {{ base: {}, ext: {} }}, profile)
+    let analysis = AirAnalysis::new(layout, {geometry}.raw_degrees, profile)
         .expect("validated generated degree roots");
     AirDescriptor::from_trusted_parts(DescriptorParts {{
         spec, analysis, fingerprint: {:?}, labels: {labels},
@@ -110,16 +112,12 @@ pub fn descriptor_{}() -> AirDescriptor<Felt> {{
 }}"#,
             item.air_label,
             item.name,
-            spec.main_width,
-            spec.aux_width,
             spec.num_public_values,
             spec.num_challenges,
             spec.num_exports,
             analysis.layout().base_indices(),
             analysis.layout().ext_indices(),
             profile.roots(),
-            degrees.base,
-            degrees.ext,
             descriptor.fingerprint(),
         )
         .unwrap();

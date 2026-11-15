@@ -10,7 +10,7 @@ use p3_field::{ExtensionField, Field};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use thiserror::Error;
 
-use crate::air::{BaseAir, LiftedAir, MultiAir, ReductionError};
+use crate::air::{MultiAir, ReductionError, native::AirKernel};
 
 // ============================================================================
 // Statement
@@ -69,7 +69,7 @@ where
             .zip(airs)
             .map(|(values, air)| {
                 let values = values.unwrap_or_default();
-                let expected = air.num_public_values();
+                let expected = air.descriptor().spec().num_public_values;
                 if values.len() != expected {
                     return Err(InstanceError::PublicValuesLengthMismatch {
                         expected,
@@ -139,58 +139,36 @@ where
     /// # Examples
     ///
     /// ```
+    /// use std::borrow::Cow;
     /// use miden_crypto::Felt;
-    /// use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, Statement};
+    /// use miden_stark::air::{MultiAir, Statement, native};
     /// use p3_challenger::CanObserve;
-    /// use p3_matrix::{Matrix, dense::RowMajorMatrix};
     ///
-    /// #[derive(Clone)]
     /// struct ExampleAir;
     ///
-    /// impl BaseAir<Felt> for ExampleAir {
-    ///     fn width(&self) -> usize {
-    ///         1
+    /// impl native::LiftedAir for ExampleAir {
+    ///     type F = Felt;
+    ///
+    ///     fn spec(&self) -> native::AirSpec<'_, Felt> {
+    ///         native::AirSpec {
+    ///             main_width: 1, aux_width: 1, num_public_values: 2,
+    ///             num_challenges: 0, num_exports: 0, preprocessed: None,
+    ///             periodic_columns: Cow::Borrowed(&[]),
+    ///         }
     ///     }
     ///
-    ///     fn num_public_values(&self) -> usize {
-    ///         2
-    ///     }
-    /// }
-    ///
-    /// impl LiftedAir<Felt, Felt> for ExampleAir {
-    ///     type EvalData<B: p3_field::Algebra<Felt>, E: p3_field::Algebra<B>> = ();
-    ///
-    ///     fn num_randomness(&self) -> usize {
-    ///         0
-    ///     }
-    ///
-    ///     fn aux_width(&self) -> usize {
-    ///         1
-    ///     }
-    ///
-    ///     fn num_aux_values(&self) -> usize {
-    ///         0
-    ///     }
-    ///
-    ///     fn build_aux_trace(
-    ///         &self,
-    ///         main: &RowMajorMatrix<Felt>,
-    ///         _air_inputs: &[Felt],
-    ///         _aux_inputs: &[Felt],
-    ///         _challenges: &[Felt],
-    ///     ) -> (RowMajorMatrix<Felt>, Vec<Felt>) {
-    ///         (RowMajorMatrix::new(vec![Felt::ZERO; main.height()], 1), Vec::new())
-    ///     }
-    ///
-    ///     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, _builder: &mut AB, _data: &()) {}
+    ///     fn eval<B: native::LiftedAirBuilder<F = Felt>>(
+    ///         &self, _frame: &native::Frame<'_, B>, _inputs: native::Inputs<'_, B>,
+    ///         _sink: &mut B,
+    ///     ) {}
     /// }
     ///
     /// struct ExampleMultiAir {
-    ///     airs: [ExampleAir; 1],
+    ///     airs: [native::DirectKernel<ExampleAir>; 1],
     /// }
     ///
     /// impl MultiAir<Felt, Felt> for ExampleMultiAir {
-    ///     type Air = ExampleAir;
+    ///     type Air = native::DirectKernel<ExampleAir>;
     ///
     ///     fn airs(&self) -> &[Self::Air] {
     ///         &self.airs
@@ -211,7 +189,7 @@ where
     /// }
     ///
     /// let statement = Statement::<Felt, Felt, _>::new(
-    ///     ExampleMultiAir { airs: [ExampleAir] },
+    ///     ExampleMultiAir { airs: [native::DirectKernel::new(ExampleAir).unwrap()] },
     ///     vec![(0, vec![Felt::new_unchecked(10), Felt::new_unchecked(11)])],
     ///     vec![Felt::new_unchecked(20), Felt::new_unchecked(21)],
     /// )
@@ -284,30 +262,38 @@ where
                 traces: traces.len(),
             });
         }
-        for (idx, trace) in traces.iter().enumerate() {
-            let h = trace.height();
+        for (idx, (air, trace)) in airs.iter().zip(&traces).enumerate() {
+            let spec = air.descriptor().spec();
+            let width = trace.width();
+            if width != spec.main_width {
+                return Err(InstanceError::TraceWidthMismatch {
+                    air: idx,
+                    expected: spec.main_width,
+                    actual: width,
+                });
+            }
+            // Descriptor main width is positive. Validate raw rows before Matrix::height divides.
+            if !trace.values.len().is_multiple_of(width) {
+                return Err(InstanceError::TraceStorageMismatch {
+                    air: idx,
+                    width,
+                    elements: trace.values.len(),
+                });
+            }
+            let h = trace.values.len() / width;
             if h < 2 {
                 return Err(InstanceError::TraceHeightTooSmall { air: idx, height: h });
             }
             if !h.is_power_of_two() {
                 return Err(InstanceError::TraceHeightNotPowerOfTwo { air: idx, height: h });
             }
-        }
-        for (idx, (air, trace)) in airs.iter().zip(traces.iter()).enumerate() {
-            let trace_height = trace.height();
-            let max_period = air.max_periodic_length();
+            let trace_height = h;
+            let max_period = spec.max_periodic_length();
             if trace_height < max_period {
                 return Err(InstanceError::TraceHeightBelowPeriod {
                     air: idx,
                     trace_height,
                     max_period,
-                });
-            }
-            if trace.width() != air.width() {
-                return Err(InstanceError::TraceWidthMismatch {
-                    air: idx,
-                    expected: air.width(),
-                    actual: trace.width(),
                 });
             }
         }
@@ -359,6 +345,13 @@ pub enum InstanceError {
         air: usize,
         expected: usize,
         actual: usize,
+    },
+
+    #[error("AIR {air}: {elements} trace elements do not form complete rows of width {width}")]
+    TraceStorageMismatch {
+        air: usize,
+        width: usize,
+        elements: usize,
     },
 
     #[error("AIR {air}: trace height = {height} is too small; expected at least 2 rows")]

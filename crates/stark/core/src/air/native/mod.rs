@@ -30,7 +30,7 @@ pub use descriptor::{
 };
 pub use frame::{AirFrame, Frame, Inputs, Rows, Selectors, UniformInputs};
 pub use kernel::{
-    AirKernel, BindError, DirectKernel, EvaluationSession, QuotientAllocationError,
+    AirKernel, BindError, DirectKernel, EvaluationSession, KernelGeometry, QuotientAllocationError,
     resolve_quotient_chunks,
 };
 pub use spec::{AirSpec, PreprocessedSpec, SpecError};

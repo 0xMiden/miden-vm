@@ -18,34 +18,27 @@ use super::{
 
 #[test]
 fn core_shape_and_degree_match_design() {
-    let air = MidenAir::CORE;
-    let symbolic = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air);
-
-    assert_eq!(air.width(), 48);
+    use miden_stark::air::native::{AirKernel, ConstraintDegrees, DirectKernel};
+    let kernel = DirectKernel::new(MidenAir::CORE).expect("Core source descriptor");
+    let descriptor = kernel.descriptor();
+    assert_eq!(descriptor.spec().main_width, 48);
     assert_eq!(constraints::columns::NUM_DECODER_COLS, 23);
-    assert_eq!(LiftedAir::<Felt, QuadFelt>::aux_width(&air), 4);
-    assert_eq!(symbolic, ConstraintDegrees { base: 9, ext: 9 });
-    assert_eq!(
-        LiftedAir::<Felt, QuadFelt>::constraint_degree(&air),
-        symbolic,
-        "Core's declared degree must match its handwritten constraints",
-    );
-    assert_eq!(miden_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 3);
+    assert_eq!(descriptor.spec().aux_width, 4);
+    assert_eq!(descriptor.analysis().raw_degrees(), ConstraintDegrees { base: 9, ext: 9 });
+    assert_eq!(miden_stark::log_quotient_degree(&kernel).unwrap(), 3);
 }
 
 #[test]
 fn and8_lookup_shape_and_degree_match_design() {
-    let air = MidenAir::AND8_LOOKUP;
-
-    assert_eq!(air.width(), 7);
-    assert_eq!(air.preprocessed_width(), 5);
-    assert_eq!(LiftedAir::<Felt, QuadFelt>::aux_width(&air), 4);
-    assert_eq!(constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE, [1, 2, 2, 2],);
-    assert_eq!(
-        LiftedAir::<Felt, QuadFelt>::constraint_degree(&air),
-        ConstraintDegrees { base: 0, ext: 3 }
-    );
-    assert_eq!(miden_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 1);
+    use miden_stark::air::native::{AirKernel, ConstraintDegrees, DirectKernel};
+    let kernel = DirectKernel::new(MidenAir::AND8_LOOKUP).expect("And8 source descriptor");
+    let descriptor = kernel.descriptor();
+    assert_eq!(descriptor.spec().main_width, 7);
+    assert_eq!(descriptor.spec().preprocessed_width(), 5);
+    assert_eq!(descriptor.spec().aux_width, 4);
+    assert_eq!(constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE, [1, 2, 2, 2]);
+    assert_eq!(descriptor.analysis().raw_degrees(), ConstraintDegrees { base: 0, ext: 3 });
+    assert_eq!(miden_stark::log_quotient_degree(&kernel).unwrap(), 1);
 }
 
 #[test]

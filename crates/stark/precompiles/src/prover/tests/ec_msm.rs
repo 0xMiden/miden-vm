@@ -20,11 +20,8 @@ use miden_core::{
 };
 use miden_precompiles::{CurveId, CurvePoint, phi_generator};
 use miden_stark::{
-    air::{BaseAir, ConstraintDegrees, LiftedAir},
-    lookup::{
-        LookupAir, ProverLookupBuilder,
-        debug::{ValidateLayout, ValidateLookupAir},
-    },
+    air::native::{ConstraintDegrees, LiftedAir},
+    lookup::{ProverLookupBuilder, native::LookupAir},
 };
 
 use crate::prover::{
@@ -34,7 +31,6 @@ use crate::prover::{
         COL_LAMBDA_PTR, COL_NEG_MINTED, COL_SCALAR, COL_VAL, COL_VAL_A, EcMsmAir,
         NUM_MAIN_COLS as MSM_COLS,
     },
-    logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     math::{U256, from_hex, from_limbs32, to_limbs32},
     session::{
         EcNode, Session,
@@ -102,29 +98,18 @@ fn msm_two_intro_traces() -> crate::prover::session::SessionTraces {
 fn shape_and_degree_match_design() {
     let air = EcMsmAir;
 
-    assert_eq!(air.width(), 35);
-    assert_eq!(air.aux_width(), 12);
+    assert_eq!(air.spec().main_width, 35);
+    assert_eq!(air.spec().aux_width, 12);
     assert_eq!(
         <EcMsmAir as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::column_shape(&air),
         &[2; 12],
     );
-    assert_eq!(
-        ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
-        ConstraintDegrees { base: 3, ext: 3 }
-    );
+    assert_eq!(crate::prover::tests::raw_degrees(&air), ConstraintDegrees { base: 3, ext: 3 });
     assert_eq!(crate::prover::tests::log_quotient_degree(&air), 1);
 
-    ValidateLookupAir::validate(
+    miden_stark::lookup::native::validate_native(
         &air,
-        ValidateLayout {
-            preprocessed_width: air.preprocessed_width(),
-            trace_width: air.width(),
-            num_public_values: 0,
-            num_periodic_columns: air.periodic_columns().len(),
-            permutation_width: air.aux_width(),
-            num_permutation_challenges: NUM_RANDOMNESS,
-            num_permutation_values: NUM_LOGUP_VALUES,
-        },
+        &miden_stark::air::native::LiftedAir::spec(&air),
     )
     .unwrap_or_else(|err| panic!("EcMsmAir lookup validation failed: {err}"));
 }
@@ -134,7 +119,7 @@ fn shape_and_degree_match_design() {
 fn overlapping_stored_families_rejected_by_derived_intro_endo_selector() {
     let traces = msm_two_intro_traces();
     let mut main = traces.mains()[9].clone();
-    let width = EcMsmAir.width();
+    let width = EcMsmAir.spec().main_width;
     let row = (0..main.height())
         .find(|&row| {
             let offset = row * width;
@@ -162,7 +147,7 @@ fn overlapping_stored_families_rejected_by_derived_intro_endo_selector() {
 fn shared_mint_flag_rejected_on_intro() {
     let traces = msm_two_intro_traces();
     let mut main = traces.mains()[9].clone();
-    let width = EcMsmAir.width();
+    let width = EcMsmAir.spec().main_width;
     let row = (0..main.height())
         .find(|&row| main.values[row * width + COL_IS_INTRO] == Felt::ONE)
         .expect("an intro row exists");

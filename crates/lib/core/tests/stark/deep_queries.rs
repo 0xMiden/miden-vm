@@ -42,7 +42,16 @@ fn native_queries<MA: MultiAir<Felt, QuadFelt>>(
                 .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>(),
         )
         .unwrap();
-    let verifier = VerifierInstance::new(config, statement, Some(preprocessed.into())).unwrap();
+    let verifier = VerifierInstance::new(
+        config,
+        statement,
+        Some(miden_stark::SetupIdentity::new::<QuadFelt, _, _>(
+            preprocessed.into(),
+            statement.airs(),
+            config,
+        )),
+    )
+    .unwrap();
     let mut challenger = config.challenger();
     observe_protocol_params(config.pcs(), &mut challenger);
     verifier

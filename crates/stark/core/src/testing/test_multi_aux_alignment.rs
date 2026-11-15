@@ -138,11 +138,11 @@ impl native::ProverAir<QuadFelt> for PaddingAir {
 }
 
 struct PaddingMultiAir {
-    airs: Vec<PaddingAir>,
+    airs: Vec<native::DirectKernel<PaddingAir>>,
 }
 
 impl MultiAir<Felt, QuadFelt> for PaddingMultiAir {
-    type Air = PaddingAir;
+    type Air = native::DirectKernel<PaddingAir>;
 
     fn airs(&self) -> &[Self::Air] {
         &self.airs
@@ -167,7 +167,12 @@ fn padding_prover_statement(
     let t0 = generate_trace(start, 8, width);
     let t1 = generate_trace(start, 16, width);
     let statement = Statement::new(
-        PaddingMultiAir { airs: vec![air.clone(), air] },
+        PaddingMultiAir {
+            airs: vec![
+                native::DirectKernel::new(air.clone()).unwrap(),
+                native::DirectKernel::new(air).unwrap(),
+            ],
+        },
         vec![(0, vec![start]), (1, vec![start])],
         Vec::new(),
     )

@@ -22,8 +22,8 @@ use miden_air_definitions::vm::{
 };
 use miden_core::{field::QuadFelt, utils::RowMajorMatrix};
 use miden_stark::{
-    air::BaseAir,
-    lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions},
+    air::native::LiftedAir,
+    lookup::{Challenges, LookupFractions, LookupMessage, native::build_lookup_fractions},
 };
 
 use super::{Felt, VmTrace};
@@ -64,11 +64,11 @@ impl InteractionLog {
         and8_matrix: &RowMajorMatrix<Felt>,
     ) -> Self {
         // Core has no periodic columns.
-        let chip_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::CHIPLETS);
+        let chip_periodic = MidenAir::CHIPLETS.spec().periodic_columns.into_owned();
         let eidos_compression_periodic =
-            BaseAir::<Felt>::periodic_columns(&MidenAir::EIDOS_COMPRESSION);
+            MidenAir::EIDOS_COMPRESSION.spec().periodic_columns.into_owned();
         let and8_preprocessed = MidenAir::AND8_LOOKUP
-            .preprocessed_trace()
+            .build_preprocessed_trace()
             .expect("AND8 lookup AIR declares a preprocessed table");
 
         // Draw four base-field elements and pair them into two extension-field elements.

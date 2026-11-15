@@ -16,7 +16,7 @@ use p3_challenger::CanObserve;
 use p3_field::Field;
 use thiserror::Error;
 
-use crate::air::{LiftedAir, log2_strict_u8};
+use crate::air::{log2_strict_u8, native::AirKernel};
 
 // ============================================================================
 // TraceOrder
@@ -55,14 +55,10 @@ impl TraceOrder {
     /// log-height fits in `u8` and within the host's `usize` width, that the
     /// number of instances fits in `u8`, and (via [`Self::from_log_heights`])
     /// that the heights match the AIRs.
-    pub(crate) fn from_trace_heights<F, EF, A>(
-        airs: &[A],
+    pub(crate) fn from_trace_heights<K: AirKernel>(
+        airs: &[K],
         trace_heights: &[usize],
-    ) -> Result<Self, ShapeError>
-    where
-        F: Field,
-        A: LiftedAir<F, EF>,
-    {
+    ) -> Result<Self, ShapeError> {
         if trace_heights.is_empty() {
             return Err(ShapeError::Empty);
         }
@@ -78,7 +74,7 @@ impl TraceOrder {
                 Ok(log2_strict_u8(h))
             })
             .collect::<Result<_, _>>()?;
-        Self::from_log_heights::<F, EF, A>(airs, log_heights)
+        Self::from_log_heights(airs, log_heights)
     }
 
     /// Build from instance-order log trace heights, validated against `airs`.
@@ -91,20 +87,16 @@ impl TraceOrder {
     /// the AIR-declared preprocessing height where present.
     /// Holding a `TraceOrder` thus guarantees the proof's heights are feasible
     /// for the AIRs.
-    pub(crate) fn from_log_heights<F, EF, A>(
-        airs: &[A],
+    pub(crate) fn from_log_heights<K: AirKernel>(
+        airs: &[K],
         log_heights: Vec<u8>,
-    ) -> Result<Self, ShapeError>
-    where
-        F: Field,
-        A: LiftedAir<F, EF>,
-    {
+    ) -> Result<Self, ShapeError> {
         Self::from_log_heights_with(airs.len(), log_heights, |index| {
-            let air = &airs[index];
+            let spec = airs[index].descriptor().spec();
             OrderShape {
-                preprocessed_width: air.preprocessed_width(),
-                log_preprocessed_height: air.log_preprocessed_height(),
-                max_period: air.max_periodic_length(),
+                preprocessed_width: spec.preprocessed_width(),
+                log_preprocessed_height: spec.preprocessed.map(|fixed| fixed.log_height),
+                max_period: spec.max_periodic_length(),
             }
         })
     }
@@ -280,15 +272,13 @@ impl TraceOrder {
     /// AIR instance index backing each committed preprocessed trace.
     ///
     /// The preprocessed commitment contains one committed LDE trace per AIR with
-    /// [`preprocessed_width`](crate::air::BaseAir::preprocessed_width)
+    /// [`preprocessed_width`](crate::air::native::AirSpec::preprocessed_width)
     /// `> 0`, in proof order (the LMCS height-monotone committed-trace order). The result
     /// length is the number of preprocessed AIRs, which is `<= len()`.
-    pub(crate) fn preprocessed_air_for_trace_index<F, EF, A>(&self, airs: &[A]) -> Vec<u8>
-    where
-        F: Field,
-        A: LiftedAir<F, EF>,
-    {
-        self.preprocessed_air_for_trace_index_with(|index| airs[index].preprocessed_width() > 0)
+    pub(crate) fn preprocessed_air_for_trace_index<K: AirKernel>(&self, airs: &[K]) -> Vec<u8> {
+        self.preprocessed_air_for_trace_index_with(|index| {
+            airs[index].descriptor().spec().preprocessed.is_some()
+        })
     }
 
     fn preprocessed_air_for_trace_index_with(
@@ -305,15 +295,11 @@ impl TraceOrder {
     /// Preprocessed trace index for each AIR, or `None` when the AIR declares no
     /// preprocessed columns. Length is [`Self::len`]; the inverse of
     /// [`Self::preprocessed_air_for_trace_index`].
-    pub(crate) fn preprocessed_trace_index_for_air<F, EF, A>(
+    pub(crate) fn preprocessed_trace_index_for_air<K: AirKernel>(
         &self,
-        airs: &[A],
-    ) -> Vec<Option<usize>>
-    where
-        F: Field,
-        A: LiftedAir<F, EF>,
-    {
-        let air_for_preprocessed_trace = self.preprocessed_air_for_trace_index::<F, EF, A>(airs);
+        airs: &[K],
+    ) -> Vec<Option<usize>> {
+        let air_for_preprocessed_trace = self.preprocessed_air_for_trace_index(airs);
         let mut v = alloc::vec![None; airs.len()];
         for (preprocessed_trace_idx, &air_idx) in air_for_preprocessed_trace.iter().enumerate() {
             v[air_idx as usize] = Some(preprocessed_trace_idx);
@@ -372,71 +358,26 @@ pub enum ShapeError {
 mod tests {
     use alloc::{vec, vec::Vec};
 
-    use p3_goldilocks::Goldilocks;
-    use p3_matrix::dense::RowMajorMatrix;
-
     use super::*;
-    use crate::air::{BaseAir, LiftedAirBuilder};
+    use crate::{air::native::DirectKernel, testing::airs::miden::DummyMidenAir};
+    use p3_goldilocks::Goldilocks;
 
     type TF = Goldilocks;
 
-    /// Minimal AIR with no periodic columns, for shape and ordering tests.
-    #[derive(Clone, Default)]
-    struct OrderTestAir {
-        preprocessed_width: usize,
-        log_preprocessed_height: Option<u8>,
-    }
-
-    impl BaseAir<TF> for OrderTestAir {
-        fn width(&self) -> usize {
-            1
-        }
-        fn preprocessed_width(&self) -> usize {
-            self.preprocessed_width
-        }
-    }
-
-    impl LiftedAir<TF, TF> for OrderTestAir {
-        type EvalData<B: p3_field::Algebra<TF>, E: p3_field::Algebra<B>> = ();
-        fn log_preprocessed_height(&self) -> Option<u8> {
-            self.log_preprocessed_height
-        }
-
-        fn num_randomness(&self) -> usize {
-            0
-        }
-        fn aux_width(&self) -> usize {
-            1
-        }
-        fn num_aux_values(&self) -> usize {
-            0
-        }
-        fn build_aux_trace(
-            &self,
-            _main: &RowMajorMatrix<TF>,
-            _air_inputs: &[TF],
-            _aux_inputs: &[TF],
-            _challenges: &[TF],
-        ) -> (RowMajorMatrix<TF>, Vec<TF>) {
-            // Unused: these tests only exercise the height permutation.
-            (RowMajorMatrix::new(Vec::new(), 1), Vec::new())
-        }
-        fn eval<AB: LiftedAirBuilder<F = TF>>(&self, _builder: &mut AB, _data: &()) {}
-    }
-
-    fn airs(n: usize) -> Vec<OrderTestAir> {
-        vec![OrderTestAir::default(); n]
+    fn airs(n: usize) -> Vec<DirectKernel<DummyMidenAir<TF>>> {
+        (0..n).map(|_| DirectKernel::new(DummyMidenAir::new(9, 1)).unwrap()).collect()
     }
 
     #[test]
     fn rejects_invalid_preprocessed_dimensions() {
         for (width, log_height) in [(1, None), (0, Some(2))] {
-            let air = OrderTestAir {
+            let shape = OrderShape {
                 preprocessed_width: width,
                 log_preprocessed_height: log_height,
+                max_period: 0,
             };
             assert!(matches!(
-                TraceOrder::from_log_heights::<TF, TF, _>(&[air], vec![2]),
+                TraceOrder::from_log_heights_with(1, vec![2], |_| shape),
                 Err(ShapeError::InvalidPreprocessedDimensions { air: 0, .. })
             ));
         }
@@ -445,15 +386,20 @@ mod tests {
     #[test]
     fn checks_preprocessed_height_in_instance_order() {
         for (log_trace_height, log_preprocessed_height) in [(1, 2), (3, 2), (2, 0), (2, u8::MAX)] {
-            let airs = [
-                OrderTestAir::default(),
-                OrderTestAir {
+            let shapes = [
+                OrderShape {
+                    preprocessed_width: 0,
+                    log_preprocessed_height: None,
+                    max_period: 0,
+                },
+                OrderShape {
                     preprocessed_width: 1,
                     log_preprocessed_height: Some(log_preprocessed_height),
+                    max_period: 0,
                 },
             ];
             assert!(matches!(
-                TraceOrder::from_trace_heights::<TF, TF, _>(&airs, &[4, 1usize << log_trace_height]),
+                TraceOrder::from_log_heights_with(2, vec![2, log_trace_height], |index| shapes[index]),
                 Err(ShapeError::PreprocessedHeightMismatch {
                     air: 1,
                     log_trace_height: actual_trace,
@@ -467,7 +413,7 @@ mod tests {
     fn trace_order_canonical_ordering() {
         // Instance order: heights [8, 2, 8, 4]. Sort by (log_h, idx) →
         // [1 (log=1), 3 (log=2), 0 (log=3), 2 (log=3)].
-        let order = TraceOrder::from_trace_heights::<TF, TF, _>(&airs(4), &[8, 2, 8, 4]).unwrap();
+        let order = TraceOrder::from_trace_heights(&airs(4), &[8, 2, 8, 4]).unwrap();
         assert_eq!(order.instance_indices(), &[1, 3, 0, 2]);
         assert_eq!(order.log_heights(), &[3, 1, 3, 2]);
         assert_eq!(order.log_heights_proof(), vec![1, 2, 3, 3]);
@@ -476,7 +422,7 @@ mod tests {
 
     #[test]
     fn trace_order_roundtrip() {
-        let order = TraceOrder::from_trace_heights::<TF, TF, _>(&airs(4), &[8, 2, 8, 4]).unwrap();
+        let order = TraceOrder::from_trace_heights(&airs(4), &[8, 2, 8, 4]).unwrap();
         let instance_data = vec!["a", "b", "c", "d"];
         let proof_data = order.to_proof_order(&instance_data);
         assert_eq!(proof_data, vec!["b", "d", "a", "c"]);
@@ -496,8 +442,7 @@ mod tests {
             &[8, 2, 4, 16, 4], // mixed
         ];
         for &heights in cases {
-            let order =
-                TraceOrder::from_trace_heights::<TF, TF, _>(&airs(heights.len()), heights).unwrap();
+            let order = TraceOrder::from_trace_heights(&airs(heights.len()), heights).unwrap();
             let instance_data: Vec<usize> = (0..heights.len()).collect();
             let expected = order.to_proof_order(&instance_data);
             let mut data = instance_data;
@@ -511,7 +456,7 @@ mod tests {
         // The boundary n == 256 (= u8::MAX + 1) is the largest accepted count;
         // index construction must not wrap `256 as u8` to an empty range.
         let n = 256;
-        let order = TraceOrder::from_log_heights::<TF, TF, _>(&airs(n), vec![1; n]).unwrap();
+        let order = TraceOrder::from_log_heights(&airs(n), vec![1; n]).unwrap();
         assert_eq!(order.instance_indices().len(), n);
         let mut seen = order.instance_indices().to_vec();
         seen.sort_unstable();

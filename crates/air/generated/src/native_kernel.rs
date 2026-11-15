@@ -57,7 +57,7 @@ pub(crate) use define_native_kernel;
 // side-effect-free descriptor functions, never source capture, witnesses or fixed-table factories.
 macro_rules! define_native_dispatch {
     ($wrapper:ty, $source:ident, $prepared:ident; $(
-        $variant:ident => ($slot:ident, $descriptor:ident, $precompute:ident, $eval:ident, $terms:ident)
+        $variant:ident => ($slot:ident, $descriptor:ident, $geometry:ident, $precompute:ident, $eval:ident, $terms:ident)
     ),+ $(,)?) => {
         $(
             static $slot: miden_utils_sync::LazyLock<
@@ -80,6 +80,12 @@ macro_rules! define_native_dispatch {
             fn descriptor(&self) -> &miden_stark::air::native::AirDescriptor<Self::F> {
                 match self.0 {
                     $($source::$variant => &$slot,)+
+                }
+            }
+
+            fn geometry(&self) -> miden_stark::air::native::KernelGeometry {
+                match self.0 {
+                    $($source::$variant => descriptors::$geometry,)+
                 }
             }
 

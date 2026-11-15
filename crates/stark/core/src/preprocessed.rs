@@ -1,20 +1,13 @@
 //! Preprocessed data: the fixed per-AIR matrices and their committed LDE tree.
 //!
-//! Preprocessed columns are *fixed circuit data* (lookup tables, selectors)
-//! declared by the AIR via [`BaseAir::preprocessed_trace`] and committed at
-//! setup. The prover holds the raw matrices plus their LDE tree (the
-//! [`Preprocessed`] bundle, which can be borrowed across proofs); the
-//! verifier holds the commitment together with AIR definitions that declare each table's
-//! width and native height. Both the root and the AIR definitions are trusted setup inputs.
-//!
-//! [`Preprocessed::build`] caches the by-value [`BaseAir::preprocessed_trace`]
-//! evals and builds the aligned LDE tree using the supplied STARK config. The
-//! resulting bundle is tied to that config's PCS blowup and LMCS alignment.
-//! `validate_preprocessed` checks a bundle against a prover statement and
-//! config; it runs at [`ProverInstance::new`](crate::ProverInstance::new)
-//! construction time, so the prover never re-checks the shape.
+//! Preprocessed columns are setup-owned fixed circuit data declared by the native descriptor.
+//! Setup calls each source factory once and retains its matrix beside the committed LDE tree.
+//! Provers borrow this cache; verifiers receive a trusted [`SetupIdentity`] associating the root
+//! with ordered descriptor fingerprints and the PCS/alignment parameters. Neither capture nor
+//! verifier construction invokes a factory. Fingerprints are local association metadata and are
+//! never added to the protocol transcript.
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, TwoAdicField};
@@ -24,12 +17,69 @@ use tracing::info_span;
 
 use crate::{
     StarkConfig,
-    air::{BaseAir, LiftedAir, MultiAir, ProverStatement, Statement, log2_strict_u8},
-    domain::LiftedDomain,
+    air::{
+        MultiAir, ProverStatement, Statement, log2_strict_u8,
+        native::{AirKernel, LiftedAir, PreprocessedSpec},
+    },
+    domain::{DomainError, LiftedDomain},
     lmcs::{Lmcs, LmcsError, LmcsTree, tree_indices::TreeIndices},
     order::{ShapeError, TraceOrder},
     prover::commit::Committed,
 };
+
+/// Association of a trusted fixed-setup root with immutable AIR and PCS metadata.
+///
+/// This does not authenticate an arbitrary root, evaluator or fixed-matrix contents. The caller
+/// supplies a trusted root; ordered fingerprints, blowup and alignment prevent accidentally
+/// reusing it with different relation/configuration metadata. Execution allocation is deliberately
+/// excluded, so a kernel may raise its quotient capacity while reusing the same fixed setup.
+/// Only the commitment, never these fingerprints, is observed by the protocol transcript.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetupIdentity<C> {
+    commitment: C,
+    fingerprints: Vec<[u8; 32]>,
+    log_blowup: u8,
+    alignment: usize,
+}
+
+impl<C> SetupIdentity<C> {
+    /// Associate an existing trusted root without evaluating a source or constructing any table.
+    ///
+    /// Optional setup presence is checked by the instance constructor. This constructor does not
+    /// prove that `commitment` is the root of the declared matrices.
+    pub fn new<EF, K, SC>(commitment: C, kernels: &[K], config: &SC) -> Self
+    where
+        K: AirKernel,
+        K::F: TwoAdicField,
+        EF: ExtensionField<K::F>,
+        SC: StarkConfig<K::F, EF>,
+        SC::Lmcs: Lmcs<Commitment = C>,
+    {
+        Self {
+            commitment,
+            fingerprints: kernels.iter().map(|kernel| kernel.descriptor().fingerprint()).collect(),
+            log_blowup: config.pcs().log_blowup(),
+            alignment: config.lmcs().alignment(),
+        }
+    }
+
+    pub fn commitment(&self) -> &C {
+        &self.commitment
+    }
+
+    /// Descriptor fingerprints in AIR instance order, including AIRs without fixed data.
+    pub fn fingerprints(&self) -> &[[u8; 32]] {
+        &self.fingerprints
+    }
+
+    pub fn log_blowup(&self) -> u8 {
+        self.log_blowup
+    }
+
+    pub fn alignment(&self) -> usize {
+        self.alignment
+    }
+}
 
 // ============================================================================
 // Preprocessed
@@ -52,13 +102,13 @@ where
     L: Lmcs<F = F>,
 {
     /// Per-AIR raw preprocessed matrices in instance order; `None` where the
-    /// AIR declares none. The cached [`BaseAir::preprocessed_trace`] evals —
-    /// `preprocessed_trace` re-allocates on every call, so they are computed
+    /// AIR declares none. Native source factories may allocate on every call, so they are computed
     /// once here and retained for validation, auxiliary-trace construction,
     /// and `check_constraints`.
     traces: Vec<Option<RowMajorMatrix<F>>>,
     /// Committed LDE tree, one committed LDE trace per preprocessed AIR.
     committed: Committed<F, RowMajorMatrix<F>, L>,
+    identity: SetupIdentity<L::Commitment>,
 }
 
 impl<F, L> Preprocessed<F, L>
@@ -66,68 +116,65 @@ where
     F: TwoAdicField,
     L: Lmcs<F = F>,
 {
-    /// Build the preprocessed bundle from a statement's AIRs, or `None` when no
-    /// AIR declares preprocessed columns.
+    /// Build and validate the fixed setup, returning `Ok(None)` when no AIR has fixed data.
     ///
-    /// Calls [`BaseAir::preprocessed_trace`] once per AIR (caching the by-value
-    /// result), then LDEs the declared matrices — sorted height-ascending,
-    /// tiebroken by AIR index, the committed trace order both sides reproduce —
-    /// and builds the aligned tree.
-    ///
-    /// # Panics
-    ///
-    /// Panics if a preprocessed matrix has zero width or incomplete rows, its height is less than
-    /// 2 or not a power of two, its presence or log height differs from
-    /// [`LiftedAir::log_preprocessed_height`], or its LDE order exceeds the field's two-adicity
-    /// or host indexing. These are AIR setup errors. Declared-width validation remains at the
-    /// prover-instance boundary.
-    pub fn build<EF, MA, C>(statement: &Statement<F, EF, MA>, config: &C) -> Option<Self>
+    /// Calls each source's factory exactly once, including factories that return `None`, then
+    /// validates presence, raw storage, width, native height and LDE domain before committing.
+    /// Raw matrices remain in instance order; fixed LDE leaves are sorted by native height and
+    /// instance index. Source construction is required only here, not by kernels or verification.
+    pub fn build<EF, MA, SC>(
+        statement: &Statement<F, EF, MA>,
+        config: &SC,
+    ) -> Result<Option<Self>, PreprocessedValidationError>
     where
         EF: ExtensionField<F>,
         MA: MultiAir<F, EF>,
-        C: StarkConfig<F, EF, Lmcs = L>,
+        MA::Air: LiftedAir<F = F>,
+        SC: StarkConfig<F, EF, Lmcs = L>,
     {
-        let traces: Vec<Option<RowMajorMatrix<F>>> = statement
-            .airs()
-            .iter()
-            .enumerate()
-            .map(|(air_idx, air)| {
-                let trace = air.preprocessed_trace();
-                let log_height = trace.as_ref().map(|trace| {
-                    let height = raw_matrix_height(air_idx, trace)
-                        .expect("preprocessed matrix must have complete power-of-two rows");
-                    log2_strict_u8(height)
-                });
-                assert_eq!(
-                    log_height,
-                    air.log_preprocessed_height(),
-                    "preprocessed matrix height for AIR {air_idx} differs from its declaration",
-                );
-                trace
-            })
-            .collect();
-        if traces.iter().all(Option::is_none) {
-            return None;
-        }
+        let airs = statement.airs();
+        // Materialize every factory once before inspecting any result, including no-table AIRs.
+        let traces: Vec<Option<RowMajorMatrix<F>>> =
+            airs.iter().map(LiftedAir::build_preprocessed_trace).collect();
 
-        // Sort by (native height, AIR index), matching the preprocessed subset of proof order.
-        // TraceOrder requires each preprocessed AIR's main trace height to equal the declared
-        // height checked above. AIRs without preprocessing can vary in height without changing
-        // this subset's order.
+        // Sort by declared height before reading matrix heights: malformed raw storage must not
+        // reach Matrix::height. Once validated, these are exactly the native-height sorted leaves.
         let mut pairs: Vec<(usize, &RowMajorMatrix<F>)> = traces
             .iter()
             .enumerate()
-            .filter_map(|(i, t)| t.as_ref().map(|m| (i, m)))
+            .filter_map(|(i, trace)| trace.as_ref().map(|matrix| (i, matrix)))
             .collect();
-        pairs.sort_by_key(|(air_idx, m)| (m.height(), *air_idx));
+        pairs.sort_by_key(|(air, _)| {
+            (airs[*air].descriptor().spec().preprocessed.map(|fixed| fixed.log_height), *air)
+        });
+        let mut trace_for_air = vec![None; airs.len()];
+        for (trace, &(air, _)) in pairs.iter().enumerate() {
+            trace_for_air[air] = Some(trace);
+        }
 
         let log_blowup = config.pcs().log_blowup();
+        for (air, (kernel, matrix)) in airs.iter().zip(&traces).enumerate() {
+            let height = validate_raw_trace(
+                air,
+                trace_for_air[air].unwrap_or(0),
+                kernel.descriptor().spec().preprocessed,
+                matrix.as_ref(),
+            )?;
+            if let Some(height) = height {
+                LiftedDomain::<F>::try_canonical(log2_strict_u8(height), log_blowup)
+                    .map_err(|source| PreprocessedValidationError::Domain { air, source })?;
+            }
+        }
+        if pairs.is_empty() {
+            return Ok(None);
+        }
+
         let ldes: Vec<_> = pairs
             .into_iter()
             .map(|(air_idx, trace)| {
                 let log_h = log2_strict_u8(trace.height());
                 let coset_shift = LiftedDomain::<F>::try_canonical(log_h, log_blowup)
-                    .expect("preprocessed LDE order exceeds field two-adicity or host indexing")
+                    .expect("preprocessed domains were validated before LDE construction")
                     .lde_shift();
                 let width = trace.width();
                 info_span!("preprocessed LDE", air = air_idx, log_height = log_h, width).in_scope(
@@ -135,11 +182,10 @@ where
                 )
             })
             .collect();
-
-        Some(Self {
-            traces,
-            committed: Committed::new(config.lmcs().build_aligned_tree(ldes)),
-        })
+        let committed: Committed<F, RowMajorMatrix<F>, L> =
+            Committed::new(config.lmcs().build_aligned_tree(ldes));
+        let identity = SetupIdentity::new::<EF, _, _>(committed.root(), airs, config);
+        Ok(Some(Self { traces, committed, identity }))
     }
 
     /// Commitment (Merkle root) of the preprocessed LDE tree — handed to the
@@ -148,8 +194,15 @@ where
         self.committed.root()
     }
 
-    /// Raw setup traces in AIR instance order.
-    pub(crate) fn raw_traces(&self) -> &[Option<RowMajorMatrix<F>>] {
+    /// Trusted association of this bundle's root, AIRs and fixed-setup parameters.
+    pub fn identity(&self) -> &SetupIdentity<L::Commitment> {
+        &self.identity
+    }
+
+    /// Read-only raw setup matrices in AIR instance order, including `None` for no-table AIRs.
+    ///
+    /// Borrow these matrices for witness construction and debugging; do not rebuild factories.
+    pub fn raw_traces(&self) -> &[Option<RowMajorMatrix<F>>] {
         &self.traces
     }
 
@@ -200,12 +253,89 @@ fn raw_matrix_height<F: TwoAdicField>(
     Ok(height)
 }
 
-/// Validate a [`Preprocessed`] bundle against a prover statement and STARK config:
-/// per-AIR presence, raw matrix shape, committed LDE shape, and LMCS alignment.
-///
-/// Called by [`ProverInstance::new`](crate::ProverInstance::new) only when both
-/// the AIRs declare preprocessed columns and a bundle is supplied; aggregate
-/// presence parity is checked separately by the constructor.
+/// Check an identity against kernel metadata and the selected fixed-setup configuration.
+/// No source evaluation, factory or witness capability is required.
+pub(crate) fn validate_setup_identity<EF, K, SC>(
+    config: &SC,
+    kernels: &[K],
+    identity: &SetupIdentity<<SC::Lmcs as Lmcs>::Commitment>,
+) -> Result<(), PreprocessedValidationError>
+where
+    K: AirKernel,
+    K::F: TwoAdicField,
+    EF: ExtensionField<K::F>,
+    SC: StarkConfig<K::F, EF>,
+{
+    if identity.fingerprints.len() != kernels.len() {
+        return Err(PreprocessedValidationError::FingerprintCountMismatch {
+            expected: kernels.len(),
+            actual: identity.fingerprints.len(),
+        });
+    }
+    for (air, (kernel, &actual)) in kernels.iter().zip(&identity.fingerprints).enumerate() {
+        let expected = kernel.descriptor().fingerprint();
+        if actual != expected {
+            return Err(PreprocessedValidationError::FingerprintMismatch { air, expected, actual });
+        }
+    }
+    let expected_blowup = config.pcs().log_blowup();
+    if identity.log_blowup != expected_blowup {
+        return Err(PreprocessedValidationError::BlowupMismatch {
+            expected: expected_blowup,
+            actual: identity.log_blowup,
+        });
+    }
+    let expected_alignment = config.lmcs().alignment();
+    if identity.alignment != expected_alignment {
+        return Err(PreprocessedValidationError::AlignmentMismatch {
+            expected: expected_alignment,
+            actual: identity.alignment,
+        });
+    }
+    Ok(())
+}
+
+/// Validate one supplied raw matrix against a descriptor's fixed-data declaration.
+/// Returns its native height after checking storage before any height accessor is used.
+fn validate_raw_trace<F: TwoAdicField>(
+    air: usize,
+    trace: usize,
+    expected: Option<PreprocessedSpec>,
+    matrix: Option<&RowMajorMatrix<F>>,
+) -> Result<Option<usize>, PreprocessedValidationError> {
+    if expected.is_some() != matrix.is_some() {
+        return Err(PreprocessedValidationError::TracePresenceMismatch {
+            air,
+            expected: expected.is_some(),
+            actual: matrix.is_some(),
+        });
+    }
+    let (Some(expected), Some(matrix)) = (expected, matrix) else {
+        return Ok(None);
+    };
+    let height = raw_matrix_height(air, matrix)?;
+    let width = matrix.width();
+    if width != expected.width {
+        return Err(PreprocessedValidationError::WidthMismatch {
+            trace,
+            air,
+            expected: expected.width,
+            actual: width,
+        });
+    }
+    let native_height = 1usize << expected.log_height;
+    if height != native_height {
+        return Err(PreprocessedValidationError::HeightMismatch {
+            air,
+            main: native_height,
+            preprocessed: height,
+        });
+    }
+    Ok(Some(height))
+}
+
+/// Validate cached fixed data and its identity against a prover statement/configuration.
+/// Aggregate optional setup presence is checked by the outer instance constructor.
 pub(crate) fn validate_preprocessed<F, EF, MA, SC>(
     config: &SC,
     prover_statement: &ProverStatement<F, EF, MA>,
@@ -220,6 +350,7 @@ where
     let airs = prover_statement.statement().airs();
     let main_traces = prover_statement.traces();
     let log_blowup = config.pcs().log_blowup();
+    validate_setup_identity::<EF, _, _>(config, airs, &preprocessed.identity)?;
 
     if preprocessed.traces.len() != airs.len() {
         return Err(PreprocessedValidationError::RawTraceCountMismatch {
@@ -227,7 +358,6 @@ where
             actual: preprocessed.traces.len(),
         });
     }
-
     let expected_alignment = config.lmcs().alignment();
     let actual_alignment = preprocessed.committed.tree().alignment();
     if actual_alignment != expected_alignment {
@@ -237,51 +367,18 @@ where
         });
     }
 
-    // Validate fixed preprocessing heights before reconstructing the table-to-AIR mapping.
+    // ProverStatement already checks raw main storage before exposing these height reads.
     let heights: Vec<usize> = main_traces.iter().map(Matrix::height).collect();
-    let trace_order = TraceOrder::from_trace_heights::<F, EF, _>(airs, &heights)?;
-    let preprocessed_trace_to_air = trace_order.preprocessed_air_for_trace_index::<F, EF, _>(airs);
-    let air_to_preprocessed_trace = trace_order.preprocessed_trace_index_for_air::<F, EF, _>(airs);
-
-    // Raw cached matrices must line up with AIR declarations in instance order.
-    for (air_idx, (air, raw_preprocessed)) in airs.iter().zip(&preprocessed.traces).enumerate() {
-        let expected_presence = air.preprocessed_width() > 0;
-        let actual_presence = raw_preprocessed.is_some();
-        if actual_presence != expected_presence {
-            return Err(PreprocessedValidationError::TracePresenceMismatch {
-                air: air_idx,
-                expected: expected_presence,
-                actual: actual_presence,
-            });
-        }
-
-        let Some(raw_preprocessed) = raw_preprocessed else {
-            continue;
-        };
-
-        let trace = air_to_preprocessed_trace[air_idx]
-            .expect("presence validation guarantees a declared preprocessed AIR");
-        let expected_width = air.preprocessed_width();
-        let actual_width = raw_preprocessed.width();
-        if actual_width != expected_width {
-            return Err(PreprocessedValidationError::WidthMismatch {
-                trace,
-                air: air_idx,
-                expected: expected_width,
-                actual: actual_width,
-            });
-        }
-
-        // The borrowed setup may have been built for an AIR with a different native height.
-        let main = main_traces[air_idx].height();
-        let preprocessed_height = raw_matrix_height(air_idx, raw_preprocessed)?;
-        if preprocessed_height != main {
-            return Err(PreprocessedValidationError::HeightMismatch {
-                air: air_idx,
-                main,
-                preprocessed: preprocessed_height,
-            });
-        }
+    let trace_order = TraceOrder::from_trace_heights(airs, &heights)?;
+    let preprocessed_trace_to_air = trace_order.preprocessed_air_for_trace_index(airs);
+    let air_to_preprocessed_trace = trace_order.preprocessed_trace_index_for_air(airs);
+    for (air, (kernel, matrix)) in airs.iter().zip(&preprocessed.traces).enumerate() {
+        validate_raw_trace(
+            air,
+            air_to_preprocessed_trace[air].unwrap_or(0),
+            kernel.descriptor().spec().preprocessed,
+            matrix.as_ref(),
+        )?;
     }
 
     let committed_traces = preprocessed.committed.tree().leaves();
@@ -291,50 +388,56 @@ where
             actual: committed_traces.len(),
         });
     }
-
-    // A cached setup may have been built for different AIRs or PCS parameters. Check committed
-    // widths against the current AIRs and LDE heights against the current main traces and blowup.
-    for (preprocessed_trace_idx, &air_idx_u8) in preprocessed_trace_to_air.iter().enumerate() {
-        let air_idx = air_idx_u8 as usize;
-        let expected_width = airs[air_idx].preprocessed_width();
-        let committed_trace = &committed_traces[preprocessed_trace_idx];
+    for (trace, &air_u8) in preprocessed_trace_to_air.iter().enumerate() {
+        let air = air_u8 as usize;
+        let expected_width = airs[air].descriptor().spec().preprocessed_width();
+        let committed_trace = &committed_traces[trace];
         let actual_width = committed_trace.width();
         if actual_width != expected_width {
             return Err(PreprocessedValidationError::WidthMismatch {
-                trace: preprocessed_trace_idx,
-                air: air_idx,
+                trace,
+                air,
                 expected: expected_width,
                 actual: actual_width,
             });
         }
-
-        let main_height = main_traces[air_idx].height();
+        let main_height = main_traces[air].height();
         let expected_lde_height = main_height.checked_shl(u32::from(log_blowup)).ok_or(
-            PreprocessedValidationError::LdeHeightOverflow {
-                air: air_idx,
-                main: main_height,
-                log_blowup,
-            },
+            PreprocessedValidationError::LdeHeightOverflow { air, main: main_height, log_blowup },
         )?;
         let actual_lde_height = committed_trace.height();
         if actual_lde_height != expected_lde_height {
             return Err(PreprocessedValidationError::LdeHeightMismatch {
-                trace: preprocessed_trace_idx,
-                air: air_idx,
+                trace,
+                air,
                 log_blowup,
                 expected: expected_lde_height,
                 actual: actual_lde_height,
             });
         }
     }
-
     Ok(())
 }
 
-/// Errors from constructing a stark-layer instance: preprocessed presence
-/// parity and (prover side) the bundle's shape against the AIR declarations.
+/// Errors from fixed-setup construction, trusted association validation and cached matrix shape.
 #[derive(Debug, Error)]
 pub enum PreprocessedValidationError {
+    #[error("fixed setup has {actual} descriptor fingerprints, expected {expected}")]
+    FingerprintCountMismatch { expected: usize, actual: usize },
+    #[error("AIR {air}: fixed setup descriptor fingerprint differs from the selected kernel")]
+    FingerprintMismatch {
+        air: usize,
+        expected: [u8; 32],
+        actual: [u8; 32],
+    },
+    #[error("fixed setup uses PCS log blowup {actual}, expected {expected}")]
+    BlowupMismatch { expected: u8, actual: u8 },
+    #[error("AIR {air}: invalid fixed-data LDE domain: {source}")]
+    Domain {
+        air: usize,
+        #[source]
+        source: DomainError,
+    },
     #[error(transparent)]
     Shape(#[from] ShapeError),
     #[error(
@@ -373,7 +476,7 @@ pub enum PreprocessedValidationError {
     )]
     TreeLengthMismatch { expected: usize, actual: usize },
     #[error(
-        "AIR {air}: preprocessed matrix height ({preprocessed}) does not match main trace height ({main})"
+        "AIR {air}: preprocessed matrix height ({preprocessed}) does not match declared native/main height ({main})"
     )]
     HeightMismatch {
         air: usize,
@@ -398,7 +501,16 @@ pub enum PreprocessedValidationError {
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec;
+    use crate::{
+        air::native::{self, DirectKernel},
+        pcs::PcsParams,
+        testing::{
+            airs::miden::DummyMidenAir,
+            configs::goldilocks_poseidon2::{Felt, QuadFelt, test_config},
+        },
+    };
+    use alloc::{sync::Arc, vec};
+    use core::sync::atomic::{AtomicUsize, Ordering};
     use p3_field::PrimeCharacteristicRing;
     use p3_goldilocks::Goldilocks;
 
@@ -417,5 +529,215 @@ mod tests {
         }
         let matrix = RowMajorMatrix::new(vec![Goldilocks::ZERO; 8], 2);
         assert_eq!(raw_matrix_height(3, &matrix).unwrap(), 4);
+    }
+
+    /// Reuse the existing degree-nine source; only its setup-owned fixed matrix is configured.
+    struct FixedDummy {
+        relation: DummyMidenAir<Felt>,
+        declared: Option<PreprocessedSpec>,
+        matrix: Option<RowMajorMatrix<Felt>>,
+        materializations: Arc<AtomicUsize>,
+    }
+
+    impl LiftedAir for FixedDummy {
+        type F = Felt;
+
+        fn spec(&self) -> native::AirSpec<'_, Felt> {
+            let mut spec = LiftedAir::spec(&self.relation);
+            spec.preprocessed = self.declared;
+            spec
+        }
+
+        fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
+            self.materializations.fetch_add(1, Ordering::Relaxed);
+            self.matrix.clone()
+        }
+
+        fn eval<S: native::LiftedAirBuilder<F = Felt>>(
+            &self,
+            frame: &native::Frame<'_, S>,
+            inputs: native::Inputs<'_, S>,
+            sink: &mut S,
+        ) {
+            LiftedAir::eval(&self.relation, frame, inputs, sink);
+        }
+    }
+
+    struct SetupMultiAir {
+        airs: Vec<DirectKernel<FixedDummy>>,
+    }
+
+    impl MultiAir<Felt, QuadFelt> for SetupMultiAir {
+        type Air = DirectKernel<FixedDummy>;
+
+        fn airs(&self) -> &[Self::Air] {
+            &self.airs
+        }
+    }
+
+    fn setup_statement(
+        cases: Vec<(Option<PreprocessedSpec>, Option<RowMajorMatrix<Felt>>)>,
+    ) -> (Statement<Felt, QuadFelt, SetupMultiAir>, Vec<Arc<AtomicUsize>>) {
+        let counters: Vec<_> = cases.iter().map(|_| Arc::new(AtomicUsize::new(0))).collect();
+        let airs = cases
+            .into_iter()
+            .zip(&counters)
+            .map(|((declared, matrix), counter)| {
+                DirectKernel::new(FixedDummy {
+                    relation: DummyMidenAir::new(9, 1),
+                    declared,
+                    matrix,
+                    materializations: counter.clone(),
+                })
+                .unwrap()
+            })
+            .collect();
+        let statement = Statement::new(SetupMultiAir { airs }, vec![], vec![]).unwrap();
+        (statement, counters)
+    }
+
+    #[test]
+    fn factories_run_once_including_none_and_fixed_leaves_keep_their_order() {
+        let (statement, counters) = setup_statement(vec![
+            (
+                Some(PreprocessedSpec { width: 1, log_height: 3 }),
+                Some(RowMajorMatrix::new(vec![Felt::ZERO; 8], 1)),
+            ),
+            (None, None),
+            (
+                Some(PreprocessedSpec { width: 2, log_height: 2 }),
+                Some(RowMajorMatrix::new(vec![Felt::ONE; 8], 2)),
+            ),
+            (
+                Some(PreprocessedSpec { width: 3, log_height: 2 }),
+                Some(RowMajorMatrix::new(vec![Felt::TWO; 12], 3)),
+            ),
+        ]);
+        assert!(counters.iter().all(|counter| counter.load(Ordering::Relaxed) == 0));
+        let config = test_config();
+        let setup = Preprocessed::build(&statement, &config).unwrap().unwrap();
+        assert!(counters.iter().all(|counter| counter.load(Ordering::Relaxed) == 1));
+        assert_eq!(setup.raw_traces().len(), 4);
+        assert!(setup.raw_traces()[1].is_none());
+        assert_eq!(setup.raw_traces()[2].as_ref().unwrap().values, vec![Felt::ONE; 8]);
+        let leaves = setup.committed().tree().leaves();
+        assert_eq!(leaves.iter().map(Matrix::width).collect::<Vec<_>>(), vec![2, 3, 1]);
+        assert_eq!(setup.identity().commitment(), &setup.commitment());
+        assert_eq!(setup.identity().alignment(), config.lmcs().alignment());
+        assert_eq!(setup.identity().log_blowup(), config.pcs().log_blowup());
+
+        // Both trusted-root association and metadata validation are factory-free.
+        let identity =
+            SetupIdentity::new::<QuadFelt, _, _>(setup.commitment(), statement.airs(), &config);
+        validate_setup_identity::<QuadFelt, _, _>(&config, statement.airs(), &identity).unwrap();
+        assert_eq!(&identity, setup.identity());
+        assert!(counters.iter().all(|counter| counter.load(Ordering::Relaxed) == 1));
+
+        let mut missing = identity.clone();
+        missing.fingerprints.pop();
+        assert!(matches!(
+            validate_setup_identity::<QuadFelt, _, _>(&config, statement.airs(), &missing),
+            Err(PreprocessedValidationError::FingerprintCountMismatch { expected: 4, actual: 3 })
+        ));
+        let mut reordered = identity.clone();
+        reordered.fingerprints.swap(0, 2);
+        assert!(matches!(
+            validate_setup_identity::<QuadFelt, _, _>(&config, statement.airs(), &reordered),
+            Err(PreprocessedValidationError::FingerprintMismatch { air: 0, .. })
+        ));
+        let mut different_blowup = identity.clone();
+        different_blowup.log_blowup += 1;
+        assert!(matches!(
+            validate_setup_identity::<QuadFelt, _, _>(&config, statement.airs(), &different_blowup),
+            Err(PreprocessedValidationError::BlowupMismatch { .. })
+        ));
+        let mut different_alignment = identity;
+        different_alignment.alignment += 1;
+        assert!(matches!(
+            validate_setup_identity::<QuadFelt, _, _>(
+                &config,
+                statement.airs(),
+                &different_alignment
+            ),
+            Err(PreprocessedValidationError::AlignmentMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn factory_shape_failures_are_typed_before_lde_and_still_visit_none_factories() {
+        let config = test_config();
+        let build = |declared, matrix| {
+            let (statement, counters) = setup_statement(vec![(declared, matrix), (None, None)]);
+            let result = Preprocessed::build(&statement, &config);
+            assert!(counters.iter().all(|counter| counter.load(Ordering::Relaxed) == 1));
+            result
+        };
+        let fixed = Some(PreprocessedSpec { width: 1, log_height: 2 });
+        assert!(matches!(
+            build(fixed, None),
+            Err(PreprocessedValidationError::TracePresenceMismatch {
+                air: 0,
+                expected: true,
+                actual: false
+            })
+        ));
+        assert!(matches!(
+            build(None, Some(RowMajorMatrix::new(vec![Felt::ZERO; 4], 1))),
+            Err(PreprocessedValidationError::TracePresenceMismatch {
+                air: 0,
+                expected: false,
+                actual: true
+            })
+        ));
+        let mut malformed = RowMajorMatrix::new(vec![Felt::ZERO; 4], 1);
+        malformed.width = 0;
+        assert!(matches!(
+            build(fixed, Some(malformed)),
+            Err(PreprocessedValidationError::RawMatrixShape { air: 0, width: 0, .. })
+        ));
+        assert!(matches!(
+            build(
+                Some(PreprocessedSpec { width: 2, log_height: 2 }),
+                Some(RowMajorMatrix::new(vec![Felt::ZERO; 4], 1))
+            ),
+            Err(PreprocessedValidationError::WidthMismatch { air: 0, expected: 2, actual: 1, .. })
+        ));
+        assert!(matches!(
+            build(fixed, Some(RowMajorMatrix::new(vec![Felt::ZERO; 8], 1))),
+            Err(PreprocessedValidationError::HeightMismatch { air: 0, main: 4, preprocessed: 8 })
+        ));
+        assert!(build(None, None).unwrap().is_none());
+
+        let (statement, _) =
+            setup_statement(vec![(fixed, Some(RowMajorMatrix::new(vec![Felt::ZERO; 4], 1)))]);
+        let mut oversized = config;
+        oversized.pcs = PcsParams::new(32, 1, 3, 0, 0, 1, 0).unwrap();
+        assert!(matches!(
+            Preprocessed::build(&statement, &oversized),
+            Err(PreprocessedValidationError::Domain {
+                air: 0,
+                source: DomainError::LdeOrderTooLarge { .. }
+            })
+        ));
+    }
+
+    #[test]
+    fn cached_raw_storage_is_validated_without_rebuilding_the_factory() {
+        let (statement, counters) = setup_statement(vec![(
+            Some(PreprocessedSpec { width: 1, log_height: 2 }),
+            Some(RowMajorMatrix::new(vec![Felt::ZERO; 4], 1)),
+        )]);
+        let config = test_config();
+        let mut setup = Preprocessed::build(&statement, &config).unwrap().unwrap();
+        let prover =
+            ProverStatement::new(statement, vec![RowMajorMatrix::new(vec![Felt::ZERO; 36], 9)])
+                .unwrap();
+        validate_preprocessed(&config, &prover, &setup).unwrap();
+        setup.traces[0].as_mut().unwrap().width = 0;
+        assert!(matches!(
+            validate_preprocessed(&config, &prover, &setup),
+            Err(PreprocessedValidationError::RawMatrixShape { air: 0, width: 0, .. })
+        ));
+        assert_eq!(counters[0].load(Ordering::Relaxed), 1);
     }
 }

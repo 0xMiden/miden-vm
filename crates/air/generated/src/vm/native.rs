@@ -14,10 +14,10 @@ mod descriptors {
 }
 
 define_native_dispatch!(super::MidenAir, Source, VmPrepared;
-    Core => (CORE_DESCRIPTOR, descriptor_core, precompute_core, eval_core, CORE_PREPARED_TERMS),
-    Chiplets => (CHIPLETS_DESCRIPTOR, descriptor_chiplets, precompute_chiplets, eval_chiplets, CHIPLETS_PREPARED_TERMS),
-    EidosCompression => (EIDOS_DESCRIPTOR, descriptor_eidos_compression, precompute_eidos_compression, eval_eidos_compression, EIDOS_COMPRESSION_PREPARED_TERMS),
-    And8Lookup => (AND8_DESCRIPTOR, descriptor_and8_lookup, precompute_and8_lookup, eval_and8_lookup, AND8_LOOKUP_PREPARED_TERMS),
+    Core => (CORE_DESCRIPTOR, descriptor_core, CORE_GEOMETRY, precompute_core, eval_core, CORE_PREPARED_TERMS),
+    Chiplets => (CHIPLETS_DESCRIPTOR, descriptor_chiplets, CHIPLETS_GEOMETRY, precompute_chiplets, eval_chiplets, CHIPLETS_PREPARED_TERMS),
+    EidosCompression => (EIDOS_DESCRIPTOR, descriptor_eidos_compression, EIDOS_COMPRESSION_GEOMETRY, precompute_eidos_compression, eval_eidos_compression, EIDOS_COMPRESSION_PREPARED_TERMS),
+    And8Lookup => (AND8_DESCRIPTOR, descriptor_and8_lookup, AND8_LOOKUP_GEOMETRY, precompute_and8_lookup, eval_and8_lookup, AND8_LOOKUP_PREPARED_TERMS),
 );
 
 define_native_kernel!(

@@ -295,14 +295,14 @@ pub type ReductionError = Box<dyn core::error::Error + Send + Sync>;
 /// [`crate::air::debug::assert_multi_air_valid`]. In particular, `airs()` must be
 /// non-empty and each AIR's dimensions and periodic columns must be well-formed.
 /// Public inputs are stored in instance order, with each AIR's slice sized
-/// by [`BaseAir::num_public_values`].
+/// by each kernel descriptor's `num_public_values`.
 pub trait MultiAir<F, EF>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
     /// AIR type. Heterogeneous AIRs are expressed via caller-defined enum wrappers.
-    type Air: LiftedAir<F, EF>;
+    type Air: crate::air::native::AirKernel<F = F>;
 
     /// The AIRs in instance order — the single source of that ordering.
     fn airs(&self) -> &[Self::Air];

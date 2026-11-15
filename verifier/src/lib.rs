@@ -736,6 +736,7 @@ mod tests {
         .unwrap();
 
         let commitment = miden_stark::Preprocessed::build(&statement, &config)
+            .expect("canonical fixed setup is valid")
             .map(|preprocessed| preprocessed.commitment());
 
         assert_eq!(commitment, Some(config::EIDOS_PREPROCESSED_COMMITMENT.into()));

@@ -12,11 +12,8 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_stark::{
-    air::{BaseAir, ConstraintDegrees, LiftedAir},
-    lookup::{
-        LookupFractions, build_lookup_fractions,
-        debug::{ValidateLayout, ValidateLookupAir},
-    },
+    air::native::{ConstraintDegrees, LiftedAir},
+    lookup::{LookupFractions, native::build_lookup_fractions},
 };
 use proptest::prelude::*;
 
@@ -30,7 +27,7 @@ use crate::prover::{
             program::SLOT_D_ROL_BEGIN,
         },
     },
-    logup::{Challenges, NUM_LOGUP_VALUES, NUM_RANDOMNESS},
+    logup::Challenges,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::{ChipletAir, Session},
     tests::{bus_balance::session_stack_residual, lookup_column_folds},
@@ -222,26 +219,17 @@ fn keccak_round_constraints_hold_on_canonical_input() {
 fn keccak_round_shape_and_degree_match_design() {
     let air = KeccakRoundAir;
 
-    assert_eq!(air.width(), 56);
-    assert_eq!(air.aux_width(), 8);
+    assert_eq!(air.spec().main_width, 56);
+    assert_eq!(air.spec().aux_width, 8);
     assert_eq!(crate::prover::tests::lookup_column_shape(&air), &[3, 4, 4, 2, 3, 4, 4, 2],);
-    assert_eq!(
-        ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
-        ConstraintDegrees { base: 2, ext: 5 }
-    );
+    assert_eq!(crate::prover::tests::raw_degrees(&air), ConstraintDegrees { base: 2, ext: 5 });
     assert_eq!(crate::prover::tests::log_quotient_degree(&air), 2);
 
-    let layout = ValidateLayout {
-        preprocessed_width: air.preprocessed_width(),
-        trace_width: air.width(),
-        num_public_values: 0,
-        num_periodic_columns: air.periodic_columns().len(),
-        permutation_width: NUM_AUX_COLS,
-        num_permutation_challenges: NUM_RANDOMNESS,
-        num_permutation_values: NUM_LOGUP_VALUES,
-    };
-    ValidateLookupAir::validate(&air, layout)
-        .unwrap_or_else(|err| panic!("KeccakRoundAir lookup validation failed: {err}"));
+    miden_stark::lookup::native::validate_native(
+        &air,
+        &miden_stark::air::native::LiftedAir::spec(&air),
+    )
+    .unwrap_or_else(|err| panic!("KeccakRoundAir lookup validation failed: {err}"));
 }
 
 #[test]
@@ -254,7 +242,7 @@ fn pure_rol_raw_b_affects_every_byte_and_lane() {
         main.values[row * NUM_MAIN_COLS..(row + 1) * NUM_MAIN_COLS].to_vec(),
         NUM_MAIN_COLS,
     );
-    let periodic_columns = air.periodic_columns();
+    let periodic_columns = air.spec().periodic_columns;
     let periodic: Vec<Vec<Felt>> =
         periodic_columns.iter().map(|column| vec![column[row % column.len()]]).collect();
     let challenges = lookup_challenges();

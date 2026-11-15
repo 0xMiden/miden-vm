@@ -145,11 +145,11 @@ impl native::ProverAir<QuadFelt> for ExternalAir {
 // ---------------------------------------------------------------------------
 
 struct ExternalMultiAir {
-    airs: Vec<ExternalAir>,
+    airs: Vec<native::DirectKernel<ExternalAir>>,
 }
 
 impl MultiAir<Felt, QuadFelt> for ExternalMultiAir {
-    type Air = ExternalAir;
+    type Air = native::DirectKernel<ExternalAir>;
 
     fn airs(&self) -> &[Self::Air] {
         &self.airs
@@ -182,7 +182,9 @@ fn external_prover_statement(
     aux_inputs: Vec<Felt>,
 ) -> ProverStatement<Felt, QuadFelt, ExternalMultiAir> {
     let statement = Statement::new(
-        ExternalMultiAir { airs: vec![ExternalAir { input }] },
+        ExternalMultiAir {
+            airs: vec![native::DirectKernel::new(ExternalAir { input }).unwrap()],
+        },
         vec![(0, air_inputs)],
         aux_inputs,
     )

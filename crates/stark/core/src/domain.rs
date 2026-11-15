@@ -26,13 +26,13 @@
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 
-use p3_field::{ExtensionField, Field, TwoAdicField, batch_multiplicative_inverse};
+use p3_field::{ExtensionField, TwoAdicField, batch_multiplicative_inverse};
 use p3_maybe_rayon::prelude::*;
 use p3_util::reverse_slice_index_bits;
 use thiserror::Error;
 
 use crate::{
-    air::{LiftedAir, log2_ceil_u8},
+    air::native::{AirKernel, QuotientAllocationError, resolve_quotient_chunks},
     selectors::Selectors,
     transcript::Channel,
 };
@@ -558,45 +558,12 @@ impl<F: TwoAdicField> LiftedDomain<F> {
 // Quotient degree
 // ============================================================================
 
-/// Log₂ of the number of quotient chunks for `air`, clamped so the quotient
-/// degree `D = 2^log_quotient_degree` is always ≥ 1.
+/// Return the log₂ execution allocation after validating the kernel's allocation policy.
 ///
-/// # Why `M − 1` chunks?
-///
-/// Let N be the trace height (so trace columns are polynomials of degree < N).
-/// Symbolic evaluation assigns each constraint a *degree multiple* M
-/// (the AIR's combined
-/// [`constraint_degree().max()`](crate::air::ConstraintDegrees::max)),
-/// so the numerator polynomial C(X) has degree bounded by roughly M·(N − 1).
-///
-/// In a STARK, the constraint numerator is divisible by the trace vanishing
-/// polynomial `Z_H(X) = Xᴺ − 1`, so the quotient polynomial
-/// `Q(X) = C(X) / Z_H(X)` has
-///
-/// `deg(Q) ≤ deg(C) − N ≤ M·(N − 1) − N < (M − 1)·N`.
-///
-/// We commit to Q(X) by splitting it into D chunks of degree < N; D = M − 1
-/// suffices, rounded up to a power of two.
-///
-/// # Low symbolic degrees
-///
-/// Quotient construction still needs at least one chunk. The prover and
-/// verifier therefore clamp the derived quotient degree to `D = 1`. The air
-/// crate reports raw symbolic degrees; this STARK-layer helper applies the
-/// protocol clamp.
-pub fn log_quotient_degree<F, EF, A>(air: &A) -> u8
-where
-    F: Field,
-    A: LiftedAir<F, EF>,
-{
-    // Maximum degree over base and extension field constraints.
-    let constraint_degree = air.constraint_degree().max();
-    // Subtract one quotient chunk for division by the vanishing polynomial.
-    let quotient_chunks = constraint_degree.saturating_sub(1);
-    // Clamp to the protocol minimum of one quotient chunk.
-    let quotient_chunks = quotient_chunks.max(1);
-    // Return the log₂ quotient chunk count.
-    log2_ceil_u8(quotient_chunks)
+/// This preserves conservative over-allocation. A proof must additionally validate the
+/// descriptor's degree profile at its actual height; see [`crate::PlanError`].
+pub fn log_quotient_degree<K: AirKernel>(air: &K) -> Result<u8, QuotientAllocationError> {
+    Ok(resolve_quotient_chunks(air)?.ilog2() as u8)
 }
 
 /// Inputs used by ACE to reconstruct a quotient polynomial from its chunks.

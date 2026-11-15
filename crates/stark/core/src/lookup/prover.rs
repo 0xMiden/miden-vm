@@ -1117,10 +1117,14 @@ mod tests {
 
         let air = WindowAir::<TestFelt>::new();
         let trace = RowMajorMatrix::new(vec![TestFelt::ONE; 8], 1);
-        let statement = Statement::new(TestMultiAir::new(vec![air.clone()]), vec![], vec![])
-            .expect("no public inputs");
+        let statement = Statement::new(
+            TestMultiAir::new(vec![native::DirectKernel::new(air.clone()).unwrap()]),
+            vec![],
+            vec![],
+        )
+        .expect("no public inputs");
         let statement = ProverStatement::new(statement, vec![trace.clone()]).unwrap();
-        crate::check_constraints(&statement, test_challenger());
+        crate::check_constraints(&statement, None, test_challenger());
         // This existing helper reaches packed prover and scalar OOD folders;
         // constraint_degree reaches the existing non-Copy symbolic builder.
         let _degree =

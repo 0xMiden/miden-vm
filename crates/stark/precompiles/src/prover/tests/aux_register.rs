@@ -194,7 +194,20 @@ fn ext_register_verifies_and_stays_out_of_the_logup_sum() {
     let challenges: [QuadFelt; NUM_RANDOMNESS] = [rand_qf(&mut rng), rand_qf(&mut rng)];
 
     // The register remains committed and constrained without contributing to the LogUp sum.
-    let (auxiliary, normalized_sum) = AuxRegisterAir.build_aux_trace(&main, &[], &[], &challenges);
+    let native::AuxTrace {
+        columns: auxiliary,
+        exports: normalized_sum,
+    } = native::ProverAir::build_aux_trace(
+        &AuxRegisterAir,
+        native::AuxTraceInputs {
+            main: &main,
+            preprocessed: None,
+            public_values: &[],
+            statement: &[],
+            challenges: &challenges,
+        },
+    )
+    .expect("register witness inputs are valid");
     assert_eq!(normalized_sum, vec![QuadFelt::ZERO], "register must not pollute the LogUp sum");
     assert_eq!(auxiliary.width(), AUX_WIDTH);
     assert!(auxiliary.values.chunks(AUX_WIDTH).all(|row| row[0] == QuadFelt::ZERO));

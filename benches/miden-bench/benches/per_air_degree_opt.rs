@@ -1,22 +1,19 @@
 //! Illustrates the per-AIR quotient-degree optimization.
 //!
 //! Compares per-AIR quotient degrees against a common maximum degree using
-//! [`OverrideConstraintDegree`]. The low-degree AIR uses its own quotient domain before its
+//! native execution capacity. The low-degree AIR uses its own quotient domain before its
 //! quotient is lifted to the common commitment domain.
-//!
-//! Matching native kernels validate allocation/profile and memory metadata before the timer;
-//! the timed path retains the existing legacy collection until runtime activation.
 //!
 //! Runs `prove` with two AIRs:
 //! - Synthetic Core AIR: width 72, max constraint degree 9 (so `D = 8`).
 //! - Synthetic Chip AIR: width 72, max constraint degree 5 (so `D = 4`).
 //!
 //! Two variants:
-//! - **Baseline**: both AIRs are forced to `constraint_degree = 9` (so `D = 8`). Chip's constraints
+//! - **Baseline**: both AIRs allocate eight quotient chunks (`D = 8`). Chip's constraints
 //!   are evaluated on `chip_height * 8` points (the full target domain) rather than its natural
 //!   `chip_height * 4`.
-//! - **Optimized**: Core forced to `constraint_degree = 9` (`D = 8`), Chip to `constraint_degree =
-//!   5` (`D = 4`). Chip evaluates on its native domain (size `chip_height * 4`), divides by the
+//! - **Optimized**: Core allocates eight chunks (`D = 8`), Chip four (`D = 4`). Chip evaluates
+//!   on its native domain (size `chip_height * 4`), divides by the
 //!   native vanishing polynomial, and `upsample_evals` lifts the resulting quotient to the target
 //!   (`chip_height * 8`).
 //!
@@ -34,8 +31,7 @@ use eidos::{Dft, Felt, QuadFelt, test_challenger, test_lmcs};
 use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
     GenericStarkConfig, ProverInstance,
-    air::{BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, native},
-    memory::ProverMemoryModel,
+    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
     testing::{MultiAir, PcsParams, ProverStatement, Statement},
 };
 use p3_field::{Algebra, Dup, PrimeCharacteristicRing};
@@ -259,92 +255,16 @@ impl native::ProverAir<QuadFelt> for ConservativeKernel {
     }
 }
 
-/// Test wrapper that forces [`LiftedAir::constraint_degree`] to a chosen value
-/// (quotient chunking — and hence `log_quotient_degree` — is derived from it).
-///
-/// Delegates everything else to the inner AIR. Used by this bench to toggle between
-/// the baseline (force every AIR to the global-max degree) and the optimized path
-/// (each AIR at its natural degree).
-///
-/// Overriding *higher* than the AIR actually needs is safe: the prover/verifier just
-/// use a larger quotient domain than necessary. Overriding *lower* than needed would
-/// produce an invalid proof.
-#[derive(Clone, Copy, Debug)]
-struct OverrideConstraintDegree<A> {
-    inner: A,
-    constraint_degree: usize,
-}
-
-/// Constraint degree that yields `log_quotient_degree == l`:
-/// `log2_ceil(((1 << l) + 1) - 1) == log2_ceil(1 << l) == l`.
-fn constraint_degree_for_log_qd(l: usize) -> usize {
-    (1 << l) + 1
-}
-
-impl<A: BaseAir<Felt>> BaseAir<Felt> for OverrideConstraintDegree<A> {
-    fn width(&self) -> usize {
-        self.inner.width()
-    }
-    fn num_public_values(&self) -> usize {
-        self.inner.num_public_values()
-    }
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        self.inner.periodic_columns()
-    }
-}
-
-impl<A: LiftedAir<Felt, QuadFelt>> LiftedAir<Felt, QuadFelt> for OverrideConstraintDegree<A> {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = A::EvalData<B, E>;
-
-    fn num_randomness(&self) -> usize {
-        self.inner.num_randomness()
-    }
-    fn aux_width(&self) -> usize {
-        self.inner.aux_width()
-    }
-    fn num_aux_values(&self) -> usize {
-        self.inner.num_aux_values()
-    }
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        self.inner.build_aux_trace(main, air_inputs, aux_inputs, challenges)
-    }
-    fn prepare<B: Algebra<Felt>, E: Algebra<B>>(
-        &self,
-        inputs: miden_stark::air::EvalInputs<'_, B, E>,
-    ) -> Self::EvalData<B, E> {
-        self.inner.prepare(inputs)
-    }
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(
-        &self,
-        builder: &mut AB,
-        data: &Self::EvalData<AB::Expr, AB::ExprEF>,
-    ) {
-        self.inner.eval(builder, data)
-    }
-    fn constraint_degree(&self) -> ConstraintDegrees
-    where
-        Self: Sized,
-    {
-        ConstraintDegrees { base: self.constraint_degree, ext: 0 }
-    }
-}
-
 // -----------------------------------------------------------------------------
 // MultiAir (trivial: constant-challenge aux column for each trace)
 // -----------------------------------------------------------------------------
 
 struct BenchMultiAir {
-    airs: Vec<OverrideConstraintDegree<BenchAir>>,
+    airs: Vec<ConservativeKernel>,
 }
 
 impl MultiAir<Felt, QuadFelt> for BenchMultiAir {
-    type Air = OverrideConstraintDegree<BenchAir>;
+    type Air = ConservativeKernel;
 
     fn airs(&self) -> &[Self::Air] {
         &self.airs
@@ -393,41 +313,6 @@ fn bench_pcs_params() -> PcsParams {
     .expect("valid PCS params")
 }
 
-/// Inspect matching native execution metadata before entering the unchanged timed proof path.
-fn native_preflight(
-    core: &OverrideConstraintDegree<BenchAir>,
-    chip: &OverrideConstraintDegree<BenchAir>,
-    log_degrees: [usize; 2],
-    heights: [usize; 2],
-    params: &PcsParams,
-) {
-    let kernels = [
-        ConservativeKernel::new(core.inner, 1usize << log_degrees[0])
-            .expect("conservative Core capacity"),
-        ConservativeKernel::new(chip.inner, 1usize << log_degrees[1])
-            .expect("conservative Chip capacity"),
-    ];
-    for (kernel, height) in kernels.iter().zip(heights) {
-        let chunks = native::resolve_quotient_chunks(kernel).expect("valid execution allocation");
-        assert!(
-            chunks <= 1usize << params.log_blowup(),
-            "benchmark allocation exceeds PCS blowup"
-        );
-        native::AirKernel::descriptor(kernel)
-            .analysis()
-            .degree_profile()
-            .validate_capacity(height, chunks)
-            .expect("benchmark degree fits actual height");
-    }
-    let model = ProverMemoryModel::<2>::from_kernels::<QuadFelt, _>(&kernels, params)
-        .expect("native benchmark memory metadata");
-    assert!(
-        model.prover_peak_bytes(&heights).is_some(),
-        "benchmark memory estimate fits host arithmetic"
-    );
-    assert_eq!(model.prover_peak_bytes(&[0, 0]), Some(0));
-}
-
 fn run_prove(
     label: &str,
     core_log_qd: usize,
@@ -438,22 +323,12 @@ fn run_prove(
     let config =
         GenericStarkConfig::new(bench_pcs_params(), test_lmcs(), Dft::default(), test_challenger());
 
-    let core_air = OverrideConstraintDegree {
-        inner: BenchAir { kind: BenchAirKind::Core },
-        constraint_degree: constraint_degree_for_log_qd(core_log_qd),
-    };
-    let chip_air = OverrideConstraintDegree {
-        inner: BenchAir { kind: BenchAirKind::Chip },
-        constraint_degree: constraint_degree_for_log_qd(chip_log_qd),
-    };
-
-    native_preflight(
-        &core_air,
-        &chip_air,
-        [core_log_qd, chip_log_qd],
-        [core_height, chip_height],
-        &bench_pcs_params(),
-    );
+    let core_air =
+        ConservativeKernel::new(BenchAir { kind: BenchAirKind::Core }, 1usize << core_log_qd)
+            .expect("conservative Core capacity");
+    let chip_air =
+        ConservativeKernel::new(BenchAir { kind: BenchAirKind::Chip }, 1usize << chip_log_qd)
+            .expect("conservative Chip capacity");
 
     let core_trace = generate_trace(BenchAirKind::Core.recurrence_power(), core_height);
     let chip_trace = generate_trace(BenchAirKind::Chip.recurrence_power(), chip_height);
@@ -492,7 +367,7 @@ fn main() {
     let core_height = 1 << 14;
     let chip_height = 1 << 16;
 
-    // Baseline: force both AIRs to report log_qd = 3 (global max). Chip loses the
+    // Baseline: allocate log_qd = 3 to both AIRs (global max). Chip loses the
     // optimization and evaluates on chip_height*8 points directly, no upsample.
     run_prove("baseline (no upsample)", 3, 3, core_height, chip_height);
 
@@ -562,10 +437,10 @@ mod tests {
                 )
                 .unwrap(),
             ];
-            let model = super::ProverMemoryModel::<2>::from_kernels::<super::QuadFelt, _>(
-                &kernels,
-                &super::bench_pcs_params(),
-            )
+            let model = miden_stark::memory::ProverMemoryModel::<2>::from_kernels::<
+                super::QuadFelt,
+                _,
+            >(&kernels, &super::bench_pcs_params())
             .unwrap();
             assert_eq!(model.prover_peak_bytes(&[0, 0]), Some(0));
             // 74 coordinates * 8 bytes * (8+1) * (16+32), plus 3904*32 shared bytes,

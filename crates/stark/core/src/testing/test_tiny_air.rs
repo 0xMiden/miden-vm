@@ -194,6 +194,14 @@ fn tiny_aux(
     (aux_trace, aux_values)
 }
 
+fn tiny_multi_air(airs: Vec<TinyAir>) -> TestMultiAir<native::DirectKernel<TinyAir>> {
+    TestMultiAir::new(
+        airs.into_iter()
+            .map(|air| native::DirectKernel::new(air).expect("valid TinyAir source"))
+            .collect(),
+    )
+}
+
 /// Build a [`ProverStatement`] for tests.
 ///
 /// Returns `Err` if validation fails (so callers can exercise error paths).
@@ -201,8 +209,11 @@ fn tiny_prover_statement(
     airs: Vec<TinyAir>,
     traces: Vec<RowMajorMatrix<Felt>>,
     air_inputs: Vec<(usize, Vec<Felt>)>,
-) -> Result<ProverStatement<Felt, QuadFelt, TestMultiAir<TinyAir>>, InstanceError> {
-    let statement = Statement::new(TestMultiAir::new(airs), air_inputs, Vec::new())?;
+) -> Result<
+    ProverStatement<Felt, QuadFelt, TestMultiAir<native::DirectKernel<TinyAir>>>,
+    InstanceError,
+> {
+    let statement = Statement::new(tiny_multi_air(airs), air_inputs, Vec::new())?;
     ProverStatement::new(statement, traces)
 }
 
@@ -237,8 +248,7 @@ fn statement_inputs_are_indexed_and_required() {
             .map(|(i, values)| (i, values.into_iter().map(Felt::from_u64).collect()))
             .collect();
         let statement =
-            Statement::<Felt, QuadFelt, _>::new(TestMultiAir::new(airs), entries, Vec::new())
-                .unwrap();
+            Statement::<Felt, QuadFelt, _>::new(tiny_multi_air(airs), entries, Vec::new()).unwrap();
         crate::air::debug::assert_multi_air_valid(statement.multi_air());
         let expected: Vec<Vec<_>> = expected
             .into_iter()
@@ -249,7 +259,7 @@ fn statement_inputs_are_indexed_and_required() {
 
     let statement = |entries| {
         Statement::<Felt, QuadFelt, _>::new(
-            TestMultiAir::new(vec![
+            tiny_multi_air(vec![
                 TinyAir { num_public_values: 2, ..TinyAir::new([]) },
                 TinyAir { num_public_values: 0, ..TinyAir::new([]) },
             ]),
@@ -366,7 +376,10 @@ fn malformed_log_trace_heights_is_rejected() {
         .expect_err("oversized log trace height should fail verification");
     assert!(matches!(
         err,
-        VerifierError::Shape(ShapeError::LogTraceHeightTooLarge { log_h: 200, .. })
+        VerifierError::Plan(crate::PlanError::Shape(ShapeError::LogTraceHeightTooLarge {
+            log_h: 200,
+            ..
+        }))
     ));
 
     // log_h = 30 with log_blowup = 3 and Felt::TWO_ADICITY = 32 overflows the LDE
@@ -376,7 +389,10 @@ fn malformed_log_trace_heights_is_rejected() {
     let err = stark_statement
         .verify(&bad_proof, test_challenger())
         .expect_err("log_h + log_blowup exceeding two-adicity should fail verification");
-    assert!(matches!(err, VerifierError::Domain(DomainError::LdeOrderTooLarge { .. })));
+    assert!(matches!(
+        err,
+        VerifierError::Plan(crate::PlanError::Domain(DomainError::LdeOrderTooLarge { .. }))
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -454,7 +470,7 @@ fn constraint_checker_rejects_invalid_aux_trace() {
         vec![(0, vec![Felt::from_u64(START)])],
     )
     .unwrap();
-    crate::debug::check_constraints(&prover_statement, test_challenger());
+    crate::debug::check_constraints(&prover_statement, None, test_challenger());
 }
 
 #[test]
@@ -473,7 +489,7 @@ fn air_order_reflects_caller_order() {
     let traces = [(7, 16), (0, 8), (11, 4)]
         .map(|(start, height)| generate_pow4_trace(Felt::from_u64(start), height));
     let prover_statement = tiny_prover_statement(airs.clone(), traces.to_vec(), inputs).unwrap();
-    crate::debug::check_constraints(&prover_statement, test_challenger());
+    crate::debug::check_constraints(&prover_statement, None, test_challenger());
     let (output, statement) = ProverInstance::new(&config, prover_statement, None)
         .unwrap()
         .prove(test_challenger())
@@ -485,7 +501,7 @@ fn air_order_reflects_caller_order() {
     assert_eq!(digest, output.digest);
     let explicit_inputs = statement.air_inputs().iter().cloned().enumerate().collect();
     let explicit_statement =
-        Statement::new(TestMultiAir::new(airs.clone()), explicit_inputs, Vec::new()).unwrap();
+        Statement::new(tiny_multi_air(airs.clone()), explicit_inputs, Vec::new()).unwrap();
     assert_eq!(
         VerifierInstance::new(&config, &explicit_statement, None)
             .unwrap()
@@ -494,11 +510,9 @@ fn air_order_reflects_caller_order() {
         digest
     );
     assert_eq!(output.proof.log_trace_heights.as_slice(), &[4, 3, 2]);
-    let trace_order = TraceOrder::from_log_heights::<Felt, QuadFelt, _>(
-        statement.airs(),
-        output.proof.log_trace_heights.clone(),
-    )
-    .unwrap();
+    let trace_order =
+        TraceOrder::from_log_heights(statement.airs(), output.proof.log_trace_heights.clone())
+            .unwrap();
     assert_eq!(trace_order.instance_indices(), &[2, 1, 0]);
     for bad_inputs in [
         vec![
@@ -513,7 +527,7 @@ fn air_order_reflects_caller_order() {
         ],
     ] {
         let statement =
-            Statement::new(TestMultiAir::new(airs.clone()), bad_inputs, Vec::new()).unwrap();
+            Statement::new(tiny_multi_air(airs.clone()), bad_inputs, Vec::new()).unwrap();
         assert!(
             VerifierInstance::new(&config, &statement, None)
                 .unwrap()

@@ -57,12 +57,16 @@ use thiserror::Error;
 
 use crate::{
     StarkConfig,
-    air::{BaseAir, InstanceError, LiftedAir, MultiAir, ReductionError, RowWindow, Statement},
-    domain::{Coset, DomainError, LiftedDomain, log_quotient_degree},
+    air::{
+        InstanceError, MultiAir, ReductionError, Statement,
+        native::{self, AirKernel},
+    },
+    domain::{Coset, DomainError},
     lmcs::Lmcs,
-    order::{ShapeError, TraceOrder},
+    order::ShapeError,
     pcs::verifier::{CommitmentGroup, PcsError, verify_aligned},
-    preprocessed::PreprocessedValidationError,
+    plan::{ExecutionPlan, PlanError},
+    preprocessed::{PreprocessedValidationError, SetupIdentity, validate_setup_identity},
     proof::{StarkDigest, StarkProofData},
     transcript::{Channel, TranscriptError, VerifierChannel, VerifierTranscript},
     util::packing::row_to_packed_ext,
@@ -88,7 +92,7 @@ where
 {
     config: &'a SC,
     statement: &'a Statement<F, EF, MA>,
-    preprocessed_commitment: Option<<SC::Lmcs as Lmcs>::Commitment>,
+    preprocessed_identity: Option<SetupIdentity<<SC::Lmcs as Lmcs>::Commitment>>,
 }
 
 impl<'a, F, EF, MA, SC> VerifierInstance<'a, F, EF, MA, SC>
@@ -106,18 +110,18 @@ where
     pub fn new(
         config: &'a SC,
         statement: &'a Statement<F, EF, MA>,
-        preprocessed_commitment: Option<<SC::Lmcs as Lmcs>::Commitment>,
+        preprocessed_identity: Option<SetupIdentity<<SC::Lmcs as Lmcs>::Commitment>>,
     ) -> Result<Self, PreprocessedValidationError> {
-        let expected = statement.airs().iter().any(|a| a.preprocessed_width() > 0);
-        let actual = preprocessed_commitment.is_some();
+        let expected =
+            statement.airs().iter().any(|a| a.descriptor().spec().preprocessed.is_some());
+        let actual = preprocessed_identity.is_some();
         if expected != actual {
             return Err(PreprocessedValidationError::PresenceMismatch { expected, actual });
         }
-        Ok(Self {
-            config,
-            statement,
-            preprocessed_commitment,
-        })
+        if let Some(identity) = &preprocessed_identity {
+            validate_setup_identity::<EF, _, _>(config, statement.airs(), identity)?;
+        }
+        Ok(Self { config, statement, preprocessed_identity })
     }
 
     /// Verify a proof against this instance.
@@ -141,7 +145,7 @@ where
 
     /// Borrow the preprocessed commitment, if any.
     pub fn preprocessed_commitment(&self) -> Option<&<SC::Lmcs as Lmcs>::Commitment> {
-        self.preprocessed_commitment.as_ref()
+        self.preprocessed_identity.as_ref().map(SetupIdentity::commitment)
     }
 }
 
@@ -153,6 +157,8 @@ where
 /// [`crate::air::debug::assert_multi_air_valid`]) from tests.
 #[derive(Debug, Error)]
 pub enum VerifierError {
+    #[error(transparent)]
+    Plan(#[from] PlanError),
     #[error(transparent)]
     Instance(#[from] InstanceError),
     #[error(transparent)]
@@ -245,17 +251,17 @@ where
     // (later code dereferences `1usize << log_h` and would otherwise overflow on
     // a malicious proof) and checks per-AIR periodic lengths and fixed preprocessing heights.
     // Statement::new already enforced the input-side contracts before construction.
-    let trace_order = TraceOrder::from_log_heights::<F, EF, _>(
+    let plan = ExecutionPlan::new(
         statement.airs(),
         proof.log_trace_heights.clone(),
+        config.pcs().log_blowup(),
     )?;
+    let trace_order = &plan.order;
 
     // Preprocessed trace↔AIR mappings (instance order), reconstructed from the
     // heights — the same ones the prover used.
-    let preprocessed_trace_to_air =
-        trace_order.preprocessed_air_for_trace_index::<F, EF, _>(statement.airs());
-    let air_to_preprocessed_trace =
-        trace_order.preprocessed_trace_index_for_air::<F, EF, _>(statement.airs());
+    let preprocessed_trace_to_air = trace_order.preprocessed_air_for_trace_index(statement.airs());
+    let air_to_preprocessed_trace = trace_order.preprocessed_trace_index_for_air(statement.airs());
 
     let air_refs: Vec<&MA::Air> = statement.airs().iter().collect();
     let proof_ordered_airs = trace_order.to_proof_order(&air_refs);
@@ -263,12 +269,8 @@ where
 
     let log_blowup = config.pcs().log_blowup();
     let log_max_trace_height = trace_order.max_log_height();
-    let max_lde_domain = LiftedDomain::<F>::try_canonical(log_max_trace_height, log_blowup)?;
-    let instance_domains: Vec<_> = trace_order
-        .log_heights_proof()
-        .iter()
-        .map(|&log_h| max_lde_domain.try_sub_domain(log_h))
-        .collect::<Result<_, _>>()?;
+    let max_lde_domain = plan.max_lde_domain;
+    let instance_domains = &plan.domains;
 
     // Observe the preprocessed commitment first (when present); mirrors the
     // prover. It is a trusted statement input, not read from the proof.
@@ -283,22 +285,7 @@ where
 
     let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
 
-    // Infer constraint degree from symbolic AIR analysis (max across all AIRs).
-    // NOTE: `log_quotient_degree` runs symbolic eval and may panic if the AIR is
-    // invalid. The AIR is trusted (see `crate::air::debug::assert_multi_air_valid`
-    // for the debug-only structural check).
-    let max_log_quotient_degree = proof_ordered_airs
-        .iter()
-        .map(|&air| log_quotient_degree::<F, EF, _>(air))
-        .max()
-        .expect("TraceOrder construction rejects empty AIR sets");
-    if max_log_quotient_degree > log_blowup {
-        return Err(DomainError::ConstraintDegreeTooHigh {
-            log_quotient: max_log_quotient_degree,
-            log_blowup,
-        }
-        .into());
-    }
+    let max_log_quotient_degree = plan.max_log_quotient_degree;
 
     // Pair the max LDE domain with the constraint degree for the constraint layer.
     let max_eval_domain = max_lde_domain.evaluation_domain(max_log_quotient_degree);
@@ -311,8 +298,11 @@ where
     let main_commit = channel.receive_commitment()?.clone();
 
     // 2. Sample randomness for aux traces
-    let max_num_randomness =
-        proof_ordered_airs.iter().map(|air| air.num_randomness()).max().unwrap_or(0);
+    let max_num_randomness = proof_ordered_airs
+        .iter()
+        .map(|air| air.descriptor().spec().num_challenges)
+        .max()
+        .unwrap_or(0);
 
     let randomness: Vec<EF> = (0..max_num_randomness)
         .map(|_| channel.sample_algebra_element::<EF>())
@@ -326,7 +316,7 @@ where
     let all_aux_values: Vec<Vec<EF>> = proof_ordered_airs
         .iter()
         .map(|air| {
-            let count = air.num_aux_values();
+            let count = air.descriptor().spec().num_exports;
             (0..count)
                 .map(|_| channel.receive_algebra_element::<EF>())
                 .collect::<Result<Vec<_>, _>>()
@@ -346,9 +336,14 @@ where
     let z_next = z * h;
 
     // 7. Widths per commitment group (unpadded data widths).
-    let main_widths: Vec<usize> = proof_ordered_airs.iter().map(|air| air.width()).collect();
-    let aux_widths: Vec<usize> =
-        proof_ordered_airs.iter().map(|air| air.aux_width() * EF::DIMENSION).collect();
+    let main_widths: Vec<usize> = proof_ordered_airs
+        .iter()
+        .map(|air| air.descriptor().spec().main_width)
+        .collect();
+    let aux_widths: Vec<usize> = proof_ordered_airs
+        .iter()
+        .map(|air| air.descriptor().spec().aux_width * EF::DIMENSION)
+        .collect();
     let quotient_widths: Vec<usize> = vec![quotient_degree * EF::DIMENSION];
 
     // Build commitments with original (unpadded) widths.
@@ -367,7 +362,9 @@ where
     if let Some(commitment) = preprocessed_commitment {
         let preprocessed_widths: Vec<usize> = preprocessed_trace_to_air
             .iter()
-            .map(|&air_idx| statement.airs()[air_idx as usize].preprocessed_width())
+            .map(|&air_idx| {
+                statement.airs()[air_idx as usize].descriptor().spec().preprocessed_width()
+            })
             .collect();
         // The preprocessed tree is committed at its own setup-fixed depth, determined by the
         // tallest preprocessed trace. The PCS virtually lifts it to the max when shorter.
@@ -424,10 +421,11 @@ where
         let domain_j = instance_domains[j];
 
         // opened[main_g][j] is a 2-row RowMajorMatrix (local, next) already truncated.
-        let main_window = RowWindow::from_view(&opened[main_g][j].as_view());
+        let main_current = opened[main_g][j].row_slice(0).expect("main current row");
+        let main_next = opened[main_g][j].row_slice(1).expect("main next row");
 
         // Extract aux trace opened values (reconstitute EF from base field components).
-        // Row widths were validated against `air.aux_width() * EF::DIMENSION`
+        // Row widths were validated against `air.descriptor().spec().aux_width * EF::DIMENSION`
         // by `verify_aligned` upstream; reaching here with a mismatch would
         // indicate a framework bug.
         let aux_mat = &opened[aux_g][j];
@@ -435,7 +433,6 @@ where
             .expect("aux row width should match: PCS verify_aligned validates this upstream");
         let aux_next = row_to_packed_ext::<F, EF>(&aux_mat.row_slice(1).expect("aux row 1"))
             .expect("aux row width should match: PCS verify_aligned validates this upstream");
-        let aux_window = RowWindow::from_two_rows(&aux_local, &aux_next);
 
         // Selectors at the lifted OOD point yⱼ = z^{rⱼ} (encapsulated in LiftedDomain).
         let selectors = domain_j.selectors_at(z);
@@ -444,11 +441,11 @@ where
         // Using (max_trace_height, z) gives z^{max_n / p}, which equals
         // y_j^{n_j / p} = (z^{max_n/n_j})^{n_j/p} = z^{max_n/p}. This avoids
         // computing y_j = z^{r_j} explicitly.
-        let periodic_polys = PeriodicPolys::new(&air.periodic_columns());
+        let periodic_polys = PeriodicPolys::new(&air.descriptor().spec().periodic_columns);
         let periodic_values = periodic_polys.eval_at::<EF>(max_trace_height, z);
 
         let aux_values_j = &all_aux_values[j];
-        let num_rand = air.num_randomness();
+        let num_rand = air.descriptor().spec().num_challenges;
 
         // Extract the opened preprocessed window when this AIR declares
         // preprocessed columns. The preprocessed trace index comes from the inverse
@@ -456,38 +453,40 @@ where
         // `RowMajorMatrix` already truncated to the declared width by `verify_aligned`, so this
         // is a zero-copy view (mirrors the main window above).
         let instance_idx = trace_order.instance_indices()[j] as usize;
-        let preprocessed_window = match air_to_preprocessed_trace[instance_idx] {
-            Some(preprocessed_trace_idx) => RowWindow::from_view(
-                &opened[preproc_g.expect("preproc group present")][preprocessed_trace_idx]
-                    .as_view(),
-            ),
-            None => RowWindow::from_two_rows(&[], &[]),
+        let preprocessed = air_to_preprocessed_trace[instance_idx]
+            .map(|index| &opened[preproc_g.expect("preprocessed group present")][index]);
+        let fixed_current =
+            preprocessed.map(|matrix| matrix.row_slice(0).expect("fixed current row"));
+        let fixed_next = preprocessed.map(|matrix| matrix.row_slice(1).expect("fixed next row"));
+        let frame = native::AirFrame {
+            main: native::Rows { current: &main_current, next: &main_next },
+            preprocessed: native::Rows {
+                current: fixed_current.as_deref().unwrap_or(&[]),
+                next: fixed_next.as_deref().unwrap_or(&[]),
+            },
+            aux: native::Rows { current: &aux_local, next: &aux_next },
+            periodic: &periodic_values,
+            selectors: native::Selectors {
+                first: selectors.is_first_row,
+                last: selectors.is_last_row,
+                transition: selectors.is_transition,
+            },
         };
-
+        let public_values: Vec<EF> =
+            air_inputs[instance_idx].iter().copied().map(EF::from).collect();
+        let session = air
+            .bind(native::UniformInputs {
+                public_values: &public_values,
+                challenges: &randomness[..num_rand],
+                exports: aux_values_j,
+            })
+            .expect("validated verifier inputs match the descriptor");
         let mut folder = ConstraintFolder {
-            main: main_window,
-            preprocessed: preprocessed_window,
-            aux: aux_window,
-            randomness: &randomness[..num_rand],
-            public_values: &air_inputs[instance_idx],
-            periodic_values: &periodic_values,
-            permutation_values: aux_values_j,
-            selectors,
             alpha,
             accumulator: EF::ZERO,
             _phantom: PhantomData,
         };
-
-        #[cfg(debug_assertions)]
-        crate::air::debug::check_builder_shape(*air, &folder);
-        let public_values: Vec<EF> =
-            air_inputs[instance_idx].iter().copied().map(EF::from).collect();
-        let data = air.prepare(crate::air::EvalInputs {
-            public_values: &public_values,
-            challenges: &randomness[..num_rand],
-            aux_values: aux_values_j,
-        });
-        air.eval(&mut folder, &data);
+        session.eval(&frame, &mut folder);
 
         // Accumulate: acc = acc * beta + folded_j
         accumulated = accumulated * beta + folder.accumulator;

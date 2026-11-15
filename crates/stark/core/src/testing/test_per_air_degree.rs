@@ -252,7 +252,7 @@ impl<A> TwoTraceMultiAir<A> {
 
 impl<A> MultiAir<Felt, QuadFelt> for TwoTraceMultiAir<A>
 where
-    A: LiftedAir<Felt, QuadFelt>,
+    A: native::AirKernel<F = Felt>,
 {
     type Air = A;
 
@@ -281,7 +281,10 @@ fn generate_pow_trace(power: u64, start: Felt, height: usize) -> RowMajorMatrix<
 
 #[test]
 fn quadratic_air_uses_one_quotient_chunk() {
-    assert_eq!(log_quotient_degree::<Felt, QuadFelt, _>(&PowerAir { power: 2 }), 0);
+    assert_eq!(
+        log_quotient_degree(&native::DirectKernel::new(PowerAir { power: 2 }).unwrap()).unwrap(),
+        0
+    );
 }
 
 #[test]
@@ -289,8 +292,12 @@ fn one_chunk_quadratic_quotient_proves() {
     let air = PowerAir { power: 2 };
     let trace = generate_pow_trace(2, Felt::from_u64(7), 16);
 
-    let statement =
-        Statement::new(TwoTraceMultiAir::new(vec![air]), Vec::new(), Vec::new()).unwrap();
+    let statement = Statement::new(
+        TwoTraceMultiAir::new(vec![native::DirectKernel::new(air).unwrap()]),
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
     let prover_statement = ProverStatement::new(statement, vec![trace]).unwrap();
     prove_and_verify_statement(prover_statement);
 }
@@ -302,8 +309,15 @@ fn run_upsample_case(low_power: u64, low_height: usize, high_power: u64, high_he
     let t_low = generate_pow_trace(low_power, Felt::from_u64(7), low_height);
     let t_high = generate_pow_trace(high_power, Felt::from_u64(11), high_height);
 
-    let statement =
-        Statement::new(TwoTraceMultiAir::new(vec![low, high]), Vec::new(), Vec::new()).unwrap();
+    let statement = Statement::new(
+        TwoTraceMultiAir::new(vec![
+            native::DirectKernel::new(low).unwrap(),
+            native::DirectKernel::new(high).unwrap(),
+        ]),
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
     let prover_statement = ProverStatement::new(statement, vec![t_low, t_high]).unwrap();
     prove_and_verify_statement(prover_statement);
 }
@@ -331,8 +345,15 @@ fn upsample_fires_with_periodic_columns() {
     let t_low = generate_pow_trace(3, Felt::from_u64(7), 16);
     let t_high = generate_pow_trace(5, Felt::from_u64(11), 16);
 
-    let statement =
-        Statement::new(TwoTraceMultiAir::new(vec![low, high]), Vec::new(), Vec::new()).unwrap();
+    let statement = Statement::new(
+        TwoTraceMultiAir::new(vec![
+            native::DirectKernel::new(low).unwrap(),
+            native::DirectKernel::new(high).unwrap(),
+        ]),
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
     let prover_statement = ProverStatement::new(statement, vec![t_low, t_high]).unwrap();
     prove_and_verify_statement(prover_statement);
 }

@@ -11,7 +11,7 @@ use miden_core::{
 };
 use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
-    PreprocessedValidationError, StarkConfig, VerifierError, VerifierInstance,
+    PreprocessedValidationError, SetupIdentity, StarkConfig, VerifierError, VerifierInstance,
     air::Statement,
     config::{blake3_256_config, keccak_config, observe_protocol_params},
     lmcs::Lmcs as LmcsTrait,
@@ -114,8 +114,16 @@ where
     let mut challenger = config.challenger();
     observe_protocol_params(config.pcs(), &mut challenger);
 
-    VerifierInstance::new(config, &statement, Some(preprocessed_commitment))?
-        .verify(&proof, challenger)?;
+    VerifierInstance::new(
+        config,
+        &statement,
+        Some(SetupIdentity::new::<QuadFelt, _, _>(
+            preprocessed_commitment,
+            statement.airs(),
+            config,
+        )),
+    )?
+    .verify(&proof, challenger)?;
 
     let log_max_height = u32::from(proof.log_trace_heights().iter().copied().max().unwrap_or(0));
     Ok((log_max_height, config.lmcs().alignment()))

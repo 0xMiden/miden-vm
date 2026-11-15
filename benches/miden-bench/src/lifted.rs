@@ -4,7 +4,7 @@ use std::fmt;
 
 use miden_stark::{
     ProverInstance, StarkConfig, VerifierInstance,
-    air::{MultiAir, ProverStatement, Statement},
+    air::{MultiAir, ProverStatement, Statement, native::DirectKernel},
     testing::airs::miden::DummyMidenAir,
 };
 use p3_field::{ExtensionField, PrimeField64, TwoAdicField};
@@ -20,12 +20,12 @@ use crate::{
 // MultiAir: empty public inputs; each AIR builds its own all-zero aux trace.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-struct BenchMultiAir<F> {
-    airs: Vec<DummyMidenAir<F>>,
+struct BenchMultiAir<F: PrimeField64> {
+    airs: Vec<DirectKernel<DummyMidenAir<F>>>,
 }
 
 impl<F: PrimeField64, EF: ExtensionField<F>> MultiAir<F, EF> for BenchMultiAir<F> {
-    type Air = DummyMidenAir<F>;
+    type Air = DirectKernel<DummyMidenAir<F>>;
 
     fn airs(&self) -> &[Self::Air] {
         &self.airs
@@ -48,7 +48,10 @@ where
 {
     let airs = specs
         .iter()
-        .map(|spec| DummyMidenAir::<F>::new(spec.width, spec.num_aux_cols))
+        .map(|spec| {
+            DirectKernel::new(DummyMidenAir::<F>::new(spec.width, spec.num_aux_cols))
+                .expect("dummy workload descriptor is valid")
+        })
         .collect();
 
     let statement =
