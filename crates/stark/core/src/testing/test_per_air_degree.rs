@@ -8,14 +8,14 @@ extern crate alloc;
 
 use alloc::{borrow::Cow, vec, vec::Vec};
 
-use p3_field::{Algebra, PrimeCharacteristicRing};
+use core::convert::Infallible;
+
+use p3_field::{Algebra, Dup, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
+use crate::air::native::LiftedAirBuilder as _;
 use crate::{
-    air::{
-        AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, Statement,
-        WindowAccess,
-    },
+    air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, Statement, native},
     domain::log_quotient_degree,
     testing::configs::goldilocks_poseidon2::{Felt, QuadFelt, prove_and_verify_statement},
 };
@@ -53,34 +53,75 @@ impl LiftedAir<Felt, QuadFelt> for PowerAir {
     fn build_aux_trace(
         &self,
         main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        // Trivial aux: a single constant-challenge column.
-        (RowMajorMatrix::new(vec![challenges[0]; main.height()], 1), vec![])
+        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
+            self,
+            native::AuxTraceInputs {
+                main,
+                preprocessed: None,
+                public_values: air_inputs,
+                statement: aux_inputs,
+                challenges,
+            },
+        )
+        .unwrap_or_else(|never| match never {});
+        (aux.columns, aux.exports)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        let main = builder.main();
-        let (local, next) = (main.current_slice().to_vec(), main.next_slice().to_vec());
+        native::migration::eval_source(self, builder);
+    }
+}
 
-        let x: AB::Expr = local[0].into();
-        let x_power: AB::Expr = match self.power {
+impl native::LiftedAir for PowerAir {
+    type F = Felt;
+
+    fn spec(&self) -> native::AirSpec<'_, Felt> {
+        native::AirSpec {
+            main_width: 1,
+            aux_width: 1,
+            num_public_values: 0,
+            num_challenges: 1,
+            num_exports: 0,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(&[]),
+        }
+    }
+
+    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &native::Frame<'_, AB>,
+        inputs: native::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        let x = frame.main.current[0].dup();
+        let x_power = match self.power {
             2 => x.clone() * x,
             5 => x.clone().exp_power_of_2(2) * x,
             9 => x.clone().exp_power_of_2(3) * x,
             _ => unreachable!("tests only use power in {{2, 5, 9}}"),
         };
-        builder.when_transition().assert_eq(next[0].into(), x_power);
+        builder.when(frame.transition()).assert_eq(frame.main.next[0].dup(), x_power);
 
         // Trivial aux: aux_local == challenge (extension-field identity, degree 1).
-        let aux = builder.permutation();
-        let aux_local = aux.current_slice().to_vec();
-        let challenge = builder.permutation_randomness()[0];
-        let aux_expr: AB::ExprEF = aux_local[0].into();
-        let challenge_expr: AB::ExprEF = challenge.into();
-        builder.assert_eq_ext(aux_expr, challenge_expr);
+        builder.assert_eq_ext(frame.aux.current[0].dup(), inputs.challenge(0));
+    }
+}
+
+impl native::ProverAir<QuadFelt> for PowerAir {
+    type Error = Infallible;
+
+    fn build_aux_trace(
+        &self,
+        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        Ok(native::AuxTrace {
+            columns: RowMajorMatrix::new(vec![inputs.challenges[0]; inputs.main.height()], 1),
+            exports: vec![],
+        })
     }
 }
 
@@ -99,8 +140,7 @@ impl BaseAir<Felt> for PeriodicPowerAir {
     }
 
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        // Period 2: entries [1, 0] repeat across the trace.
-        Cow::Owned(vec![vec![Felt::ONE, Felt::ZERO]])
+        native::LiftedAir::spec(self).periodic_columns
     }
 }
 
@@ -122,38 +162,77 @@ impl LiftedAir<Felt, QuadFelt> for PeriodicPowerAir {
     fn build_aux_trace(
         &self,
         main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        // Trivial aux: a single constant-challenge column.
-        (RowMajorMatrix::new(vec![challenges[0]; main.height()], 1), vec![])
+        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
+            self,
+            native::AuxTraceInputs {
+                main,
+                preprocessed: None,
+                public_values: air_inputs,
+                statement: aux_inputs,
+                challenges,
+            },
+        )
+        .unwrap_or_else(|never| match never {});
+        (aux.columns, aux.exports)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        let main = builder.main();
-        let (local, next) = (main.current_slice().to_vec(), main.next_slice().to_vec());
-        let periodic = builder.periodic_values().to_vec();
+        native::migration::eval_source(self, builder);
+    }
+}
 
-        let x: AB::Expr = local[0].into();
-        let x_power: AB::Expr = match self.power {
+impl native::LiftedAir for PeriodicPowerAir {
+    type F = Felt;
+
+    fn spec(&self) -> native::AirSpec<'_, Felt> {
+        native::AirSpec {
+            main_width: 1,
+            aux_width: 1,
+            num_public_values: 0,
+            num_challenges: 1,
+            num_exports: 0,
+            preprocessed: None,
+            periodic_columns: Cow::Owned(vec![vec![Felt::ONE, Felt::ZERO]]),
+        }
+    }
+
+    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &native::Frame<'_, AB>,
+        inputs: native::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        let x = frame.main.current[0].dup();
+        let x_power = match self.power {
             3 => x.clone().exp_power_of_2(1) * x,
             5 => x.clone().exp_power_of_2(2) * x,
             _ => unreachable!("periodic test uses power in {{3, 5}}"),
         };
-        builder.when_transition().assert_eq(next[0].into(), x_power);
+        builder.when(frame.transition()).assert_eq(frame.main.next[0].dup(), x_power);
 
         // Periodic column starts at 1 on the first trace row.
-        let p: AB::Expr = periodic[0].into();
-        builder.when_first_row().assert_one(p);
+        builder.when(frame.first_row()).assert_one(frame.periodic[0].dup());
 
-        // Trivial aux: aux_local == challenge.
-        let aux = builder.permutation();
-        let aux_local = aux.current_slice().to_vec();
-        let challenge = builder.permutation_randomness()[0];
-        let aux_expr: AB::ExprEF = aux_local[0].into();
-        let challenge_expr: AB::ExprEF = challenge.into();
-        builder.assert_eq_ext(aux_expr, challenge_expr);
+        // Trivial aux: aux_local == challenge (extension-field identity, degree 1).
+        builder.assert_eq_ext(frame.aux.current[0].dup(), inputs.challenge(0));
+    }
+}
+
+impl native::ProverAir<QuadFelt> for PeriodicPowerAir {
+    type Error = Infallible;
+
+    fn build_aux_trace(
+        &self,
+        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        Ok(native::AuxTrace {
+            columns: RowMajorMatrix::new(vec![inputs.challenges[0]; inputs.main.height()], 1),
+            exports: vec![],
+        })
     }
 }
 
@@ -256,4 +335,73 @@ fn upsample_fires_with_periodic_columns() {
         Statement::new(TwoTraceMultiAir::new(vec![low, high]), Vec::new(), Vec::new()).unwrap();
     let prover_statement = ProverStatement::new(statement, vec![t_low, t_high]).unwrap();
     prove_and_verify_statement(prover_statement);
+}
+
+#[test]
+fn native_power_sources_preserve_witness_and_direct_symbolic_order() {
+    use native::AirKernel;
+
+    for power in [2, 5, 9] {
+        let source = PowerAir { power };
+        let expected = native::capture_with::<_, QuadFelt>(&source).unwrap();
+        assert_eq!(expected.descriptor.analysis().layout().base_indices(), &[0]);
+        assert_eq!(expected.descriptor.analysis().layout().ext_indices(), &[1]);
+        let kernel = native::DirectKernel::new(source).unwrap();
+        let main = generate_pow_trace(power, Felt::from_u64(2), 4);
+        let challenges = [QuadFelt::from_u64(7)];
+        let aux = native::ProverAir::build_aux_trace(
+            &kernel,
+            native::AuxTraceInputs {
+                main: &main,
+                preprocessed: None,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        )
+        .unwrap();
+        assert_eq!(aux.columns.values, vec![QuadFelt::from_u64(7); 4]);
+        assert!(aux.exports.is_empty());
+        let observed = native::capture_from_spec::<Felt, QuadFelt>(
+            kernel.descriptor().spec().as_borrowed(),
+            |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
+        )
+        .unwrap();
+        assert_eq!(observed.descriptor.fingerprint(), expected.descriptor.fingerprint());
+        assert_eq!(observed.descriptor.analysis(), expected.descriptor.analysis());
+    }
+
+    for power in [3, 5] {
+        let source = PeriodicPowerAir { power };
+        let expected = native::capture_with::<_, QuadFelt>(&source).unwrap();
+        assert_eq!(
+            expected.descriptor.spec().periodic_columns.as_ref(),
+            &[vec![Felt::ONE, Felt::ZERO]]
+        );
+        assert_eq!(expected.descriptor.analysis().layout().base_indices(), &[0, 1]);
+        assert_eq!(expected.descriptor.analysis().layout().ext_indices(), &[2]);
+        let kernel = native::DirectKernel::new(source).unwrap();
+        let main = generate_pow_trace(power, Felt::from_u64(2), 4);
+        let challenges = [QuadFelt::from_u64(7)];
+        let aux = native::ProverAir::build_aux_trace(
+            &kernel,
+            native::AuxTraceInputs {
+                main: &main,
+                preprocessed: None,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        )
+        .unwrap();
+        assert_eq!(aux.columns.values, vec![QuadFelt::from_u64(7); 4]);
+        assert!(aux.exports.is_empty());
+        let observed = native::capture_from_spec::<Felt, QuadFelt>(
+            kernel.descriptor().spec().as_borrowed(),
+            |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
+        )
+        .unwrap();
+        assert_eq!(observed.descriptor.fingerprint(), expected.descriptor.fingerprint());
+        assert_eq!(observed.descriptor.analysis(), expected.descriptor.analysis());
+    }
 }
