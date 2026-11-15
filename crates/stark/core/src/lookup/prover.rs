@@ -687,8 +687,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        air::{RowWindow, WindowAccess, native},
-        lookup::{Deg, LookupAir, accumulate_slow, message::LookupMessage},
+        air::native,
+        lookup::{
+            Deg, LookupAir, accumulate_slow, message::LookupMessage, native as native_lookup,
+        },
     };
 
     type QuadFelt = BinomialExtensionField<Felt, 2>;
@@ -715,9 +717,9 @@ mod tests {
 
     const SMOKE_SHAPE: [usize; 2] = [2, 1];
 
-    impl<LB> LookupAir<LB> for SmokeAir
+    impl<LB> native_lookup::LookupAir<LB> for SmokeAir
     where
-        LB: LookupBuilder<F = Felt, EF = QuadFelt, Expr = Felt, ExprEF = QuadFelt>,
+        LB: native_lookup::LookupBuilder<F = Felt, Expr = Felt, ExprEF = QuadFelt>,
     {
         fn column_shape(&self) -> &[usize] {
             &SMOKE_SHAPE
@@ -728,7 +730,7 @@ mod tests {
         fn num_bus_ids(&self) -> usize {
             1
         }
-        fn eval(&self, builder: &mut LB) {
+        fn eval(&self, _frame: &native_lookup::LookupFrame<'_, Felt>, builder: &mut LB) {
             builder.next_column(
                 |col| {
                     col.group(
@@ -797,29 +799,10 @@ mod tests {
         // `LookupAir<LB>` is generic over `LB` and disambiguation fails at a value call.
         let challenges = Challenges::<QuadFelt>::new(alpha, beta, 1, 1);
 
-        // `SmokeAir::eval` never touches the main trace, periodic columns, or public
-        // values — pass dummy zero-length slices.
-        let empty_row: Vec<Felt> = vec![];
-        let periodic_values: Vec<Felt> = vec![];
-
-        let shape =
-            <SmokeAir as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::column_shape(&air)
-                .to_vec();
-        let mut fractions = LookupFractions::<Felt, QuadFelt>::from_shape(shape, NUM_ROWS);
-
-        for _row in 0..NUM_ROWS {
-            let window = RowWindow::from_two_rows(&empty_row, &empty_row);
-            let preprocessed = RowWindow::from_two_rows(&empty_row, &empty_row);
-            let mut lb = ProverLookupBuilder::new(
-                window,
-                preprocessed,
-                &periodic_values,
-                &challenges,
-                &air,
-                &mut fractions,
-            );
-            air.eval(&mut lb);
-        }
+        // SmokeAir reads no frame fields. One unread zero column represents the same eight
+        // inert rows for the native collector; a zero-width matrix cannot carry a row count.
+        let main = RowMajorMatrix::new(vec![Felt::ZERO; NUM_ROWS], 1);
+        let fractions = native_lookup::build_lookup_fractions(&air, &main, None, &[], &challenges);
 
         // Two columns, counts buffer has num_rows * num_cols entries.
         assert_eq!(fractions.num_columns(), 2);
@@ -873,9 +856,9 @@ mod tests {
 
     const ROW_TAGGED_SHAPE: [usize; 1] = [1];
 
-    impl<LB> LookupAir<LB> for RowTaggedAir
+    impl<LB> native_lookup::LookupAir<LB> for RowTaggedAir
     where
-        LB: LookupBuilder<F = Felt, EF = QuadFelt, Expr = Felt, Var = Felt, ExprEF = QuadFelt>,
+        LB: native_lookup::LookupBuilder<F = Felt, Expr = Felt, ExprEF = QuadFelt>,
     {
         fn column_shape(&self) -> &[usize] {
             &ROW_TAGGED_SHAPE
@@ -889,9 +872,9 @@ mod tests {
             1
         }
 
-        fn eval(&self, builder: &mut LB) {
-            let row_tag = builder.main().current_slice()[0];
-            let active = builder.main().current_slice()[1];
+        fn eval(&self, frame: &native_lookup::LookupFrame<'_, Felt>, builder: &mut LB) {
+            let row_tag = frame.main.current[0];
+            let active = frame.main.current[1];
             builder.next_column(
                 |col| {
                     col.group(
@@ -1219,13 +1202,18 @@ mod tests {
         let challenges = Challenges::new(QuadFelt::from_u32(7), QuadFelt::from_u32(13), 1, 1);
         // Start inside the trace and include the last-to-first edge.
         let rows = period / 2 - 1..num_rows;
-        let actual = build_lookup_fraction_chunk(
-            &WindowAir::<Felt>::new(),
+        let air = WindowAir::<Felt>::new();
+        let shape = <WindowAir<Felt> as native_lookup::LookupAir<
+            ProverLookupBuilder<'_, Felt, QuadFelt>,
+        >>::column_shape(&air);
+        let actual = build_lookup_fraction_chunk_with(
             &main,
             None,
             &periodic,
             &challenges,
+            shape,
             rows.clone(),
+            |frame, builder| native_lookup::LookupAir::eval(&air, frame, builder),
         );
         let expected: Vec<_> = rows
             .map(|row| {
@@ -1263,7 +1251,8 @@ mod tests {
             1,
         );
 
-        let fractions = build_lookup_fractions(&RowTaggedAir, &trace, None, &[], &challenges);
+        let fractions =
+            native_lookup::build_lookup_fractions(&RowTaggedAir, &trace, None, &[], &challenges);
 
         assert_eq!(fractions.counts(), expected_counts);
         assert_eq!(fractions.fractions().len(), expected_tags.len());
