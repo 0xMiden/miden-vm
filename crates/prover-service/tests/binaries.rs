@@ -29,6 +29,21 @@ use tonic_health::pb::{
 const UNTRUSTED: &str = env!("CARGO_BIN_EXE_miden-prover-service");
 const TRUSTED: &str = env!("CARGO_BIN_EXE_miden-prover-service-trusted");
 const WAIT: Duration = Duration::from_secs(60);
+
+fn proof_timeout_override() -> Option<Duration> {
+    std::env::var("MIDEN_COVERAGE_PROOF_TIMEOUT_SECS").ok().map(|value| {
+        Duration::from_secs(
+            value.parse().expect("coverage proof timeout must be a positive integer"),
+        )
+    })
+}
+
+fn proof_wait() -> Duration {
+    proof_timeout_override()
+        .map(|timeout| timeout + Duration::from_secs(10))
+        .unwrap_or(WAIT)
+}
+
 const LIMITS: [&str; 10] = [
     "--max-witness-bytes",
     "8388608",
@@ -61,11 +76,18 @@ impl Process {
     }
 
     async fn with_limits(binary: &str, limits: &[&str], args: &[&str]) -> Self {
+        let configured_timeout =
+            proof_timeout_override().map(|value| value.as_millis().to_string());
+        let mut limits = limits.to_vec();
+        if let Some(ref request_timeout_ms) = configured_timeout {
+            let index = limits.iter().position(|value| *value == "--request-timeout-ms").unwrap();
+            limits[index + 1] = request_timeout_ms;
+        }
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         drop(listener);
         let child = command(binary)
-            .args(limits)
+            .args(&limits)
             .args(["--listen", &address.to_string()])
             .args(args)
             .env("RUST_LOG", "miden_prover_service=debug")
@@ -109,7 +131,7 @@ impl Process {
 
     async fn prove(&mut self, bytes: Vec<u8>) -> Result<Vec<u8>, Status> {
         timeout(
-            WAIT,
+            proof_wait(),
             self.client.prove(ProveRequest {
                 protocol_version: PROTOCOL_VERSION,
                 execution_witness: bytes,
@@ -344,7 +366,8 @@ async fn cli_signals_drain_active_proofs_and_reject_queued_work() {
             assert_eq!(error.code(), tonic::Code::Unavailable);
             assert_eq!(code(error), ErrorCode::ShuttingDown);
 
-            let response = timeout(WAIT, active).await.unwrap().unwrap().unwrap().into_inner();
+            let response =
+                timeout(proof_wait(), active).await.unwrap().unwrap().unwrap().into_inner();
             let proof = ExecutionProof::read_from_bytes(&response.execution_proof).unwrap();
             assert!(matches!(proof.precompile(), PrecompileStatus::Empty));
             assert!(miden_verifier::Verifier::new().verify(&claim, &proof).unwrap().is_complete());

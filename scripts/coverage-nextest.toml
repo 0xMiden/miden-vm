@@ -1,0 +1,14 @@
+[profile.coverage]
+fail-fast = false
+# Emit progress warnings without terminating slow proofs.
+slow-timeout = { period = "60s" }
+
+[[profile.coverage.overrides]]
+# These tests start real proving services with their own resource budgets.
+filter = 'package(miden-prover-service)'
+threads-required = "num-test-threads"
+priority = 100
+
+[[profile.coverage.overrides]]
+filter = 'test(prove) | test(proof) | test(stark_verifier)'
+threads-required = 4
