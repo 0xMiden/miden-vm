@@ -4,23 +4,25 @@ use core::array;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
-    utils::{Matrix, RowMajorMatrix},
+    utils::Matrix,
 };
-use miden_stark::lookup::build_logup_aux_trace;
+use miden_stark::{
+    air::native::{AuxTrace, AuxTraceInputs},
+    lookup::native::{LookupError, build_logup_aux_trace},
+};
 
 use super::{
     AUX_WIDTH, COL_ACT, COL_BORROW, COL_KAPPA_A, GAMMA_OFFSET, GAMMA_SLOTS, NUM_GAMMA,
-    NUM_MAIN_COLS, NUM_Q_LIMBS, PERIOD, ROW_A, ROW_B, ROW_C, ROW_P, ROW_Q, ROW_R, S_KEEP,
-    TERM_CELL_KAPPA_C_SIGNED, UintMulAir,
+    NUM_MAIN_COLS, NUM_Q_LIMBS, PERIOD, REG_ID, REG_S, ROW_A, ROW_B, ROW_C, ROW_P, ROW_Q, ROW_R,
+    S_KEEP, TERM_CELL_KAPPA_C_SIGNED, UintMulAir,
 };
 
 pub(crate) fn build_aux(
-    main: &RowMajorMatrix<Felt>,
-    challenges: &[QuadFelt],
-) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    // Cols 0–2: LogUp running sum + the two fraction columns.
-    let (logup, sigma) = build_logup_aux_trace(&UintMulAir, main, challenges);
-    let logup_width = logup.width();
+    inputs: AuxTraceInputs<'_, Felt, QuadFelt>,
+) -> Result<AuxTrace<QuadFelt>, LookupError> {
+    let main = inputs.main;
+    let challenges = inputs.challenges;
+    let mut aux = build_logup_aux_trace(&UintMulAir, inputs)?;
     let n = main.height();
     let beta = challenges[1];
 
@@ -46,15 +48,13 @@ pub(crate) fn build_aux(
         by_row
     };
 
-    // Cols 3–4: the `id` and `S` registers. Both start at 0; the
-    // updates mirror UintMulAir's role-gated expressions exactly.
-    let mut data = Vec::with_capacity(AUX_WIDTH * n);
+    // Fill the existing `id` and `S` suffix in place, before each row's updates.
+    // The declared lookup prefix and normalized export are independent of these registers.
     let mut id = QuadFelt::ZERO;
     let mut s_reg = QuadFelt::ZERO;
     for r in 0..n {
-        data.extend((0..logup_width).map(|c| logup.values[r * logup_width + c]));
-        data.push(id);
-        data.push(s_reg);
+        aux.columns.values[r * AUX_WIDTH + REG_ID] = id;
+        aux.columns.values[r * AUX_WIDTH + REG_S] = s_reg;
 
         let cell = |c: usize| -> Felt { main.values[r * NUM_MAIN_COLS + c] };
         let row_kind = r % PERIOD;
@@ -99,5 +99,5 @@ pub(crate) fn build_aux(
         s_reg = s_reg * keep + build;
     }
 
-    (RowMajorMatrix::new(data, AUX_WIDTH), sigma)
+    Ok(aux)
 }

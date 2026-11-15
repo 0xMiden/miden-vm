@@ -28,7 +28,7 @@
 #[doc(hidden)]
 pub mod eidos;
 
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 
 use miden_core::{
     Felt,
@@ -36,19 +36,19 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_stark::{
-    air::{BaseAir, LiftedAir, LiftedAirBuilder},
+    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
     lookup::{
-        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage, build_logup_aux_trace,
-        build_logup_aux_trace_with_preprocessed,
+        Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
+        LookupMessage, native as native_lookup,
     },
 };
+
+use p3_field::Dup;
 
 use self::eidos::{Relation as EidosRelation, Rotation as EidosRotation};
 use crate::precompiles::{
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    utils::current_main,
 };
 
 // OPERATION
@@ -309,17 +309,26 @@ impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
         &self,
         main: &RowMajorMatrix<Felt>,
         preprocessed: Option<&RowMajorMatrix<Felt>>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        build_logup_aux_trace_with_preprocessed(self, main, preprocessed, challenges)
+        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
+            self,
+            native::AuxTraceInputs {
+                main,
+                preprocessed,
+                public_values: air_inputs,
+                statement: aux_inputs,
+                challenges,
+            },
+        )
+        .expect("valid byte-pair table auxiliary inputs");
+        (aux.columns, aux.exports)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        let mut lb = ConstraintLookupBuilder::new(builder, self);
-        <Self as LookupAir<_>>::eval(self, &mut lb);
-        lb.finish();
+        native::migration::eval_source(self, builder);
     }
 }
 
@@ -332,9 +341,24 @@ impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
 /// remaining columns are degree three.
 const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2];
 
-impl<LB> LookupAir<LB> for BytePairLutAir
+impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for BytePairLutAir {
+    fn column_shape(&self) -> &[usize] {
+        &COLUMN_SHAPE
+    }
+    fn max_message_width(&self) -> usize {
+        MAX_MESSAGE_WIDTH
+    }
+    fn num_bus_ids(&self) -> usize {
+        NUM_BUS_IDS
+    }
+    fn eval(&self, builder: &mut LB) {
+        native::migration::eval_lookup(self, builder, NUM_PREPROCESSED_COLS);
+    }
+}
+
+impl<LB> native_lookup::LookupAir<LB> for BytePairLutAir
 where
-    LB: LookupBuilder<F = Felt>,
+    LB: native_lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -348,21 +372,20 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, builder: &mut LB) {
-        let preprocessed: [LB::Var; NUM_PREPROCESSED_COLS] =
-            current_main(builder.preprocessed().clone(), 0);
-        let main: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
+    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        let preprocessed = frame.preprocessed.current;
+        let main = frame.main.current;
 
-        let a_value: LB::Expr = preprocessed[PRE_A].into();
-        let b_value: LB::Expr = preprocessed[PRE_B].into();
-        let x: LB::Expr = preprocessed[PRE_XOR].into();
-        let wrap12: LB::Expr = preprocessed[PRE_WRAP12].into();
-        let wrap7: LB::Expr = preprocessed[PRE_WRAP7].into();
+        let a_value: LB::Expr = preprocessed[PRE_A].dup();
+        let b_value: LB::Expr = preprocessed[PRE_B].dup();
+        let x: LB::Expr = preprocessed[PRE_XOR].dup();
+        let wrap12: LB::Expr = preprocessed[PRE_WRAP12].dup();
+        let wrap7: LB::Expr = preprocessed[PRE_WRAP7].dup();
         let w = a_value.clone() + LB::Expr::from_u16(256) * b_value.clone();
 
         let neg_relation: [LB::Expr; eidos::NUM_RELATIONS] =
-            core::array::from_fn(|relation| LB::Expr::ZERO - LB::Expr::from(main[relation]));
-        let neg_range16 = LB::Expr::ZERO - LB::Expr::from(main[COL_MULT_RANGE16]);
+            core::array::from_fn(|relation| LB::Expr::ZERO - main[relation].dup());
+        let neg_range16 = LB::Expr::ZERO - main[COL_MULT_RANGE16].dup();
 
         let relation_values = eidos::provider_values(x.clone(), wrap12, wrap7);
 
@@ -457,14 +480,64 @@ where
 // PROVER
 // ================================================================================================
 
-/// Builds the chiplet's auxiliary trace from witness multiplicities. The shared driver obtains the
-/// fixed table through [`BaseAir::preprocessed_trace`], matching the constraint-side
-/// `LookupBuilder::preprocessed` window.
+/// Legacy convenience constructor that builds the fixed table before native witness construction.
+/// Native proving instead supplies setup's existing matrix to `ProverAir::build_aux_trace`.
 pub(crate) fn build_aux(
     main: &RowMajorMatrix<Felt>,
     challenges: &[QuadFelt],
 ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    build_logup_aux_trace(&BytePairLutAir, main, challenges)
+    let preprocessed = preprocessed_table();
+    let aux = <BytePairLutAir as native::ProverAir<QuadFelt>>::build_aux_trace(
+        &BytePairLutAir,
+        native::AuxTraceInputs {
+            main,
+            preprocessed: Some(&preprocessed),
+            public_values: &[],
+            statement: &[],
+            challenges,
+        },
+    )
+    .expect("valid byte-pair table auxiliary inputs");
+    (aux.columns, aux.exports)
+}
+
+impl native::LiftedAir for BytePairLutAir {
+    type F = Felt;
+    fn spec(&self) -> native::AirSpec<'_, Felt> {
+        native::AirSpec {
+            main_width: NUM_MAIN_COLS,
+            aux_width: NUM_AUX_COLS,
+            num_public_values: 0,
+            num_challenges: NUM_RANDOMNESS,
+            num_exports: NUM_LOGUP_VALUES,
+            preprocessed: Some(native::PreprocessedSpec {
+                width: NUM_PREPROCESSED_COLS,
+                log_height: LOG_TRACE_HEIGHT,
+            }),
+            periodic_columns: Cow::Borrowed(&[]),
+        }
+    }
+    fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
+        Some(preprocessed_table())
+    }
+    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &native::Frame<'_, AB>,
+        inputs: native::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        native_lookup::eval_lookup(self, frame, inputs, builder);
+    }
+}
+
+impl native::ProverAir<QuadFelt> for BytePairLutAir {
+    type Error = native_lookup::LookupError;
+    fn build_aux_trace(
+        &self,
+        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        native_lookup::build_logup_aux_trace(self, inputs)
+    }
 }
 
 #[cfg(test)]

@@ -15,8 +15,10 @@ use crate::{
         ace::PvmRecursiveAceCircuit,
         geometry::lookup_shape,
         hash::{keccak::round::KeccakRoundAir, sha256::Sha256Air, sha512::Sha512Air},
+        primitives::byte_pair_lut::BytePairLutAir,
         relation::AIRS,
         transcript::eidos::EidosCompressionAir,
+        uint::{add::UintAddAir, store_mul::UintStoreMulAir},
     },
     shared::geometry::NUM_OOD_POINTS,
 };
@@ -39,7 +41,10 @@ impl CapturedPvmRelation {
                 .iter()
                 .map(|air| match air {
                     ChipletAir::KeccakRound => CapturedAir::new_native(&KeccakRoundAir),
+                    ChipletAir::BytePairLut => CapturedAir::new_native(&BytePairLutAir),
                     ChipletAir::EidosCompression => CapturedAir::new_native(&EidosCompressionAir),
+                    ChipletAir::UintStoreMul => CapturedAir::new_native(&UintStoreMulAir),
+                    ChipletAir::UintAdd => CapturedAir::new_native(&UintAddAir),
                     ChipletAir::Sha256 => CapturedAir::new_native(&Sha256Air),
                     ChipletAir::Sha512 => CapturedAir::new_native(&Sha512Air),
                     _ => CapturedAir::new(air),

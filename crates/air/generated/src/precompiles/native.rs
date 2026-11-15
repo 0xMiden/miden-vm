@@ -54,6 +54,37 @@ define_native_kernel!(
 );
 
 define_native_kernel!(
+    /// Generated execution of the combined uint storage and multiplication relation.
+    ///
+    /// Witness construction remains on the authored `UintStoreMulAir`.
+    UintStoreMulKernel,
+    descriptor_uint_store_mul,
+    precompute_uint_store_mul,
+    eval_uint_store_mul,
+    UINT_STORE_MUL_PREPARED_TERMS
+);
+
+define_native_kernel!(
+    /// Generated execution of the authored uint addition relation.
+    UintAddKernel,
+    descriptor_uint_add,
+    precompute_uint_add,
+    eval_uint_add,
+    UINT_ADD_PREPARED_TERMS
+);
+
+define_native_kernel!(
+    /// Generated execution of the PVM byte-pair table relation.
+    ///
+    /// Setup owns the fixed matrix; this kernel embeds only its shape and relation descriptor.
+    BytePairLutKernel,
+    descriptor_byte_pair_lut,
+    precompute_byte_pair_lut,
+    eval_byte_pair_lut,
+    BYTE_PAIR_LUT_PREPARED_TERMS
+);
+
+define_native_kernel!(
     /// Generated execution of the PVM Eidos compression relation and its fingerprint register.
     ///
     /// Witness construction remains on the authored

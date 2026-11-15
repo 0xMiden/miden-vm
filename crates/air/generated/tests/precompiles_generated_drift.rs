@@ -48,6 +48,28 @@ fn native_sha512_registration_keeps_source_metadata_and_prepared_execution() {
 }
 
 #[test]
+fn native_uint_registration_keeps_interleaved_classes_and_prepared_execution() {
+    use miden_air::precompiles::native::{UintAddKernel, UintStoreMulKernel};
+    use miden_air_definitions::precompiles::uint::{add::UintAddAir, store_mul::UintStoreMulAir};
+
+    assert_native_registration(&UintAddAir, &UintAddAir, &UintAddKernel::new(), &SEEDS);
+    assert_native_registration(
+        &UintStoreMulAir,
+        &UintStoreMulAir,
+        &UintStoreMulKernel::new(),
+        &SEEDS,
+    );
+}
+
+#[test]
+fn native_byte_pair_registration_keeps_fixed_shape_and_prepared_execution() {
+    use miden_air::precompiles::native::BytePairLutKernel;
+    use miden_air_definitions::precompiles::primitives::byte_pair_lut::BytePairLutAir;
+
+    assert_native_registration(&BytePairLutAir, &BytePairLutAir, &BytePairLutKernel::new(), &SEEDS);
+}
+
+#[test]
 fn native_eidos_registration_keeps_source_metadata_and_prepared_execution() {
     use miden_air::precompiles::native::EidosCompressionKernel;
     use miden_air_definitions::precompiles::transcript::eidos::EidosCompressionAir;

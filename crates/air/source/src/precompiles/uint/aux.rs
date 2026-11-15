@@ -1,20 +1,23 @@
-use alloc::vec::Vec;
-
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
-    utils::{Matrix, RowMajorMatrix},
+    utils::Matrix,
 };
-use miden_stark::lookup::build_logup_aux_trace;
+use miden_stark::{
+    air::native::{AuxTrace, AuxTraceInputs},
+    lookup::native::{LookupError, build_logup_aux_trace},
+};
 
-use super::{AUX_WIDTH, CARRY_HI_BEGIN, CARRY_LO_BEGIN, NUM_MAIN_COLS, PERIOD, UintStoreAir};
+use super::{
+    AUX_WIDTH, CARRY_HI_BEGIN, CARRY_LO_BEGIN, NUM_MAIN_COLS, PERIOD, REGISTER_COL, UintStoreAir,
+};
 
 pub(crate) fn build_aux(
-    main: &RowMajorMatrix<Felt>,
-    challenges: &[QuadFelt],
-) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    // Col 0: LogUp running sum over the UintVal provide / consume.
-    let (logup, sigma) = build_logup_aux_trace(&UintStoreAir, main, challenges);
+    inputs: AuxTraceInputs<'_, Felt, QuadFelt>,
+) -> Result<AuxTrace<QuadFelt>, LookupError> {
+    let main = inputs.main;
+    let challenges = inputs.challenges;
+    let mut aux = build_logup_aux_trace(&UintStoreAir, inputs)?;
     let n = main.height();
     let beta = challenges[1];
 
@@ -27,14 +30,11 @@ pub(crate) fn build_aux(
     let two16 = Felt::from(1u32 << 16);
     let t32 = QuadFelt::from(Felt::new(1u64 << 32).expect("2^32 < Goldilocks p"));
 
-    // Col 1: the SZ register. id[0] = 0; id[r+1] = id[r] + contrib(row r),
-    // contrib matching UintStoreAir's role-gated expression exactly.
-    let logup_width = logup.width();
-    let mut data = Vec::with_capacity(AUX_WIDTH * n);
+    // The SZ suffix starts at zero and follows the authored role-gated recurrence.
+    // The normalized LogUp export and its prefix columns remain untouched.
     let mut id = QuadFelt::ZERO;
     for r in 0..n {
-        data.extend((0..logup_width).map(|c| logup.values[r * logup_width + c]));
-        data.push(id);
+        aux.columns.values[r * AUX_WIDTH + REGISTER_COL] = id;
 
         let limb = |c: usize| -> Felt { main.values[r * NUM_MAIN_COLS + c] };
         let recomb_lo07 = || {
@@ -81,5 +81,5 @@ pub(crate) fn build_aux(
         id += contrib;
     }
 
-    (RowMajorMatrix::new(data, AUX_WIDTH), sigma)
+    Ok(aux)
 }
