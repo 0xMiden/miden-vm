@@ -1,17 +1,13 @@
 use std::borrow::Cow;
 
-use miden_core::{
-    Felt,
-    field::{Algebra, QuadFelt},
-};
+use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::PrimeCharacteristicRing;
-use miden_stark::air::{
-    AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
-    symbolic::{AirLayout, SymbolicAirBuilder},
-};
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use miden_stark::air::native::{self, LiftedAir as _, LiftedAirBuilder as _};
+use p3_field::Dup;
+use p3_matrix::dense::RowMajorMatrix;
 
-use super::common::{eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient};
+use super::common::{eval_dag, eval_periodic_values, eval_quotient};
+use crate::compiler::testing::eval_native_constraints;
 use crate::{
     InputKey, InputLayout,
     compiler::{
@@ -61,274 +57,164 @@ impl TestAir {
     }
 }
 
-impl BaseAir<F> for TestAir {
-    fn num_public_values(&self) -> usize {
-        self.public
-    }
+impl native::LiftedAir for TestAir {
+    type F = F;
 
-    fn width(&self) -> usize {
-        self.main
-    }
-
-    fn preprocessed_width(&self) -> usize {
-        self.preprocessed
-    }
-
-    fn periodic_columns(&self) -> Cow<'_, [Vec<F>]> {
-        if self.period == 0 {
-            return Cow::Borrowed(&[]);
-        }
-        let mut column = vec![F::ZERO; self.period];
-        column[1] = F::ONE;
-        Cow::Owned(vec![column])
-    }
-}
-
-impl LiftedAir<F, EF> for TestAir {
-    type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        2
-    }
-
-    fn aux_width(&self) -> usize {
-        self.aux
-    }
-
-    fn num_aux_values(&self) -> usize {
-        self.boundaries
-    }
-
-    fn build_aux_trace(
-        &self,
-        _main: &RowMajorMatrix<F>,
-        _air_inputs: &[F],
-        _aux_inputs: &[F],
-        _challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        unreachable!("ACE codegen tests do not build concrete traces")
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
-        let mut expression: AB::Expr = {
-            let main = builder.main();
-            main.current_slice()[self.main - 1].into()
+    fn spec(&self) -> native::AirSpec<'_, F> {
+        let periodic_columns: Cow<'_, [Vec<F>]> = if self.period == 0 {
+            Cow::Borrowed(&[][..])
+        } else {
+            let mut column = vec![F::ZERO; self.period];
+            column[1] = F::ONE;
+            Cow::Owned(vec![column])
         };
-        for &value in builder.public_values() {
-            let value: AB::Expr = value.into();
-            expression += value;
+        native::AirSpec {
+            main_width: self.main,
+            aux_width: self.aux,
+            num_public_values: self.public,
+            num_challenges: 2,
+            num_exports: self.boundaries,
+            preprocessed: (self.preprocessed > 0)
+                .then_some(native::PreprocessedSpec { width: self.preprocessed, log_height: 2 }),
+            periodic_columns,
+        }
+    }
+
+    fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<F>> {
+        // Reconstruction-owned synthetic fixture data: the old fixture declared width only.
+        (self.preprocessed > 0)
+            .then(|| RowMajorMatrix::new(vec![F::ZERO; 4 * self.preprocessed], self.preprocessed))
+    }
+
+    fn eval<AB: native::LiftedAirBuilder<F = F>>(
+        &self,
+        frame: &native::Frame<'_, AB>,
+        inputs: native::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        let mut expression = frame.main.current[self.main - 1].dup();
+        for value in inputs.public_values {
+            expression += value.dup();
         }
         if self.preprocessed > 0 {
-            let preprocessed: AB::Expr = {
-                let trace = builder.preprocessed();
-                trace.current_slice()[self.preprocessed - 1].into()
-            };
-            expression += preprocessed;
+            expression += frame.preprocessed.current[self.preprocessed - 1].dup();
         }
         if self.period > 0 {
-            let periodic: AB::Expr = builder.periodic_values()[0].into();
-            expression += periodic;
+            expression += frame.periodic[0].dup();
         }
-
         match self.selector {
             Selector::None => builder.assert_zero(expression),
-            Selector::First => builder.when_first_row().assert_zero(expression),
-            Selector::Last => builder.when_last_row().assert_zero(expression),
-            Selector::Transition => builder.when_transition().assert_zero(expression),
+            Selector::First => builder.when(frame.first_row()).assert_zero(expression),
+            Selector::Last => builder.when(frame.last_row()).assert_zero(expression),
+            Selector::Transition => builder.when(frame.transition()).assert_zero(expression),
         }
-
         if self.aux > 0 {
-            let mut expression: AB::ExprEF = {
-                let aux = builder.permutation();
-                aux.current_slice()[self.aux - 1].into()
-            };
+            let mut expression = frame.aux.current[self.aux - 1].dup();
             if self.boundaries > 0 {
-                let boundary: AB::ExprEF =
-                    builder.permutation_values()[self.boundaries - 1].clone().into();
-                expression += boundary;
+                expression += inputs.export(self.boundaries - 1);
             }
             builder.assert_zero_ext(expression);
         }
     }
 }
 
-impl BaseAir<F> for MockAir {
-    fn width(&self) -> usize {
-        1
+impl native::LiftedAir for MockAir {
+    type F = F;
+
+    fn spec(&self) -> native::AirSpec<'_, F> {
+        native::AirSpec {
+            main_width: 1,
+            aux_width: 1,
+            num_public_values: 1,
+            num_challenges: 2,
+            num_exports: 1,
+            preprocessed: None,
+            periodic_columns: Cow::Owned(vec![vec![F::ONE]]),
+        }
     }
 
-    fn num_public_values(&self) -> usize {
-        1
-    }
-
-    fn periodic_columns(&self) -> Cow<'_, [Vec<F>]> {
-        Cow::Owned(vec![vec![Felt::ONE]])
+    fn eval<AB: native::LiftedAirBuilder<F = F>>(
+        &self,
+        frame: &native::Frame<'_, AB>,
+        inputs: native::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        let a = frame.main.current[0].dup();
+        let b = frame.main.next[0].dup();
+        builder.assert_zero(a.dup() + inputs.public(0));
+        builder.assert_zero_ext(inputs.challenge(0) + frame.aux.current[0].dup());
+        builder.when(frame.transition()).assert_zero(b - a.dup());
+        let a_ext = AB::ExtExpr::from(a);
+        let per_ext = AB::ExtExpr::from(frame.periodic[0].dup());
+        builder.assert_zero_ext(per_ext - a_ext);
     }
 }
 
 struct MockPreprocessedAir;
 
-impl BaseAir<F> for MockPreprocessedAir {
-    fn width(&self) -> usize {
-        1
+impl native::LiftedAir for MockPreprocessedAir {
+    type F = F;
+
+    fn spec(&self) -> native::AirSpec<'_, F> {
+        native::AirSpec {
+            main_width: 1,
+            aux_width: 1,
+            num_public_values: 0,
+            num_challenges: 2,
+            num_exports: 0,
+            preprocessed: Some(native::PreprocessedSpec { width: 1, log_height: 2 }),
+            periodic_columns: Cow::Borrowed(&[]),
+        }
     }
 
-    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<F>> {
-        Some(RowMajorMatrix::new(vec![Felt::ZERO; 4], 1))
+    fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<F>> {
+        Some(RowMajorMatrix::new(vec![F::ZERO; 4], 1))
     }
 
-    fn preprocessed_width(&self) -> usize {
-        1
-    }
-}
-
-impl LiftedAir<F, EF> for MockPreprocessedAir {
-    type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
-
-    fn log_preprocessed_height(&self) -> Option<u8> {
-        Some(2)
-    }
-
-    fn num_randomness(&self) -> usize {
-        2
-    }
-
-    fn aux_width(&self) -> usize {
-        1
-    }
-
-    fn num_aux_values(&self) -> usize {
-        0
-    }
-
-    fn build_aux_trace(
+    fn eval<AB: native::LiftedAirBuilder<F = F>>(
         &self,
-        main: &RowMajorMatrix<F>,
-        _air_inputs: &[F],
-        _aux_inputs: &[F],
-        _challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), Vec::new())
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
-        let preprocessed = builder.preprocessed();
-        let curr = preprocessed.current_slice()[0];
-        let next = preprocessed.next_slice()[0];
-        builder.assert_zero(curr + next);
-    }
-}
-
-impl LiftedAir<F, EF> for MockAir {
-    type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        2
-    }
-
-    fn aux_width(&self) -> usize {
-        1
-    }
-
-    fn num_aux_values(&self) -> usize {
-        1
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<F>,
-        _air_inputs: &[F],
-        _aux_inputs: &[F],
-        _challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), vec![EF::ZERO])
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
-        let main = builder.main();
-        let a = main.current_slice()[0];
-        let b = main.next_slice()[0];
-        let pub0 = builder.public_values()[0];
-        let rand0 = builder.permutation_randomness()[0];
-        let aux0 = builder.permutation().current_slice()[0];
-        let per0 = builder.periodic_values()[0];
-
-        builder.assert_zero(a.into() + pub0.into());
-        builder.assert_zero_ext(rand0.into() + aux0.into());
-        builder.when_transition().assert_zero(b - a);
-        let a_expr: AB::Expr = a.into();
-        let a_ext: AB::ExprEF = a_expr.into();
-        let per_expr: AB::ExprEF = per0.into().into();
-        builder.assert_zero_ext(per_expr - a_ext);
+        frame: &native::Frame<'_, AB>,
+        _inputs: native::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        builder.assert_zero(frame.preprocessed.current[0].dup() + frame.preprocessed.next[0].dup());
     }
 }
 
 struct MockPeriodicAir;
 
-impl BaseAir<F> for MockPeriodicAir {
-    fn width(&self) -> usize {
-        1
+impl native::LiftedAir for MockPeriodicAir {
+    type F = F;
+
+    fn spec(&self) -> native::AirSpec<'_, F> {
+        // Preserve sparse period128 and dense period8 data and their lowering choices.
+        let mut sparse_col = vec![F::ZERO; 128];
+        sparse_col[0] = F::new_unchecked(7);
+        sparse_col[50] = F::new_unchecked(11);
+        sparse_col[100] = F::new_unchecked(13);
+        let dense_col = [2u64, 3, 5, 7, 11, 13, 17, 19].into_iter().map(F::new_unchecked).collect();
+        native::AirSpec {
+            main_width: 1,
+            aux_width: 1,
+            num_public_values: 1,
+            num_challenges: 2,
+            num_exports: 1,
+            preprocessed: None,
+            periodic_columns: Cow::Owned(vec![sparse_col, dense_col]),
+        }
     }
 
-    fn num_public_values(&self) -> usize {
-        1
-    }
-
-    fn periodic_columns(&self) -> Cow<'_, [Vec<F>]> {
-        // Period 128, mostly zero: cheaper to evaluate via the sparse Lagrange path.
-        let mut sparse_col = vec![Felt::ZERO; 128];
-        sparse_col[0] = Felt::new_unchecked(7);
-        sparse_col[50] = Felt::new_unchecked(11);
-        sparse_col[100] = Felt::new_unchecked(13);
-
-        // Period 8, fully dense: cheaper to evaluate via the Horner path.
-        let dense_col: Vec<Felt> =
-            [2u64, 3, 5, 7, 11, 13, 17, 19].into_iter().map(Felt::new_unchecked).collect();
-
-        Cow::Owned(vec![sparse_col, dense_col])
-    }
-}
-
-impl LiftedAir<F, EF> for MockPeriodicAir {
-    type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        2
-    }
-
-    fn aux_width(&self) -> usize {
-        1
-    }
-
-    fn num_aux_values(&self) -> usize {
-        1
-    }
-
-    fn build_aux_trace(
+    fn eval<AB: native::LiftedAirBuilder<F = F>>(
         &self,
-        main: &RowMajorMatrix<F>,
-        _air_inputs: &[F],
-        _aux_inputs: &[F],
-        _challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), vec![EF::ZERO])
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
-        let main = builder.main();
-        let a = main.current_slice()[0];
-        let pub0 = builder.public_values()[0];
-        let rand0 = builder.permutation_randomness()[0];
-        let aux0 = builder.permutation().current_slice()[0];
-        let per0 = builder.periodic_values()[0];
-        let per1 = builder.periodic_values()[1];
-
-        builder.assert_zero(a.into() + pub0.into());
-        builder.assert_zero_ext(rand0.into() + aux0.into());
-
-        let per0_ext: AB::ExprEF = per0.into().into();
-        let per1_ext: AB::ExprEF = per1.into().into();
-        builder.assert_zero_ext(per0_ext + per1_ext);
+        frame: &native::Frame<'_, AB>,
+        inputs: native::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        builder.assert_zero(frame.main.current[0].dup() + inputs.public(0));
+        builder.assert_zero_ext(inputs.challenge(0) + frame.aux.current[0].dup());
+        let per0 = AB::ExtExpr::from(frame.periodic[0].dup());
+        let per1 = AB::ExtExpr::from(frame.periodic[1].dup());
+        builder.assert_zero_ext(per0 + per1);
     }
 }
 
@@ -358,60 +244,33 @@ fn shared_basis_columns() -> Vec<Vec<F>> {
     columns
 }
 
-impl BaseAir<F> for MockSharedBasisAir {
-    fn width(&self) -> usize {
-        1
+impl native::LiftedAir for MockSharedBasisAir {
+    type F = F;
+
+    fn spec(&self) -> native::AirSpec<'_, F> {
+        native::AirSpec {
+            main_width: 1,
+            aux_width: 1,
+            num_public_values: 1,
+            num_challenges: 2,
+            num_exports: 1,
+            preprocessed: None,
+            periodic_columns: Cow::Owned(shared_basis_columns()),
+        }
     }
 
-    fn num_public_values(&self) -> usize {
-        1
-    }
-
-    fn periodic_columns(&self) -> Cow<'_, [Vec<F>]> {
-        Cow::Owned(shared_basis_columns())
-    }
-}
-
-impl LiftedAir<F, EF> for MockSharedBasisAir {
-    type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        2
-    }
-
-    fn aux_width(&self) -> usize {
-        1
-    }
-
-    fn num_aux_values(&self) -> usize {
-        1
-    }
-
-    fn build_aux_trace(
+    fn eval<AB: native::LiftedAirBuilder<F = F>>(
         &self,
-        main: &RowMajorMatrix<F>,
-        _air_inputs: &[F],
-        _aux_inputs: &[F],
-        _challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), vec![EF::ZERO])
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
-        let main = builder.main();
-        let a = main.current_slice()[0];
-        let pub0 = builder.public_values()[0];
-        let rand0 = builder.permutation_randomness()[0];
-        let aux0 = builder.permutation().current_slice()[0];
-        let periodic: Vec<AB::ExprEF> =
-            builder.periodic_values().iter().map(|value| (*value).into().into()).collect();
-
-        builder.assert_zero(a.into() + pub0.into());
-        builder.assert_zero_ext(rand0.into() + aux0.into());
-        let a_expr: AB::Expr = a.into();
-        let a_ext: AB::ExprEF = a_expr.into();
-        for value in periodic {
-            builder.assert_zero_ext(value * a_ext.clone());
+        frame: &native::Frame<'_, AB>,
+        inputs: native::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        let a = frame.main.current[0].dup();
+        builder.assert_zero(a.dup() + inputs.public(0));
+        builder.assert_zero_ext(inputs.challenge(0) + frame.aux.current[0].dup());
+        let a_ext = AB::ExtExpr::from(a);
+        for value in frame.periodic {
+            builder.assert_zero_ext(AB::ExtExpr::from(value.dup()) * a_ext.dup());
         }
     }
 }
@@ -633,8 +492,8 @@ fn mixed_air_periods_use_one_shared_basis() {
     for _ in 0..3 {
         period_four_point *= period_four_point;
     }
-    let period_four = eval_periodic_values(&airs[0].periodic_columns(), period_four_point)[0];
-    let period_thirty_two = eval_periodic_values(&airs[1].periodic_columns(), z_k)[0];
+    let period_four = eval_periodic_values(&airs[0].spec().periodic_columns, period_four_point)[0];
+    let period_thirty_two = eval_periodic_values(&airs[1].spec().periodic_columns, z_k)[0];
     let expected = period_four * ef(7) + period_thirty_two;
     assert_eq!(circuit.eval(&inputs).unwrap(), expected);
     assert_eq!(
@@ -648,7 +507,7 @@ fn mixed_air_periods_use_one_shared_basis() {
         ),
         expected,
     );
-    assert_ne!(period_four, eval_periodic_values(&airs[0].periodic_columns(), z_k)[0]);
+    assert_ne!(period_four, eval_periodic_values(&airs[0].spec().periodic_columns, z_k)[0]);
 }
 
 #[test]
@@ -717,29 +576,11 @@ fn test_verifier_dag_matches_manual_eval() {
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
-    let periodic_columns = air.periodic_columns();
-    let periodic_values = eval_periodic_values(&periodic_columns, z_k);
+    let spec = air.spec();
+    let periodic_columns = &spec.periodic_columns;
+    let periodic_values = eval_periodic_values(periodic_columns, z_k);
 
-    let air_layout = AirLayout {
-        preprocessed_width: layout.counts.preprocessed_width,
-        main_width: layout.counts.width,
-        num_public_values: layout.counts.num_public,
-        permutation_width: layout.counts.aux_width,
-        num_permutation_challenges: layout.counts.num_randomness,
-        num_permutation_values: air.num_aux_values(),
-        num_periodic_columns: periodic_columns.len(),
-    };
-    let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
-    air.eval(&mut builder, &());
-
-    let acc = eval_folded_constraints(
-        &builder.base_constraints(),
-        &builder.extension_constraints(),
-        &builder.constraint_layout(),
-        &inputs,
-        &layout,
-        &periodic_values,
-    );
+    let acc = eval_native_constraints(&air, &spec, &inputs, &layout, &periodic_values);
     let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
     let vanishing = z_pow_n - EF::ONE;
     let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
@@ -764,29 +605,11 @@ fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
-    let periodic_columns = air.periodic_columns();
-    let periodic_values = eval_periodic_values(&periodic_columns, z_k);
+    let spec = air.spec();
+    let periodic_columns = &spec.periodic_columns;
+    let periodic_values = eval_periodic_values(periodic_columns, z_k);
 
-    let air_layout = AirLayout {
-        preprocessed_width: 0,
-        main_width: layout.counts.width,
-        num_public_values: layout.counts.num_public,
-        permutation_width: layout.counts.aux_width,
-        num_permutation_challenges: layout.counts.num_randomness,
-        num_permutation_values: air.num_aux_values(),
-        num_periodic_columns: periodic_columns.len(),
-    };
-    let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
-    air.eval(&mut builder, &());
-
-    let acc = eval_folded_constraints(
-        &builder.base_constraints(),
-        &builder.extension_constraints(),
-        &builder.constraint_layout(),
-        &inputs,
-        &layout,
-        &periodic_values,
-    );
+    let acc = eval_native_constraints(&air, &spec, &inputs, &layout, &periodic_values);
     let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
     let vanishing = z_pow_n - EF::ONE;
     let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
@@ -828,29 +651,11 @@ fn test_shared_lagrange_basis_periodic_path_matches_manual_eval() {
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
-    let periodic_columns = air.periodic_columns();
-    let periodic_values = eval_periodic_values(&periodic_columns, z_k);
+    let spec = air.spec();
+    let periodic_columns = &spec.periodic_columns;
+    let periodic_values = eval_periodic_values(periodic_columns, z_k);
 
-    let air_layout = AirLayout {
-        preprocessed_width: 0,
-        main_width: layout.counts.width,
-        num_public_values: layout.counts.num_public,
-        permutation_width: layout.counts.aux_width,
-        num_permutation_challenges: layout.counts.num_randomness,
-        num_permutation_values: air.num_aux_values(),
-        num_periodic_columns: periodic_columns.len(),
-    };
-    let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
-    air.eval(&mut builder, &());
-
-    let acc = eval_folded_constraints(
-        &builder.base_constraints(),
-        &builder.extension_constraints(),
-        &builder.constraint_layout(),
-        &inputs,
-        &layout,
-        &periodic_values,
-    );
+    let acc = eval_native_constraints(&air, &spec, &inputs, &layout, &periodic_values);
     let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
     let vanishing = z_pow_n - EF::ONE;
     let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
@@ -992,7 +797,10 @@ fn compiled_relation_reuses_capture_and_pads_each_air_row() {
         period: 4,
         ..TestAir::simple()
     };
-    let captures = [CapturedAir::new(&first).unwrap(), CapturedAir::new(&second).unwrap()];
+    let captures = [
+        CapturedAir::new_native(&first).unwrap(),
+        CapturedAir::new_native(&second).unwrap(),
+    ];
     let relation = CompiledRelation::from_captured(&[&captures[0], &captures[1]], 8).unwrap();
     assert_eq!(relation.geometry().main_width, 16);
     assert_eq!(relation.geometry().preprocessed_width, 8);
@@ -1023,8 +831,12 @@ fn captured_degrees_match_symbolic_selector_and_extension_semantics() {
             boundaries: 1,
             ..TestAir::simple()
         };
-        let captured = CapturedAir::new(&air).unwrap();
-        assert_eq!(captured.degrees(), ConstraintDegrees::from_air::<F, EF, _>(&air));
+        let captured = CapturedAir::new_native(&air).unwrap();
+        let base = match selector {
+            Selector::First | Selector::Last => 2,
+            Selector::None | Selector::Transition => 1,
+        };
+        assert_eq!(captured.degrees(), ConstraintDegrees { base, ext: 1 });
         assert_eq!(captured.constraint_counts().base, 1);
         assert_eq!(captured.constraint_counts().ext, 1);
     }
@@ -1033,8 +845,8 @@ fn captured_degrees_match_symbolic_selector_and_extension_semantics() {
 #[test]
 fn relation_geometry_concatenates_public_windows_and_rejects_width_overflow() {
     use crate::compiler::{CapturedAir, CompiledRelation};
-    let first = CapturedAir::new(&TestAir { public: 2, ..TestAir::simple() }).unwrap();
-    let mut second = CapturedAir::new(&TestAir { public: 1, ..TestAir::simple() }).unwrap();
+    let first = CapturedAir::new_native(&TestAir { public: 2, ..TestAir::simple() }).unwrap();
+    let mut second = CapturedAir::new_native(&TestAir { public: 1, ..TestAir::simple() }).unwrap();
     let relation = CompiledRelation::from_captured(&[&first, &second], 8).unwrap();
     assert_eq!(relation.geometry().num_public, 3);
     assert_eq!(relation.geometry().airs[0].public_offset, 0);
@@ -1058,41 +870,30 @@ struct CountedCubicAir {
     eval_count: std::sync::atomic::AtomicUsize,
 }
 
-impl BaseAir<F> for CountedCubicAir {
-    fn width(&self) -> usize {
-        1
-    }
-}
+impl native::LiftedAir for CountedCubicAir {
+    type F = F;
 
-impl LiftedAir<F, EF> for CountedCubicAir {
-    type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
-
-    fn aux_width(&self) -> usize {
-        0
-    }
-
-    fn num_aux_values(&self) -> usize {
-        0
+    fn spec(&self) -> native::AirSpec<'_, F> {
+        native::AirSpec {
+            main_width: 1,
+            aux_width: 0,
+            num_public_values: 0,
+            num_challenges: 2,
+            num_exports: 0,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(&[]),
+        }
     }
 
-    fn num_randomness(&self) -> usize {
-        2
-    }
-
-    fn build_aux_trace(
+    fn eval<AB: native::LiftedAirBuilder<F = F>>(
         &self,
-        _main: &RowMajorMatrix<F>,
-        _air_inputs: &[F],
-        _aux_inputs: &[F],
-        _challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        unreachable!("capture-only AIR")
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
+        frame: &native::Frame<'_, AB>,
+        _inputs: native::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
         self.eval_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let x: AB::Expr = builder.main().current_slice()[0].into();
-        builder.assert_zero(x.clone() * x.clone() * x);
+        let x = frame.main.current[0].dup();
+        builder.assert_zero(x.dup() * x.dup() * x);
     }
 }
 
@@ -1102,7 +903,7 @@ fn repeated_artifact_generation_evaluates_the_air_only_during_capture() {
     let air = CountedCubicAir {
         eval_count: std::sync::atomic::AtomicUsize::new(0),
     };
-    let captured = CapturedAir::new(&air).unwrap();
+    let captured = CapturedAir::new_native(&air).unwrap();
     assert_eq!(captured.degrees().base, 3);
     let relation = CompiledRelation::from_captured(&[&captured], 8).unwrap();
     assert_eq!(relation.geometry().num_quotient_chunks, 2);
