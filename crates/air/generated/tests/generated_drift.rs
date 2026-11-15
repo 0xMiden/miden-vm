@@ -35,6 +35,19 @@ fn native_core_registration_keeps_source_metadata_and_prepared_execution() {
     );
 }
 
+#[test]
+fn native_eidos_registration_keeps_source_metadata_and_prepared_execution() {
+    use miden_air::vm::native::EidosCompressionKernel;
+    use miden_air_definitions::vm::{EidosCompressionAir, MidenAir};
+
+    native_registration::assert_native_registration(
+        &EidosCompressionAir,
+        &MidenAir::EidosCompression,
+        &EidosCompressionKernel::new(),
+        &SEEDS,
+    );
+}
+
 /// Guards `miden-constraint-compiler` crate invariant 1: capture must read the
 /// hand-written definitions. The emitter flips mixed-class commutative
 /// operands, so honest routing yields raw (pre-canonicalization) root ids that

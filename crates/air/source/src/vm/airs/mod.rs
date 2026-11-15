@@ -5,10 +5,7 @@ use alloc::{borrow::Cow, vec::Vec};
 use miden_core::{Felt, field::ExtensionField, utils::RowMajorMatrix};
 use miden_stark::{
     air::{BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, ReductionError},
-    lookup::{
-        BoundaryBuilder, Challenges, LookupAir, build_logup_aux_trace_with_preprocessed,
-        build_logup_aux_trace_with_width,
-    },
+    lookup::{BoundaryBuilder, Challenges, LookupAir, build_logup_aux_trace_with_preprocessed},
 };
 use p3_field::Algebra;
 
@@ -233,25 +230,24 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         &self,
         main: &RowMajorMatrix<Felt>,
         preprocessed: Option<&RowMajorMatrix<Felt>>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
         challenges: &[EF],
     ) -> (RowMajorMatrix<EF>, Vec<EF>) {
         let (aux, sums) = if *self == Self::EidosCompression {
-            let (mut aux, sums) = build_logup_aux_trace_with_width(
-                self,
-                main,
-                preprocessed,
-                challenges,
-                crate::vm::constraints::eidos_compression::layout::AUX_COLS,
-            );
-            crate::shared::eidos::fill_aux_register(
-                main,
-                &mut aux,
-                crate::vm::constraints::eidos_compression::layout::AUX_REGISTER_COL,
-                challenges[1],
-            );
-            (aux, sums)
+            let aux =
+                <EidosCompressionAir as miden_stark::air::native::ProverAir<EF>>::build_aux_trace(
+                    &EidosCompressionAir,
+                    miden_stark::air::native::AuxTraceInputs {
+                        main,
+                        preprocessed,
+                        public_values: air_inputs,
+                        statement: aux_inputs,
+                        challenges,
+                    },
+                )
+                .expect("valid Eidos compression auxiliary inputs");
+            (aux.columns, aux.exports)
         } else {
             build_logup_aux_trace_with_preprocessed(self, main, preprocessed, challenges)
         };

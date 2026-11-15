@@ -52,3 +52,16 @@ define_native_kernel!(
     eval_sha512,
     SHA512_PREPARED_TERMS
 );
+
+define_native_kernel!(
+    /// Generated execution of the PVM Eidos compression relation and its fingerprint register.
+    ///
+    /// Witness construction remains on the authored
+    /// [`EidosCompressionAir`](miden_air_definitions::precompiles::transcript::eidos::EidosCompressionAir).
+    /// The descriptor is embedded; the canonical runtime retains its current wrapper until activation.
+    EidosCompressionKernel,
+    descriptor_eidos_compression,
+    precompute_eidos_compression,
+    eval_eidos_compression,
+    EIDOS_COMPRESSION_PREPARED_TERMS
+);

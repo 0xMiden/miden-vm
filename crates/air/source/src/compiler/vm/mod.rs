@@ -15,7 +15,7 @@ pub use self::{
 };
 use crate::{
     shared::geometry::NUM_OOD_POINTS,
-    vm::{AIRS, CoreAir, MidenAir, logup::MIDEN_MAX_MESSAGE_WIDTH},
+    vm::{AIRS, CoreAir, EidosCompressionAir, MidenAir, logup::MIDEN_MAX_MESSAGE_WIDTH},
 };
 
 /// Canonical authored captures shared by VM evaluator and ACE generation.
@@ -28,6 +28,7 @@ pub fn capture_vm_airs() -> Result<Vec<(MidenAir, CapturedAir)>, AceError> {
         .map(|air| {
             let captured = match air {
                 MidenAir::Core => CapturedAir::new_native(&CoreAir),
+                MidenAir::EidosCompression => CapturedAir::new_native(&EidosCompressionAir),
                 _ => CapturedAir::new(&air),
             }?;
             Ok((air, captured))

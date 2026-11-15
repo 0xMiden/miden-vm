@@ -48,6 +48,19 @@ fn native_sha512_registration_keeps_source_metadata_and_prepared_execution() {
 }
 
 #[test]
+fn native_eidos_registration_keeps_source_metadata_and_prepared_execution() {
+    use miden_air::precompiles::native::EidosCompressionKernel;
+    use miden_air_definitions::precompiles::transcript::eidos::EidosCompressionAir;
+
+    assert_native_registration(
+        &EidosCompressionAir,
+        &EidosCompressionAir,
+        &EidosCompressionKernel::new(),
+        &SEEDS,
+    );
+}
+
+#[test]
 fn handwritten_and_generated_are_distinct_captures() {
     for air in ChipletAir::all() {
         let mut builder = Graph::builder();

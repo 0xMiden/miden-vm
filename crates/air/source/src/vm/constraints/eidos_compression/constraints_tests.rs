@@ -1,6 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_core::field::{Field, PrimeCharacteristicRing, QuadFelt};
+use miden_stark::air::native::migration::{LegacySink, SourceSnapshot};
 use miden_stark::{
     air::{AirBuilder, ConstraintDegrees, ExtensionBuilder, PermutationAirBuilder, RowWindow},
     lookup::{ConstraintLookupBuilder, LookupAir},
@@ -9,8 +10,9 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use super::{
     constraints::{
-        enforce_footer_rows, enforce_fused_rows, enforce_inactive_footer_input_aux,
-        enforce_inactive_footer_output_aux,
+        enforce_footer_rows as native_footer_rows, enforce_fused_rows as native_fused_rows,
+        enforce_inactive_footer_input_aux as native_inactive_input,
+        enforce_inactive_footer_output_aux as native_inactive_output,
     },
     layout::*,
     lookup::{FOOTER_INPUT_COLUMN, FOOTER_OUTPUT_COLUMN},
@@ -39,6 +41,41 @@ struct ConstraintEvalBuilder {
     preprocessed_window: RowWindow<'static, Felt>,
     is_first_row: Felt,
     is_last_row: Felt,
+}
+
+// Keep the independent scalar test builder while passing its row context to the native bodies.
+fn enforce_fused_rows(
+    builder: &mut ConstraintEvalBuilder,
+    local: &[Felt],
+    next: &[Felt],
+    selectors: &EidosCompressionSelectors<Felt>,
+) {
+    let snapshot = SourceSnapshot::new(builder, 0, 0);
+    native_fused_rows(&snapshot.frame(), &mut LegacySink::new(builder), local, next, selectors);
+}
+fn enforce_footer_rows(
+    builder: &mut ConstraintEvalBuilder,
+    local: &[Felt],
+    next: &[Felt],
+    selectors: &EidosCompressionSelectors<Felt>,
+) {
+    let snapshot = SourceSnapshot::new(builder, 0, 0);
+    native_footer_rows(&snapshot.frame(), &mut LegacySink::new(builder), local, next, selectors);
+}
+fn enforce_inactive_footer_input_aux(
+    builder: &mut ConstraintEvalBuilder,
+    selectors: &EidosCompressionSelectors<Felt>,
+) {
+    let snapshot = SourceSnapshot::new(builder, 0, AUX_COLS);
+    native_inactive_input(&snapshot.frame(), &mut LegacySink::new(builder), selectors);
+}
+fn enforce_inactive_footer_output_aux(
+    builder: &mut ConstraintEvalBuilder,
+    local: &[Felt],
+    selectors: &EidosCompressionSelectors<Felt>,
+) {
+    let snapshot = SourceSnapshot::new(builder, 0, AUX_COLS);
+    native_inactive_output(&snapshot.frame(), &mut LegacySink::new(builder), local, selectors);
 }
 
 #[test]
@@ -1210,7 +1247,13 @@ pub(super) fn fingerprint_evaluations(
             builder.aux.values[AUX_COLS..]
                 .copy_from_slice(&aux.values[next * AUX_COLS..(next + 1) * AUX_COLS]);
             builder.randomness[1] = rho;
-            super::fingerprint::enforce_register_constraints(&mut builder, AUX_REGISTER_COL);
+            let snapshot = SourceSnapshot::new(&builder, 0, AUX_COLS);
+            super::fingerprint::enforce_register_constraints(
+                &snapshot.frame(),
+                snapshot.inputs(),
+                &mut LegacySink::new(&mut builder),
+                AUX_REGISTER_COL,
+            );
             builder.extension_evaluations.try_into().unwrap()
         })
         .collect()

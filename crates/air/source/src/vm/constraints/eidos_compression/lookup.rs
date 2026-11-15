@@ -5,8 +5,11 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing},
 };
 use miden_stark::lookup::{
-    Challenges, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, LookupMessage,
+    Challenges, Deg, LookupBatch, LookupBuilder as LegacyLookupBuilder, LookupColumn, LookupGroup,
+    LookupMessage, native::LookupBuilder,
 };
+
+use p3_field::Dup;
 
 use super::{
     algebra::{footer_cv_word, footer_message_word, pack_pair, pack_u32_le, xor_from_and},
@@ -86,18 +89,18 @@ const MVM_NARROW_LOOKUP_CONFIG: NarrowLookupConfig = NarrowLookupConfig {
 };
 
 /// Lookup builder accepted by the Eidos compression AIR.
-pub(crate) trait EidosCompressionLookupBuilder: LookupBuilder<F = Felt> {}
+pub(crate) trait EidosCompressionLookupBuilder: LegacyLookupBuilder<F = Felt> {}
 
-impl<T> EidosCompressionLookupBuilder for T where T: LookupBuilder<F = Felt> {}
+impl<T> EidosCompressionLookupBuilder for T where T: LegacyLookupBuilder<F = Felt> {}
 
 /// Emits all Eidos compression lookup groups in their fixed auxiliary-column order.
 pub(crate) fn emit_lookup_columns<LB>(
     builder: &mut LB,
-    local: &EidosCompressionCols<LB::Var>,
-    next: &EidosCompressionCols<LB::Var>,
+    local: &EidosCompressionCols<LB::Expr>,
+    next: &EidosCompressionCols<LB::Expr>,
     selectors: &EidosCompressionSelectors<LB::Expr>,
 ) where
-    LB: EidosCompressionLookupBuilder,
+    LB: LookupBuilder<F = Felt>,
 {
     emit_narrow_lookup_columns(builder, local, next, selectors, MVM_NARROW_LOOKUP_CONFIG);
 
@@ -113,9 +116,9 @@ pub(crate) fn emit_lookup_columns<LB>(
                     "eidos_compression",
                     |group| match aux_col {
                         FOOTER_INPUT_COLUMN => {
-                            let mode = LB::Expr::from(local.columns[F_MODE_COL]);
+                            let mode = local.columns[F_MODE_COL].dup();
                             let input_multiplicity = -selectors.is_footer_row(FOOTER_ROWS - 1)
-                                * (LB::Expr::from(local.columns[F_COMPRESSION_MULTIPLICITY_COL])
+                                * (local.columns[F_COMPRESSION_MULTIPLICITY_COL].dup()
                                     + mode.clone());
                             group.insert(
                                 "compression_or_aead_input",
@@ -131,9 +134,7 @@ pub(crate) fn emit_lookup_columns<LB>(
                                         )
                                     }),
                                     tail: core::array::from_fn(|idx| {
-                                        LB::Expr::from(
-                                            local.columns[footer_interface_tail_col(idx)],
-                                        )
+                                        local.columns[footer_interface_tail_col(idx)].dup()
                                     }),
                                 },
                                 FOOTER_INPUT_DEG,
@@ -144,7 +145,7 @@ pub(crate) fn emit_lookup_columns<LB>(
                             // degree-two multiplicity gives degree two for U and degree three for
                             // V; the inactive-row constraint pins this column everywhere else,
                             // including when a denominator is zero.
-                            let mode = LB::Expr::from(local.columns[F_MODE_COL]);
+                            let mode = local.columns[F_MODE_COL].dup();
                             let multiplicity = -selectors.is_footer() * mode;
                             group.batch(
                                 "aead_output_pairs",
@@ -180,32 +181,32 @@ pub(crate) fn emit_lookup_columns<LB>(
     }
 }
 
-fn footer_block<LB>(local: &EidosCompressionCols<LB::Var>) -> [LB::Expr; 8]
+fn footer_block<LB>(local: &EidosCompressionCols<LB::Expr>) -> [LB::Expr; 8]
 where
     LB: LookupBuilder<F = Felt>,
 {
     core::array::from_fn(|idx| {
         if idx < 6 {
-            LB::Expr::from(local.columns[footer_r_col(FOOTER_ROWS - 1, idx)])
+            local.columns[footer_r_col(FOOTER_ROWS - 1, idx)].dup()
         } else {
             let pair = idx - 6;
             pack_pair(
-                footer_message_word(|col| LB::Expr::from(local.columns[col]), 2 * pair),
-                footer_message_word(|col| LB::Expr::from(local.columns[col]), 2 * pair + 1),
+                footer_message_word(|col| local.columns[col].dup(), 2 * pair),
+                footer_message_word(|col| local.columns[col].dup(), 2 * pair + 1),
             )
         }
     })
 }
 
-fn cv_word<LB>(local: &EidosCompressionCols<LB::Var>, idx: usize) -> LB::Expr
+fn cv_word<LB>(local: &EidosCompressionCols<LB::Expr>, idx: usize) -> LB::Expr
 where
     LB: LookupBuilder<F = Felt>,
 {
-    footer_cv_word(|col| LB::Expr::from(local.columns[col]), idx)
+    footer_cv_word(|col| local.columns[col].dup(), idx)
 }
 
 fn aead_output_pair_msg_for_current_footer<LB>(
-    local: &EidosCompressionCols<LB::Var>,
+    local: &EidosCompressionCols<LB::Expr>,
     selectors: &EidosCompressionSelectors<LB::Expr>,
     lane_offset: usize,
 ) -> AeadEidosCompressionOutputPairMsg<LB::Expr>
@@ -228,16 +229,16 @@ where
     };
 
     AeadEidosCompressionOutputPairMsg {
-        clk: LB::Expr::from(local.columns[F_CLK_COL]),
+        clk: local.columns[F_CLK_COL].dup(),
         first_lane_idx: LB::Expr::from_u64(lane_offset as u64) + LB::Expr::from_u64(2) * footer_idx,
         value0,
         value1,
     }
 }
 
-fn footer_xor_word<LB>(local: &EidosCompressionCols<LB::Var>, slot_base: usize) -> LB::Expr
+fn footer_xor_word<LB>(local: &EidosCompressionCols<LB::Expr>, slot_base: usize) -> LB::Expr
 where
-    LB: EidosCompressionLookupBuilder,
+    LB: LookupBuilder<F = Felt>,
 {
     pack_u32_le(
         footer_xor_byte::<LB>(local, slot_base),
@@ -247,13 +248,13 @@ where
     )
 }
 
-fn footer_xor_byte<LB>(local: &EidosCompressionCols<LB::Var>, slot: usize) -> LB::Expr
+fn footer_xor_byte<LB>(local: &EidosCompressionCols<LB::Expr>, slot: usize) -> LB::Expr
 where
-    LB: EidosCompressionLookupBuilder,
+    LB: LookupBuilder<F = Felt>,
 {
     let base = footer_xor_slot_col(slot, 0);
-    let lhs = LB::Expr::from(local.columns[base]);
-    let rhs = LB::Expr::from(local.columns[base + 1]);
-    let and = LB::Expr::from(local.columns[base + 2]);
+    let lhs = local.columns[base].dup();
+    let rhs = local.columns[base + 1].dup();
+    let and = local.columns[base + 2].dup();
     xor_from_and(lhs, rhs, and)
 }

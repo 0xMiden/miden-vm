@@ -64,14 +64,13 @@
 //! joint bound is their maximum. The ordinary lookup budget covers this degree; sharing beta
 //! does not require independence between the identity checks and LogUp.
 
-use alloc::vec::Vec;
-
 use miden_core::{
     Felt,
     field::{Algebra, ExtensionField, PrimeCharacteristicRing},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_stark::air::{LiftedAirBuilder, WindowAccess};
+use miden_stark::air::native::{Frame, Inputs, LiftedAirBuilder};
+use p3_field::Dup;
 
 use super::{
     algebra::{footer_cv_word, footer_message_word, packed_fused_bytes},
@@ -178,20 +177,18 @@ where
 
 /// Enforces the accumulator's recurrence and per-cycle reset outside the LogUp prefix.
 pub fn enforce_register_constraints<AB: LiftedAirBuilder<F = Felt>>(
+    frame: &Frame<'_, AB>,
+    inputs: Inputs<'_, AB>,
     builder: &mut AB,
     aux_column: usize,
 ) {
-    let main = builder.main();
-    let local = main.current_slice();
-    let aux = builder.permutation();
-    let acc: AB::ExprEF = aux.current_slice()[aux_column].into();
-    let acc_next: AB::ExprEF = aux.next_slice()[aux_column].into();
-    let periodic: Vec<AB::Expr> = builder.periodic_values().iter().map(|&v| v.into()).collect();
-    let selectors = EidosCompressionSelectors::new(&periodic, 0);
-    let coefficients = Coefficients::new(builder.permutation_randomness()[1].into());
+    let local = frame.main.current;
+    let acc = frame.aux.current[aux_column].dup();
+    let acc_next = frame.aux.next[aux_column].dup();
+    let selectors = EidosCompressionSelectors::new(frame.periodic, 0);
+    let coefficients = Coefficients::new(inputs.challenge(1));
     builder.assert_zero_ext(
-        acc_next
-            - next_accumulator(|col| local[col].into(), &selectors, acc.clone(), &coefficients),
+        acc_next - next_accumulator(|col| local[col].dup(), &selectors, acc.clone(), &coefficients),
     );
     builder.assert_zero_ext(acc * selectors.is_first_fused());
 }

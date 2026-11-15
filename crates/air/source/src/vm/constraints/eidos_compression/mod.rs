@@ -68,8 +68,13 @@ mod views_tests;
 #[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
 pub mod testing {
+    use alloc::vec::Vec;
+
     use miden_core::Felt;
-    use miden_stark::air::LiftedAirBuilder;
+    use miden_stark::air::{
+        LiftedAirBuilder,
+        native::migration::{LegacySink, SourceSnapshot},
+    };
 
     pub use super::{periodic::get_periodic_column_values, selectors::EidosCompressionSelectors};
 
@@ -83,7 +88,16 @@ pub mod testing {
     ) where
         AB: LiftedAirBuilder<F = Felt>,
     {
-        super::constraints::enforce_fused_rows(builder, local, next, selectors);
+        let snapshot = SourceSnapshot::new(builder, 0, 0);
+        let local: Vec<AB::Expr> = local.iter().copied().map(Into::into).collect();
+        let next: Vec<AB::Expr> = next.iter().copied().map(Into::into).collect();
+        super::constraints::enforce_fused_rows(
+            &snapshot.frame(),
+            &mut LegacySink::new(builder),
+            &local,
+            &next,
+            selectors,
+        );
     }
 
     pub fn enforce_common_footer_rows<AB>(
@@ -94,7 +108,16 @@ pub mod testing {
     ) where
         AB: LiftedAirBuilder<F = Felt>,
     {
-        super::constraints::enforce_common_footer_rows(builder, local, next, selectors);
+        let snapshot = SourceSnapshot::new(builder, 0, 0);
+        let local: Vec<AB::Expr> = local.iter().copied().map(Into::into).collect();
+        let next: Vec<AB::Expr> = next.iter().copied().map(Into::into).collect();
+        super::constraints::enforce_common_footer_rows(
+            &snapshot.frame(),
+            &mut LegacySink::new(builder),
+            &local,
+            &next,
+            selectors,
+        );
     }
 }
 

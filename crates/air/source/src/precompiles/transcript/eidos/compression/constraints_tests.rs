@@ -5,10 +5,15 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
+use miden_stark::air::{
+    AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow,
+    native::migration::{LegacySink, SourceSnapshot},
+};
 
 use super::{
-    constraints::{enforce_footer_rows, enforce_fused_rows},
+    constraints::{
+        enforce_footer_rows as native_footer_rows, enforce_fused_rows as native_fused_rows,
+    },
     layout::{BLOCK_PERIOD, FUSED_G_ROWS, G_COMPRESSION_CYCLE_ID_COL, NUM_COLS},
     testing::generate_felt_trace_block_with_cycle_id,
     trace::EidosCompressionFeltRow,
@@ -28,6 +33,26 @@ struct ConstraintEvalBuilder {
     preprocessed_window: RowWindow<'static, Felt>,
     is_first_row: Felt,
     is_last_row: Felt,
+}
+
+// Preserve the test's independent scalar evaluator while supplying native row selectors.
+fn enforce_fused_rows(
+    builder: &mut ConstraintEvalBuilder,
+    local: &[Felt],
+    next: &[Felt],
+    selectors: &EidosCompressionSelectors<Felt>,
+) {
+    let snapshot = SourceSnapshot::new(builder, 0, 0);
+    native_fused_rows(&snapshot.frame(), &mut LegacySink::new(builder), local, next, selectors);
+}
+fn enforce_footer_rows(
+    builder: &mut ConstraintEvalBuilder,
+    local: &[Felt],
+    next: &[Felt],
+    selectors: &EidosCompressionSelectors<Felt>,
+) {
+    let snapshot = SourceSnapshot::new(builder, 0, 0);
+    native_footer_rows(&snapshot.frame(), &mut LegacySink::new(builder), local, next, selectors);
 }
 
 impl ConstraintEvalBuilder {

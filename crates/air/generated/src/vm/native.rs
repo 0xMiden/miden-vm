@@ -24,3 +24,16 @@ define_native_kernel!(
     eval_core,
     CORE_PREPARED_TERMS
 );
+
+define_native_kernel!(
+    /// Generated execution of the VM Eidos compression relation and its fingerprint register.
+    ///
+    /// Witness construction remains on the authored
+    /// [`EidosCompressionAir`](miden_air_definitions::vm::EidosCompressionAir).
+    /// The descriptor is embedded; the canonical runtime retains its current wrapper until activation.
+    EidosCompressionKernel,
+    descriptor_eidos_compression,
+    precompute_eidos_compression,
+    eval_eidos_compression,
+    EIDOS_COMPRESSION_PREPARED_TERMS
+);

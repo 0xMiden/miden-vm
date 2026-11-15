@@ -16,6 +16,7 @@ use crate::{
         geometry::lookup_shape,
         hash::{keccak::round::KeccakRoundAir, sha256::Sha256Air, sha512::Sha512Air},
         relation::AIRS,
+        transcript::eidos::EidosCompressionAir,
     },
     shared::geometry::NUM_OOD_POINTS,
 };
@@ -38,6 +39,7 @@ impl CapturedPvmRelation {
                 .iter()
                 .map(|air| match air {
                     ChipletAir::KeccakRound => CapturedAir::new_native(&KeccakRoundAir),
+                    ChipletAir::EidosCompression => CapturedAir::new_native(&EidosCompressionAir),
                     ChipletAir::Sha256 => CapturedAir::new_native(&Sha256Air),
                     ChipletAir::Sha512 => CapturedAir::new_native(&Sha512Air),
                     _ => CapturedAir::new(air),

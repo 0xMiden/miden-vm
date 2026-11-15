@@ -26,6 +26,7 @@ pub(crate) mod selectors;
 pub mod testing;
 #[doc(hidden)]
 pub mod trace;
+mod witness;
 
 pub use algebra::{
     cv_storage_coefficient, cv_storage_offset, cv_word_base, footer_cv_word, footer_message_word,
@@ -41,3 +42,6 @@ pub use model::{initial_working_state, low_output};
 pub use periodic::get_periodic_column_values;
 pub use schedule::{FusedStep, fused_step_at};
 pub use selectors::EidosCompressionSelectors;
+
+pub use witness::EidosWitnessError;
+pub(crate) use witness::build_aux_trace;
