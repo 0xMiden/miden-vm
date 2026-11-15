@@ -1,98 +1,31 @@
-//! Lifted STARK AIR enum and prove/verify runner.
+//! Lifted STARK prove/verify runner for the dummy Miden workload.
 
 use std::fmt;
 
 use miden_stark::{
     ProverInstance, StarkConfig, VerifierInstance,
-    air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, Statement},
-    testing::airs::{blake3::LiftedBlake3Air, keccak::LiftedKeccakAir, miden::DummyMidenAir},
+    air::{MultiAir, ProverStatement, Statement},
+    testing::airs::miden::DummyMidenAir,
 };
-use p3_field::{Algebra, ExtensionField, Field, PrimeField64, TwoAdicField};
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use p3_field::{ExtensionField, PrimeField64, TwoAdicField};
+use p3_matrix::dense::RowMajorMatrix;
 use tracing::info_span;
 
 use crate::{
     RunResult,
-    cli::{AirType, Cli, TraceSpec},
+    cli::{Cli, TraceSpec},
 };
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// AIR enum
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub(crate) enum LiftedBenchAir {
-    Keccak(LiftedKeccakAir),
-    Blake3(LiftedBlake3Air),
-    Miden(DummyMidenAir),
-}
-
-impl<F> BaseAir<F> for LiftedBenchAir {
-    fn width(&self) -> usize {
-        match self {
-            Self::Keccak(a) => BaseAir::<F>::width(a),
-            Self::Blake3(a) => BaseAir::<F>::width(a),
-            Self::Miden(a) => BaseAir::<F>::width(a),
-        }
-    }
-}
-
-impl<F: PrimeField64, EF: Field> LiftedAir<F, EF> for LiftedBenchAir {
-    type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        match self {
-            Self::Miden(a) => LiftedAir::<F, EF>::num_randomness(a),
-            _ => 1,
-        }
-    }
-
-    fn aux_width(&self) -> usize {
-        match self {
-            Self::Miden(a) => LiftedAir::<F, EF>::aux_width(a),
-            _ => 1,
-        }
-    }
-
-    fn num_aux_values(&self) -> usize {
-        match self {
-            Self::Miden(a) => LiftedAir::<F, EF>::num_aux_values(a),
-            _ => 0,
-        }
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<F>,
-        _air_inputs: &[F],
-        _aux_inputs: &[F],
-        _challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        // All-zero aux trace of the AIR's declared width.
-        let aux_width = LiftedAir::<F, EF>::aux_width(self);
-        let num_aux_values = LiftedAir::<F, EF>::num_aux_values(self);
-        let aux = RowMajorMatrix::new(EF::zero_vec(main.height() * aux_width), aux_width);
-        (aux, EF::zero_vec(num_aux_values))
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
-        match self {
-            Self::Keccak(a) => LiftedAir::<F, EF>::eval(a, builder, &()),
-            Self::Blake3(a) => LiftedAir::<F, EF>::eval(a, builder, &()),
-            Self::Miden(a) => LiftedAir::<F, EF>::eval(a, builder, &()),
-        }
-    }
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MultiAir: empty public inputs; each AIR builds its own all-zero aux trace.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 struct BenchMultiAir {
-    airs: Vec<LiftedBenchAir>,
+    airs: Vec<DummyMidenAir>,
 }
 
 impl<F: PrimeField64, EF: ExtensionField<F>> MultiAir<F, EF> for BenchMultiAir {
-    type Air = LiftedBenchAir;
+    type Air = DummyMidenAir;
 
     fn airs(&self) -> &[Self::Air] {
         &self.airs
@@ -113,15 +46,9 @@ where
     SC: StarkConfig<F, EF>,
     miden_stark::proof::StarkDigest<F, EF, SC>: PartialEq + fmt::Debug,
 {
-    let airs: Vec<LiftedBenchAir> = specs
+    let airs = specs
         .iter()
-        .map(|spec| match spec.air_type {
-            AirType::Keccak => LiftedBenchAir::Keccak(LiftedKeccakAir),
-            AirType::Blake3 => LiftedBenchAir::Blake3(LiftedBlake3Air),
-            AirType::Miden => {
-                LiftedBenchAir::Miden(DummyMidenAir::new(spec.width, spec.num_aux_cols))
-            },
-        })
+        .map(|spec| DummyMidenAir::new(spec.width, spec.num_aux_cols))
         .collect();
 
     let statement =

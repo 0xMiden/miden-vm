@@ -1,4 +1,4 @@
-//! Unified STARK prove/verify profiling binary.
+//! Lifted STARK prove/verify profiling binary.
 //!
 //! Proves and verifies a set of AIR instances, printing a configuration summary,
 //! proof size, and total time. Trace specifications are passed as positional
@@ -9,24 +9,19 @@
 //! fine-grained control.
 //!
 //! ```bash
-//! # Quick run with defaults (blake3:15 keccak:18):
+//! # Quick run with defaults (miden:18):
 //! cargo run -p miden-bench --features concurrent --release
 //!
-//! # Custom traces:
-//! cargo run -p miden-bench --features concurrent --release -- keccak:15 keccak:18 keccak:19
-//!
-//! # Full tracing tree:
-//! cargo run -p miden-bench --features concurrent --release -- -v keccak:15
-//!
-//! # Dummy degree-9 AIRs with configurable widths (auto log_blowup=3):
+//! # Dummy degree-9 AIRs with configurable widths (default log_blowup=3):
 //! cargo run -p miden-bench --features concurrent --release -- miden:18:51 miden:19:20
 //!
-//! # Batch-STARK comparison:
-//! cargo run -p miden-bench --features concurrent --release -- \
-//!   -m batch -H blake3 keccak:15 keccak:18
+//! # Full tracing tree:
+//! cargo run -p miden-bench --features concurrent --release -- -v miden:15
+//!
+//! # Select a commitment hash:
+//! cargo run -p miden-bench --features concurrent --release -- -H blake3 miden:15
 //! ```
 
-mod batch;
 mod cli;
 mod lifted;
 
@@ -39,10 +34,7 @@ use miden_stark::{
     config::eidos_config,
     pcs::PcsParams,
     testing::{
-        airs::{
-            blake3::generate_blake3_trace, keccak::generate_keccak_trace,
-            miden::generate_dummy_trace,
-        },
+        airs::miden::generate_dummy_trace,
         configs::{
             Felt, QuadFelt, goldilocks_blake3 as blake3, goldilocks_blake3_192 as blake3_192,
             goldilocks_keccak as keccak,
@@ -50,13 +42,11 @@ use miden_stark::{
     },
 };
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
-use rand::{RngExt, SeedableRng, rngs::SmallRng};
+use rand::{SeedableRng, rngs::SmallRng};
 use tracing::info_span;
 use tracing_subscriber::{Layer, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
-use crate::cli::{AirType, Cli, HashFn, Mode, TraceSpec};
-
-const KECCAK_ROWS_PER_HASH: usize = 24;
+use crate::cli::{Cli, HashFn, TraceSpec};
 
 // ════════════════════════════════════════════════════════════════════════════��══
 // Run result
@@ -65,9 +55,9 @@ const KECCAK_ROWS_PER_HASH: usize = 24;
 /// Captured output from a single prove/verify invocation.
 pub(crate) struct RunResult {
     pub(crate) proof_size_bytes: usize,
-    /// Number of field elements in the proof (lifted only, 0 for batch).
+    /// Number of field elements in the proof.
     pub(crate) field_elems: usize,
-    /// Number of commitments in the proof (lifted only, 0 for batch).
+    /// Number of commitments in the proof.
     pub(crate) commitments: usize,
 }
 
@@ -86,19 +76,13 @@ impl fmt::Display for RunResult {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 fn print_config(cli: &Cli, specs: &[TraceSpec], traces: &[RowMajorMatrix<Felt>], log_blowup: u8) {
-    let mode = match cli.mode {
-        Mode::Lifted => "lifted",
-        Mode::Batch => "batch",
-    };
-    eprintln!("{:<20} {mode}", "mode:");
     eprintln!("{:<20} {}", "hash:", cli.hash);
     eprintln!("{:<20} {}", "seed:", cli.seed);
     for (i, (spec, trace)) in specs.iter().zip(traces).enumerate() {
         let label = if i == 0 { "traces:" } else { "" };
         eprintln!(
-            "{:<20} {}:{} (width={}, {})",
+            "{:<20} miden:{} (width={}, {})",
             label,
-            spec.air_type,
             spec.log_height,
             trace.width(),
             trace_row_summary(spec, trace.height()),
@@ -115,27 +99,15 @@ fn print_config(cli: &Cli, specs: &[TraceSpec], traces: &[RowMajorMatrix<Felt>],
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Trace generation (shared between modes)
+// Trace generation
 // ═══════════════════════════════════════════════════════════════════════════════
 
 fn generate_traces(specs: &[TraceSpec], rng: &mut SmallRng) -> Vec<RowMajorMatrix<Felt>> {
     specs
         .iter()
         .map(|spec| {
-            info_span!("generate trace", air = %spec.air_type, log_height = spec.log_height)
-                .in_scope(|| match spec.air_type {
-                    AirType::Keccak => {
-                        let n = keccak_hash_count(spec.log_height);
-                        let inputs: Vec<[u64; 25]> = (0..n).map(|_| rng.random()).collect();
-                        generate_keccak_trace(inputs)
-                    },
-                    AirType::Blake3 => {
-                        let n = 1usize << spec.log_height;
-                        let inputs: Vec<[u32; 24]> = (0..n).map(|_| rng.random()).collect();
-                        generate_blake3_trace(inputs)
-                    },
-                    AirType::Miden => generate_dummy_trace(spec.width, spec.log_height, rng),
-                })
+            info_span!("generate trace", air = "miden", log_height = spec.log_height)
+                .in_scope(|| generate_dummy_trace(spec.width, spec.log_height, rng))
         })
         .collect()
 }
@@ -146,27 +118,8 @@ fn generate_traces(specs: &[TraceSpec], rng: &mut SmallRng) -> Vec<RowMajorMatri
 
 fn main() {
     let cli = Cli::parse();
-    assert!(
-        !matches!(cli.mode, Mode::Batch) || cli.hash != HashFn::Eidos,
-        "batch mode requires --hash keccak, blake3, or blake3-192",
-    );
-
-    // Apply defaults.
     let mut specs = if cli.traces.is_empty() {
-        vec![
-            TraceSpec {
-                air_type: AirType::Blake3,
-                log_height: 15,
-                width: 0,
-                num_aux_cols: 0,
-            },
-            TraceSpec {
-                air_type: AirType::Keccak,
-                log_height: 18,
-                width: 0,
-                num_aux_cols: 0,
-            },
-        ]
+        vec![TraceSpec::default()]
     } else {
         cli.traces.clone()
     };
@@ -174,8 +127,7 @@ fn main() {
     // Sort by ascending height for deterministic output.
     specs.sort_by_key(|s| s.log_height);
 
-    let has_miden = specs.iter().any(|s| s.air_type == AirType::Miden);
-    let log_blowup = cli.log_blowup.unwrap_or(if has_miden { 3 } else { 1 });
+    let log_blowup = cli.log_blowup.unwrap_or(3);
 
     // Set up tracing subscriber (quiet by default, -v for full tree).
     init_tracing(cli.verbose);
@@ -218,54 +170,41 @@ fn main() {
 
     // Run prove/verify.
     let start = Instant::now();
-    let result = match cli.mode {
-        Mode::Lifted => match cli.hash {
-            HashFn::Eidos => {
-                let config = eidos_config(
-                    pcs,
-                    [MidenFelt::ZERO; 4],
-                    miden_core::program::domain::STARK_TRANSCRIPT,
-                );
-                lifted::run_lifted(
-                    &config,
-                    &specs,
-                    native_traces.expect("native Eidos traces"),
-                    &cli,
-                )
-            },
-            HashFn::Keccak => {
-                let config = GenericStarkConfig::<Felt, QuadFelt, _, _, _>::new(
-                    pcs,
-                    keccak::test_lmcs(),
-                    Dft::default(),
-                    keccak::test_challenger(),
-                );
-                lifted::run_lifted(&config, &specs, traces, &cli)
-            },
-            HashFn::Blake3 => {
-                let config = GenericStarkConfig::<Felt, QuadFelt, _, _, _>::new(
-                    pcs,
-                    blake3::test_lmcs(),
-                    Dft::default(),
-                    blake3::test_challenger(),
-                );
-                lifted::run_lifted(&config, &specs, traces, &cli)
-            },
-            HashFn::Blake3_192 => {
-                let config = GenericStarkConfig::<Felt, QuadFelt, _, _, _>::new(
-                    pcs,
-                    blake3_192::test_lmcs(),
-                    Dft::default(),
-                    blake3_192::test_challenger(),
-                );
-                lifted::run_lifted(&config, &specs, traces, &cli)
-            },
+    let result = match cli.hash {
+        HashFn::Eidos => {
+            let config = eidos_config(
+                pcs,
+                [MidenFelt::ZERO; 4],
+                miden_core::program::domain::STARK_TRANSCRIPT,
+            );
+            lifted::run_lifted(&config, &specs, native_traces.expect("native Eidos traces"), &cli)
         },
-        Mode::Batch => match cli.hash {
-            HashFn::Eidos => unreachable!("Eidos requires lifted mode"),
-            HashFn::Keccak => batch::run_batch_keccak(&specs, &traces, log_blowup, &cli),
-            HashFn::Blake3 => batch::run_batch_blake3(&specs, &traces, log_blowup, &cli),
-            HashFn::Blake3_192 => batch::run_batch_blake3_192(&specs, &traces, log_blowup, &cli),
+        HashFn::Keccak => {
+            let config = GenericStarkConfig::<Felt, QuadFelt, _, _, _>::new(
+                pcs,
+                keccak::test_lmcs(),
+                Dft::default(),
+                keccak::test_challenger(),
+            );
+            lifted::run_lifted(&config, &specs, traces, &cli)
+        },
+        HashFn::Blake3 => {
+            let config = GenericStarkConfig::<Felt, QuadFelt, _, _, _>::new(
+                pcs,
+                blake3::test_lmcs(),
+                Dft::default(),
+                blake3::test_challenger(),
+            );
+            lifted::run_lifted(&config, &specs, traces, &cli)
+        },
+        HashFn::Blake3_192 => {
+            let config = GenericStarkConfig::<Felt, QuadFelt, _, _, _>::new(
+                pcs,
+                blake3_192::test_lmcs(),
+                Dft::default(),
+                blake3_192::test_challenger(),
+            );
+            lifted::run_lifted(&config, &specs, traces, &cli)
         },
     };
     let elapsed = start.elapsed();
@@ -294,21 +233,8 @@ fn init_tracing(verbose: bool) {
         .init();
 }
 
-fn keccak_hash_count(log_height: u8) -> usize {
-    (1usize << log_height) / KECCAK_ROWS_PER_HASH
-}
-
 fn trace_row_summary(spec: &TraceSpec, trace_height: usize) -> String {
-    if spec.air_type == AirType::Keccak {
-        let hashes = keccak_hash_count(spec.log_height);
-        let active_rows = hashes * KECCAK_ROWS_PER_HASH;
-        format!(
-            "2^{} = {trace_height} padded rows, {hashes} hashes = {active_rows} active rows",
-            spec.log_height,
-        )
-    } else {
-        format!("2^{} = {trace_height} rows", spec.log_height)
-    }
+    format!("2^{} = {trace_height} rows", spec.log_height)
 }
 
 pub(crate) fn format_bytes(bytes: usize) -> String {
@@ -326,28 +252,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn keccak_trace_summary_reports_active_rows_separately_from_padded_rows() {
-        let spec = TraceSpec {
-            air_type: AirType::Keccak,
-            log_height: 18,
-            width: 0,
-            num_aux_cols: 0,
-        };
-
-        assert_eq!(
-            trace_row_summary(&spec, 262_144),
-            "2^18 = 262144 padded rows, 10922 hashes = 262128 active rows",
-        );
-    }
-
-    #[test]
-    fn non_keccak_trace_summary_keeps_power_of_two_rows() {
-        let spec = TraceSpec {
-            air_type: AirType::Blake3,
-            log_height: 19,
-            width: 0,
-            num_aux_cols: 0,
-        };
+    fn miden_trace_summary_keeps_power_of_two_rows() {
+        let spec = TraceSpec { log_height: 19, ..TraceSpec::default() };
 
         assert_eq!(trace_row_summary(&spec, 524_288), "2^19 = 524288 rows");
     }
