@@ -11,8 +11,11 @@ use super::{BoundaryBuilder, Deg, LookupColumn};
 use crate::air::native::{AirFrame, Rows};
 
 mod constraint;
+mod prover;
 
+pub use super::ProverLookupBuilder;
 pub use constraint::{ConstraintLookupBuilder, eval_lookup};
+pub use prover::{LookupError, build_logup_aux_trace, build_lookup_fractions};
 
 /// The inputs a per-row lookup declaration may read.
 ///

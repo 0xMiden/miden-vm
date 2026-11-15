@@ -314,9 +314,7 @@ where
         for (col, &count) in row_counts.iter().enumerate() {
             let mut sum = EF::ZERO;
             for &(m, d) in &flat_fractions[cursor..cursor + count] {
-                let d_inv = d
-                    .try_inverse()
-                    .expect("LogUp denominator must be non-zero for the sampled challenges");
+                let d_inv = d.inverse();
                 sum += d_inv * m;
             }
             per_row_value[col] = sum;
@@ -338,9 +336,7 @@ where
     );
 
     let sigma: EF = row_totals.iter().copied().sum();
-    let n_inv = EF::from_usize(num_rows)
-        .try_inverse()
-        .expect("LogUp trace length must be non-zero in the field");
+    let n_inv = EF::from_usize(num_rows).inverse();
     let sigma_prime = sigma * n_inv;
 
     let mut acc = EF::ZERO;
@@ -452,7 +448,8 @@ where
 }
 
 /// Write fraction columns and row totals into zero-initialized chunk buffers.
-fn accumulate_fraction_chunk<F: Field, EF: ExtensionField<F>>(
+/// All collected denominators are nonzero by the witness construction contract.
+pub(super) fn accumulate_fraction_chunk<F: Field, EF: ExtensionField<F>>(
     fractions: &[(F, EF)],
     counts: &[usize],
     num_cols: usize,
@@ -491,7 +488,8 @@ fn accumulate_fraction_chunk<F: Field, EF: ExtensionField<F>>(
 }
 
 /// Write centered prefix sums to column 0 and return the mean row total.
-fn write_centered_accumulator<EF: Field>(
+/// The trace length is nonzero in the witness field.
+pub(super) fn write_centered_accumulator<EF: Field>(
     row_totals: &[EF],
     output: &mut [EF],
     num_cols: usize,
@@ -500,9 +498,7 @@ fn write_centered_accumulator<EF: Field>(
 
     let num_rows = row_totals.len();
     debug_assert_eq!(output.len(), num_rows * num_cols);
-    let n_inv = EF::from_usize(num_rows)
-        .try_inverse()
-        .expect("LogUp trace length must be non-zero in the field");
+    let n_inv = EF::from_usize(num_rows).inverse();
     let scan_rows = |totals: &[EF], out: &mut [EF], mut acc: EF, mean: EF| {
         for (row, &total) in out.chunks_mut(num_cols).zip(totals) {
             row[0] = acc;
@@ -609,11 +605,7 @@ where
     p3_field::batch_multiplicative_inverse_general(
         &products[..active_lanes],
         &mut inverses[..active_lanes],
-        |product| {
-            product
-                .try_inverse()
-                .expect("LogUp denominator product must be non-zero for the sampled challenges")
-        },
+        |product| product.inverse(),
     );
 
     // In each lane, prefix * inverse is the current denominator's inverse. Removing that
@@ -786,8 +778,8 @@ mod tests {
         assert_eq!(aux[0].len(), 2);
         assert_eq!(aux[1].len(), 2);
 
-        let d1_inv = d1.try_inverse().unwrap();
-        let d2_inv = d2.try_inverse().unwrap();
+        let d1_inv = d1.inverse();
+        let d2_inv = d2.inverse();
 
         // Row 0: col 0 own = 1/d1 + 2/d2, col 1 own = 0
         // Row 1: col 0 own = 1/d1,         col 1 own = 2/d2
@@ -843,10 +835,10 @@ mod tests {
 
         WrappedCenteredFixture {
             fractions,
-            row0_col0: d1.try_inverse().unwrap(),
-            row0_col1: d2.try_inverse().unwrap() * two,
-            row1_col0: d3.try_inverse().unwrap() * three,
-            row2_col1: d4.try_inverse().unwrap() * four,
+            row0_col0: d1.inverse(),
+            row0_col1: d2.inverse() * two,
+            row1_col0: d3.inverse() * three,
+            row2_col1: d4.inverse() * four,
         }
     }
 
@@ -986,7 +978,7 @@ mod tests {
     fn accumulate_last_row_only_closes_cyclically() {
         const NUM_ROWS: usize = 4;
         let denominator = QuadFelt::from_u32(7);
-        let contribution = denominator.try_inverse().unwrap();
+        let contribution = denominator.inverse();
         let mut fx = fixture([1, 1], NUM_ROWS);
         for row in 0..NUM_ROWS {
             if row == NUM_ROWS - 1 {
@@ -1006,7 +998,7 @@ mod tests {
     #[test]
     fn accumulate_single_row_commits_its_row_total() {
         let denominator = QuadFelt::from_u32(11);
-        let contribution = denominator.try_inverse().unwrap().double();
+        let contribution = denominator.inverse().double();
         let mut fx = LookupFractions::from_shape(vec![1], 1);
         fx.fractions.push((Felt::from_u32(2), denominator));
         fx.counts.push(1);

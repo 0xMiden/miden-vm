@@ -68,7 +68,27 @@ where
     where
         A: LookupAir<Self>,
     {
-        let num_columns = air.column_shape().len();
+        Self::from_shape(
+            main,
+            preprocessed,
+            periodic_values,
+            challenges,
+            air.column_shape(),
+            fractions,
+        )
+    }
+
+    /// Shared constructor for legacy and native declarations. Shape is read without evaluating
+    /// a relation, so the native collection path has no legacy `LookupAir` bound.
+    pub(super) fn from_shape(
+        main: RowWindow<'a, F>,
+        preprocessed: RowWindow<'a, F>,
+        periodic_values: &'a [F],
+        challenges: &'a Challenges<EF>,
+        shape: &[usize],
+        fractions: &'a mut LookupFractions<F, EF>,
+    ) -> Self {
+        let num_columns = shape.len();
         debug_assert_eq!(fractions.num_columns(), num_columns, "fraction-buffer width mismatch");
         Self {
             main,
@@ -142,6 +162,19 @@ where
         )
     };
 
+    collect_lookup_chunks(air.column_shape(), num_rows, process_chunk)
+}
+
+/// Shared chunk scheduling and ordered concatenation, independent of declaration syntax.
+pub(super) fn collect_lookup_chunks<F, EF>(
+    shape: &[usize],
+    num_rows: usize,
+    process_chunk: impl Fn(Range<usize>) -> LookupFractions<F, EF> + Sync,
+) -> LookupFractions<F, EF>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
     #[cfg(not(feature = "concurrent"))]
     let fractions = process_chunk(0..num_rows);
 
@@ -152,7 +185,7 @@ where
     let fractions = {
         use miden_crypto::parallel::*;
 
-        let shape = air.column_shape().to_vec();
+        let shape = shape.to_vec();
         let num_cols = shape.len();
         let rows_per_chunk = crate::lookup::aux_builder::ACCUMULATE_ROWS_PER_CHUNK;
         let num_chunks = num_rows.div_ceil(rows_per_chunk);
@@ -212,6 +245,7 @@ where
         num_rows * fractions.num_columns(),
         "counts buffer should have exactly num_rows * num_cols entries after collection",
     );
+    debug_assert_eq!(fractions.shape(), shape, "collected lookup shape");
     fractions
 }
 
@@ -249,6 +283,31 @@ where
     EF: ExtensionField<F>,
     for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
 {
+    build_lookup_fraction_chunk_with(
+        main_trace,
+        preprocessed_trace,
+        periodic_columns,
+        challenges,
+        air.column_shape(),
+        rows,
+        |_, builder| air.eval(builder),
+    )
+}
+
+/// The sole row/periodic reader for both declaration interfaces.
+pub(super) fn build_lookup_fraction_chunk_with<F, EF>(
+    main_trace: &RowMajorMatrix<F>,
+    preprocessed_trace: Option<&RowMajorMatrix<F>>,
+    periodic_columns: &[Vec<F>],
+    challenges: &Challenges<EF>,
+    shape: &[usize],
+    rows: Range<usize>,
+    eval: impl Fn(&super::native::LookupFrame<'_, F>, &mut ProverLookupBuilder<'_, F, EF>),
+) -> LookupFractions<F, EF>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
     let num_rows = main_trace.height();
     let width = main_trace.width();
     let flat: &[F] = main_trace.values.borrow();
@@ -262,36 +321,61 @@ where
             (trace.width(), trace.values.borrow())
         });
     let empty_row: &[F] = &[];
-    let mut chunk = LookupFractions::from_shape(air.column_shape().to_vec(), rows.len());
+    let mut chunk = LookupFractions::from_shape(shape.to_vec(), rows.len());
     let mut periodic_row = vec![F::ZERO; periodic_columns.len()];
     for r in rows {
         let curr = &flat[r * width..(r + 1) * width];
         let nxt_idx = (r + 1) % num_rows;
         let next = &flat[nxt_idx * width..(nxt_idx + 1) * width];
         let window = RowWindow::from_two_rows(curr, next);
-        let preprocessed_window = if preprocessed_width == 0 {
-            RowWindow::from_two_rows(empty_row, empty_row)
+        let (preprocessed_current, preprocessed_next) = if preprocessed_width == 0 {
+            (empty_row, empty_row)
         } else {
             let curr = &preprocessed_flat[r * preprocessed_width..(r + 1) * preprocessed_width];
             let next = &preprocessed_flat
                 [nxt_idx * preprocessed_width..(nxt_idx + 1) * preprocessed_width];
-            RowWindow::from_two_rows(curr, next)
+            (curr, next)
         };
+        let preprocessed_window = RowWindow::from_two_rows(preprocessed_current, preprocessed_next);
         for (i, col) in periodic_columns.iter().enumerate() {
             periodic_row[i] = col[r % col.len()];
         }
-        let mut lb = ProverLookupBuilder::new(
+        let frame = super::native::LookupFrame {
+            main: crate::air::native::Rows { current: curr, next },
+            preprocessed: crate::air::native::Rows {
+                current: preprocessed_current,
+                next: preprocessed_next,
+            },
+            periodic: &periodic_row,
+        };
+        let mut lb = ProverLookupBuilder::from_shape(
             window,
             preprocessed_window,
             &periodic_row,
             challenges,
-            air,
+            shape,
             &mut chunk,
         );
-        air.eval(&mut lb);
+        eval(&frame, &mut lb);
         lb.finish();
     }
     chunk
+}
+
+impl<F: Field, EF: ExtensionField<F>> super::native::LookupBuilder
+    for ProverLookupBuilder<'_, F, EF>
+{
+    type F = F;
+    type Expr = F;
+    type ExprEF = EF;
+    type Column<'a>
+        = <Self as LookupBuilder>::Column<'a>
+    where
+        Self: 'a;
+
+    fn next_column<'a, R>(&'a mut self, f: impl FnOnce(&mut Self::Column<'a>) -> R, deg: Deg) -> R {
+        LookupBuilder::next_column(self, f, deg)
+    }
 }
 
 impl<'a, F, EF> LookupBuilder for ProverLookupBuilder<'a, F, EF>
