@@ -128,27 +128,55 @@ def locations(llvm, lcov, root, sources):
             mapped_regions.add(key)
             if count > 0:
                 covered_regions.add(key)
-    mapped_lines, covered_lines = set(), set()
+    json_files = {source_path(f["filename"], root): f for f in data["files"]}
+    mapped_lines, covered_lines, lcov_files = set(), set(), set()
     filename = None
+    active = False
+    totals = {}
     for line in lcov.splitlines():
         if line.startswith("SF:"):
+            if active:
+                raise ValueError("LCOV record has no end_of_record marker")
             filename = source_path(line[3:], root)
+            if filename in sources and filename not in json_files:
+                raise ValueError("LLVM JSON and LCOV file inventories disagree")
+            active, totals = True, {}
         elif line == "end_of_record":
-            filename = None
-        elif line.startswith("DA:") and filename in sources:
+            if not active:
+                raise ValueError("LCOV end_of_record has no source file")
+            if filename in sources:
+                if set(totals) != {"LF", "LH"}:
+                    raise ValueError(f"Incomplete LCOV line totals: {filename}")
+                summary = json_files.get(filename, {}).get("summary", {}).get("lines", {})
+                # LLVM's native summaries may differ from the number of DA rows.
+                # Compare export summaries before folding physical source locations.
+                if summary.get("count") != totals["LF"] or summary.get("covered") != totals["LH"]:
+                    raise ValueError(f"LLVM JSON and LCOV line totals disagree: {filename}")
+                lcov_files.add(filename)
+            active, filename = False, None
+        elif line.startswith(("LF:", "LH:")):
+            totals[line[:2]] = int(line[3:])
+        elif line.startswith("DA:"):
+            if not active:
+                raise ValueError("LCOV line has no source file")
             number, count, *_ = line[3:].split(",")
             number, count = int(number), int(count)
+            if filename not in sources:
+                continue
             if any(sl <= number <= el for sl, _, el, _ in sources[filename]["excluded_spans"]):
                 continue
             key = (filename, number)
             mapped_lines.add(key)
             if count > 0:
                 covered_lines.add(key)
+    if active:
+        raise ValueError("LCOV record has no end_of_record marker")
     if not covered_lines or not covered_regions:
         raise ValueError("No covered production lines or regions")
-    json_files = {source_path(f["filename"], root) for f in data["files"]}
     measured_files = {key[0] for key in mapped_lines}
-    if not measured_files <= json_files:
+    region_files = {key[0] for key in mapped_regions}
+    scoped_json_files = json_files.keys() & sources.keys()
+    if measured_files != region_files or lcov_files != scoped_json_files:
         raise ValueError("LLVM JSON and LCOV file inventories disagree")
     required = {"crates/field/src/word/mod.rs", "crates/field/src/native/mod.rs"}
     if not required <= measured_files:
@@ -168,6 +196,9 @@ def compare(before, after):
             covered = set(map(tuple, report["locations"][f"covered_{kind}"]))
             if not mapped or not covered or not covered <= mapped:
                 raise ValueError(f"Invalid {kind} inventory")
+        if ({location[0] for location in report["locations"]["mapped_lines"]}
+                != {location[0] for location in report["locations"]["mapped_regions"]}):
+            raise ValueError("Line and region file inventories disagree")
     if before["configuration"] != after["configuration"]:
         raise ValueError("Verification configurations differ")
     if before["production_sources"] != after["production_sources"]:
