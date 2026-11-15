@@ -323,6 +323,18 @@ cargo test -p miden-stark --features testing
 
 ## Security
 
+The [`security`](src/security.rs) module owns the numerical estimator shared by VM and
+precompile verification. `ProofSecurityParameters` retains the validated PCS configuration and
+resolved relation/instance geometry. Its conjectured report uses conservative Q16 arithmetic
+shared with MASM; its proven report evaluates the complete unique- and list-decoding bounds,
+including each candidate's lookup and batching losses. The caller chooses its acceptance policy.
+Manually assembled parameters are estimates; successful verification establishes their relation
+to a proof. Estimation does not evaluate AIR equations, construct fixed tables or build witnesses.
+
+The `testing` feature exposes synthetic numerical inputs and independent regression references.
+[Provenance and licenses](src/security/provenance/README.md) describe the pinned upstream formulas
+adapted to this native implementation.
+
 Audits should start with `SECURITY.md` at the workspace root for transcript
 ordering, lifting correctness, constraint identity, and critical paths.
 

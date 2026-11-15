@@ -1,41 +1,9 @@
-//! Inputs to the round budget: protocol parameters, instance shape, and AIR shape.
-//!
-//! These mirror the security-relevant subset of a protocol's runtime configuration rather than
-//! wrapping it. The runtime types live in the protocol's own crate, which this one must not depend
-//! on, so the caller — the only site with visibility into both sides — assembles these explicitly.
+// Derived from p3-security 0.8.0, Plonky3 commit a21e3ed42905040ad49c519e402f018381c12d0c.
+// Copyright (c) 2022 The Plonky3 Authors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Adapted for Miden; source mapping and changes are recorded in provenance/README.md.
 
-/// Protocol parameters that enter the round budget.
-///
-/// Every field must be bound into the protocol's Fiat-Shamir transcript, so a proof cannot be
-/// graded under parameters it was not produced with.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct ProtocolParams {
-    /// Log2 of the LDE blowup factor; the FRI rate is `2^-log_blowup`.
-    pub log_blowup: u32,
-    /// Log2 of the FRI folding arity.
-    pub log_folding_arity: u32,
-    /// Number of FRI query repetitions.
-    pub num_queries: u32,
-    /// Grinding bits before query index sampling.
-    pub query_pow_bits: u32,
-    /// Grinding bits before the out-of-domain evaluation point is sampled.
-    ///
-    /// This round's error is the DEEP-ALI identity's degree over the field size, fixed by the AIR
-    /// and the trace height. Every other round here has a second lever — the query count, the
-    /// folding arity, the width of what is batched — so this is the only one whose bits nothing
-    /// but grinding can buy back.
-    pub ood_pow_bits: u32,
-    /// Grinding bits before the DEEP-composition challenge is sampled. Read only when
-    /// [`AirShape::num_deep_terms`] is `Some`.
-    pub deep_pow_bits: u32,
-    /// Grinding bits before each FRI folding challenge.
-    pub folding_pow_bits: u32,
-    /// Grinding bits before the lookup / permutation argument's challenges are sampled.
-    ///
-    /// The lookup round's error grows linearly in trace length, so its absence degrades with
-    /// instance size.
-    pub lookup_pow_bits: u32,
-}
+//! Numeric geometry supplied by the compiled relation and verified proof.
 
 /// Shape of the proof instance being graded.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -60,10 +28,10 @@ impl InstanceShape {
     /// exceed the smaller of the challenge-field size and the commitment hash's collision
     /// resistance.
     pub const fn cap(&self) -> u64 {
-        if self.field_bits == 0 || self.field_bits > crate::fixed::from_bits(u32::MAX) {
+        if self.field_bits == 0 || self.field_bits > super::fixed::from_bits(u32::MAX) {
             return 0;
         }
-        let collision = crate::fixed::from_bits(self.collision_resistance);
+        let collision = super::fixed::from_bits(self.collision_resistance);
         if collision < self.field_bits {
             collision
         } else {

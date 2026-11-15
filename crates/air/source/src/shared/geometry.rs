@@ -5,7 +5,7 @@ use miden_core::{Felt, field::QuadFelt};
 #[cfg(any(test, feature = "compiler"))]
 use miden_stark::air::native;
 #[cfg(any(test, feature = "compiler"))]
-use p3_security::budget::{AirShape, LookupShape};
+use miden_stark::security::{AirShape, LookupShape};
 
 /// Source-derived artifact geometry, preserving the conservative quotient allocation policy.
 ///

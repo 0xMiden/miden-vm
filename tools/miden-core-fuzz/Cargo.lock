@@ -1533,7 +1533,6 @@ dependencies = [
  "miden-utils-sync",
  "p3-challenger",
  "p3-field",
- "p3-security",
  "proptest",
  "ruint",
  "thiserror",
@@ -1848,17 +1847,16 @@ dependencies = [
 name = "miden-stark"
 version = "1.0.0-rc.1"
 dependencies = [
+ "libm",
  "miden-core",
  "miden-crypto",
  "miden-utils-sync",
- "p3-air",
  "p3-challenger",
  "p3-dft",
  "p3-field",
  "p3-goldilocks",
  "p3-matrix",
  "p3-maybe-rayon",
- "p3-security",
  "p3-symmetric",
  "p3-util",
  "rand 0.10.2",
@@ -2042,19 +2040,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
 
 [[package]]
-name = "p3-air"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be7a317aa82ba3d758229db6dd1e2baa75f9aa6f1179d98b3b1e0c2c6b930d59"
-dependencies = [
- "p3-field",
- "p3-matrix",
- "serde",
- "thiserror",
- "tracing",
-]
-
-[[package]]
 name = "p3-blake3"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2213,20 +2198,6 @@ dependencies = [
  "p3-symmetric",
  "p3-util",
  "rand 0.10.2",
- "thiserror",
-]
-
-[[package]]
-name = "p3-security"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c20542aa9e2a1249996d4cb0a461a236a58d2cf61fae712cec63c04b3765c03"
-dependencies = [
- "libm",
- "p3-air",
- "p3-commit",
- "p3-field",
- "serde",
  "thiserror",
 ]
 

@@ -10,14 +10,16 @@
 //! `air_shape_matches_symbolic` checks it against the shape obtained from the chiplet AIRs.
 
 use miden_core::proof::HashFunction;
+use miden_stark::security::CHALLENGE_FIELD_BITS;
 #[cfg(test)]
 use miden_stark::security::COMMITMENT_ALIGNMENT;
-use miden_stark::security::{CHALLENGE_FIELD_BITS, protocol_params};
+#[cfg(test)]
+use miden_stark::security::testing::{ProtocolParams, protocol_params};
 pub use miden_stark::{
     pcs::PcsParams,
     security::{
-        AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams,
-        ProvenSecurityReport, SecurityReport, SecurityTerm,
+        AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProvenSecurityReport,
+        SecurityReport, SecurityTerm,
     },
 };
 
@@ -65,8 +67,7 @@ pub fn proof_security_parameters(
     hash_fn: HashFunction,
 ) -> ProofSecurityParameters {
     ProofSecurityParameters {
-        protocol_params: protocol_params(pcs_params),
-        log_final_degree: u32::from(pcs_params.log_final_degree()),
+        pcs_params: *pcs_params,
         instance_shape: InstanceShape {
             log_max_height,
             field_bits: CHALLENGE_FIELD_BITS,
@@ -87,7 +88,7 @@ pub mod testing;
 mod tests {
     use miden_air::precompiles::policy::precompile_pcs_params;
     use miden_air_definitions::precompiles::geometry::derive_air_shape;
-    use p3_security::budget::report::{LOOKUP_LABEL, QUERY_LABEL};
+    use miden_stark::security::labels::{LOOKUP_LABEL, QUERY_LABEL};
 
     use super::{testing::*, *};
 
@@ -174,7 +175,10 @@ mod tests {
             security_parameters.conjectured_security_report(),
             security_report(&expected_protocol_params, 19)
         );
-        assert_eq!(security_parameters.log_final_degree, u32::from(pcs_params.log_final_degree()));
+        assert_eq!(
+            security_parameters.pcs_params.log_final_degree(),
+            pcs_params.log_final_degree()
+        );
         assert_eq!(security_parameters.num_ood_points, NUM_OOD_POINTS);
     }
 

@@ -1,6 +1,11 @@
+// Derived from p3-security 0.8.0, Plonky3 commit a21e3ed42905040ad49c519e402f018381c12d0c.
+// Copyright (c) 2022 The Plonky3 Authors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Adapted for Miden; source mapping and changes are recorded in provenance/README.md.
+
 //! Deterministic integer analog of this crate's floating-point error-bit arithmetic.
 //!
-//! Every quantity elsewhere in this crate is `-log2(error)` as an `f64` via [`crate::error::ErrorBits`].
+//! Every quantity elsewhere in this crate is `-log2(error)` as an `f64` via [`crate::security::ErrorBits`].
 //! A protocol that grades proof soundness *inside a recursive verifier* — a circuit or a VM with no
 //! floating-point unit — cannot reproduce that arithmetic bit-for-bit, and needs every rounding
 //! step biased toward understating security rather than overstating it. This module provides that:
@@ -10,7 +15,7 @@
 //!
 //! Not wired into the rest of the crate's `f64` composition machinery — a consumer needing
 //! bit-exact recursive verification uses this module's primitives directly rather than
-//! [`crate::error::ErrorBits`].
+//! [`crate::security::ErrorBits`].
 
 /// Number of fractional bits in the fixed-point representation.
 pub const FRACTIONAL_BITS: u32 = 16;
@@ -121,17 +126,12 @@ pub const fn bits_per_query(log_blowup: u32, field_bits: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fri::{FriRegime, conjectured_error};
-    use crate::shape::InstanceShape;
+    use crate::security::fri::{FriRegime, conjectured_error};
+    use crate::security::proven::InstanceParameters as InstanceShape;
 
     #[test]
     fn malformed_field_bits_have_no_query_security() {
-        for field_bits in [
-            0,
-            18_446_744_073_709_391_531,
-            u64::MAX,
-            from_bits(u32::MAX) + 1,
-        ] {
+        for field_bits in [0, 18_446_744_073_709_391_531, u64::MAX, from_bits(u32::MAX) + 1] {
             assert_eq!(bits_per_query(1, field_bits), 0);
         }
         assert!(bits_per_query(1, from_bits(u32::MAX)) > 0);
@@ -150,22 +150,10 @@ mod tests {
                 let floor = floor_log2(candidate) as f64;
                 let ceil = ceil_log2(candidate) as f64;
 
-                assert!(
-                    floor <= truth + 1e-3,
-                    "floor_log2({candidate}) overstates log2"
-                );
-                assert!(
-                    truth - floor < 2.0,
-                    "floor_log2({candidate}) is more than 1 ulp low"
-                );
-                assert!(
-                    ceil + 1e-3 >= truth,
-                    "ceil_log2({candidate}) understates log2"
-                );
-                assert!(
-                    ceil - truth < 2.0,
-                    "ceil_log2({candidate}) is more than 1 ulp high"
-                );
+                assert!(floor <= truth + 1e-3, "floor_log2({candidate}) overstates log2");
+                assert!(truth - floor < 2.0, "floor_log2({candidate}) is more than 1 ulp low");
+                assert!(ceil + 1e-3 >= truth, "ceil_log2({candidate}) understates log2");
+                assert!(ceil - truth < 2.0, "ceil_log2({candidate}) is more than 1 ulp high");
             }
             x *= 2;
         }
@@ -176,10 +164,7 @@ mod tests {
     #[test]
     fn log2_e_rounds_up_not_down() {
         let truth = core::f64::consts::LOG2_E * ONE as f64;
-        assert!(
-            LOG2_E as f64 >= truth,
-            "LOG2_E must round up, not down: {LOG2_E} < {truth}"
-        );
+        assert!(LOG2_E as f64 >= truth, "LOG2_E must round up, not down: {LOG2_E} < {truth}");
     }
 
     #[test]
@@ -219,7 +204,7 @@ mod tests {
         assert_eq!(bits_per_query(0, from_bits(128)), 0);
     }
 
-    /// [`bits_per_query`] and this crate's own [`crate::fri::conjectured_error`] compute the same
+    /// [`bits_per_query`] and this crate's own [`crate::security::fri::conjectured_error`] compute the same
     /// per-query rate through two independent code paths (fixed-point vs. `f64` + `libm`); at a
     /// single query with no grinding they must agree to within the fixed-point representation's own
     /// resolution.
@@ -244,10 +229,7 @@ mod tests {
             let f64_bits = conjectured_error(&regime, &shape).bits();
             let fixed_bits = bits_per_query(log_blowup as u32, from_bits(128)) as f64 / ONE as f64;
 
-            assert!(
-                fixed_bits <= f64_bits + 1e-9,
-                "log_blowup={log_blowup}: fixed overstates f64"
-            );
+            assert!(fixed_bits <= f64_bits + 1e-9, "log_blowup={log_blowup}: fixed overstates f64");
             assert!(
                 f64_bits - fixed_bits < 2.0 / ONE as f64 + 1e-9,
                 "log_blowup={log_blowup}: fixed is more than 1 ulp below f64"

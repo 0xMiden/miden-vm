@@ -26,7 +26,6 @@ p3-goldilocks.workspace  = true
 p3-matrix.workspace      = true
 p3-maybe-rayon.workspace = true
 p3-symmetric.workspace   = true
-p3-security.workspace    = true
 p3-util.workspace        = true
 
 # Optional (for testing/examples features)
@@ -34,6 +33,7 @@ p3-blake3        = { optional = true, workspace = true }
 p3-keccak        = { optional = true, workspace = true }
 
 # Third-party
+libm.workspace      = true
 rand.workspace      = true
 serde.workspace     = true
 thiserror.workspace = true
@@ -48,7 +48,6 @@ p3-goldilocks.workspace  = true
 p3-keccak.workspace      = true
 p3-merkle-tree.workspace = true
 p3-symmetric.workspace   = true
-p3-security.workspace    = true
 
 # Third-party
 criterion.workspace = true

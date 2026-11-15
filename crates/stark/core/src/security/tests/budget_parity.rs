@@ -1,22 +1,27 @@
-//! Cross-checks [`p3_security::budget`]'s fixed-point rounds against this crate's own `f64`
+// Derived from p3-security 0.8.0, Plonky3 commit a21e3ed42905040ad49c519e402f018381c12d0c.
+// Copyright (c) 2022 The Plonky3 Authors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Adapted for Miden; source mapping and changes are recorded in ../provenance/README.md.
+
+//! Cross-checks the fixed-point round budget's fixed-point rounds against this crate's own `f64`
 //! composite (`fri`, `logup`, `deep`, `air`) on a synthetic grid, so the two representations of
 //! the same conjectured-security math can never drift apart silently.
 //!
 //! See `budget`'s module doc for the folding-accounting and DEEP-quotient-batching design notes
 //! this test exercises.
 
-use p3_security::budget::report::{
+use crate::security::labels::{
     COLLISION_LABEL, COMPOSITION_LABEL, DEEP_COMPOSITION_LABEL, FOLDING_LABEL, LOOKUP_LABEL,
     OUT_OF_DOMAIN_LABEL, QUERY_LABEL,
 };
-use p3_security::budget::{
-    AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, security_report,
+use crate::security::testing::reference::{
+    AirParameters as StarkAirParams, FriRegime, GrindingSites,
+    InstanceParameters as F64InstanceShape, LogUpAir, batching_error_udr, boost,
+    commit_phase_error_udr, composition_error, conjectured_error, deep_ali_error,
+    security_term as logup_security_term,
 };
-use p3_security::fri::{FriRegime, commit_phase_error_udr, conjectured_error};
-use p3_security::grinding::{GrindingSites, boost};
-use p3_security::logup::{LogUpAir, security_term as logup_security_term};
-use p3_security::shape::{InstanceShape as F64InstanceShape, StarkAirParams};
-use p3_security::{ErrorBits, SecurityAssumption, air, deep, fixed};
+use crate::security::testing::{ProtocolParams, budget_security_report as security_report};
+use crate::security::{AirShape, ErrorBits, InstanceShape, LookupShape, SecurityReport, fixed};
 use proptest::prelude::*;
 
 const TIGHT_TOL: f64 = 1e-4;
@@ -77,24 +82,13 @@ const fn f64_instance(log_max_height: u32) -> F64InstanceShape {
 }
 
 fn term_bits(report: &SecurityReport, label: &str) -> f64 {
-    to_f64(
-        report
-            .terms()
-            .iter()
-            .find(|t| t.label == label)
-            .expect("label present")
-            .bits,
-    )
+    to_f64(report.terms().iter().find(|t| t.label == label).expect("label present").bits)
 }
 
 /// Caps an uncapped `f64` reference value the same way [`security_report`] caps its fixed-point
 /// terms, so the two sides are compared on equal footing near the ceiling.
 const fn cap(bits: f64) -> f64 {
-    if bits < CAP_BITS as f64 {
-        bits
-    } else {
-        CAP_BITS as f64
-    }
+    if bits < CAP_BITS as f64 { bits } else { CAP_BITS as f64 }
 }
 
 #[test]
@@ -184,19 +178,15 @@ fn check_lookup(report: &SecurityReport, air_vector: &AirVector, log_max_height:
         num_interactions: air_vector.fractions_per_row as usize,
         max_message_width: air_vector.max_message_width as usize,
     };
-    let p3_bits = cap(logup_security_term(
-        &logup_air,
-        &f64_instance(log_max_height),
-        &GrindingSites::NONE,
-    )
-    .expect("has interactions")
-    .bits
-    .bits());
+    let p3_bits =
+        cap(
+            logup_security_term(&logup_air, &f64_instance(log_max_height), &GrindingSites::NONE)
+                .expect("has interactions")
+                .bits
+                .bits(),
+        );
 
-    assert!(
-        fixed_bits <= p3_bits + TIGHT_TOL,
-        "lookup: {fixed_bits} > {p3_bits}"
-    );
+    assert!(fixed_bits <= p3_bits + TIGHT_TOL, "lookup: {fixed_bits} > {p3_bits}");
     assert!(
         p3_bits - fixed_bits < TIGHT_TOL,
         "lookup: gap {} >= tolerance, fixed drifted conservative",
@@ -207,15 +197,9 @@ fn check_lookup(report: &SecurityReport, air_vector: &AirVector, log_max_height:
 fn check_composition(report: &SecurityReport, air_vector: &AirVector) {
     let fixed_bits = term_bits(report, COMPOSITION_LABEL);
     let p3_bits =
-        cap(
-            air::composition_error(air_vector.num_composed_constraints as usize, 1.0, CAP_BITS)
-                .bits(),
-        );
+        cap(composition_error(air_vector.num_composed_constraints as usize, 1.0, CAP_BITS).bits());
 
-    assert!(
-        fixed_bits <= p3_bits + TIGHT_TOL,
-        "composition: {fixed_bits} > {p3_bits}"
-    );
+    assert!(fixed_bits <= p3_bits + TIGHT_TOL, "composition: {fixed_bits} > {p3_bits}");
     assert!(
         p3_bits - fixed_bits < TIGHT_TOL,
         "composition: gap {} >= tolerance, fixed drifted conservative",
@@ -239,7 +223,7 @@ fn check_ood(
         max_combo: max_combo as usize,
     };
     let p3_bits = cap(boost(
-        deep::deep_ali_error(&stark_air, &f64_instance(log_max_height), 1.0),
+        deep_ali_error(&stark_air, &f64_instance(log_max_height), 1.0),
         ood_pow_bits as usize,
     )
     .bits());
@@ -266,16 +250,11 @@ fn check_folding(report: &SecurityReport, log_max_height: u32, folding_pow_bits:
         commit_pow_bits: folding_pow_bits as usize,
         query_pow_bits: 0,
     };
-    let p3_bits = cap(
-        commit_phase_error_udr(&regime, &f64_instance(log_max_height))
-            .expect("folds at every swept height")
-            .bits(),
-    );
+    let p3_bits = cap(commit_phase_error_udr(&regime, &f64_instance(log_max_height))
+        .expect("folds at every swept height")
+        .bits());
 
-    assert!(
-        fixed_bits <= p3_bits + TIGHT_TOL,
-        "folding: {fixed_bits} > {p3_bits}"
-    );
+    assert!(fixed_bits <= p3_bits + TIGHT_TOL, "folding: {fixed_bits} > {p3_bits}");
     assert!(
         p3_bits - fixed_bits < 1.0 + TIGHT_TOL,
         "folding: gap {} >= 1 bit",
@@ -291,17 +270,11 @@ fn check_deep_composition(
 ) {
     let fixed_bits = term_bits(report, DEEP_COMPOSITION_LABEL);
     let num_terms = air_vector.num_deep_terms as usize;
-    // The opening-batching term of `p3_security::stark`'s conjectured report: the proximity-gap
+    // The opening-batching term of the floating-point STARK report's conjectured report: the proximity-gap
     // error `(k − 1)·n / |F|` over the LDE domain.
     let p3_bits = cap(boost(
         ErrorBits::from_log2(
-            SecurityAssumption::UniqueDecoding
-                .prox_gaps_error(
-                    log_max_height as usize,
-                    LOG_BLOWUP as usize,
-                    CAP_BITS,
-                    num_terms,
-                )
+            batching_error_udr(log_max_height as usize, LOG_BLOWUP as usize, CAP_BITS, num_terms)
                 .max(0.0),
         ),
         deep_pow_bits as usize,
@@ -412,7 +385,7 @@ proptest! {
             max_combo: max_combo as usize,
         };
         let reference = boost(
-            deep::deep_ali_error(&stark_air, &f64_instance(log_max_height), 1.0),
+            deep_ali_error(&stark_air, &f64_instance(log_max_height), 1.0),
             ood_pow_bits as usize,
         );
         let p3_bits = cap(reference.bits());

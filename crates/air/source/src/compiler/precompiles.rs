@@ -7,7 +7,7 @@ use miden_ace::{
     compiler::{AceCircuit, CapturedAir, CompiledRelation, LayoutKind},
 };
 use miden_core::field::QuadFelt;
-use p3_security::budget::AirShape;
+use miden_stark::security::AirShape;
 
 use crate::{
     precompiles::{ace::PvmRecursiveAceCircuit, geometry::lookup_shape, relation::AIRS},

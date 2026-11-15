@@ -1,3 +1,8 @@
+// Derived from p3-security 0.8.0, Plonky3 commit a21e3ed42905040ad49c519e402f018381c12d0c.
+// Copyright (c) 2022 The Plonky3 Authors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Adapted for Miden's concrete FRI security calculation; see provenance/README.md.
+
 //! Proximity-gap and list-size helpers shared across low-degree-test
 //! modules.
 //!
@@ -119,12 +124,6 @@ pub fn alpha_ldr_m(log_blowup: usize, m: usize) -> f64 {
     (1.0 + 0.5 / m as f64) * sqrt(rho)
 }
 
-/// UDR proximity parameter γ = 1 − α used in the multi-point quotient
-/// soundness precondition from [2020/654] §4.1.3.
-pub fn gamma_udr(log_trace_length: usize, log_blowup: usize, max_combo: usize) -> f64 {
-    1.0 - alpha_udr(log_trace_length, log_blowup, max_combo)
-}
-
 /// LDR proximity parameter γ = 1 − √ρ·(1 + 1/(2m)). BCHKS25 §4.2.
 pub fn gamma_ldr_m(log_blowup: usize, m: usize) -> f64 {
     let rho = pow(2.0, -(log_blowup as f64));
@@ -136,26 +135,12 @@ pub const fn list_size_udr() -> f64 {
     1.0
 }
 
-/// Conjectured-regime list size: L⁺ = 1.
-///
-/// The random-words heuristic of [2025/2010] §1.5 treats a malicious prover's
-/// committed word as distributed like a uniformly random word, whose distance
-/// to the code concentrates at capacity `1 − ρ`. Conjecturing correlated
-/// agreement up to that radius, the relevant decoding list is a single
-/// codeword — numerically the same L⁺ = 1 as [`list_size_udr`], but justified
-/// by the conjecture rather than by the unique-decoding radius. The ALI and
-/// DEEP-ALI bounds therefore carry no list-size multiplier in this regime.
-pub const fn list_size_conjectured() -> f64 {
-    1.0
-}
-
 /// LDR list size: L⁺ = (m + 1/2)/√ρ. Matches `soundcalc`
 /// `johnson_bound::get_max_list_size` (explicit-m branch).
 ///
 /// Uses the tighter [2025/2055] BCHKS25 Theorem 4.2 list size at the caller's
-/// explicit `m`, distinct from [`crate::assumption::SecurityAssumption::JohnsonBound`]'s
-/// classical Johnson bound at a fixed safety margin — the two are not
-/// interchangeable, see that variant's `list_size_bits_at_log_eta` doc.
+/// explicit `m`. This is the FRI list-size bound at that decoding radius;
+/// it is not the classical fixed-safety-margin Johnson bound.
 pub fn list_size_ldr_m(log_blowup: usize, m: usize) -> f64 {
     let rho = pow(2.0, -(log_blowup as f64));
     (m as f64 + 0.5) / sqrt(rho)
@@ -177,17 +162,49 @@ pub fn compute_upper_m(trace_length: usize, max_combo: usize) -> usize {
     let ratio = (h + max_combo as f64) / h;
     let x = 1.0 / (2.0 * (sqrt(ratio) - 1.0));
     let m = floor(x);
-    if m == x {
-        (m - 1.0) as usize
-    } else {
-        m as usize
-    }
+    if m == x { (m - 1.0) as usize } else { m as usize }
+}
+
+/// Opening-batching proximity error in the unique-decoding regime.
+///
+/// The batching polynomial has degree `num_functions - 1`; a caller must pass at least two
+/// functions. This is the unique-decoding branch of upstream `prox_gaps_error_at_log_eta`.
+pub fn batching_error_udr(
+    log_degree: usize,
+    log_inv_rate: usize,
+    field_size_bits: usize,
+    num_functions: usize,
+) -> f64 {
+    assert!(num_functions >= 2, "num_functions must be >= 2 to compute proximity gaps error");
+    let error = (log_degree + log_inv_rate) as f64;
+    let num_functions_1_log = libm::log2(num_functions as f64 - 1.);
+    field_size_bits as f64 - (error + num_functions_1_log)
+}
+
+/// Opening-batching proximity error at the same explicit Johnson parameter as the FRI bound.
+///
+/// DKT26 Theorem 5.12 and Appendix B.1–B.2 bound the exceptional line count. A polynomial
+/// curve of degree `num_functions - 1` contributes that factor. The caller must use agreement
+/// at least `(1 + 1/(2m)) * sqrt(k/n)` and pass at least two functions; choosing a smaller `m`
+/// than the decoding radius permits would be unsound. Unsupported `m` or inverse rate fails
+/// closed through the exceptional-line helper's infinite bound.
+pub fn batching_error_ldr_m(
+    log_degree: usize,
+    log_inv_rate: usize,
+    field_size_bits: usize,
+    num_functions: usize,
+    m: usize,
+) -> f64 {
+    assert!(num_functions >= 2, "num_functions must be >= 2 to compute proximity gaps error");
+    let error = johnson_exceptional_line_count_log2(log_degree, log_inv_rate, m);
+    let num_functions_1_log = libm::log2(num_functions as f64 - 1.);
+    field_size_bits as f64 - (error + num_functions_1_log)
 }
 
 #[cfg(test)]
 mod tests {
+    use super::batching_error_ldr_m;
     use super::johnson_exceptional_line_count_log2;
-    use crate::assumption::SecurityAssumption;
 
     struct CurveCertificate {
         challenge_degree: u128,
@@ -220,10 +237,8 @@ mod tests {
         let variables = (0..=jet_degree)
             .map(|j| (spectral_cutoff - degree * j) * (challenge_degree + 1 - ell * j))
             .sum();
-        let equations = n
-            * (0..m)
-                .map(|b| (m - b) * (challenge_degree + 1 - ell * b))
-                .sum::<u128>();
+        let equations =
+            n * (0..m).map(|b| (m - b) * (challenge_degree + 1 - ell * b)).sum::<u128>();
         let psi = 1
             + (2 * degree - 1) * (2 * jet_degree - 1)
             + 2 * jet_degree.saturating_sub(2 * degree + 1);
@@ -270,8 +285,7 @@ mod tests {
                     for ell in [1, 2, 3, 7, 31, 257, 1_572_866] {
                         let certificate = finite_curve_certificate(d, r, m, ell);
                         assert!(certificate.variables > certificate.equations);
-                        let closed_log2 = 256.0
-                            - SecurityAssumption::prox_gaps_error_jb_at_m(d, r, 256, ell + 1, m);
+                        let closed_log2 = 256.0 - batching_error_ldr_m(d, r, 256, ell + 1, m);
                         assert!(
                             libm::log2(certificate.exceptional_count) < closed_log2,
                             "d={d}, r={r}, m={m}, ell={ell}"
@@ -291,10 +305,7 @@ mod tests {
             (20, 2, 10, 35.59199114347699),
         ] {
             let actual = johnson_exceptional_line_count_log2(log_degree, log_inv_rate, m);
-            assert!(
-                (actual - expected).abs() < 1e-12,
-                "got {actual}, expected {expected}"
-            );
+            assert!((actual - expected).abs() < 1e-12, "got {actual}, expected {expected}");
         }
     }
 

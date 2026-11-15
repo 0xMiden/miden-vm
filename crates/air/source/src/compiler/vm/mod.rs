@@ -8,11 +8,11 @@ use alloc::vec::Vec;
 use miden_ace::AceError;
 pub use miden_ace::compiler::{CapturedAir, CompiledRelation, LayoutKind};
 use miden_core::{Felt, field::QuadFelt};
+use miden_stark::security::{AirShape, LookupShape};
 use miden_stark::{
     air::native::DescriptorError,
     lookup::{ProverLookupBuilder, native::LookupAir},
 };
-use p3_security::budget::{AirShape, LookupShape};
 
 pub use self::{
     multi_air::build_canonical_multi_air_ace_circuit,

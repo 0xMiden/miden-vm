@@ -2766,7 +2766,6 @@ dependencies = [
  "miden-utils-sync",
  "p3-challenger",
  "p3-field",
- "p3-security",
 ]
 
 [[package]]
@@ -2785,7 +2784,6 @@ dependencies = [
  "p3-challenger",
  "p3-field",
  "p3-matrix",
- "p3-security",
  "proptest",
  "ruint",
  "thiserror 2.0.19",
@@ -2930,7 +2928,6 @@ dependencies = [
  "num",
  "p256",
  "p3-challenger",
- "p3-security",
  "rand 0.10.2",
  "rand_chacha 0.10.0",
  "rstest",
@@ -3328,7 +3325,6 @@ dependencies = [
  "miden-stark",
  "miden-utils-sync",
  "p3-field",
- "p3-security",
  "proptest",
  "rand 0.10.2",
  "rayon",
@@ -3481,6 +3477,7 @@ name = "miden-stark"
 version = "1.0.0-rc.1"
 dependencies = [
  "criterion",
+ "libm",
  "miden-core",
  "miden-crypto",
  "miden-utils-sync",
@@ -3494,7 +3491,6 @@ dependencies = [
  "p3-matrix",
  "p3-maybe-rayon",
  "p3-merkle-tree",
- "p3-security",
  "p3-symmetric",
  "p3-util",
  "proptest",
@@ -3661,7 +3657,6 @@ dependencies = [
  "miden-crypto",
  "miden-serde-utils",
  "miden-stark",
- "p3-security",
  "serde",
  "serde-wincode",
  "thiserror 2.0.19",
@@ -4231,16 +4226,6 @@ dependencies = [
  "p3-symmetric",
  "p3-util",
  "rand 0.10.2",
- "thiserror 2.0.19",
-]
-
-[[package]]
-name = "p3-security"
-version = "0.8.0"
-dependencies = [
- "libm",
- "p3-field",
- "serde",
  "thiserror 2.0.19",
 ]
 

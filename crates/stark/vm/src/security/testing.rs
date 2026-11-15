@@ -8,8 +8,8 @@ use miden_air::vm::{
 };
 use miden_core::proof::HashFunction;
 use miden_stark::security::{
-    CHALLENGE_FIELD_BITS, InstanceShape, ProtocolParams, SecurityReport, apply_lookup_correction,
-    lookup_boundary_correction, security_report_with_hash,
+    CHALLENGE_FIELD_BITS, InstanceShape, SecurityReport, lookup_boundary_correction,
+    testing::{ProtocolParams, SecurityCase, apply_lookup_correction, security_report_with_hash},
 };
 
 /// Computes an Eidos Miden VM proof's conjectured security level, in whole bits.
@@ -42,15 +42,15 @@ pub fn conjectured_security_level(
         folding_pow_bits,
         lookup_pow_bits: LOOKUP_POW_BITS,
     };
-    super::mvm_security_parameters_from_protocol(
-        protocol,
-        u32::from(config::pcs_params().log_final_degree()),
+    let mut case = SecurityCase::from(super::proof_security_parameters(
+        &config::pcs_params(),
         log_max_height,
         num_kernel_procedures,
         COMMITMENT_ALIGNMENT,
         HashFunction::Eidos,
-    )
-    .conjectured_security_level()
+    ));
+    case.protocol_params = protocol;
+    case.conjectured_security_level()
 }
 
 /// Computes the conjectured security level of a Miden VM statement proof, for each protocol

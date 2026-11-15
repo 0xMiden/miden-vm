@@ -1,42 +1,31 @@
+// Derived from p3-security 0.8.0, Plonky3 commit a21e3ed42905040ad49c519e402f018381c12d0c.
+// Copyright (c) 2022 The Plonky3 Authors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Adapted for Miden's concrete FRI security calculation; see provenance/README.md.
+
 //! FRI low-degree-test soundness.
 //!
 //! Conjectured regime: random-words bound, [2025/2010] §1.5.
-//! Legacy regime: historical pre-random-words ethSTARK query estimate, [2021/582].
 //! Proven regime: round-by-round, [2024/1553] Theorems 2 & 3, with the
 //! DKT26 Johnson line-MCA commit bound ([2026/2056] Theorem 5.12 and
 //! Appendix B.1–B.2, extended to powers batching through the order-zero
 //! case of §7.2, Equation (88)). Its characteristic-free transfer is Lemma
 //! 5.3, not the positive-order powers-batching corollary in that section.
 //!
-//! Correspondence with [`crate::assumption::SecurityAssumption`]:
-//! - [`proven_error_udr`] is the FRI counterpart of `UniqueDecoding`
-//!   (with FRI-specific α = (1 + ρ⁺)/2 incorporating OOD expansion).
-//! - [`proven_error_ldr_m`] / [`best_ldr_m`] is the FRI counterpart of
-//!   `JohnsonBound`, but searches `m ∈ [3, LDR_M_CAP]` rather than
-//!   fixing `m = 10` as WHIR does.
-//! - `CapacityBound` is not currently supported by FRI's commit-phase
-//!   analysis.
-
-use alloc::vec;
 use alloc::vec::Vec;
 
 use libm::{log2, pow};
 
-use crate::error::ErrorBits;
-use crate::ldt::LowDegreeTest;
-use crate::proximity::{
+use super::ErrorBits;
+use super::proven::{AirParameters, InstanceParameters};
+use super::proximity::{
     LDR_M_CAP, alpha_ldr_m, alpha_udr, compute_upper_m, gamma_ldr_m,
     johnson_exceptional_line_count_log2,
 };
-use crate::report::{LDT_COMMIT_LABEL, LDT_QUERY_LABEL, SecurityTerm};
-use crate::shape::{InstanceShape, StarkAirParams};
 
-/// Security-relevant mirror of `p3_fri::FriParameters`.
+/// Private numerical FRI inputs resolved from the PCS parameters and actual final domain.
 ///
-/// Keep in sync with `FriParameters` whenever a security-affecting field
-/// is added there. There is intentionally no `From<FriParameters>` impl:
-/// the protocol crate assembles this from its own params + instance
-/// shape, baking in protocol-specific assumptions at the call site.
+/// The last partially filled folding round is included before these values are assembled.
 #[derive(Copy, Clone, Debug)]
 pub struct FriRegime {
     pub log_blowup: usize,
@@ -53,53 +42,12 @@ impl FriRegime {
     }
 }
 
-impl LowDegreeTest for FriRegime {
-    fn log_blowup(&self) -> usize {
-        self.log_blowup
-    }
-
-    fn proven_error_udr(&self, air: &StarkAirParams, shape: &InstanceShape) -> ErrorBits {
-        proven_error_udr(self, air, shape)
-    }
-
-    fn best_ldr(&self, air: &StarkAirParams, shape: &InstanceShape) -> Option<(usize, ErrorBits)> {
-        best_ldr_m(self, air, shape)
-    }
-
-    fn ldr_candidates(
-        &self,
-        air: &StarkAirParams,
-        shape: &InstanceShape,
-    ) -> Vec<(usize, ErrorBits)> {
-        ldr_candidates(self, air, shape)
-    }
-
-    fn conjectured_error(&self, shape: &InstanceShape) -> ErrorBits {
-        conjectured_error(self, shape)
-    }
-
-    fn legacy_conjectured_error(&self, _shape: &InstanceShape) -> Option<ErrorBits> {
-        Some(legacy_conjectured_error(self))
-    }
-
-    fn conjectured_terms(&self, shape: &InstanceShape) -> Vec<SecurityTerm> {
-        let mut terms = vec![SecurityTerm::new(
-            LDT_QUERY_LABEL,
-            conjectured_error(self, shape),
-        )];
-        terms.extend(
-            conjectured_commit_phase_error(self, shape)
-                .map(|bits| SecurityTerm::new(LDT_COMMIT_LABEL, bits)),
-        );
-        terms
-    }
-}
-
 /// Conjectured low-degree-test soundness (random-words, [2025/2010] §1.5).
 ///
 /// `b = num_queries · (−log2(ρ + η)) + query_pow`,
 /// with `η ≈ (log2(e/ρ) · ρ) / log2(q)`.
-pub fn conjectured_error(regime: &FriRegime, shape: &InstanceShape) -> ErrorBits {
+#[cfg(any(test, feature = "testing"))]
+pub fn conjectured_error(regime: &FriRegime, shape: &InstanceParameters) -> ErrorBits {
     if regime.log_blowup == 0 || shape.modulus_bits == 0 {
         return ErrorBits::from_log2(regime.query_pow_bits as f64);
     }
@@ -116,24 +64,6 @@ pub fn conjectured_error(regime: &FriRegime, shape: &InstanceShape) -> ErrorBits
     ErrorBits::from_log2(bits)
 }
 
-/// Historical FRI query-error estimate (ethSTARK
-/// [2021/582](https://eprint.iacr.org/2021/582) §5.10.1, pre-random-words).
-///
-/// `b = num_queries · log_blowup + query_pow` is `-log2(2^-zeta * eps_1)`:
-/// the paper's FRI query error `eps_1 = rho^s`, boosted by grinding. It does
-/// not reproduce the paper's total-error `lambda`, whose Eq. (19) includes
-/// the one-bit union-bound loss from Eq. (18). The composite below instead
-/// takes the round-by-round minimum over its terms.
-///
-/// This omits the random-words correction in [`conjectured_error`] and the
-/// folding round in [`conjectured_commit_phase_error`]. It is for historical
-/// comparison, not a soundness bound or a guide to deployment parameters.
-/// Use [`crate::stark::legacy_security_report`] to compose it with the
-/// AIR, DEEP-ALI, batching, extra, and commitment-collision terms.
-pub const fn legacy_conjectured_error(regime: &FriRegime) -> ErrorBits {
-    ErrorBits::from_log2((regime.log_blowup * regime.num_queries + regime.query_pow_bits) as f64)
-}
-
 /// FRI commit-phase per-round error in the conjectured regime.
 ///
 /// Identical to [`commit_phase_error_udr`], and deliberately so: the bound
@@ -141,15 +71,16 @@ pub const fn legacy_conjectured_error(regime: &FriRegime) -> ErrorBits {
 /// word, and that count does not depend on the decoding regime. What the
 /// random-words conjecture buys is the removal of the list-size multiplier
 /// `L⁺` that the Johnson-bound analysis pays (see
-/// [`crate::stark::conjectured_security_report`]) — it does not assert that a
+/// the conjectured round budget) — it does not assert that a
 /// bad folding challenge cannot exist. Dropping the round entirely, as an
 /// LDT-only conjectured number does, therefore overstates security for a large
 /// LDE domain over a small field.
 ///
 /// Returns `None` when no fold occurs, in which case there is no such round.
-pub fn conjectured_commit_phase_error(
+#[cfg(test)]
+fn conjectured_commit_phase_error(
     regime: &FriRegime,
-    shape: &InstanceShape,
+    shape: &InstanceParameters,
 ) -> Option<ErrorBits> {
     commit_phase_error_udr(regime, shape)
 }
@@ -162,7 +93,7 @@ pub fn conjectured_commit_phase_error(
 /// Returns `None` when `regime.max_log_arity` is `0` (folding factor `1`,
 /// i.e. no fold at all) — such a regime has no commit-phase round, rather
 /// than being indistinguishable from arity 2.
-pub fn commit_phase_error_udr(regime: &FriRegime, shape: &InstanceShape) -> Option<ErrorBits> {
+pub fn commit_phase_error_udr(regime: &FriRegime, shape: &InstanceParameters) -> Option<ErrorBits> {
     let folding_minus_one = regime.folding_factor() - 1.0;
     if folding_minus_one <= 0.0 {
         return None;
@@ -195,7 +126,7 @@ pub fn commit_phase_error_udr(regime: &FriRegime, shape: &InstanceShape) -> Opti
 /// than being indistinguishable from arity 2.
 pub fn commit_phase_error_ldr_m(
     regime: &FriRegime,
-    shape: &InstanceShape,
+    shape: &InstanceParameters,
     m: usize,
 ) -> Option<ErrorBits> {
     let rho = pow(2.0, -(regime.log_blowup as f64));
@@ -222,9 +153,7 @@ pub fn commit_phase_error_ldr_m(
         + 0.5 * log2(rho)
         + regime.commit_pow_bits as f64;
 
-    Some(ErrorBits::from_log2(
-        bits_linear.min(bits_n_over_q).max(0.0),
-    ))
+    Some(ErrorBits::from_log2(bits_linear.min(bits_n_over_q).max(0.0)))
 }
 
 /// FRI query-phase error: ε ≤ αᵏ, contributing `query_pow − k·log2(α)` bits.
@@ -238,11 +167,11 @@ pub fn query_phase_error(alpha: f64, num_queries: usize, query_pow_bits: usize) 
 
 /// Proven LDT-only error in the UDR regime. Combines commit-phase and
 /// query-phase contributions; AIR/DEEP terms compose at the protocol
-/// call site (e.g. `crate::stark::proven_security`).
+/// call site.
 pub fn proven_error_udr(
     regime: &FriRegime,
-    air: &StarkAirParams,
-    shape: &InstanceShape,
+    air: &AirParameters,
+    shape: &InstanceParameters,
 ) -> ErrorBits {
     if regime.log_blowup == 0 || shape.log_trace_length == 0 || shape.modulus_bits == 0 {
         return ErrorBits::from_log2(0.0);
@@ -260,8 +189,8 @@ pub fn proven_error_udr(
 /// Proven LDT-only error in the LDR regime with explicit `m`.
 pub fn proven_error_ldr_m(
     regime: &FriRegime,
-    air: &StarkAirParams,
-    shape: &InstanceShape,
+    air: &AirParameters,
+    shape: &InstanceParameters,
     m: usize,
 ) -> ErrorBits {
     if regime.log_blowup == 0 || shape.log_trace_length == 0 || shape.modulus_bits == 0 {
@@ -290,36 +219,31 @@ pub fn proven_error_ldr_m(
 ///
 /// Optimizes `min(commit, query)` only — the LDT-only error — not the full
 /// `min(ALI, DEEP, commit, query)` composite ultimately reported by
-/// [`crate::stark::proven_security`]. In practice ALI/DEEP don't bind at
+/// the complete Miden security report. In practice ALI/DEEP don't bind at
 /// the optimum, so the chosen `m` matches what optimizing the full
 /// composite would pick, but this function does not verify that.
-pub fn best_ldr_m(
+#[cfg(test)]
+fn best_ldr_m(
     regime: &FriRegime,
-    air: &StarkAirParams,
-    shape: &InstanceShape,
+    air: &AirParameters,
+    shape: &InstanceParameters,
 ) -> Option<(usize, ErrorBits)> {
     ldr_candidates(regime, air, shape)
         .into_iter()
-        .max_by(|a, b| {
-            a.1.bits()
-                .partial_cmp(&b.1.bits())
-                .unwrap_or(core::cmp::Ordering::Equal)
-        })
+        .max_by(|a, b| a.1.bits().partial_cmp(&b.1.bits()).unwrap_or(core::cmp::Ordering::Equal))
 }
 
 /// Every admissible `m ∈ [3, min(compute_upper_m, LDR_M_CAP)]` with the
 /// LDT-only error attained there, in increasing order of `m`.
 ///
-/// [`best_ldr_m`] picks from this list by the LDT error alone;
-/// [`crate::stark::proven_security_report`] takes the whole list and picks by
-/// the full composite, which is the choice that stays valid once a term
-/// outside the LDT depends on `m` (see [`crate::ldt::LowDegreeTest::ldr_candidates`]).
+/// The complete Miden report evaluates every candidate because lookup and opening-batching
+/// losses depend on the same `m`. Selecting a FRI-only optimum first would lose that dependency.
 ///
 /// Empty when the trace is too small to admit any valid `m`.
 pub fn ldr_candidates(
     regime: &FriRegime,
-    air: &StarkAirParams,
-    shape: &InstanceShape,
+    air: &AirParameters,
+    shape: &InstanceParameters,
 ) -> Vec<(usize, ErrorBits)> {
     let trace_length = 1usize << shape.log_trace_length;
     let m_max = core::cmp::min(compute_upper_m(trace_length, air.max_combo), LDR_M_CAP);
@@ -335,7 +259,6 @@ pub fn ldr_candidates(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stark::proven_security;
 
     fn benchmark_regime() -> FriRegime {
         FriRegime {
@@ -348,8 +271,8 @@ mod tests {
         }
     }
 
-    fn benchmark_shape() -> InstanceShape {
-        InstanceShape {
+    fn benchmark_shape() -> InstanceParameters {
+        InstanceParameters {
             log_trace_length: 20,
             modulus_bits: 252,
             collision_resistance: 128,
@@ -357,8 +280,8 @@ mod tests {
         }
     }
 
-    fn benchmark_air() -> StarkAirParams {
-        StarkAirParams {
+    fn benchmark_air() -> AirParameters {
+        AirParameters {
             num_constraints: 1,
             max_constraint_degree: 2,
             num_quotient_chunks: 1,
@@ -377,37 +300,10 @@ mod tests {
         let shape = benchmark_shape();
 
         let udr_ldt = proven_error_udr(&regime, &air, &shape);
-        let (best_m, ldr_ldt) = best_ldr_m(&regime, &air, &shape).unwrap();
+        let ldr_ldt = best_ldr_m(&regime, &air, &shape).unwrap().1;
 
-        let udr_bits = crate::stark::proven_security_udr(&air, &shape, udr_ldt, &[])
-            .bits()
-            .floor() as usize;
-        let ldr_bits = crate::stark::proven_security_ldr_m(
-            &air,
-            &shape,
-            regime.log_blowup,
-            best_m,
-            ldr_ldt,
-            &[],
-        )
-        .bits()
-        .floor() as usize;
-
-        assert_eq!(udr_bits, 57);
-        assert_eq!(ldr_bits, 65);
-
-        let combined = proven_security(
-            &air,
-            &shape,
-            regime.log_blowup,
-            udr_ldt,
-            best_m,
-            ldr_ldt,
-            &[],
-        )
-        .bits()
-        .floor() as usize;
-        assert_eq!(combined, 65);
+        assert_eq!(udr_ldt.bits().floor() as usize, 57);
+        assert_eq!(ldr_ldt.bits().floor() as usize, 65);
     }
 
     /// The conjectured commit-phase round is a real constraint, not a
@@ -426,7 +322,7 @@ mod tests {
             commit_pow_bits: 0,
             query_pow_bits: 16,
         };
-        let shape = InstanceShape {
+        let shape = InstanceParameters {
             log_trace_length: 23,
             modulus_bits: 128,
             collision_resistance: 128,
@@ -439,10 +335,7 @@ mod tests {
             (commit.bits() - (128.0 - libm::log2(3.0 * (65_536.0 * 1024.0 + 1.0)))).abs() < 1e-9
         );
         assert!(commit.bits() < 128.0, "got {}", commit.bits());
-        assert_eq!(
-            commit.bits(),
-            commit_phase_error_udr(&regime, &shape).unwrap().bits()
-        );
+        assert_eq!(commit.bits(), commit_phase_error_udr(&regime, &shape).unwrap().bits());
     }
 
     /// Commit-phase grinding is credited to the commit-phase term and to
@@ -452,10 +345,7 @@ mod tests {
         let base = benchmark_regime();
         let shape = benchmark_shape();
 
-        let ground = FriRegime {
-            commit_pow_bits: 12,
-            ..base
-        };
+        let ground = FriRegime { commit_pow_bits: 12, ..base };
         let b0 = conjectured_commit_phase_error(&base, &shape).expect("folds occur");
         let b12 = conjectured_commit_phase_error(&ground, &shape).expect("folds occur");
         assert!((b12.bits() - b0.bits() - 12.0).abs() < 1e-12);
@@ -471,11 +361,6 @@ mod tests {
             ..base
         };
         assert!(conjectured_commit_phase_error(&no_folds, &shape).is_none());
-        assert_eq!(
-            LowDegreeTest::conjectured_terms(&no_folds, &shape).len(),
-            1,
-            "a fold-free regime reports the query phase only"
-        );
     }
 
     /// `max_log_arity: 0` (folding factor 1) is a genuinely fold-free regime,
@@ -487,10 +372,7 @@ mod tests {
         let base = benchmark_regime();
         let shape = benchmark_shape();
         let air = benchmark_air();
-        let no_arity = FriRegime {
-            max_log_arity: 0,
-            ..base
-        };
+        let no_arity = FriRegime { max_log_arity: 0, ..base };
 
         assert!(commit_phase_error_udr(&no_arity, &shape).is_none());
         assert!(commit_phase_error_ldr_m(&no_arity, &shape, 10).is_none());
@@ -522,7 +404,7 @@ mod tests {
             commit_pow_bits: 28,
             query_pow_bits: 17,
         };
-        let shape = InstanceShape {
+        let shape = InstanceParameters {
             log_trace_length: 20,
             modulus_bits: 127,
             collision_resistance: 128,
@@ -535,16 +417,10 @@ mod tests {
         let alpha = alpha_ldr_m(regime.log_blowup, 3);
         let query = query_phase_error(alpha, regime.num_queries, regime.query_pow_bits).bits();
         let ldt = proven_error_ldr_m(&regime, &benchmark_air(), &shape, 3).bits();
-        assert!(
-            (ldt - 120.4862138717).abs() < 1e-9,
-            "commit={commit}, query={query}, ldt={ldt}",
-        );
+        assert!((ldt - 120.4862138717).abs() < 1e-9, "commit={commit}, query={query}, ldt={ldt}",);
         assert!((commit - 120.57793385796532).abs() < 1e-9, "got {commit}");
 
-        let ungrounded = FriRegime {
-            commit_pow_bits: 0,
-            ..regime
-        };
+        let ungrounded = FriRegime { commit_pow_bits: 0, ..regime };
         let ungrounded_commit = commit_phase_error_ldr_m(&ungrounded, &shape, 3)
             .expect("arity four has folding rounds")
             .bits();
@@ -553,22 +429,6 @@ mod tests {
             query_phase_error(alpha, regime.num_queries, regime.query_pow_bits).bits(),
             query_phase_error(alpha, ungrounded.num_queries, ungrounded.query_pow_bits).bits()
         );
-    }
-
-    /// ethSTARK §5.10.1 uses R = 2, zeta = 20, and s = 31/41/55 for
-    /// lambda = 80/100/128. These are the boosted query terms, before the
-    /// paper's pre-query cap and one-bit union-bound loss.
-    #[test]
-    fn legacy_conjectured_error_matches_ethstark_query_vectors() {
-        for (num_queries, expected) in [(31, 82.0), (41, 102.0), (55, 130.0)] {
-            let regime = FriRegime {
-                log_blowup: 2,
-                num_queries,
-                query_pow_bits: 20,
-                ..benchmark_regime()
-            };
-            assert_eq!(legacy_conjectured_error(&regime).bits(), expected);
-        }
     }
 
     #[test]
@@ -581,7 +441,7 @@ mod tests {
             commit_pow_bits: 0,
             query_pow_bits: 0,
         };
-        let shape = InstanceShape {
+        let shape = InstanceParameters {
             log_trace_length: 16,
             modulus_bits: 128,
             collision_resistance: 128,
