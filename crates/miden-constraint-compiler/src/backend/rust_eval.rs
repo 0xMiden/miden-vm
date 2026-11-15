@@ -14,9 +14,9 @@
 //! Emission is deterministic: the same graph always produces byte-identical
 //! output (crate invariant 3).
 //!
-//! Representation: trace-window reads stay the builder's Copy `Var`/`VarEF`
-//! rather than promoting to `Expr`, mirroring the hand-written eval and avoiding
-//! an `Expr` materialization per trace cell on builders where the two differ.
+//! Legacy trace-window reads retain Copy `Var`/`VarEF` representation. Native frame elements are
+//! already expressions and are duplicated into owned bindings. Both ABIs use the same graph,
+//! preparation selection, global assertion scheduling and arithmetic specialization machinery.
 //!
 //! Class handling: base subexpressions stay in `AB::Expr` and are promoted to
 //! `AB::ExprEF` exactly where an ext op consumes them. Since the builder bound
@@ -29,6 +29,9 @@
 //! [`emit_optimized_module`] also specializes single-use arithmetic while preserving cached terms.
 
 use std::fmt::Write as _;
+
+use miden_core::Felt;
+use miden_stark::air::native::AirDescriptor;
 
 use self::preparation::PreparationPlan;
 use crate::ir::{CapturedConstraints, Class, Graph, Leaf, Node, NodeId, OpKind};
@@ -46,6 +49,22 @@ pub struct AirEvaluator<'a> {
     pub air_label: &'a str,
     pub graph: &'a Graph,
     pub constraints: &'a CapturedConstraints,
+}
+
+/// One native evaluator paired with the original descriptor from its authored capture.
+///
+/// Graph, roots and descriptor must come from the same canonical source capture. Cheap layout
+/// and address checks catch accidental mismatches; they do not prove arbitrary code equivalence.
+/// Never substitute a descriptor reconstructed by capturing optimized/generated execution.
+pub struct NativeAirEvaluator<'a> {
+    pub eval: AirEvaluator<'a>,
+    pub descriptor: &'a AirDescriptor<Felt>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AirApi {
+    Legacy,
+    Native,
 }
 
 /// Emit evaluators with a reusable preparation step for challenge-only expressions.
@@ -71,30 +90,152 @@ pub fn emit_optimized_module(header: &str, evals: &[AirEvaluator<'_>]) -> String
     emit_module_with_plan(header, evals, true)
 }
 
-fn emit_module_with_plan(header: &str, evals: &[AirEvaluator<'_>], optimized: bool) -> String {
-    let mut out = String::from(header);
-    out.push_str(MODULE_IMPORTS);
-    out.push_str("use p3_field::Algebra;\n");
+/// Emit native frame/input/sink evaluators using the existing preparation and arithmetic plans.
+///
+/// Each native function has a schedule-derived `NAME_PREPARED_TERMS` constant, a preparation
+/// function accepting borrowed uniform inputs, and a row function accepting frame, inputs, sink
+/// and prepared terms. Preparation remains challenge-only; no new caching policy is introduced.
+/// Non-base extension constants remain unsupported by the expression-algebra contract.
+pub fn emit_native_optimized_module(header: &str, evals: &[NativeAirEvaluator<'_>]) -> String {
+    let mut out = module_start(header, AirApi::Native);
     for eval in evals {
-        let plan = PreparationPlan::new(eval.graph, eval.constraints);
-        let terms = plan.terms();
-        let mut preparation = Emitter::new(EmissionMode::Preparation(&plan));
-        let values: Vec<_> = terms
-            .iter()
-            .map(|&id| as_expr(&preparation.token(id), preparation.types()))
-            .collect();
-        writeln!(out, "\n/// Prepare the challenge-only expressions for `{}`.", eval.air_label)
-            .unwrap();
-        writeln!(out, "pub fn precompute_{}<B: PrimeCharacteristicRing, E: Algebra<B>>(challenges: &[E]) -> [E; {}] {{", eval.name, terms.len()).unwrap();
-        writeln!(out, "    let _ = challenges;").unwrap();
-        for line in preparation.lines {
-            writeln!(out, "{line}").unwrap();
-        }
-        writeln!(out, "    [{}]\n}}", values.join(", ")).unwrap();
-
-        emit_evaluator(eval, &mut out, &plan, optimized);
+        validate_native(eval);
+        emit_air(&eval.eval, &mut out, true, AirApi::Native);
     }
     out
+}
+
+fn emit_module_with_plan(header: &str, evals: &[AirEvaluator<'_>], optimized: bool) -> String {
+    let mut out = module_start(header, AirApi::Legacy);
+    for eval in evals {
+        emit_air(eval, &mut out, optimized, AirApi::Legacy);
+    }
+    out
+}
+
+fn module_start(header: &str, api: AirApi) -> String {
+    let mut out = String::from(header);
+    out.push_str(match api {
+        AirApi::Legacy => MODULE_IMPORTS,
+        AirApi::Native => NATIVE_MODULE_IMPORTS,
+    });
+    out.push_str("use p3_field::Algebra;\n");
+    out
+}
+
+fn emit_air(eval: &AirEvaluator<'_>, out: &mut String, optimized: bool, api: AirApi) {
+    let plan = PreparationPlan::new(eval.graph, eval.constraints);
+    let terms = plan.terms();
+    let mut preparation = Emitter::new(EmissionMode::Preparation(&plan), api);
+    let values: Vec<_> = terms
+        .iter()
+        .map(|&id| as_expr(&preparation.token(id), preparation.types()))
+        .collect();
+    if api == AirApi::Native {
+        writeln!(
+            out,
+            "\npub const {}_PREPARED_TERMS: usize = {};",
+            eval.name.to_ascii_uppercase(),
+            terms.len()
+        )
+        .unwrap();
+    }
+    writeln!(out, "\n/// Prepare the challenge-only expressions for `{}`.", eval.air_label)
+        .unwrap();
+    match api {
+        AirApi::Legacy => {
+            writeln!(out, "pub fn precompute_{}<B: PrimeCharacteristicRing, E: Algebra<B>>(challenges: &[E]) -> [E; {}] {{", eval.name, terms.len()).unwrap();
+            writeln!(out, "    let _ = challenges;").unwrap();
+        },
+        AirApi::Native => {
+            writeln!(out, "pub fn precompute_{}<B: Algebra<Felt>, E: Algebra<B>>(inputs: UniformInputs<'_, B, E>) -> [E; {}] {{", eval.name, terms.len()).unwrap();
+            writeln!(out, "    let challenges = inputs.challenges;\n    let _ = challenges;")
+                .unwrap();
+        },
+    }
+    for line in preparation.lines {
+        writeln!(out, "{line}").unwrap();
+    }
+    writeln!(out, "    [{}]\n}}", values.join(", ")).unwrap();
+
+    emit_evaluator(eval, out, &plan, optimized, api);
+}
+
+fn validate_native(native: &NativeAirEvaluator<'_>) {
+    let eval = &native.eval;
+    let layout = native.descriptor.analysis().layout();
+    assert_eq!(
+        eval.constraints.base_roots.len(),
+        layout.base_indices().len(),
+        "native base root count"
+    );
+    assert_eq!(
+        eval.constraints.ext_roots.len(),
+        layout.ext_indices().len(),
+        "native extension root count"
+    );
+    assert_eq!(
+        eval.constraints.base_global_indices.as_slice(),
+        layout.base_indices(),
+        "native base assertion positions"
+    );
+    assert_eq!(
+        eval.constraints.ext_global_indices.as_slice(),
+        layout.ext_indices(),
+        "native extension assertion positions"
+    );
+
+    let mut pending: Vec<_> = eval
+        .constraints
+        .base_roots
+        .iter()
+        .chain(&eval.constraints.ext_roots)
+        .copied()
+        .collect();
+    for &root in &eval.constraints.base_roots {
+        assert!(root.index() < eval.graph.len(), "native base root outside graph");
+        assert_eq!(eval.graph.class(root), Class::Base, "native base root class");
+    }
+    let spec = native.descriptor.spec();
+    let mut seen = vec![false; eval.graph.len()];
+    while let Some(id) = pending.pop() {
+        assert!(id.index() < eval.graph.len(), "native operand outside graph");
+        if core::mem::replace(&mut seen[id.index()], true) {
+            continue;
+        }
+        match eval.graph.node(id) {
+            Node::Op { x, y, .. } => pending.extend([Some(x), y].into_iter().flatten()),
+            Node::Leaf(Leaf::ExtBase(inner)) => pending.push(inner),
+            Node::Leaf(leaf) => match leaf {
+                Leaf::Main { offset, index } => assert!(
+                    offset <= 1 && index < spec.main_width,
+                    "native main input outside spec"
+                ),
+                Leaf::Preprocessed { offset, index } => assert!(
+                    offset <= 1 && index < spec.preprocessed_width(),
+                    "native preprocessed input outside spec"
+                ),
+                Leaf::Aux { offset, index } => assert!(
+                    offset <= 1 && index < spec.aux_width,
+                    "native auxiliary input outside spec"
+                ),
+                Leaf::Public(index) => {
+                    assert!(index < spec.num_public_values, "native public input outside spec")
+                },
+                Leaf::Periodic(index) => assert!(
+                    index < spec.periodic_columns.len(),
+                    "native periodic input outside spec"
+                ),
+                Leaf::Challenge(index) => {
+                    assert!(index < spec.num_challenges, "native challenge outside spec")
+                },
+                Leaf::PermValue(index) => {
+                    assert!(index < spec.num_exports, "native export outside spec")
+                },
+                _ => (),
+            },
+        }
+    }
 }
 
 const MODULE_IMPORTS: &str = r"
@@ -102,6 +243,13 @@ use miden_core::Felt;
 use miden_crypto::field::PrimeCharacteristicRing;
 use miden_stark::air::{LiftedAirBuilder, WindowAccess};
 use p3_field::Dup;
+";
+
+const NATIVE_MODULE_IMPORTS: &str = r"
+use miden_core::Felt;
+use miden_crypto::field::PrimeCharacteristicRing as _;
+use miden_stark::air::native::{LiftedAirBuilder, Frame, Inputs, UniformInputs};
+use p3_field::Dup as _;
 ";
 
 /// Opens every evaluator function: window handles over the main and aux trace
@@ -118,6 +266,16 @@ const PREPROCESSED_PROLOGUE: &str = r"    let preprocessed = builder.preprocesse
     let p0 = preprocessed.current_slice();
     let p1 = preprocessed.next_slice();
     let _ = &p1;";
+
+const NATIVE_FN_PROLOGUE: &str = r"    let m0 = frame.main.current;
+    let m1 = frame.main.next;
+    let a0 = frame.aux.current;
+    let a1 = frame.aux.next;
+    let _ = (&m0, &m1, &a0, &a1, &inputs);";
+
+const NATIVE_PREPROCESSED_PROLOGUE: &str = r"    let p0 = frame.preprocessed.current;
+    let p1 = frame.preprocessed.next;
+    let _ = (&p0, &p1);";
 
 /// Whether a binding is a Copy builder `Var`/`VarEF` (a trace-window read) or a
 /// materialized `Expr`/`ExprEF` (every op result and every non-trace leaf).
@@ -195,6 +353,7 @@ impl<'g> EmissionMode<'g> {
 
 struct Emitter<'g> {
     mode: EmissionMode<'g>,
+    api: AirApi,
     plan: Option<Plan<'g>>,
     /// Token per emitted node, memoized on first use.
     tokens: Vec<Option<Token>>,
@@ -206,9 +365,10 @@ struct Emitter<'g> {
 }
 
 impl<'g> Emitter<'g> {
-    fn new(mode: EmissionMode<'g>) -> Self {
+    fn new(mode: EmissionMode<'g>, api: AirApi) -> Self {
         Self {
             mode,
+            api,
             plan: None,
             tokens: vec![None; mode.graph().len()],
             lines: Vec::new(),
@@ -219,7 +379,13 @@ impl<'g> Emitter<'g> {
     fn types(&self) -> ExprTypes {
         match self.mode {
             EmissionMode::Preparation(_) => ExprTypes { base: "B", ext: "E" },
-            EmissionMode::Row(_) => ExprTypes { base: "AB::Expr", ext: "AB::ExprEF" },
+            EmissionMode::Row(_) => ExprTypes {
+                base: "AB::Expr",
+                ext: match self.api {
+                    AirApi::Legacy => "AB::ExprEF",
+                    AirApi::Native => "AB::ExtExpr",
+                },
+            },
         }
     }
 
@@ -294,6 +460,37 @@ impl<'g> Emitter<'g> {
     }
 
     fn leaf_token(&mut self, leaf: Leaf) -> Token {
+        if self.api == AirApi::Native && matches!(self.mode, EmissionMode::Row(_)) {
+            // Native rows already contain expressions. Materialize them by Dup so no borrowed
+            // input element is moved or accidentally treated as a Copy upstream variable.
+            match leaf {
+                Leaf::Preprocessed { offset, index } => {
+                    return self.base_leaf(format!("p{offset}[{index}].dup()"));
+                },
+                Leaf::Main { offset, index } => {
+                    return self.base_leaf(format!("m{offset}[{index}].dup()"));
+                },
+                Leaf::Aux { offset, index } => {
+                    return self.ext_leaf(format!("a{offset}[{index}].dup()"));
+                },
+                Leaf::Public(index) => {
+                    return self.base_leaf(format!("inputs.public_values[{index}].dup()"));
+                },
+                Leaf::Periodic(index) => {
+                    return self.base_leaf(format!("frame.periodic[{index}].dup()"));
+                },
+                Leaf::IsFirst => return self.base_leaf("frame.first_row()".to_string()),
+                Leaf::IsLast => return self.base_leaf("frame.last_row()".to_string()),
+                Leaf::IsTransition => return self.base_leaf("frame.transition()".to_string()),
+                Leaf::Challenge(index) => {
+                    return self.ext_leaf(format!("inputs.challenges[{index}].dup()"));
+                },
+                Leaf::PermValue(index) => {
+                    return self.ext_leaf(format!("inputs.exports[{index}].dup()"));
+                },
+                Leaf::BaseConst(_) | Leaf::ExtConst(_) | Leaf::ExtBase(_) => (),
+            }
+        }
         match leaf {
             Leaf::Preprocessed { offset, index } => {
                 self.base_var_leaf(format!("p{offset}[{index}]"))
@@ -335,7 +532,11 @@ impl<'g> Emitter<'g> {
                 if matches!(self.mode, EmissionMode::Preparation(_)) {
                     self.ext_leaf(format!("E::from(B::from_u64({c0}))"))
                 } else {
-                    self.ext_leaf(format!("AB::ExprEF::from(AB::Expr::from(Felt::from_u64({c0})))"))
+                    let types = self.types();
+                    self.ext_leaf(format!(
+                        "{}::from({}::from(Felt::from_u64({c0})))",
+                        types.ext, types.base
+                    ))
                 }
             },
             Leaf::ExtBase(inner) => self.token(inner),
@@ -419,9 +620,10 @@ impl<'g> Emitter<'g> {
     }
 
     fn rewrite_rhs(&mut self, class: Class, rewrite: Rewrite) -> String {
+        let types = self.types();
         let ty = match class {
-            Class::Base => "AB::Expr",
-            Class::Ext => "AB::ExprEF",
+            Class::Base => types.base,
+            Class::Ext => types.ext,
         };
         match rewrite {
             Rewrite::Square(id) => format!("{}.square()", self.expr(id, class)),
@@ -474,7 +676,7 @@ impl<'g> Emitter<'g> {
                                 .iter()
                                 .map(|&(_, coefficient)| match coefficient {
                                     Coefficient::Scalar(c) => format!("Felt::from_u64({c})"),
-                                    Coefficient::One => "AB::Expr::ONE".to_string(),
+                                    Coefficient::One => format!("{}::ONE", types.base),
                                     Coefficient::Node(id) => self.expr(
                                         id,
                                         if kind == DotKind::Mixed { Class::Base } else { class },
@@ -487,7 +689,10 @@ impl<'g> Emitter<'g> {
                                     format!("<{ty} as Algebra<Felt>>::mixed_dot_product::<{n}>")
                                 },
                                 DotKind::Mixed => {
-                                    format!("<{ty} as Algebra<AB::Expr>>::mixed_dot_product::<{n}>")
+                                    format!(
+                                        "<{ty} as Algebra<{}>>::mixed_dot_product::<{n}>",
+                                        types.base
+                                    )
                                 },
                             };
                             format!(
@@ -539,6 +744,7 @@ fn emit_evaluator(
     out: &mut String,
     preparation: &PreparationPlan<'_>,
     optimized: bool,
+    api: AirApi,
 ) {
     // Order the constraint roots by global index; emission then walks them in
     // that order, so the asserts replay the hand-written eval's layout (and
@@ -553,23 +759,27 @@ fn emit_evaluator(
         place(&mut roots, global, (cons.ext_roots[local], true));
     }
 
-    let mut e = Emitter::new(EmissionMode::Row(preparation));
+    let mut e = Emitter::new(EmissionMode::Row(preparation), api);
     if optimized {
         e.plan = Some(Plan::new(eval.graph, cons, preparation.terms()));
     }
     for entry in roots {
         let (root, is_ext) = entry.expect("every global constraint index must be assigned");
         let t = e.token(root);
+        let sink = match api {
+            AirApi::Legacy => "builder",
+            AirApi::Native => "sink",
+        };
         let line = if is_ext {
             match t.class {
-                Class::Ext => format!("    builder.assert_zero_ext({});", operand(&t)),
+                Class::Ext => format!("    {sink}.assert_zero_ext({});", operand(&t)),
                 Class::Base => {
-                    format!("    builder.assert_zero_ext({});", lift_base_to_ext(&t, e.types()))
+                    format!("    {sink}.assert_zero_ext({});", lift_base_to_ext(&t, e.types()))
                 },
             }
         } else {
             assert!(t.class == Class::Base, "base constraint root must be base-class");
-            format!("    builder.assert_zero({});", operand(&t))
+            format!("    {sink}.assert_zero({});", operand(&t))
         };
         e.lines.push(line);
     }
@@ -580,6 +790,16 @@ fn emit_evaluator(
     } else {
         "with each node's `let` placed at its first use."
     };
+    let signature = match api {
+        AirApi::Legacy => format!(
+            "pub fn eval_{}<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &[AB::ExprEF]) {{",
+            eval.name
+        ),
+        AirApi::Native => format!(
+            "pub fn eval_{}<AB: LiftedAirBuilder<F = Felt>>(frame: &Frame<'_, AB>, inputs: Inputs<'_, AB>, sink: &mut AB, terms: &[AB::ExtExpr]) {{",
+            eval.name
+        ),
+    };
     writeln!(
         out,
         "\n/// Generated globally-CSE'd evaluator for `{}`.\n\
@@ -587,18 +807,34 @@ fn emit_evaluator(
          /// Emits constraints in the exact global order of the hand-written `eval`,\n\
          /// {schedule}\n\
          #[inline(never)]\n\
-         pub fn eval_{}<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &[AB::ExprEF]) {{",
-        eval.air_label, eval.name,
+         {signature}",
+        eval.air_label,
     )
     .unwrap();
     writeln!(out, "    assert_eq!(terms.len(), {term_count});").unwrap();
-    writeln!(out, "{FN_PROLOGUE}").unwrap();
+    writeln!(
+        out,
+        "{}",
+        match api {
+            AirApi::Legacy => FN_PROLOGUE,
+            AirApi::Native => NATIVE_FN_PROLOGUE,
+        }
+    )
+    .unwrap();
     if eval
         .graph
         .iter()
         .any(|(_, node)| matches!(node, Node::Leaf(Leaf::Preprocessed { .. })))
     {
-        writeln!(out, "{PREPROCESSED_PROLOGUE}").unwrap();
+        writeln!(
+            out,
+            "{}",
+            match api {
+                AirApi::Legacy => PREPROCESSED_PROLOGUE,
+                AirApi::Native => NATIVE_PREPROCESSED_PROLOGUE,
+            }
+        )
+        .unwrap();
     }
     for line in &e.lines {
         writeln!(out, "{line}").unwrap();
@@ -608,8 +844,12 @@ fn emit_evaluator(
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use miden_core::{Felt, field::QuadFelt};
     use miden_crypto::field::PrimeCharacteristicRing;
+    use miden_stark::air::native;
+    use p3_field::Dup;
 
     use super::*;
     use crate::{
@@ -626,6 +866,137 @@ mod tests {
             naive_base: OpCounts::default(),
             naive_ext: OpCounts::default(),
         }
+    }
+
+    struct NativeRewrites;
+
+    impl native::LiftedAir for NativeRewrites {
+        type F = Felt;
+
+        fn spec(&self) -> native::AirSpec<'_, Felt> {
+            native::AirSpec {
+                main_width: 4,
+                aux_width: 4,
+                num_public_values: 0,
+                num_challenges: 2,
+                num_exports: 0,
+                preprocessed: None,
+                periodic_columns: Cow::Borrowed(&[]),
+            }
+        }
+
+        fn eval<B: native::LiftedAirBuilder<F = Felt>>(
+            &self,
+            frame: &native::Frame<'_, B>,
+            _inputs: native::Inputs<'_, B>,
+            sink: &mut B,
+        ) {
+            let sum: B::Expr = frame.main.current[..4].iter().map(Dup::dup).sum();
+            sink.assert_zero(sum);
+            let mixed: B::ExtExpr =
+                (0..4).map(|i| frame.aux.current[i].dup() * frame.main.current[i].dup()).sum();
+            sink.assert_zero_ext(mixed);
+            sink.assert_zero(
+                frame.main.current[0].dup() * frame.main.current[1].dup()
+                    + frame.main.current[0].dup() * frame.main.current[2].dup(),
+            );
+        }
+    }
+
+    #[test]
+    fn native_rendering_uses_the_shared_optimizer_with_owned_expression_leaves() {
+        let mut shared = GraphBuilder::new();
+        // Shared graphs may contain another AIR's inputs; native validation must inspect only
+        // nodes reachable from this source's roots.
+        shared.leaf(Leaf::Main { offset: 0, index: usize::MAX });
+        let (cons, descriptor) =
+            crate::ir::capture_native_into(&NativeRewrites, &mut shared).unwrap();
+        let graph = shared.freeze();
+        let out = emit_native_optimized_module(
+            "//! Native renderer.\n",
+            &[NativeAirEvaluator {
+                eval: AirEvaluator {
+                    name: "rewrites",
+                    air_label: "NativeRewrites",
+                    graph: &graph,
+                    constraints: &cons,
+                },
+                descriptor: &descriptor,
+            }],
+        );
+        assert!(out.contains("pub const REWRITES_PREPARED_TERMS: usize = 0;"), "{out}");
+        assert!(out.contains("AB::Expr::sum_array::<4>"), "{out}");
+        assert!(out.contains("<AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product::<4>"));
+        assert!(out.contains(" * ("), "factored products: {out}");
+        for input in ["m0[0].dup()", "a0[0].dup()"] {
+            assert!(out.contains(input), "missing native read {input}: {out}");
+        }
+        assert!(!out.contains("AB::ExprEF"));
+        assert!(!out.contains("builder."));
+        assert!(!out.contains("WindowAccess"));
+        assert!(!out.contains(&format!("m0[{}]", usize::MAX)));
+    }
+
+    #[test]
+    #[should_panic(expected = "native base assertion positions")]
+    fn native_rendering_rejects_an_accidentally_mismatched_layout() {
+        let (graph, mut cons, descriptor) = crate::ir::capture_native(&NativeRewrites).unwrap();
+        cons.base_global_indices.swap(0, 1);
+        emit_native_optimized_module(
+            "",
+            &[NativeAirEvaluator {
+                eval: AirEvaluator {
+                    name: "mismatch",
+                    air_label: "Mismatch",
+                    graph: &graph,
+                    constraints: &cons,
+                },
+                descriptor: &descriptor,
+            }],
+        );
+    }
+
+    #[test]
+    fn native_base_liftable_extension_constant_uses_the_native_type() {
+        let output = render_native_extension_constant(0);
+        assert!(
+            output.contains("AB::ExtExpr::from(AB::Expr::from(Felt::from_u64(1)))"),
+            "{output}"
+        );
+        assert!(!output.contains("AB::ExprEF"));
+    }
+
+    #[test]
+    #[should_panic(expected = "ext constant with non-base coefficients")]
+    fn native_rendering_keeps_the_nonbase_extension_constant_rejection() {
+        render_native_extension_constant(2);
+    }
+
+    fn render_native_extension_constant(second_coefficient: u64) -> String {
+        let mut builder = GraphBuilder::new();
+        let (cons, descriptor) =
+            crate::ir::capture_native_into_with(&NativeRewrites, &mut builder, |_, _, sink| {
+                native::LiftedAirBuilder::assert_zero_ext(
+                    sink,
+                    native::symbolic::SymbolicExpressionExt::<Felt, QuadFelt>::from(QuadFelt::new(
+                        [Felt::ONE, Felt::from_u64(second_coefficient)],
+                    )),
+                );
+            })
+            .unwrap();
+        let graph = builder.freeze();
+        emit_native_optimized_module(
+            "",
+            &[NativeAirEvaluator {
+                eval: AirEvaluator {
+                    name: "nonbase",
+                    air_label: "Nonbase",
+                    graph: &graph,
+                    constraints: &cons,
+                },
+                descriptor: &descriptor,
+            }],
+        )
     }
 
     #[test]

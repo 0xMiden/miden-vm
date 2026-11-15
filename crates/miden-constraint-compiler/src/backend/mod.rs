@@ -4,4 +4,5 @@
 //! own machinery (the ACE circuit in `miden-ace`) owns its backend as an
 //! IR consumer.
 
+pub mod rust_descriptor;
 pub mod rust_eval;
