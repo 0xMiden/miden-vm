@@ -7,6 +7,8 @@
 
 use core::array;
 
+use p3_field::Dup;
+
 use miden_core::{chiplets::eidos_compression, field::PrimeCharacteristicRing};
 use miden_stark::lookup::{Deg, LookupBatch, LookupGroup};
 
@@ -14,7 +16,7 @@ use crate::vm::{
     constraints::{
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
-            main_air::{MainBusContext, MainLookupBuilder},
+            main_air::{MainBusContext, NativeMainLookupBuilder},
             messages::{
                 BusId, HasherCompressionLinkMsg, HasherMsg, HasherPayload, RangeMsg, SiblingBit,
                 SiblingMsg,
@@ -27,17 +29,17 @@ use crate::vm::{
 
 pub(in crate::vm::constraints::lookup) fn emit_core_requests<LB, G>(
     g: &mut G,
-    ctx: &MainBusContext<LB>,
+    ctx: &MainBusContext<'_, LB::Expr>,
 ) where
-    LB: MainLookupBuilder,
+    LB: NativeMainLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     let stk = &ctx.local.stack;
     let stk_next = &ctx.next.stack;
     let user_helpers = ctx.local.decoder.user_op_helpers();
-    let helper0 = user_helpers[0];
-    let merkle_direction_bit = user_helpers[1];
-    let merkle_y3 = user_helpers[5];
+    let helper0 = user_helpers[0].dup();
+    let merkle_direction_bit = user_helpers[1].dup();
+    let merkle_y3 = user_helpers[5].dup();
     let op_flags = &ctx.op_flags;
     let cycle_len: LB::Expr = LB::Expr::from_u16(CONTROLLER_ROWS_PER_HASHER_OP as u16);
     // --- MPVERIFY ---
@@ -46,18 +48,18 @@ pub(in crate::vm::constraints::lookup) fn emit_core_requests<LB, G>(
         g.batch(
             "mpverify",
             op_flags.mpverify(),
-            move |b| {
-                let helper0: LB::Expr = helper0.into();
-                let mp_index = stk.get(5).into();
-                let mp_depth: LB::Expr = stk.get(4).into();
-                let stk_word_0 = array::from_fn(|i| stk.get(i).into());
-                let old_root = array::from_fn(|i| stk.get(6 + i).into());
+            |b| {
+                let helper0: LB::Expr = helper0.dup();
+                let mp_index = stk.get(5);
+                let mp_depth: LB::Expr = stk.get(4);
+                let stk_word_0 = array::from_fn(|i| stk.get(i));
+                let old_root = array::from_fn(|i| stk.get(6 + i));
                 b.remove(
                     "mpverify_init",
                     HasherMsg::merkle_verify_init(
                         helper0.clone(),
                         mp_index,
-                        merkle_direction_bit.into(),
+                        merkle_direction_bit.dup(),
                         stk_word_0,
                     ),
                     Deg { v: 5, u: 6 },
@@ -70,7 +72,7 @@ pub(in crate::vm::constraints::lookup) fn emit_core_requests<LB, G>(
                 );
                 b.remove(
                     "mpverify_merkle_y3",
-                    RangeMsg { value: merkle_y3.into() },
+                    RangeMsg { value: merkle_y3.dup() },
                     Deg { v: 5, u: 6 },
                 );
             },
@@ -83,20 +85,20 @@ pub(in crate::vm::constraints::lookup) fn emit_core_requests<LB, G>(
         g.batch(
             "mrupdate",
             op_flags.mrupdate(),
-            move |b| {
-                let helper0: LB::Expr = helper0.into();
-                let mr_index: LB::Expr = stk.get(5).into();
-                let mr_depth: LB::Expr = stk.get(4).into();
-                let stk_word_0 = array::from_fn(|i| stk.get(i).into());
-                let stk_next_word_0 = array::from_fn(|i| stk_next.get(i).into());
-                let old_root = array::from_fn(|i| stk.get(6 + i).into());
-                let new_node = array::from_fn(|i| stk.get(10 + i).into());
+            |b| {
+                let helper0: LB::Expr = helper0.dup();
+                let mr_index: LB::Expr = stk.get(5);
+                let mr_depth: LB::Expr = stk.get(4);
+                let stk_word_0 = array::from_fn(|i| stk.get(i));
+                let stk_next_word_0 = array::from_fn(|i| stk_next.get(i));
+                let old_root = array::from_fn(|i| stk.get(6 + i));
+                let new_node = array::from_fn(|i| stk.get(10 + i));
                 b.remove(
                     "mrupdate_old_init",
                     HasherMsg::merkle_old_init(
                         helper0.clone(),
                         mr_index.clone(),
-                        merkle_direction_bit.into(),
+                        merkle_direction_bit.dup(),
                         stk_word_0,
                     ),
                     Deg { v: 4, u: 5 },
@@ -114,7 +116,7 @@ pub(in crate::vm::constraints::lookup) fn emit_core_requests<LB, G>(
                     HasherMsg::merkle_new_init(
                         new_init_addr,
                         mr_index,
-                        merkle_direction_bit.into(),
+                        merkle_direction_bit.dup(),
                         new_node,
                     ),
                     Deg { v: 4, u: 5 },
@@ -134,15 +136,15 @@ pub(in crate::vm::constraints::lookup) fn emit_core_requests<LB, G>(
 
 pub(in crate::vm::constraints::lookup) fn emit_core_range_checks<LB, G>(
     g: &mut G,
-    ctx: &MainBusContext<LB>,
+    ctx: &MainBusContext<'_, LB::Expr>,
 ) where
-    LB: MainLookupBuilder,
+    LB: NativeMainLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     let f_mpverify = ctx.op_flags.mpverify();
     let f_mrupdate = ctx.op_flags.mrupdate();
     let merkle_depth = ctx.local.stack.get(4);
-    let merkle_y3 = ctx.local.decoder.user_op_helpers()[5];
+    let merkle_y3 = ctx.local.decoder.user_op_helpers()[5].dup();
     // Two simultaneous checks enforce `1 <= depth <= MAX_MERKLE_DEPTH`. The first
     // constrains `depth` to its canonical 16-bit value. The second checks
     // `(depth - 1) * (2^16 / MAX_MERKLE_DEPTH)`, which fits in 16 bits exactly for
@@ -157,15 +159,17 @@ pub(in crate::vm::constraints::lookup) fn emit_core_range_checks<LB, G>(
     g.batch(
         "mpverify_merkle_range_check",
         f_mpverify,
-        move |b| {
-            let depth: LB::Expr = merkle_depth.into();
+        |b| {
+            let depth: LB::Expr = merkle_depth.dup();
             let scaled_depth =
                 (depth.clone() - LB::Expr::ONE) * LB::Expr::from_u16(MERKLE_DEPTH_RANGE_SCALE);
             b.remove("mpverify_depth", RangeMsg { value: depth }, Deg { v: 5, u: 6 });
             b.remove("mpverify_depth_scaled", RangeMsg { value: scaled_depth }, Deg { v: 5, u: 6 });
             b.remove(
                 "mpverify_merkle_y3_doubled",
-                RangeMsg { value: LB::Expr::from_u16(2) * merkle_y3 },
+                RangeMsg {
+                    value: LB::Expr::from_u16(2) * merkle_y3.dup(),
+                },
                 Deg { v: 5, u: 6 },
             );
         },
@@ -174,20 +178,18 @@ pub(in crate::vm::constraints::lookup) fn emit_core_range_checks<LB, G>(
     g.batch(
         "mrupdate_merkle_range_check",
         f_mrupdate,
-        move |b| {
-            let depth: LB::Expr = merkle_depth.into();
+        |b| {
+            let depth: LB::Expr = merkle_depth.dup();
             let scaled_depth =
                 (depth.clone() - LB::Expr::ONE) * LB::Expr::from_u16(MERKLE_DEPTH_RANGE_SCALE);
             b.remove("mrupdate_depth", RangeMsg { value: depth }, Deg { v: 4, u: 5 });
             b.remove("mrupdate_depth_scaled", RangeMsg { value: scaled_depth }, Deg { v: 4, u: 5 });
-            b.remove(
-                "mrupdate_merkle_y3",
-                RangeMsg { value: merkle_y3.into() },
-                Deg { v: 4, u: 5 },
-            );
+            b.remove("mrupdate_merkle_y3", RangeMsg { value: merkle_y3.dup() }, Deg { v: 4, u: 5 });
             b.remove(
                 "mrupdate_merkle_y3_doubled",
-                RangeMsg { value: LB::Expr::from_u16(2) * merkle_y3 },
+                RangeMsg {
+                    value: LB::Expr::from_u16(2) * merkle_y3.dup(),
+                },
                 Deg { v: 4, u: 5 },
             );
         },
@@ -197,9 +199,9 @@ pub(in crate::vm::constraints::lookup) fn emit_core_range_checks<LB, G>(
 
 pub(in crate::vm::constraints::lookup) fn emit_core_index_limbs<LB, G>(
     g: &mut G,
-    ctx: &MainBusContext<LB>,
+    ctx: &MainBusContext<'_, LB::Expr>,
 ) where
-    LB: MainLookupBuilder,
+    LB: NativeMainLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     let op_flags = &ctx.op_flags;
@@ -214,7 +216,7 @@ pub(in crate::vm::constraints::lookup) fn emit_core_index_limbs<LB, G>(
             for helper in &helpers[2..5] {
                 b.remove(
                     "mpverify_merkle_y_limb",
-                    RangeMsg { value: (*helper).into() },
+                    RangeMsg { value: helper.dup() },
                     Deg { v: 5, u: 6 },
                 );
             }
@@ -228,7 +230,7 @@ pub(in crate::vm::constraints::lookup) fn emit_core_index_limbs<LB, G>(
             for helper in &helpers[2..5] {
                 b.remove(
                     "mrupdate_merkle_y_limb",
-                    RangeMsg { value: (*helper).into() },
+                    RangeMsg { value: helper.dup() },
                     Deg { v: 4, u: 5 },
                 );
             }

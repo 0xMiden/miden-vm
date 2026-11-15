@@ -16,15 +16,22 @@
 //! `build_chiplet_active` stays on the default; the chiplet selectors produce
 //! only six outputs via four subtractions, so the boolean shortcut is noise.
 
+use core::borrow::Borrow;
+
 use miden_core::field::ExtensionField;
 use miden_stark::{
-    air::LiftedAirBuilder,
-    lookup::{ConstraintLookupBuilder, ProverLookupBuilder},
+    air::{
+        LiftedAirBuilder, WindowAccess,
+        native::{self, migration::LegacyLookup},
+    },
+    lookup::{ConstraintLookupBuilder, ProverLookupBuilder, native as native_lookup},
 };
 
 use super::{
-    and8_lookup_air::And8LookupBuilder, buses::LookupOpFlags, chiplet_air::ChipletLookupBuilder,
-    main_air::MainLookupBuilder,
+    and8_lookup_air::And8LookupBuilder,
+    buses::LookupOpFlags,
+    chiplet_air::ChipletLookupBuilder,
+    main_air::{MainLookupBuilder, NativeMainLookupBuilder},
 };
 use crate::vm::{CoreCols, Felt};
 
@@ -60,11 +67,7 @@ where
     /// ~100 Felt multiplications in the shared prefix tree. Semantics match the default body
     /// on any valid trace; a `debug_assertions` parity check inside `from_boolean_row`
     /// surfaces divergences immediately.
-    fn build_op_flags(
-        &self,
-        local: &CoreCols<Self::Var>,
-        next: &CoreCols<Self::Var>,
-    ) -> LookupOpFlags<Self::Expr> {
+    fn build_op_flags(&self, local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> LookupOpFlags<Felt> {
         LookupOpFlags::from_boolean_row(&local.decoder, &local.stack, &next.decoder)
     }
 }
@@ -94,3 +97,38 @@ mod debug_impls {
     impl<'ab, 'r> ChipletLookupBuilder for ValidationBuilder<'ab, 'r> {}
     impl<'ab, 'r> And8LookupBuilder for ValidationBuilder<'ab, 'r> {}
 }
+
+// NATIVE MAIN-TRACE PATHS
+// ================================================================================================
+
+impl<B: native::LiftedAirBuilder<F = Felt>> NativeMainLookupBuilder
+    for native_lookup::ConstraintLookupBuilder<'_, '_, B>
+{
+}
+
+impl<EF: ExtensionField<Felt>> NativeMainLookupBuilder for ProverLookupBuilder<'_, Felt, EF> {
+    fn build_op_flags(&self, local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> LookupOpFlags<Felt> {
+        LookupOpFlags::from_boolean_row(&local.decoder, &local.stack, &next.decoder)
+    }
+}
+
+impl<LB: MainLookupBuilder> NativeMainLookupBuilder for LegacyLookup<'_, LB> {
+    fn build_op_flags(
+        &self,
+        _local: &CoreCols<LB::Expr>,
+        _next: &CoreCols<LB::Expr>,
+    ) -> LookupOpFlags<LB::Expr> {
+        // The bridge snapshots and this hook read the same stable builder row pair. Keep a single
+        // owned window alive only for flag construction; no legacy row/adapter borrow escapes.
+        let builder = self.legacy();
+        let main = builder.main();
+        let local: &CoreCols<LB::Var> =
+            main.current_slice()[..super::super::columns::NUM_CORE_COLS].borrow();
+        let next: &CoreCols<LB::Var> =
+            main.next_slice()[..super::super::columns::NUM_CORE_COLS].borrow();
+        MainLookupBuilder::build_op_flags(builder, local, next)
+    }
+}
+
+#[cfg(feature = "std")]
+impl NativeMainLookupBuilder for native_lookup::NativeValidationBuilder<'_> {}

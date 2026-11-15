@@ -8,6 +8,8 @@
 
 use core::array;
 
+use p3_field::Dup;
+
 use miden_core::field::PrimeCharacteristicRing;
 use miden_stark::lookup::{Deg, LookupBatch, LookupGroup};
 
@@ -15,7 +17,7 @@ use crate::vm::constraints::{
     chiplets::columns::AeadStreamCols,
     lookup::{
         chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
-        main_air::{MainBusContext, MainLookupBuilder},
+        main_air::{MainBusContext, NativeMainLookupBuilder},
         messages::{
             AeadEidosCompressionInputMsg, AeadEidosCompressionOutputPairMsg, AeadStreamRequestMsg,
             BytePairLookupMsg, MemoryMsg,
@@ -26,34 +28,34 @@ use crate::vm::constraints::{
 
 pub(in crate::vm::constraints::lookup) fn emit_core_requests<LB, G>(
     g: &mut G,
-    main_ctx: &MainBusContext<LB>,
+    main_ctx: &MainBusContext<'_, LB::Expr>,
 ) where
-    LB: MainLookupBuilder,
+    LB: NativeMainLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     let stk = &main_ctx.local.stack;
-    let clk = main_ctx.local.system.clk;
-    let sys_ctx = main_ctx.local.system.ctx;
+    let clk = main_ctx.local.system.clk.dup();
+    let sys_ctx = main_ctx.local.system.ctx.dup();
     let op_flags = &main_ctx.op_flags;
     let src_ptr = stk.get(5);
     let dst_ptr = stk.get(6);
     g.batch(
         "aead_stream",
         op_flags.cryptostream(),
-        move |b| {
+        |b| {
             let state = array::from_fn(|i| {
                 if i == 0 {
-                    stk.get(4).into()
+                    stk.get(4)
                 } else if i < 8 {
                     LB::Expr::ZERO
                 } else {
-                    stk.get(i - 8).into()
+                    stk.get(i - 8)
                 }
             });
             b.insert(
                 "aead_eidos_input",
                 LB::Expr::ONE,
-                AeadEidosCompressionInputMsg { clk: clk.into(), state },
+                AeadEidosCompressionInputMsg { clk: clk.dup(), state },
                 Deg { v: 4, u: 5 },
             );
             for (name, src_offset, dst_offset, lane_base) in
@@ -65,10 +67,10 @@ pub(in crate::vm::constraints::lookup) fn emit_core_requests<LB, G>(
                     name,
                     -LB::Expr::from_u16(2),
                     AeadStreamRequestMsg {
-                        ctx: sys_ctx.into(),
-                        clk: clk.into(),
-                        src_ptr: Into::<LB::Expr>::into(src_ptr) + LB::Expr::from_u16(src_offset),
-                        dst_ptr: Into::<LB::Expr>::into(dst_ptr) + LB::Expr::from_u16(dst_offset),
+                        ctx: sys_ctx.dup(),
+                        clk: clk.dup(),
+                        src_ptr: src_ptr.dup() + LB::Expr::from_u16(src_offset),
+                        dst_ptr: dst_ptr.dup() + LB::Expr::from_u16(dst_offset),
                         lane_base: LB::Expr::from_u16(lane_base),
                     },
                     Deg { v: 4, u: 5 },

@@ -192,6 +192,17 @@ where
 #[doc(hidden)]
 pub struct LegacyLookup<'a, LB>(&'a mut LB);
 
+impl<LB> LegacyLookup<'_, LB> {
+    /// Reborrow the stable legacy row reader for a source-specific construction hook.
+    ///
+    /// The bridge constructs the native frame from these same current/next rows. Hooks return
+    /// owned expressions before mutable column callbacks begin; the constructor stays private.
+    #[doc(hidden)]
+    pub fn legacy(&self) -> &LB {
+        &*self.0
+    }
+}
+
 impl<LB: lookup::LookupBuilder> native::LookupBuilder for LegacyLookup<'_, LB> {
     type F = LB::F;
     type Expr = LB::Expr;

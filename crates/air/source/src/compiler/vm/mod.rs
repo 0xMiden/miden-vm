@@ -3,6 +3,9 @@
 mod multi_air;
 mod recursive;
 
+use alloc::vec::Vec;
+
+use miden_ace::AceError;
 pub use miden_ace::compiler::{CapturedAir, CompiledRelation, LayoutKind};
 use p3_security::budget::{AirShape, LookupShape};
 
@@ -12,8 +15,25 @@ pub use self::{
 };
 use crate::{
     shared::geometry::NUM_OOD_POINTS,
-    vm::{AIRS, logup::MIDEN_MAX_MESSAGE_WIDTH},
+    vm::{AIRS, CoreAir, MidenAir, logup::MIDEN_MAX_MESSAGE_WIDTH},
 };
+
+/// Canonical authored captures shared by VM evaluator and ACE generation.
+///
+/// Only complete source ports use native capture; other variants retain their legacy source
+/// route. Pairing declarations with their capture preserves instance order for every backend.
+pub fn capture_vm_airs() -> Result<Vec<(MidenAir, CapturedAir)>, AceError> {
+    AIRS.iter()
+        .copied()
+        .map(|air| {
+            let captured = match air {
+                MidenAir::Core => CapturedAir::new_native(&CoreAir),
+                _ => CapturedAir::new(&air),
+            }?;
+            Ok((air, captured))
+        })
+        .collect()
+}
 
 /// Derive the security shape for tooling and differential validation.
 pub fn derive_air_shape() -> AirShape {

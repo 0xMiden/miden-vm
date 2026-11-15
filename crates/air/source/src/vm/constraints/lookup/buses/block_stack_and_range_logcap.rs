@@ -64,12 +64,13 @@ use core::array;
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_stark::lookup::{Deg, LookupBatch, LookupColumn, LookupGroup};
+use p3_field::Dup;
 
 use super::super::operations::merkle;
 use crate::vm::{
     constraints::{
         lookup::{
-            main_air::{MainBusContext, MainLookupBuilder},
+            main_air::{MainBusContext, NativeMainLookupBuilder},
             messages::{BlockStackMsg, LogDeferredMsg, RangeMsg},
         },
         utils::BoolNot,
@@ -86,9 +87,9 @@ pub(in crate::vm::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 4
 /// Emit the merged block-stack + u32/Merkle-depth range-check + logpre column.
 pub(in crate::vm::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     builder: &mut LB,
-    ctx: &MainBusContext<LB>,
+    ctx: &MainBusContext<'_, LB::Expr>,
 ) where
-    LB: MainLookupBuilder,
+    LB: NativeMainLookupBuilder,
 {
     let local = ctx.local;
     let next = ctx.next;
@@ -105,25 +106,25 @@ pub(in crate::vm::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     // (see `end_block_flags()`). DYNCALL reads `h[4]`/`h[5]` as the caller stack depth and
     // caller overflow address; END reads its semantic flags through the typed `EndBlockFlags`
     // overlay.
-    let addr = dec.addr;
-    let addr_next = dec_next.addr;
-    let h4 = dec.hasher_state[4];
-    let h5 = dec.hasher_state[5];
-    let h1_next = dec_next.hasher_state[1];
+    let addr = dec.addr.dup();
+    let addr_next = dec_next.addr.dup();
+    let h4 = dec.hasher_state[4].dup();
+    let h5 = dec.hasher_state[5].dup();
+    let h1_next = dec_next.hasher_state[1].dup();
     let end_flags = dec.end_block_flags();
 
-    let b0 = stk.b0;
-    let b1 = stk.b1;
-    let b0_next = stk_next.b0;
-    let b1_next = stk_next.b1;
+    let b0 = stk.b0.dup();
+    let b1 = stk.b1.dup();
+    let b0_next = stk_next.b0.dup();
+    let b1_next = stk_next.b1.dup();
 
-    let sys_ctx = local.system.ctx;
-    let sys_ctx_next = next.system.ctx;
+    let sys_ctx = local.system.ctx.dup();
+    let sys_ctx_next = next.system.ctx.dup();
 
     // `fn_hash` is used by caller-frame additions (DYNCALL, CALL, SYSCALL), and `fn_hash_next`
     // is used by caller-frame END removals.
-    let fn_hash = local.system.fn_hash;
-    let fn_hash_next = next.system.fn_hash;
+    let fn_hash = local.system.fn_hash.clone();
+    let fn_hash_next = next.system.fn_hash.clone();
 
     // ---- u32 and Merkle-depth range-check + logpre captures (from range_logcap.rs) ----
 
@@ -132,12 +133,13 @@ pub(in crate::vm::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     let f_log_deferred = op_flags.log_deferred();
 
     // u32rc helpers: first 4 of the 6 user_op_helpers.
-    let u32rc_helpers: [LB::Var; 4] = array::from_fn(|i| user_helpers[i]);
+    let u32rc_helpers: [LB::Expr; 4] = array::from_fn(|i| user_helpers[i].dup());
 
     // LOGDEFERRED transcript-state add/remove payloads.
-    let state_prev: [LB::Var; 4] =
-        array::from_fn(|i| user_helpers[HELPER_STATE_PREV_RANGE.start + i]);
-    let state_new: [LB::Var; 4] = array::from_fn(|i| stk_next.get(STACK_STATE_NEW_RANGE.start + i));
+    let state_prev: [LB::Expr; 4] =
+        array::from_fn(|i| user_helpers[HELPER_STATE_PREV_RANGE.start + i].dup());
+    let state_new: [LB::Expr; 4] =
+        array::from_fn(|i| stk_next.get(STACK_STATE_NEW_RANGE.start + i));
 
     builder.next_column(
         |col| {
@@ -154,8 +156,8 @@ pub(in crate::vm::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         "join_split_span_dyn",
                         f,
                         || {
-                            let block_id = addr_next.into();
-                            let parent_id = addr.into();
+                            let block_id = addr_next.dup();
+                            let parent_id = addr.dup();
                             let is_loop = LB::Expr::ZERO;
                             BlockStackMsg::Continuation { block_id, parent_id, is_loop }
                         },
@@ -168,8 +170,8 @@ pub(in crate::vm::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         "loop",
                         op_flags.loop_op(),
                         || {
-                            let block_id = addr_next.into();
-                            let parent_id = addr.into();
+                            let block_id = addr_next.dup();
+                            let parent_id = addr.dup();
                             let is_loop = LB::Expr::ONE;
                             BlockStackMsg::Continuation { block_id, parent_id, is_loop }
                         },
@@ -182,12 +184,12 @@ pub(in crate::vm::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         "dyncall",
                         op_flags.dyncall(),
                         || {
-                            let block_id = addr_next.into();
-                            let parent_id = addr.into();
-                            let caller_ctx = sys_ctx.into();
-                            let caller_stack_depth = h4.into();
-                            let caller_overflow_addr = h5.into();
-                            let caller_fn_hash = fn_hash.map(LB::Expr::from);
+                            let block_id = addr_next.dup();
+                            let parent_id = addr.dup();
+                            let caller_ctx = sys_ctx.dup();
+                            let caller_stack_depth = h4.dup();
+                            let caller_overflow_addr = h5.dup();
+                            let caller_fn_hash = fn_hash.clone();
                             BlockStackMsg::CallerFrame {
                                 block_id,
                                 parent_id,
@@ -206,12 +208,12 @@ pub(in crate::vm::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         "call_syscall",
                         f,
                         || {
-                            let block_id = addr_next.into();
-                            let parent_id = addr.into();
-                            let caller_ctx = sys_ctx.into();
-                            let caller_stack_depth = b0.into();
-                            let caller_overflow_addr = b1.into();
-                            let caller_fn_hash = fn_hash.map(LB::Expr::from);
+                            let block_id = addr_next.dup();
+                            let parent_id = addr.dup();
+                            let caller_ctx = sys_ctx.dup();
+                            let caller_stack_depth = b0.dup();
+                            let caller_overflow_addr = b1.dup();
+                            let caller_fn_hash = fn_hash.clone();
                             BlockStackMsg::CallerFrame {
                                 block_id,
                                 parent_id,
@@ -225,15 +227,15 @@ pub(in crate::vm::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                     );
 
                     // END of a continuation: pop with the stored is_loop.
-                    let restores_caller_frame: LB::Expr = end_flags.restores_caller_frame.into();
+                    let restores_caller_frame: LB::Expr = end_flags.restores_caller_frame.dup();
                     let f = op_flags.end() * restores_caller_frame.not();
                     g.remove(
                         "end_continuation",
                         f,
                         || {
-                            let block_id = addr.into();
-                            let parent_id = addr_next.into();
-                            let is_loop = end_flags.is_loop.into();
+                            let block_id = addr.dup();
+                            let parent_id = addr_next.dup();
+                            let is_loop = end_flags.is_loop.dup();
                             BlockStackMsg::Continuation { block_id, parent_id, is_loop }
                         },
                         Deg { v: 5, u: 6 },
@@ -245,12 +247,12 @@ pub(in crate::vm::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         "end_caller_frame",
                         f,
                         || {
-                            let block_id = addr.into();
-                            let parent_id = addr_next.into();
-                            let caller_ctx = sys_ctx_next.into();
-                            let caller_stack_depth = b0_next.into();
-                            let caller_overflow_addr = b1_next.into();
-                            let caller_fn_hash = fn_hash_next.map(LB::Expr::from);
+                            let block_id = addr.dup();
+                            let parent_id = addr_next.dup();
+                            let caller_ctx = sys_ctx_next.dup();
+                            let caller_stack_depth = b0_next.dup();
+                            let caller_overflow_addr = b1_next.dup();
+                            let caller_fn_hash = fn_hash_next.clone();
                             BlockStackMsg::CallerFrame {
                                 block_id,
                                 parent_id,
@@ -268,8 +270,8 @@ pub(in crate::vm::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         "respan",
                         op_flags.respan(),
                         |b| {
-                            let block_id_add = addr_next.into();
-                            let parent_id_add = h1_next.into();
+                            let block_id_add = addr_next.dup();
+                            let parent_id_add = h1_next.dup();
                             let is_loop_add = LB::Expr::ZERO;
                             b.add(
                                 "respan_add",
@@ -280,8 +282,8 @@ pub(in crate::vm::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                                 },
                                 Deg { v: 4, u: 5 },
                             );
-                            let block_id_rem = addr.into();
-                            let parent_id_rem = h1_next.into();
+                            let block_id_rem = addr.dup();
+                            let parent_id_rem = h1_next.dup();
                             let is_loop_rem = LB::Expr::ZERO;
                             b.remove(
                                 "respan_remove",
@@ -303,9 +305,9 @@ pub(in crate::vm::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                     g.batch(
                         "u32_range_check",
                         f_u32rc,
-                        move |b| {
+                        |b| {
                             for helper in u32rc_helpers {
-                                let value = helper.into();
+                                let value = helper.dup();
                                 b.remove("u32rc_remove", RangeMsg { value }, Deg { v: 3, u: 4 });
                             }
                         },
@@ -325,14 +327,14 @@ pub(in crate::vm::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                     g.batch(
                         "log_deferred_state",
                         f_log_deferred,
-                        move |b| {
-                            let state_prev_expr = state_prev.map(LB::Expr::from);
+                        |b| {
+                            let state_prev_expr = state_prev.clone();
                             b.remove(
                                 "logpre_state_remove",
                                 LogDeferredMsg { state: state_prev_expr },
                                 Deg { v: 5, u: 6 },
                             );
-                            let state_new_expr = state_new.map(LB::Expr::from);
+                            let state_new_expr = state_new.clone();
                             b.add(
                                 "logpre_state_add",
                                 LogDeferredMsg { state: state_new_expr },
@@ -342,14 +344,14 @@ pub(in crate::vm::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         Deg { v: 6, u: 7 }, // (V, U) = (1 + 5, 2 + 5)
                     );
 
-                    let root_to_clear: [LB::Var; 4] = array::from_fn(|i| stk.get(i));
+                    let root_to_clear: [LB::Expr; 4] = array::from_fn(|i| stk.get(i));
                     g.batch(
                         "clear_deferred_state",
                         op_flags.clear_deferred(),
                         |b| {
                             b.remove(
                                 "clear_deferred_state_remove",
-                                LogDeferredMsg { state: root_to_clear.map(LB::Expr::from) },
+                                LogDeferredMsg { state: root_to_clear.clone() },
                                 Deg { v: 7, u: 8 },
                             );
                             b.add(

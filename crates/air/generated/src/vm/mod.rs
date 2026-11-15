@@ -8,6 +8,7 @@ mod airs;
 pub mod config;
 #[allow(clippy::eq_op)]
 mod generated;
+pub mod native;
 mod proof_order;
 pub mod security;
 mod statement;

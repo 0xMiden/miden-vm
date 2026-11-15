@@ -19,6 +19,22 @@ use miden_core::{Felt, field::QuadFelt};
 const SEEDS: [u64; 4] =
     [0x243f6a8885a308d3, 0x13198a2e03707344, 0xa4093822299f31d0, 0x082efa98ec4e6c89];
 
+#[path = "common/native_registration.rs"]
+mod native_registration;
+
+#[test]
+fn native_core_registration_keeps_source_metadata_and_prepared_execution() {
+    use miden_air::vm::native::CoreKernel;
+    use miden_air_definitions::vm::{CoreAir, MidenAir};
+
+    native_registration::assert_native_registration(
+        &CoreAir,
+        &MidenAir::Core,
+        &CoreKernel::new(),
+        &SEEDS,
+    );
+}
+
 /// Guards `miden-constraint-compiler` crate invariant 1: capture must read the
 /// hand-written definitions. The emitter flips mixed-class commutative
 /// operands, so honest routing yields raw (pre-canonicalization) root ids that

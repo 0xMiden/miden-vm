@@ -1034,7 +1034,7 @@ fn accumulate_depth_deltas<const N: usize, E: PrimeCharacteristicRing>(
 /// - Op bits extra columns are computed for degree reduction
 /// - All other columns are zero
 #[cfg(test)]
-pub(super) fn generate_test_row(
+pub(in crate::vm) fn generate_test_row(
     opcode: usize,
 ) -> crate::vm::constraints::columns::CoreCols<miden_core::Felt> {
     use core::borrow::{Borrow, BorrowMut};

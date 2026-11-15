@@ -466,7 +466,12 @@ impl<'a> CompiledRelation<'a> {
         Self::with_quotient_chunks(airs, trace_alignment, None)
     }
 
-    pub(crate) fn with_quotient_chunks(
+    /// Derive artifact geometry with a caller-selected quotient allocation.
+    ///
+    /// `None` uses the existing raw-degree-derived allocation. `Some` preserves the caller's
+    /// configuration, including a larger allocation. Setup must separately check actual-height
+    /// descriptor capacity; artifact geometry does not establish that proof-engine requirement.
+    pub fn with_quotient_chunks(
         airs: &[&'a CapturedAir],
         trace_alignment: usize,
         chunks: Option<usize>,
