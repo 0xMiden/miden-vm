@@ -8,7 +8,7 @@ use core::marker::PhantomData;
 use p3_field::{ExtensionField, Field};
 
 use crate::{
-    air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow},
+    air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow, native},
     selectors::Selectors,
 };
 
@@ -48,6 +48,26 @@ where
     pub _phantom: PhantomData<F>,
 }
 
+impl<F: Field, EF: ExtensionField<F>> ConstraintFolder<'_, F, EF> {
+    fn fold(&mut self, value: EF) {
+        self.accumulator = self.accumulator * self.alpha + value;
+    }
+}
+
+impl<F: Field, EF: ExtensionField<F>> native::LiftedAirBuilder for ConstraintFolder<'_, F, EF> {
+    type F = F;
+    type Expr = EF;
+    type ExtExpr = EF;
+
+    fn emit_base(&mut self, value: EF, _meta: native::ConstraintMeta<'_>) {
+        self.fold(value);
+    }
+
+    fn emit_ext(&mut self, value: EF, _meta: native::ConstraintMeta<'_>) {
+        self.fold(value);
+    }
+}
+
 impl<'a, F, EF> AirBuilder for ConstraintFolder<'a, F, EF>
 where
     F: Field,
@@ -82,7 +102,7 @@ where
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
-        self.accumulator = self.accumulator * self.alpha + x.into();
+        self.fold(x.into());
     }
 
     fn public_values(&self) -> &[Self::PublicVar] {
@@ -107,7 +127,7 @@ where
     where
         I: Into<Self::ExprEF>,
     {
-        self.accumulator = self.accumulator * self.alpha + x.into();
+        self.fold(x.into());
     }
 }
 
@@ -130,5 +150,63 @@ where
 
     fn permutation_values(&self) -> &[Self::PermutationVar] {
         self.permutation_values
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use p3_field::PrimeCharacteristicRing;
+
+    use super::*;
+    use crate::testing::configs::{Felt, QuadFelt};
+
+    fn folder(alpha: QuadFelt) -> ConstraintFolder<'static, Felt, QuadFelt> {
+        ConstraintFolder {
+            main: RowWindow::from_two_rows(&[], &[]),
+            preprocessed: RowWindow::from_two_rows(&[], &[]),
+            aux: RowWindow::from_two_rows(&[], &[]),
+            randomness: &[],
+            public_values: &[],
+            periodic_values: &[],
+            permutation_values: &[],
+            selectors: Selectors {
+                is_first_row: QuadFelt::ZERO,
+                is_last_row: QuadFelt::ZERO,
+                is_transition: QuadFelt::ZERO,
+            },
+            alpha,
+            accumulator: QuadFelt::ZERO,
+            _phantom: PhantomData,
+        }
+    }
+
+    #[test]
+    fn native_scalar_folder_keeps_zero_and_repeated_interleaved_emissions() {
+        let alpha = QuadFelt::new([Felt::from_u32(7), Felt::from_u32(11)]);
+        let first = QuadFelt::from_u32(13);
+        let repeated = QuadFelt::new([Felt::from_u32(17), Felt::from_u32(19)]);
+        let last = QuadFelt::from_u32(23);
+        let mut legacy = folder(alpha);
+        AirBuilder::assert_zero(&mut legacy, first);
+        ExtensionBuilder::assert_zero_ext(&mut legacy, QuadFelt::ZERO);
+        AirBuilder::assert_zero(&mut legacy, repeated);
+        ExtensionBuilder::assert_zero_ext(&mut legacy, repeated);
+        AirBuilder::assert_zero(&mut legacy, last);
+
+        let mut native_folder = folder(alpha);
+        native::LiftedAirBuilder::assert_zero(&mut native_folder, first);
+        native::LiftedAirBuilder::assert_zero_ext(
+            &mut native::LiftedAirBuilder::when(&mut native_folder, QuadFelt::ZERO),
+            repeated,
+        );
+        native::LiftedAirBuilder::assert_zero(&mut native_folder, repeated);
+        native::LiftedAirBuilder::assert_zero_ext(&mut native_folder, repeated);
+        native::LiftedAirBuilder::assert_zero(&mut native_folder, last);
+
+        // Five emissions assign descending powers 4 through 0, including the zero-gated emission.
+        let expected =
+            first * alpha.exp_u64(4) + repeated * alpha.square() + repeated * alpha + last;
+        assert_eq!(legacy.accumulator, expected);
+        assert_eq!(native_folder.accumulator, expected);
     }
 }
