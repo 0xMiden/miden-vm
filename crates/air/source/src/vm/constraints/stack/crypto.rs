@@ -18,13 +18,14 @@
 //! - **MPVERIFY / MRUPDATE**: Bind the Merkle node index to its canonical field representative.
 
 use miden_core::{Felt, field::PrimeCharacteristicRing};
-use miden_stark::air::AirBuilder;
+use miden_stark::air::native::LiftedAirBuilder;
+use p3_field::Dup;
 
 use crate::vm::{
-    CoreCols, MidenAirBuilder,
+    CoreCols, NativeMidenAirBuilder,
     constraints::{
         constants::{F_1, F_2, F_3, F_8, F_16, TWO_POW_16, TWO_POW_32, TWO_POW_48},
-        ext_field::{QuadFeltAirBuilder, QuadFeltExpr},
+        ext_field::{NativeQuadFeltAirBuilder, QuadFeltExpr},
         op_flags::OpFlags,
     },
 };
@@ -41,11 +42,11 @@ const TAU3_INV: Felt = Felt::new_unchecked(281474976710656);
 /// Enforces crypto operation constraints.
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &CoreCols<AB::Var>,
-    next: &CoreCols<AB::Var>,
+    local: &CoreCols<AB::Expr>,
+    next: &CoreCols<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     enforce_aead_stream_constraints(builder, local, next, op_flags);
     enforce_merkle_index_canonicality(builder, local, op_flags);
@@ -66,18 +67,18 @@ pub fn enforce_main<AB>(
 /// non-canonical depth-64 alias `index + p` without consuming any hasher-controller columns.
 fn enforce_merkle_index_canonicality<AB>(
     builder: &mut AB,
-    local: &CoreCols<AB::Var>,
+    local: &CoreCols<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     let helpers = local.decoder.user_op_helpers();
-    let bit: AB::Expr = helpers[1].into();
-    let y = Into::<AB::Expr>::into(helpers[2])
-        + AB::Expr::from(TWO_POW_16) * helpers[3]
-        + AB::Expr::from(TWO_POW_32) * helpers[4]
-        + AB::Expr::from(TWO_POW_48) * helpers[5];
-    let index: AB::Expr = local.stack.get(5).into();
+    let bit: AB::Expr = helpers[1].dup();
+    let y = helpers[2].dup()
+        + AB::Expr::from(TWO_POW_16) * helpers[3].dup()
+        + AB::Expr::from(TWO_POW_32) * helpers[4].dup()
+        + AB::Expr::from(TWO_POW_48) * helpers[5].dup();
+    let index: AB::Expr = local.stack.get(5);
     let gate = op_flags.mpverify() + op_flags.mrupdate();
     let merkle = &mut builder.when(gate);
 
@@ -94,11 +95,11 @@ fn enforce_merkle_index_canonicality<AB>(
 /// to `[K_CTR(4), counter+1, src+8, dst+16, remaining-1, ...]`.
 fn enforce_aead_stream_constraints<AB>(
     builder: &mut AB,
-    local: &CoreCols<AB::Var>,
-    next: &CoreCols<AB::Var>,
+    local: &CoreCols<AB::Expr>,
+    next: &CoreCols<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     let builder = &mut builder.when(op_flags.cryptostream());
 
@@ -106,16 +107,16 @@ fn enforce_aead_stream_constraints<AB>(
     let s_next = &next.stack.top;
 
     for i in 0..4 {
-        builder.assert_eq(s_next[i], s[i]);
+        builder.assert_eq(s_next[i].dup(), s[i].dup());
     }
 
-    builder.assert_eq(s_next[4], s[4].into() + F_1);
-    builder.assert_eq(s_next[5], s[5].into() + F_8);
-    builder.assert_eq(s_next[6], s[6].into() + F_16);
-    builder.assert_eq(s_next[7], s[7].into() - F_1);
+    builder.assert_eq(s_next[4].dup(), s[4].dup() + F_1);
+    builder.assert_eq(s_next[5].dup(), s[5].dup() + F_8);
+    builder.assert_eq(s_next[6].dup(), s[6].dup() + F_16);
+    builder.assert_eq(s_next[7].dup(), s[7].dup() - F_1);
 
     for i in 8..16 {
-        builder.assert_eq(s_next[i], s[i]);
+        builder.assert_eq(s_next[i].dup(), s[i].dup());
     }
 }
 
@@ -149,11 +150,11 @@ fn enforce_aead_stream_constraints<AB>(
 ///   acc' = tmp1 * alpha^3 + (c5 * alpha^2 + c6 * alpha + c7)
 fn enforce_hornerbase_constraints<AB>(
     builder: &mut AB,
-    local: &CoreCols<AB::Var>,
-    next: &CoreCols<AB::Var>,
+    local: &CoreCols<AB::Expr>,
+    next: &CoreCols<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     let horner_builder = &mut builder.when(op_flags.hornerbase());
 
@@ -162,20 +163,20 @@ fn enforce_hornerbase_constraints<AB>(
     let helpers = local.decoder.user_op_helpers();
 
     // Extension element alpha and its powers.
-    let alpha: QuadFeltExpr<AB::Expr> = QuadFeltExpr::new(helpers[0], helpers[1]);
+    let alpha: QuadFeltExpr<AB::Expr> = QuadFeltExpr::new(helpers[0].dup(), helpers[1].dup());
     let alpha_sq = alpha.clone().square();
     let alpha_cubed = alpha_sq.clone() * alpha.clone();
 
     // Nondeterministic intermediates from decoder helpers.
-    let tmp0 = QuadFeltExpr::new(helpers[4], helpers[5]);
-    let tmp1 = QuadFeltExpr::new(helpers[2], helpers[3]);
+    let tmp0 = QuadFeltExpr::new(helpers[4].dup(), helpers[5].dup());
+    let tmp1 = QuadFeltExpr::new(helpers[2].dup(), helpers[3].dup());
 
     // Accumulator.
-    let acc = QuadFeltExpr::new(s[14], s[15]);
-    let acc_next = QuadFeltExpr::new(s_next[14], s_next[15]);
+    let acc = QuadFeltExpr::new(s[14].dup(), s[15].dup());
+    let acc_next = QuadFeltExpr::new(s_next[14].dup(), s_next[15].dup());
 
     // Base-field coefficient accessor.
-    let c = |i: usize| -> AB::Expr { s[i].into() };
+    let c = |i: usize| -> AB::Expr { s[i].dup() };
 
     // tmp0 = acc * alpha^2 + (c0 * alpha + c1)
     let tmp0_expected = acc * alpha_sq.clone() + alpha.clone() * c(0) + c(1);
@@ -222,11 +223,11 @@ fn enforce_hornerbase_constraints<AB>(
 /// constrained here.
 fn enforce_hornerext_constraints<AB>(
     builder: &mut AB,
-    local: &CoreCols<AB::Var>,
-    next: &CoreCols<AB::Var>,
+    local: &CoreCols<AB::Expr>,
+    next: &CoreCols<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     let horner_builder = &mut builder.when(op_flags.hornerext());
 
@@ -235,21 +236,21 @@ fn enforce_hornerext_constraints<AB>(
     let helpers = local.decoder.user_op_helpers();
 
     // Extension element alpha and its square.
-    let alpha: QuadFeltExpr<AB::Expr> = QuadFeltExpr::new(helpers[0], helpers[1]);
+    let alpha: QuadFeltExpr<AB::Expr> = QuadFeltExpr::new(helpers[0].dup(), helpers[1].dup());
     let alpha_sq = alpha.clone().square();
 
     // Nondeterministic intermediate from decoder helpers.
-    let tmp = QuadFeltExpr::new(helpers[4], helpers[5]);
+    let tmp = QuadFeltExpr::new(helpers[4].dup(), helpers[5].dup());
 
     // Accumulator.
-    let acc = QuadFeltExpr::new(s[14], s[15]);
-    let acc_next = QuadFeltExpr::new(s_next[14], s_next[15]);
+    let acc = QuadFeltExpr::new(s[14].dup(), s[15].dup());
+    let acc_next = QuadFeltExpr::new(s_next[14].dup(), s_next[15].dup());
 
     // Extension-field coefficient pairs from the stack.
-    let c0 = QuadFeltExpr::new(s[0], s[1]);
-    let c1 = QuadFeltExpr::new(s[2], s[3]);
-    let c2 = QuadFeltExpr::new(s[4], s[5]);
-    let c3 = QuadFeltExpr::new(s[6], s[7]);
+    let c0 = QuadFeltExpr::new(s[0].dup(), s[1].dup());
+    let c1 = QuadFeltExpr::new(s[2].dup(), s[3].dup());
+    let c2 = QuadFeltExpr::new(s[4].dup(), s[5].dup());
+    let c3 = QuadFeltExpr::new(s[6].dup(), s[7].dup());
 
     // tmp = acc * alpha^2 + (c0 * alpha + c1)
     let tmp_expected = acc * alpha_sq.clone() + alpha.clone() * c0 + c1;
@@ -332,11 +333,11 @@ fn enforce_hornerext_constraints<AB>(
 /// Fold4 pairs conjugate points: (q0, q2) and (q1, q3).
 fn enforce_frie2f4_constraints<AB>(
     builder: &mut AB,
-    local: &CoreCols<AB::Var>,
-    next: &CoreCols<AB::Var>,
+    local: &CoreCols<AB::Expr>,
+    next: &CoreCols<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     let builder = &mut builder.when(op_flags.frie2f4());
 
@@ -348,17 +349,17 @@ fn enforce_frie2f4_constraints<AB>(
     // Inputs (current trace row)
     // ==========================================================================
     // Leaf values are quadratic-extension values stored in bit-reversed order.
-    let q0 = QuadFeltExpr::new(s[0], s[1]);
-    let q2 = QuadFeltExpr::new(s[2], s[3]);
-    let q1 = QuadFeltExpr::new(s[4], s[5]);
-    let q3 = QuadFeltExpr::new(s[6], s[7]);
+    let q0 = QuadFeltExpr::new(s[0].dup(), s[1].dup());
+    let q2 = QuadFeltExpr::new(s[2].dup(), s[3].dup());
+    let q1 = QuadFeltExpr::new(s[4].dup(), s[5].dup());
+    let q3 = QuadFeltExpr::new(s[6].dup(), s[7].dup());
 
-    let folded_pos = s[8];
-    let coset = s[9];
-    let poe = s[10];
-    let prev_eval = QuadFeltExpr::new(s[11], s[12]);
-    let alpha = QuadFeltExpr::new(s[13], s[14]);
-    let layer_ptr = s[15];
+    let folded_pos = s[8].dup();
+    let coset = s[9].dup();
+    let poe = s[10].dup();
+    let prev_eval = QuadFeltExpr::new(s[11].dup(), s[12].dup());
+    let alpha = QuadFeltExpr::new(s[13].dup(), s[14].dup());
+    let layer_ptr = s[15].dup();
 
     // ==========================================================================
     // Phase 1: Coset identification
@@ -366,22 +367,24 @@ fn enforce_frie2f4_constraints<AB>(
     // The coset flags are one-hot and use natural order: flag_i is active when coset == i.
     // The flags also select the tau factor used to compute the domain point.
 
-    let coset_flag_1: AB::Expr = s_next[4].into();
-    let coset_flag_2: AB::Expr = s_next[5].into();
-    let coset_flag_3: AB::Expr = s_next[6].into();
+    let coset_flag_1: AB::Expr = s_next[4].dup();
+    let coset_flag_2: AB::Expr = s_next[5].dup();
+    let coset_flag_3: AB::Expr = s_next[6].dup();
     let coset_flag_0 =
         AB::Expr::ONE - coset_flag_1.clone() - coset_flag_2.clone() - coset_flag_3.clone();
 
     // One-hot coset encoding.
-    builder.assert_bools([
+    for value in [
         coset_flag_0.clone(),
         coset_flag_1.clone(),
         coset_flag_2.clone(),
         coset_flag_3.clone(),
-    ]);
+    ] {
+        builder.assert_bool(value);
+    }
 
     // coset = 0*flag0 + 1*flag1 + 2*flag2 + 3*flag3.
-    let folded_pos_next = s_next[11];
+    let folded_pos_next = s_next[11].dup();
     let expected_coset =
         coset_flag_1.clone() + coset_flag_2.clone() * F_2 + coset_flag_3.clone() * F_3;
     builder.assert_eq(coset, expected_coset);
@@ -404,17 +407,18 @@ fn enforce_frie2f4_constraints<AB>(
     // Constraining the relations here forces the prover to provide correct values.
 
     // domain_point = poe * tau_factor.
-    let domain_point = helpers[4];
-    let domain_point_inv = helpers[5];
-    builder.assert_eq(domain_point, poe * expected_tau);
-    builder.assert_one(domain_point * domain_point_inv);
+    let domain_point = helpers[4].dup();
+    let domain_point_inv = helpers[5].dup();
+    builder.assert_eq(domain_point.dup(), poe.dup() * expected_tau);
+    builder.assert_one(domain_point * domain_point_inv.dup());
 
     // eval_point = alpha / domain_point = alpha * domain_point_inv.
-    let eval_point: QuadFeltExpr<AB::Expr> = QuadFeltExpr::new(helpers[0], helpers[1]);
-    builder.assert_eq_quad(eval_point.clone(), alpha * domain_point_inv.into());
+    let eval_point: QuadFeltExpr<AB::Expr> = QuadFeltExpr::new(helpers[0].dup(), helpers[1].dup());
+    builder.assert_eq_quad(eval_point.clone(), alpha * domain_point_inv);
 
     // eval_point_sq = eval_point^2.
-    let eval_point_sq: QuadFeltExpr<AB::Expr> = QuadFeltExpr::new(helpers[2], helpers[3]);
+    let eval_point_sq: QuadFeltExpr<AB::Expr> =
+        QuadFeltExpr::new(helpers[2].dup(), helpers[3].dup());
     builder.assert_eq_quad(eval_point_sq.clone(), eval_point.clone().square());
 
     // ==========================================================================
@@ -436,9 +440,9 @@ fn enforce_frie2f4_constraints<AB>(
      -> QuadFeltExpr<AB::Expr> { (a.clone() + b.clone()) + (a - b) * ep };
 
     // Degree-reduction intermediates.
-    let fold_mid0 = QuadFeltExpr::new(s_next[0], s_next[1]);
-    let fold_mid1 = QuadFeltExpr::new(s_next[2], s_next[3]);
-    let fold_result = QuadFeltExpr::new(s_next[12], s_next[13]);
+    let fold_mid0 = QuadFeltExpr::new(s_next[0].dup(), s_next[1].dup());
+    let fold_mid1 = QuadFeltExpr::new(s_next[2].dup(), s_next[3].dup());
+    let fold_result = QuadFeltExpr::new(s_next[12].dup(), s_next[13].dup());
 
     // Three fold2 applications compose into fold4:
     //   fold_mid0   = fold2(q0, q2, eval_point)
@@ -462,27 +466,27 @@ fn enforce_frie2f4_constraints<AB>(
     // Stack order is [q0, q2, q1, q3], so natural position 0 maps to s[0..2], 1 maps to
     // s[4..6], 2 maps to s[2..4], and 3 maps to s[6..8].
     // Enforce prev_eval = q_coset.
-    let selected_component_0 = AB::Expr::from(s[0]) * coset_flag_0.clone()
-        + AB::Expr::from(s[4]) * coset_flag_1.clone()
-        + AB::Expr::from(s[2]) * coset_flag_2.clone()
-        + AB::Expr::from(s[6]) * coset_flag_3.clone();
-    let selected_component_1 = AB::Expr::from(s[1]) * coset_flag_0
-        + AB::Expr::from(s[5]) * coset_flag_1
-        + AB::Expr::from(s[3]) * coset_flag_2
-        + AB::Expr::from(s[7]) * coset_flag_3;
+    let selected_component_0 = s[0].dup() * coset_flag_0.clone()
+        + s[4].dup() * coset_flag_1.clone()
+        + s[2].dup() * coset_flag_2.clone()
+        + s[6].dup() * coset_flag_3.clone();
+    let selected_component_1 = s[1].dup() * coset_flag_0
+        + s[5].dup() * coset_flag_1
+        + s[3].dup() * coset_flag_2
+        + s[7].dup() * coset_flag_3;
     builder
         .assert_eq_quad(prev_eval, QuadFeltExpr::new(selected_component_0, selected_component_1));
 
     // Domain generator power for the next layer: poe -> poe^2 -> poe^4.
-    let poe_sq = s_next[7];
-    let poe_fourth = s_next[10];
-    builder.assert_eq(poe_sq, poe * poe);
-    builder.assert_eq(poe_fourth, poe_sq * poe_sq);
+    let poe_sq = s_next[7].dup();
+    let poe_fourth = s_next[10].dup();
+    builder.assert_eq(poe_sq.dup(), poe.dup() * poe);
+    builder.assert_eq(poe_fourth, poe_sq.dup() * poe_sq);
 
     // Advance the layer pointer and preserve the folded position.
-    let layer_ptr_next = s_next[8];
-    builder.assert_eq(layer_ptr_next, layer_ptr + F_8);
-    builder.assert_eq(s_next[9], layer_ptr + F_8);
-    builder.assert_eq(s_next[14], layer_ptr + F_8);
+    let layer_ptr_next = s_next[8].dup();
+    builder.assert_eq(layer_ptr_next, layer_ptr.dup() + F_8);
+    builder.assert_eq(s_next[9].dup(), layer_ptr.dup() + F_8);
+    builder.assert_eq(s_next[14].dup(), layer_ptr.dup() + F_8);
     builder.assert_eq(folded_pos_next, folded_pos);
 }

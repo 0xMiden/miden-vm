@@ -10,12 +10,10 @@
 //!   `LookupAir` impls on the per-trace AIRs, wired in from each AIR's `eval` via
 //!   [`miden_stark::lookup::ConstraintLookupBuilder`].
 
-use core::borrow::Borrow;
-
 use chiplets::selectors::ChipletSelectors;
-use miden_stark::air::native::migration::{LegacySink, SourceSnapshot};
+use miden_stark::air::native::Frame;
 
-use crate::vm::{ChipletCols, CoreCols, MidenAirBuilder};
+use crate::vm::{ChipletCols, CoreCols, MidenAirBuilder, NativeMidenAirBuilder};
 
 pub mod and8_lookup;
 pub mod chiplets;
@@ -46,34 +44,17 @@ mod test_utils;
 /// Public-input boundary constraints ([`public_inputs::enforce_main`]) are owned by Core too
 /// but live on a separate entry point because they don't read `next` or `op_flags`.
 pub fn enforce_core<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    snapshot: &SourceSnapshot<AB::Expr, AB::ExprEF>,
-    local: &CoreCols<AB::Var>,
-    next: &CoreCols<AB::Var>,
+    local: &CoreCols<AB::Expr>,
+    next: &CoreCols<AB::Expr>,
     op_flags: &op_flags::OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
-    // Own the expression rows outside every temporary mutable sink borrow. The stack body still
-    // consumes the original legacy variables until its separate source migration.
-    let frame = snapshot.frame();
-    let native_local: &CoreCols<AB::Expr> = frame.main.current.borrow();
-    let native_next: &CoreCols<AB::Expr> = frame.main.next.borrow();
-    system::enforce_main(
-        &frame,
-        &mut LegacySink::new(builder),
-        native_local,
-        native_next,
-        op_flags,
-    );
-    stack::enforce_main(builder, local, next, op_flags);
-    decoder::enforce_main(
-        &frame,
-        &mut LegacySink::new(builder),
-        native_local,
-        native_next,
-        op_flags,
-    );
+    system::enforce_main(frame, builder, local, next, op_flags);
+    stack::enforce_main(frame, builder, local, next, op_flags);
+    decoder::enforce_main(frame, builder, local, next, op_flags);
 }
 
 /// Enforces the Chiplets-trace main constraints (hasher controller, bitwise, memory, ACE).

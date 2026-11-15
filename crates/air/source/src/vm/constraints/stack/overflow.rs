@@ -29,11 +29,11 @@
 //!    - On a left shift or DYNCALL at depth 16: stack[15]' = 0
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_stark::air::AirBuilder;
+use miden_stark::air::native::{Frame, LiftedAirBuilder};
 use p3_field::Dup;
 
 use crate::vm::{
-    CoreCols, MidenAirBuilder,
+    CoreCols, NativeMidenAirBuilder,
     constraints::{constants::*, op_flags::OpFlags, utils::BoolNot},
 };
 
@@ -48,30 +48,31 @@ use crate::vm::{
 /// 3. Overflow bookkeeping index b1 is updated correctly on shifts
 /// 4. Last stack item is zeroed when it must be refilled and depth = 16
 pub fn enforce_main<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    local: &CoreCols<AB::Var>,
-    next: &CoreCols<AB::Var>,
+    local: &CoreCols<AB::Expr>,
+    next: &CoreCols<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     // Boundary constraints: stack depth and overflow pointer must start/end clean.
-    builder.when_first_row().assert_eq(local.stack.b0, F_16);
-    builder.when_last_row().assert_eq(local.stack.b0, F_16);
-    builder.when_first_row().assert_zero(local.stack.b1);
-    builder.when_last_row().assert_zero(local.stack.b1);
+    builder.when(frame.first_row()).assert_eq(local.stack.b0.dup(), F_16);
+    builder.when(frame.last_row()).assert_eq(local.stack.b0.dup(), F_16);
+    builder.when(frame.first_row()).assert_zero(local.stack.b1.dup());
+    builder.when(frame.last_row()).assert_zero(local.stack.b1.dup());
 
     // Transition constraints: depth bookkeeping, overflow flag, and pointer updates.
-    enforce_stack_depth_constraints(builder, local, next, op_flags);
+    enforce_stack_depth_constraints(frame, builder, local, next, op_flags);
 
     // Overflow flag: (1 - overflow) * (depth - 16) = 0
     // When depth > 16, overflow must be 1; when depth = 16, satisfied for any h0.
     {
-        let depth = local.stack.b0;
+        let depth = local.stack.b0.dup();
         builder.when(op_flags.overflow().not()).assert_eq(depth, F_16);
     }
 
-    enforce_overflow_index_constraints(builder, local, next, op_flags);
+    enforce_overflow_index_constraints(frame, builder, local, next, op_flags);
 }
 
 // CONSTRAINT HELPERS
@@ -88,15 +89,16 @@ pub fn enforce_main<AB>(
 /// An END operation which restores a caller frame is handled separately by the block-stack
 /// relation.
 fn enforce_stack_depth_constraints<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    local: &CoreCols<AB::Var>,
-    next: &CoreCols<AB::Var>,
+    local: &CoreCols<AB::Expr>,
+    next: &CoreCols<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
-    let depth = local.stack.b0;
-    let depth_next = next.stack.b0;
+    let depth = local.stack.b0.dup();
+    let depth_next = next.stack.b0.dup();
 
     // Flag for CALL, DYNCALL, or SYSCALL operations
     let call_or_dyncall_or_syscall = op_flags.call() + op_flags.dyncall() + op_flags.syscall();
@@ -126,7 +128,7 @@ fn enforce_stack_depth_constraints<AB>(
     //   increase polynomial degree.
     // - We still need to suppress the raw (b0' - b0) term on caller-frame END rows, hence the mask.
     let normal_mask = AB::Expr::ONE - call_or_dyncall_or_syscall.dup() - caller_frame_end;
-    let depth_delta_part = (depth_next - depth) * normal_mask;
+    let depth_delta_part = (depth_next.dup() - depth) * normal_mask;
 
     // Left shift with non-empty overflow decrements depth by one.
     let left_shift_part = op_flags.left_shift() * op_flags.overflow();
@@ -139,7 +141,7 @@ fn enforce_stack_depth_constraints<AB>(
 
     // Combined constraint: normal depth update + shift effects + call reset = 0.
     builder
-        .when_transition()
+        .when(frame.transition())
         .assert_zero(depth_delta_part + left_shift_part - right_shift_part + call_part);
 }
 
@@ -151,27 +153,28 @@ fn enforce_stack_depth_constraints<AB>(
 /// 3. On operations which do not modify or restore the overflow table: b1' = b1
 /// 4. When position 15 must be refilled at depth 16: stack[15]' = 0
 fn enforce_overflow_index_constraints<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    local: &CoreCols<AB::Var>,
-    next: &CoreCols<AB::Var>,
+    local: &CoreCols<AB::Expr>,
+    next: &CoreCols<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
-    let overflow_addr = local.stack.b1;
-    let overflow_addr_next = next.stack.b1;
-    let clk = local.system.clk;
+    let overflow_addr = local.stack.b1.dup();
+    let overflow_addr_next = next.stack.b1.dup();
+    let clk = local.system.clk.dup();
     let last_stack_item_next = next.stack.get(15);
 
     // On a right shift, the overflow address is the current clock.
-    builder.when(op_flags.right_shift()).assert_eq(overflow_addr_next, clk);
+    builder.when(op_flags.right_shift()).assert_eq(overflow_addr_next.dup(), clk);
 
     // A new call context starts with an empty overflow table.
     let context_start = op_flags.call() + op_flags.dyncall() + op_flags.syscall();
     builder
-        .when_transition()
+        .when(frame.transition())
         .when(context_start.dup())
-        .assert_zero(overflow_addr_next);
+        .assert_zero(overflow_addr_next.dup());
 
     // A caller-frame END restores the caller's overflow address through the block-stack lookup.
     // The decoder constrains the restoration flag to be boolean on every END row, and a forged
@@ -186,7 +189,7 @@ fn enforce_overflow_index_constraints<AB>(
         + op_flags.right_shift()
         + op_flags.left_shift() * op_flags.overflow();
     builder
-        .when_transition()
+        .when(frame.transition())
         .when(pointer_changes.not())
         .assert_eq(overflow_addr_next, overflow_addr);
 
@@ -217,13 +220,14 @@ mod tests {
     use crate::vm::constraints::{
         columns::CoreCols,
         op_flags::{OpFlags, generate_test_row},
-        test_utils::ConstraintEvalBuilder,
+        test_utils::{ConstraintEvalContext, NativeConstraintEvalBuilder},
     };
 
     fn eval_stack_overflow(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> Vec<QuadFelt> {
-        let mut builder = ConstraintEvalBuilder::new();
+        let context = ConstraintEvalContext::new();
+        let mut builder = NativeConstraintEvalBuilder::default();
         let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
-        enforce_main(&mut builder, local, next, &op_flags);
+        enforce_main(&context.frame(local, next), &mut builder, local, next, &op_flags);
         builder.evaluations
     }
 

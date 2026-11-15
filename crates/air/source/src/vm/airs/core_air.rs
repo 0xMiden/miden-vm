@@ -6,7 +6,7 @@ use core::borrow::Borrow;
 use miden_core::{Felt, WORD_SIZE, field::ExtensionField};
 use miden_stark::{
     air::{
-        ReductionError, WindowAccess,
+        ReductionError,
         native::migration::{LegacySink, SourceSnapshot},
     },
     lookup::{BoundaryBuilder, Challenges, ConstraintLookupBuilder, LookupAir},
@@ -80,23 +80,18 @@ impl CoreAir {
     }
 
     pub(super) fn eval<AB: MidenAirBuilder>(self, builder: &mut AB) {
-        let main = builder.main();
-        let local: &CoreCols<AB::Var> = (*main.current_slice()).borrow();
-        let next: &CoreCols<AB::Var> = (*main.next_slice()).borrow();
-
+        let snapshot = SourceSnapshot::new(builder, 0, self.aux_width());
+        let frame = snapshot.frame();
+        let local: &CoreCols<AB::Expr> = frame.main.current.borrow();
+        let next: &CoreCols<AB::Expr> = frame.main.next.borrow();
         let op_flags =
             constraints::op_flags::OpFlags::new(&local.decoder, &local.stack, &next.decoder);
 
-        let snapshot = SourceSnapshot::new(builder, 0, self.aux_width());
-        constraints::enforce_core(builder, &snapshot, local, next, &op_flags);
-        let frame = snapshot.frame();
-        let native_local: &CoreCols<AB::Expr> = frame.main.current.borrow();
-        constraints::public_inputs::enforce_main(
-            &frame,
-            snapshot.inputs(),
-            &mut LegacySink::new(builder),
-            native_local,
-        );
+        {
+            let sink = &mut LegacySink::new(builder);
+            constraints::enforce_core(&frame, sink, local, next, &op_flags);
+            constraints::public_inputs::enforce_main(&frame, snapshot.inputs(), sink, local);
+        }
 
         let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::Core);
         self.lookup_eval(&mut lb);

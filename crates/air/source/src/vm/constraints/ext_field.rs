@@ -162,3 +162,16 @@ pub trait QuadFeltAirBuilder: AirBuilder {
 }
 
 impl<AB: AirBuilder> QuadFeltAirBuilder for AB {}
+
+/// Component-wise equality for quadratic values represented by native base expressions.
+///
+/// These are two base assertions, component zero followed by component one. Their quadratic
+/// mathematical interpretation does not change their assertion class or global emission order.
+pub trait NativeQuadFeltAirBuilder: miden_stark::air::native::LiftedAirBuilder {
+    fn assert_eq_quad(&mut self, lhs: QuadFeltExpr<Self::Expr>, rhs: QuadFeltExpr<Self::Expr>) {
+        self.assert_eq(lhs.0, rhs.0);
+        self.assert_eq(lhs.1, rhs.1);
+    }
+}
+
+impl<AB: miden_stark::air::native::LiftedAirBuilder> NativeQuadFeltAirBuilder for AB {}

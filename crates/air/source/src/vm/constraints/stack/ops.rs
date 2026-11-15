@@ -7,10 +7,11 @@
 //! Stack shifting is enforced in the general stack constraints; here we only cover explicit
 //! rewrites of stack positions for these op groups.
 
-use miden_stark::air::AirBuilder;
+use miden_stark::air::native::LiftedAirBuilder;
+use p3_field::Dup;
 
 use crate::vm::{
-    CoreCols, MidenAirBuilder,
+    CoreCols, NativeMidenAirBuilder,
     constraints::{constants::F_8, op_flags::OpFlags, utils::BoolNot},
 };
 
@@ -20,11 +21,11 @@ use crate::vm::{
 /// Enforces stack operation constraints for PAD/DUP/CLK/SWAP/MOV/SWAPW/CSWAP.
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &CoreCols<AB::Var>,
-    next: &CoreCols<AB::Var>,
+    local: &CoreCols<AB::Expr>,
+    next: &CoreCols<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     let s0 = local.stack.get(0);
     let s1 = local.stack.get(1);
@@ -42,12 +43,12 @@ pub fn enforce_main<AB>(
     let s13 = local.stack.get(13);
     let s14 = local.stack.get(14);
     let s15 = local.stack.get(15);
-    let stack_depth = local.stack.b0;
+    let stack_depth = local.stack.b0.dup();
 
-    let fn_hash_0 = local.system.fn_hash[0];
-    let fn_hash_1 = local.system.fn_hash[1];
-    let fn_hash_2 = local.system.fn_hash[2];
-    let fn_hash_3 = local.system.fn_hash[3];
+    let fn_hash_0 = local.system.fn_hash[0].dup();
+    let fn_hash_1 = local.system.fn_hash[1].dup();
+    let fn_hash_2 = local.system.fn_hash[2].dup();
+    let fn_hash_3 = local.system.fn_hash[3].dup();
 
     let s0_next = next.stack.get(0);
     let s1_next = next.stack.get(1);
@@ -111,18 +112,18 @@ pub fn enforce_main<AB>(
     let is_caller = op_flags.caller();
     let is_sdepth = op_flags.sdepth();
 
-    let clk = local.system.clk;
+    let clk = local.system.clk.dup();
 
     // ASSERT: top element must be 1 (shift handled by stack general).
-    builder.when(is_assert).assert_one(s0);
+    builder.when(is_assert).assert_one(s0.dup());
 
     // CSWAP / CSWAPW: conditional swaps using s0 as the selector.
-    let cswap_c = s0;
-    let cswap_c_inv = cswap_c.into().not();
+    let cswap_c = s0.dup();
+    let cswap_c_inv = cswap_c.not();
 
     // Binary constraint for the swap selector (must be 0 or 1). CSWAP and CSWAPW are
     // distinct opcodes, so at most one gate is live and the shared check is exact.
-    builder.when(is_cswap.clone() + is_cswapw.clone()).assert_bool(cswap_c);
+    builder.when(is_cswap.clone() + is_cswapw.clone()).assert_bool(cswap_c.dup());
 
     // Each block below folds, for one next-row stack position, all ops that explicitly
     // rewrite that position into a single constraint:
@@ -166,36 +167,36 @@ pub fn enforce_main<AB>(
             + is_cswapw.clone()
             + is_caller.clone()
             + is_sdepth.clone();
-        let expected = is_dup * s0.into()
-            + is_dup1 * s1.into()
-            + is_dup2 * s2.into()
-            + is_dup3 * s3.into()
-            + is_dup4 * s4.into()
-            + is_dup5 * s5.into()
-            + is_dup6 * s6.into()
-            + is_dup7 * s7.into()
-            + is_dup9 * s9.into()
-            + is_dup11 * s11.into()
-            + is_dup13 * s13.into()
-            + is_dup15 * s15.into()
-            + is_clk * clk.into()
-            + is_swap.clone() * s1.into()
-            + is_movup2 * s2.into()
-            + is_movup3 * s3.into()
-            + is_movup4 * s4.into()
-            + is_movup5 * s5.into()
-            + is_movup6 * s6.into()
-            + is_movup7 * s7.into()
-            + is_movup8 * s8.into()
-            + is_swapw.clone() * s4.into()
-            + is_swapw2.clone() * s8.into()
-            + is_swapw3.clone() * s12.into()
-            + is_swapdw.clone() * s8.into()
-            + is_cswap.clone() * (cswap_c * s2.into() + cswap_c_inv.clone() * s1.into())
-            + is_cswapw.clone() * (cswap_c * s5.into() + cswap_c_inv.clone() * s1.into())
-            + is_caller.clone() * fn_hash_0.into()
-            + is_sdepth * stack_depth.into();
-        builder.assert_zero(s0_next * flag_sum - expected);
+        let expected = is_dup * s0.dup()
+            + is_dup1 * s1.dup()
+            + is_dup2 * s2.dup()
+            + is_dup3 * s3.dup()
+            + is_dup4 * s4.dup()
+            + is_dup5 * s5.dup()
+            + is_dup6 * s6.dup()
+            + is_dup7 * s7.dup()
+            + is_dup9 * s9.dup()
+            + is_dup11 * s11.dup()
+            + is_dup13 * s13.dup()
+            + is_dup15 * s15.dup()
+            + is_clk * clk.dup()
+            + is_swap.clone() * s1.dup()
+            + is_movup2 * s2.dup()
+            + is_movup3 * s3.dup()
+            + is_movup4 * s4.dup()
+            + is_movup5 * s5.dup()
+            + is_movup6 * s6.dup()
+            + is_movup7 * s7.dup()
+            + is_movup8 * s8.dup()
+            + is_swapw.clone() * s4.dup()
+            + is_swapw2.clone() * s8.dup()
+            + is_swapw3.clone() * s12.dup()
+            + is_swapdw.clone() * s8.dup()
+            + is_cswap.clone() * (cswap_c.dup() * s2.dup() + cswap_c_inv.clone() * s1.dup())
+            + is_cswapw.clone() * (cswap_c.dup() * s5.dup() + cswap_c_inv.clone() * s1.dup())
+            + is_caller.clone() * fn_hash_0.dup()
+            + is_sdepth * stack_depth.dup();
+        builder.assert_zero(s0_next.dup() * flag_sum - expected);
     }
 
     // Position 1: SWAP, SWAPW/SWAPW2/SWAPW3/SWAPDW, CSWAP, CSWAPW, CALLER.
@@ -208,15 +209,15 @@ pub fn enforce_main<AB>(
             + is_cswap.clone()
             + is_cswapw.clone()
             + is_caller.clone();
-        let expected = is_swap * s0.into()
-            + is_swapw.clone() * s5.into()
-            + is_swapw2.clone() * s9.into()
-            + is_swapw3.clone() * s13.into()
-            + is_swapdw.clone() * s9.into()
-            + is_cswap * (cswap_c * s1.into() + cswap_c_inv.clone() * s2.into())
-            + is_cswapw.clone() * (cswap_c * s6.into() + cswap_c_inv.clone() * s2.into())
-            + is_caller.clone() * fn_hash_1.into();
-        builder.assert_zero(s1_next * flag_sum - expected);
+        let expected = is_swap * s0.dup()
+            + is_swapw.clone() * s5.dup()
+            + is_swapw2.clone() * s9.dup()
+            + is_swapw3.clone() * s13.dup()
+            + is_swapdw.clone() * s9.dup()
+            + is_cswap * (cswap_c.dup() * s1.dup() + cswap_c_inv.clone() * s2.dup())
+            + is_cswapw.clone() * (cswap_c.dup() * s6.dup() + cswap_c_inv.clone() * s2.dup())
+            + is_caller.clone() * fn_hash_1.dup();
+        builder.assert_zero(s1_next.dup() * flag_sum - expected);
     }
 
     // Position 2: MOVDN2, SWAPW/SWAPW2/SWAPW3/SWAPDW, CSWAPW, CALLER.
@@ -228,14 +229,14 @@ pub fn enforce_main<AB>(
             + is_swapdw.clone()
             + is_cswapw.clone()
             + is_caller.clone();
-        let expected = is_movdn2 * s0.into()
-            + is_swapw.clone() * s6.into()
-            + is_swapw2.clone() * s10.into()
-            + is_swapw3.clone() * s14.into()
-            + is_swapdw.clone() * s10.into()
-            + is_cswapw.clone() * (cswap_c * s7.into() + cswap_c_inv.clone() * s3.into())
-            + is_caller.clone() * fn_hash_2.into();
-        builder.assert_zero(s2_next * flag_sum - expected);
+        let expected = is_movdn2 * s0.dup()
+            + is_swapw.clone() * s6.dup()
+            + is_swapw2.clone() * s10.dup()
+            + is_swapw3.clone() * s14.dup()
+            + is_swapdw.clone() * s10.dup()
+            + is_cswapw.clone() * (cswap_c.dup() * s7.dup() + cswap_c_inv.clone() * s3.dup())
+            + is_caller.clone() * fn_hash_2.dup();
+        builder.assert_zero(s2_next.dup() * flag_sum - expected);
     }
 
     // Position 3: MOVDN3, SWAPW/SWAPW2/SWAPW3/SWAPDW, CSWAPW, CALLER.
@@ -247,113 +248,113 @@ pub fn enforce_main<AB>(
             + is_swapdw.clone()
             + is_cswapw.clone()
             + is_caller.clone();
-        let expected = is_movdn3 * s0.into()
-            + is_swapw.clone() * s7.into()
-            + is_swapw2.clone() * s11.into()
-            + is_swapw3.clone() * s15.into()
-            + is_swapdw.clone() * s11.into()
-            + is_cswapw.clone() * (cswap_c * s8.into() + cswap_c_inv.clone() * s4.into())
-            + is_caller * fn_hash_3.into();
-        builder.assert_zero(s3_next * flag_sum - expected);
+        let expected = is_movdn3 * s0.dup()
+            + is_swapw.clone() * s7.dup()
+            + is_swapw2.clone() * s11.dup()
+            + is_swapw3.clone() * s15.dup()
+            + is_swapdw.clone() * s11.dup()
+            + is_cswapw.clone() * (cswap_c.dup() * s8.dup() + cswap_c_inv.clone() * s4.dup())
+            + is_caller * fn_hash_3.dup();
+        builder.assert_zero(s3_next.dup() * flag_sum - expected);
     }
 
     // Position 4: MOVDN4, SWAPW, SWAPDW, CSWAPW.
     {
         let flag_sum = is_movdn4.clone() + is_swapw.clone() + is_swapdw.clone() + is_cswapw.clone();
-        let expected = is_movdn4 * s0.into()
-            + is_swapw.clone() * s0.into()
-            + is_swapdw.clone() * s12.into()
-            + is_cswapw.clone() * (cswap_c * s1.into() + cswap_c_inv.clone() * s5.into());
-        builder.assert_zero(s4_next * flag_sum - expected);
+        let expected = is_movdn4 * s0.dup()
+            + is_swapw.clone() * s0.dup()
+            + is_swapdw.clone() * s12.dup()
+            + is_cswapw.clone() * (cswap_c.dup() * s1.dup() + cswap_c_inv.clone() * s5.dup());
+        builder.assert_zero(s4_next.dup() * flag_sum - expected);
     }
 
     // Position 5: MOVDN5, SWAPW, SWAPDW, CSWAPW.
     {
         let flag_sum = is_movdn5.clone() + is_swapw.clone() + is_swapdw.clone() + is_cswapw.clone();
-        let expected = is_movdn5 * s0.into()
-            + is_swapw.clone() * s1.into()
-            + is_swapdw.clone() * s13.into()
-            + is_cswapw.clone() * (cswap_c * s2.into() + cswap_c_inv.clone() * s6.into());
-        builder.assert_zero(s5_next * flag_sum - expected);
+        let expected = is_movdn5 * s0.dup()
+            + is_swapw.clone() * s1.dup()
+            + is_swapdw.clone() * s13.dup()
+            + is_cswapw.clone() * (cswap_c.dup() * s2.dup() + cswap_c_inv.clone() * s6.dup());
+        builder.assert_zero(s5_next.dup() * flag_sum - expected);
     }
 
     // Position 6: MOVDN6, SWAPW, SWAPDW, CSWAPW.
     {
         let flag_sum = is_movdn6.clone() + is_swapw.clone() + is_swapdw.clone() + is_cswapw.clone();
-        let expected = is_movdn6 * s0.into()
-            + is_swapw.clone() * s2.into()
-            + is_swapdw.clone() * s14.into()
-            + is_cswapw.clone() * (cswap_c * s3.into() + cswap_c_inv.clone() * s7.into());
-        builder.assert_zero(s6_next * flag_sum - expected);
+        let expected = is_movdn6 * s0.dup()
+            + is_swapw.clone() * s2.dup()
+            + is_swapdw.clone() * s14.dup()
+            + is_cswapw.clone() * (cswap_c.dup() * s3.dup() + cswap_c_inv.clone() * s7.dup());
+        builder.assert_zero(s6_next.dup() * flag_sum - expected);
     }
 
     // Position 7: MOVDN7, SWAPW, SWAPDW, CSWAPW.
     {
         let flag_sum = is_movdn7.clone() + is_swapw.clone() + is_swapdw.clone() + is_cswapw.clone();
-        let expected = is_movdn7 * s0.into()
-            + is_swapw * s3.into()
-            + is_swapdw.clone() * s15.into()
-            + is_cswapw * (cswap_c * s4.into() + cswap_c_inv * s8.into());
-        builder.assert_zero(s7_next * flag_sum - expected);
+        let expected = is_movdn7 * s0.dup()
+            + is_swapw * s3.dup()
+            + is_swapdw.clone() * s15.dup()
+            + is_cswapw * (cswap_c.dup() * s4.dup() + cswap_c_inv * s8.dup());
+        builder.assert_zero(s7_next.dup() * flag_sum - expected);
     }
 
     // Position 8: MOVDN8, SWAPW2, SWAPDW.
     {
         let flag_sum = is_movdn8.clone() + is_swapw2.clone() + is_swapdw.clone();
         let expected =
-            is_movdn8 * s0.into() + is_swapw2.clone() * s0.into() + is_swapdw.clone() * s0.into();
-        builder.assert_zero(s8_next * flag_sum - expected);
+            is_movdn8 * s0.dup() + is_swapw2.clone() * s0.dup() + is_swapdw.clone() * s0.dup();
+        builder.assert_zero(s8_next.dup() * flag_sum - expected);
     }
 
     // Position 9: SWAPW2, SWAPDW.
     {
         let flag_sum = is_swapw2.clone() + is_swapdw.clone();
-        let expected = is_swapw2.clone() * s1.into() + is_swapdw.clone() * s1.into();
-        builder.assert_zero(s9_next * flag_sum - expected);
+        let expected = is_swapw2.clone() * s1.dup() + is_swapdw.clone() * s1.dup();
+        builder.assert_zero(s9_next.dup() * flag_sum - expected);
     }
 
     // Position 10: SWAPW2, SWAPDW.
     {
         let flag_sum = is_swapw2.clone() + is_swapdw.clone();
-        let expected = is_swapw2.clone() * s2.into() + is_swapdw.clone() * s2.into();
-        builder.assert_zero(s10_next * flag_sum - expected);
+        let expected = is_swapw2.clone() * s2.dup() + is_swapdw.clone() * s2.dup();
+        builder.assert_zero(s10_next.dup() * flag_sum - expected);
     }
 
     // Position 11: SWAPW2, SWAPDW.
     {
         let flag_sum = is_swapw2.clone() + is_swapdw.clone();
-        let expected = is_swapw2 * s3.into() + is_swapdw.clone() * s3.into();
-        builder.assert_zero(s11_next * flag_sum - expected);
+        let expected = is_swapw2 * s3.dup() + is_swapdw.clone() * s3.dup();
+        builder.assert_zero(s11_next.dup() * flag_sum - expected);
     }
 
     // Position 12: SWAPW3, SWAPDW, MSTREAM/PIPE (two-word memory cursor advances by 8).
     {
         let flag_sum = is_swapw3.clone() + is_swapdw.clone() + is_mstream_or_pipe.clone();
-        let expected = is_swapw3.clone() * s0.into()
-            + is_swapdw.clone() * s4.into()
-            + is_mstream_or_pipe * (s12.into() + F_8);
-        builder.assert_zero(s12_next * flag_sum - expected);
+        let expected = is_swapw3.clone() * s0.dup()
+            + is_swapdw.clone() * s4.dup()
+            + is_mstream_or_pipe * (s12.dup() + F_8);
+        builder.assert_zero(s12_next.dup() * flag_sum - expected);
     }
 
     // Position 13: SWAPW3, SWAPDW.
     {
         let flag_sum = is_swapw3.clone() + is_swapdw.clone();
-        let expected = is_swapw3.clone() * s1.into() + is_swapdw.clone() * s5.into();
-        builder.assert_zero(s13_next * flag_sum - expected);
+        let expected = is_swapw3.clone() * s1.dup() + is_swapdw.clone() * s5.dup();
+        builder.assert_zero(s13_next.dup() * flag_sum - expected);
     }
 
     // Position 14: SWAPW3, SWAPDW.
     {
         let flag_sum = is_swapw3.clone() + is_swapdw.clone();
-        let expected = is_swapw3.clone() * s2.into() + is_swapdw.clone() * s6.into();
-        builder.assert_zero(s14_next * flag_sum - expected);
+        let expected = is_swapw3.clone() * s2.dup() + is_swapdw.clone() * s6.dup();
+        builder.assert_zero(s14_next.dup() * flag_sum - expected);
     }
 
     // Position 15: SWAPW3, SWAPDW.
     {
         let flag_sum = is_swapw3.clone() + is_swapdw.clone();
-        let expected = is_swapw3 * s3.into() + is_swapdw * s7.into();
-        builder.assert_zero(s15_next * flag_sum - expected);
+        let expected = is_swapw3 * s3.dup() + is_swapdw * s7.dup();
+        builder.assert_zero(s15_next.dup() * flag_sum - expected);
     }
 }
 
@@ -375,11 +376,11 @@ mod tests {
     use crate::vm::constraints::{
         columns::CoreCols,
         op_flags::{OpFlags, generate_test_row},
-        test_utils::ConstraintEvalBuilder,
+        test_utils::NativeConstraintEvalBuilder,
     };
 
     fn eval_stack_ops(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> Vec<QuadFelt> {
-        let mut builder = ConstraintEvalBuilder::new();
+        let mut builder = NativeConstraintEvalBuilder::default();
         let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
         enforce_main(&mut builder, local, next, &op_flags);
         builder.evaluations
