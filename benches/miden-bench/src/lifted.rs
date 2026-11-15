@@ -20,12 +20,12 @@ use crate::{
 // MultiAir: empty public inputs; each AIR builds its own all-zero aux trace.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-struct BenchMultiAir {
-    airs: Vec<DummyMidenAir>,
+struct BenchMultiAir<F> {
+    airs: Vec<DummyMidenAir<F>>,
 }
 
-impl<F: PrimeField64, EF: ExtensionField<F>> MultiAir<F, EF> for BenchMultiAir {
-    type Air = DummyMidenAir;
+impl<F: PrimeField64, EF: ExtensionField<F>> MultiAir<F, EF> for BenchMultiAir<F> {
+    type Air = DummyMidenAir<F>;
 
     fn airs(&self) -> &[Self::Air] {
         &self.airs
@@ -48,11 +48,11 @@ where
 {
     let airs = specs
         .iter()
-        .map(|spec| DummyMidenAir::new(spec.width, spec.num_aux_cols))
+        .map(|spec| DummyMidenAir::<F>::new(spec.width, spec.num_aux_cols))
         .collect();
 
     let statement =
-        Statement::new(BenchMultiAir { airs }, Vec::new(), Vec::new()).expect("statement");
+        Statement::new(BenchMultiAir::<F> { airs }, Vec::new(), Vec::new()).expect("statement");
     let prover_statement = ProverStatement::new(statement, traces).expect("prover statement");
     let prover_instance =
         ProverInstance::new(config, prover_statement, None).expect("no preprocessed columns");
