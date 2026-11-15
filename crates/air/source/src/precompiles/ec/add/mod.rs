@@ -101,13 +101,14 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_stark::{
-    air::{BaseAir, LiftedAir, LiftedAirBuilder},
+    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
     lookup::{
-        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage,
+        Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
+        LookupMessage, native as native_lookup,
     },
 };
 use miden_utils_sync::LazyLock;
+use p3_field::Dup;
 
 use crate::precompiles::{
     ec::{EcGroupMsg, EcPointMsg},
@@ -115,7 +116,6 @@ use crate::precompiles::{
     primitives::byte_pair_lut::Range16Msg,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     uint::{add::UintAddMsg, mul::UintMulMsg},
-    utils::{current_main, next_main},
 };
 
 // MESSAGES
@@ -311,29 +311,64 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
     fn build_aux_trace(
         &self,
         main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        miden_stark::lookup::build_logup_aux_trace(&EcGroupAddAir, main, challenges)
+        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
+            self,
+            native::AuxTraceInputs {
+                main,
+                preprocessed: None,
+                public_values: air_inputs,
+                statement: aux_inputs,
+                challenges,
+            },
+        )
+        .expect("valid EC addition auxiliary inputs");
+        (aux.columns, aux.exports)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
+        native::migration::eval_source(self, builder);
+    }
+}
 
-        let sel: [AB::Expr; NUM_PERIODIC] = {
-            let p = builder.periodic_values();
-            array::from_fn(|i| p[i].into())
-        };
+impl native::LiftedAir for EcGroupAddAir {
+    type F = Felt;
 
-        let pai_p: AB::Expr = local[COL_PAI_P].into();
-        let pai_q: AB::Expr = local[COL_PAI_Q].into();
-        let cancel: AB::Expr = local[COL_CANCEL].into();
-        let dbl: AB::Expr = local[COL_DBL].into();
-        let generic: AB::Expr = local[COL_GEN].into();
-        let act: AB::Expr = local[COL_ACT].into();
-        let mints: AB::Expr = local[COL_MINTS].into();
+    fn spec(&self) -> native::AirSpec<'_, Felt> {
+        native::AirSpec {
+            main_width: NUM_MAIN_COLS,
+            aux_width: AUX_WIDTH,
+            num_public_values: 0,
+            num_challenges: NUM_RANDOMNESS,
+            num_exports: NUM_LOGUP_VALUES,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(PERIODIC_COLUMNS.as_slice()),
+        }
+    }
+
+    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &native::Frame<'_, AB>,
+        inputs: native::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        let local: &[AB::Expr; NUM_MAIN_COLS] = frame.main.current[..NUM_MAIN_COLS]
+            .try_into()
+            .expect("EC addition current main row");
+        let next: &[AB::Expr; NUM_MAIN_COLS] =
+            frame.main.next[..NUM_MAIN_COLS].try_into().expect("EC addition next main row");
+        let sel: [AB::Expr; NUM_PERIODIC] = array::from_fn(|i| frame.periodic[i].dup());
+
+        let pai_p: AB::Expr = local[COL_PAI_P].dup();
+        let pai_q: AB::Expr = local[COL_PAI_Q].dup();
+        let cancel: AB::Expr = local[COL_CANCEL].dup();
+        let dbl: AB::Expr = local[COL_DBL].dup();
+        let generic: AB::Expr = local[COL_GEN].dup();
+        let act: AB::Expr = local[COL_ACT].dup();
+        let mints: AB::Expr = local[COL_MINTS].dup();
 
         // Case flags + act + mints are boolean; exactly one case per active
         // block — except `∞ + ∞`, where *both* pass flags must be set (each
@@ -341,7 +376,7 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
         // infinite operand matches no `is_pai = 0` provide). The ties below
         // then force `p = q = r`: the group's canonical PAI row.
         for flag in [&pai_p, &pai_q, &cancel, &dbl, &generic, &act, &mints] {
-            builder.assert_zero(flag.clone() * (AB::Expr::ONE - flag.clone()));
+            builder.assert_zero((*flag).dup() * (AB::Expr::ONE - (*flag).dup()));
         }
         builder.assert_zero(
             pai_p.clone() + pai_q.clone() + cancel + dbl + generic
@@ -357,20 +392,20 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
         //    `2x₁` and grounds the chord/tangent.
         //  - `dbl`: `y₁ = y₂`. The tangent lookups below rule out zero y on the authenticated
         //    smooth curve, so this case cannot substitute the cancellation branch.
-        let px_eq: AB::Expr = local[COL_PX].into();
-        let qx_eq: AB::Expr = local[COL_QX].into();
-        let py_eq: AB::Expr = local[COL_PY].into();
-        let qy_eq: AB::Expr = local[COL_QY].into();
-        let cancel_eq: AB::Expr = local[COL_CANCEL].into();
-        let dbl_eq: AB::Expr = local[COL_DBL].into();
+        let px_eq: AB::Expr = local[COL_PX].dup();
+        let qx_eq: AB::Expr = local[COL_QX].dup();
+        let py_eq: AB::Expr = local[COL_PY].dup();
+        let qy_eq: AB::Expr = local[COL_QY].dup();
+        let cancel_eq: AB::Expr = local[COL_CANCEL].dup();
+        let dbl_eq: AB::Expr = local[COL_DBL].dup();
         builder.assert_zero((cancel_eq + dbl_eq.clone()) * (px_eq - qx_eq));
         builder.assert_zero(dbl_eq * (py_eq - qy_eq));
 
         // Pass-through result ties, at the res row where r is local and
         // p / q sit in the term row's cells (next).
-        let r_cell: AB::Expr = local[CELL_R].into();
-        let p_cell: AB::Expr = next[TERM_CELL_P].into();
-        let q_cell: AB::Expr = next[TERM_CELL_Q].into();
+        let r_cell: AB::Expr = local[CELL_R].dup();
+        let p_cell: AB::Expr = next[TERM_CELL_P].dup();
+        let q_cell: AB::Expr = next[TERM_CELL_Q].dup();
         builder.assert_zero(sel[PCOL_RES].clone() * pai_p * (r_cell.clone() - q_cell));
         builder.assert_zero(sel[PCOL_RES].clone() * pai_q * (r_cell - p_cell));
 
@@ -382,19 +417,19 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
         //  - strict ordering: r_ptr > p_ptr ∧ r_ptr > q_ptr, via the witnessed limb diffs `r − p −
         //    1 = lo + 2¹⁶·hi` (limbs Range16-checked in the LookupAir). Read on the res row, where
         //    r is local and p / q are the term cells (next).
-        let dbl_g: AB::Expr = local[COL_DBL].into();
-        let gen_g: AB::Expr = local[COL_GEN].into();
+        let dbl_g: AB::Expr = local[COL_DBL].dup();
+        let gen_g: AB::Expr = local[COL_GEN].dup();
         builder.assert_zero(mints.clone() * (AB::Expr::ONE - dbl_g - gen_g));
-        let r_res: AB::Expr = local[CELL_R].into();
-        let p_res: AB::Expr = next[TERM_CELL_P].into();
-        let q_res: AB::Expr = next[TERM_CELL_Q].into();
+        let r_res: AB::Expr = local[CELL_R].dup();
+        let p_res: AB::Expr = next[TERM_CELL_P].dup();
+        let q_res: AB::Expr = next[TERM_CELL_Q].dup();
         let two_16 = AB::Expr::from(Felt::from(1u32 << 16));
-        let rp_lo: AB::Expr = local[COL_RP_LO].into();
-        let rp_hi: AB::Expr = local[COL_RP_HI].into();
-        let rq_lo: AB::Expr = next[COL_RQ_LO].into();
-        let rq_hi: AB::Expr = next[COL_RQ_HI].into();
+        let rp_lo: AB::Expr = local[COL_RP_LO].dup();
+        let rp_hi: AB::Expr = local[COL_RP_HI].dup();
+        let rq_lo: AB::Expr = next[COL_RQ_LO].dup();
+        let rq_hi: AB::Expr = next[COL_RQ_HI].dup();
         let at_res: AB::Expr = sel[PCOL_RES].clone();
-        builder.assert_zero(at_res.clone() * (AB::Expr::ONE - act) * next[TERM_CELL_MULT].into());
+        builder.assert_zero(at_res.clone() * (AB::Expr::ONE - act) * next[TERM_CELL_MULT].dup());
         builder.assert_zero(
             at_res.clone()
                 * mints.clone()
@@ -408,25 +443,31 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
         // boundary).
         let not_term: AB::Expr = AB::Expr::ONE - sel[PCOL_TERM].clone();
         for col in (COL_PX..COL_RP_LO).chain(COL_BETA_PTR..NUM_MAIN_COLS) {
-            let here: AB::Expr = local[col].into();
-            let there: AB::Expr = next[col].into();
+            let here: AB::Expr = local[col].dup();
+            let there: AB::Expr = next[col].dup();
             builder.assert_zero(not_term.clone() * (there - here));
         }
 
         // Phase 2: LogUp.
-        let mut lb = ConstraintLookupBuilder::new(builder, self);
-        <Self as LookupAir<_>>::eval(self, &mut lb);
-        lb.finish();
+        native_lookup::eval_lookup(self, frame, inputs, builder);
+    }
+}
+
+impl native::ProverAir<QuadFelt> for EcGroupAddAir {
+    type Error = native_lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        native_lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
 // LOOKUP AIR
 // ================================================================================================
 
-impl<LB> LookupAir<LB> for EcGroupAddAir
-where
-    LB: LookupBuilder<F = Felt>,
-{
+impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for EcGroupAddAir {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
@@ -440,32 +481,53 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next: [LB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
+        native::migration::eval_lookup(self, builder, 0);
+    }
+}
 
-        let sel: [LB::Expr; NUM_PERIODIC] = {
-            let p = builder.periodic_values();
-            array::from_fn(|i| p[i].into())
-        };
+impl<LB> native_lookup::LookupAir<LB> for EcGroupAddAir
+where
+    LB: native_lookup::LookupBuilder<F = Felt>,
+{
+    fn column_shape(&self) -> &[usize] {
+        &COLUMN_SHAPE
+    }
 
-        let px: LB::Expr = local[COL_PX].into();
-        let py: LB::Expr = local[COL_PY].into();
-        let qx: LB::Expr = local[COL_QX].into();
-        let qy: LB::Expr = local[COL_QY].into();
-        let a_ptr: LB::Expr = local[COL_A_PTR].into();
-        let b_ptr: LB::Expr = local[COL_B_PTR].into();
-        let bound: LB::Expr = local[COL_BOUND_PTR].into();
-        let beta_ptr: LB::Expr = local[COL_BETA_PTR].into();
-        let lambda_ptr: LB::Expr = local[COL_LAMBDA_PTR].into();
-        let pai_p: LB::Expr = local[COL_PAI_P].into();
-        let pai_q: LB::Expr = local[COL_PAI_Q].into();
-        let cancel: LB::Expr = local[COL_CANCEL].into();
-        let dbl: LB::Expr = local[COL_DBL].into();
-        let generic: LB::Expr = local[COL_GEN].into();
-        let act: LB::Expr = local[COL_ACT].into();
-        let mints: LB::Expr = local[COL_MINTS].into();
-        let rp_lo: LB::Expr = local[COL_RP_LO].into();
-        let rp_hi: LB::Expr = local[COL_RP_HI].into();
+    fn max_message_width(&self) -> usize {
+        MAX_MESSAGE_WIDTH
+    }
+
+    fn num_bus_ids(&self) -> usize {
+        NUM_BUS_IDS
+    }
+
+    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        let local: &[LB::Expr; NUM_MAIN_COLS] = frame.main.current[..NUM_MAIN_COLS]
+            .try_into()
+            .expect("EC addition lookup current main row");
+        let next: &[LB::Expr; NUM_MAIN_COLS] = frame.main.next[..NUM_MAIN_COLS]
+            .try_into()
+            .expect("EC addition lookup next main row");
+        let sel: [LB::Expr; NUM_PERIODIC] = array::from_fn(|i| frame.periodic[i].dup());
+
+        let px: LB::Expr = local[COL_PX].dup();
+        let py: LB::Expr = local[COL_PY].dup();
+        let qx: LB::Expr = local[COL_QX].dup();
+        let qy: LB::Expr = local[COL_QY].dup();
+        let a_ptr: LB::Expr = local[COL_A_PTR].dup();
+        let b_ptr: LB::Expr = local[COL_B_PTR].dup();
+        let bound: LB::Expr = local[COL_BOUND_PTR].dup();
+        let beta_ptr: LB::Expr = local[COL_BETA_PTR].dup();
+        let lambda_ptr: LB::Expr = local[COL_LAMBDA_PTR].dup();
+        let pai_p: LB::Expr = local[COL_PAI_P].dup();
+        let pai_q: LB::Expr = local[COL_PAI_Q].dup();
+        let cancel: LB::Expr = local[COL_CANCEL].dup();
+        let dbl: LB::Expr = local[COL_DBL].dup();
+        let generic: LB::Expr = local[COL_GEN].dup();
+        let act: LB::Expr = local[COL_ACT].dup();
+        let mints: LB::Expr = local[COL_MINTS].dup();
+        let rp_lo: LB::Expr = local[COL_RP_LO].dup();
+        let rp_hi: LB::Expr = local[COL_RP_HI].dup();
         let live: LB::Expr = cancel.clone() + dbl.clone() + generic.clone();
         let tail: LB::Expr = dbl.clone() + generic.clone();
 
@@ -476,25 +538,25 @@ where
         // Row-0 (slope) window: the slope transients (local) + the tail
         // transients (next). e / x₃ / y₃ all sit on the tail row, so both
         // fused mul-subtracts read their result here in one window.
-        let slope_aux: LB::Expr = local[CELL_SLOPE_AUX].into();
-        let lambda: LB::Expr = local[CELL_LAMBDA].into();
-        let t: LB::Expr = local[CELL_T].into();
-        let e: LB::Expr = next[CELL_E].into();
-        let x3_next: LB::Expr = next[CELL_X3].into();
-        let y3_next: LB::Expr = next[CELL_Y3].into();
+        let slope_aux: LB::Expr = local[CELL_SLOPE_AUX].dup();
+        let lambda: LB::Expr = local[CELL_LAMBDA].dup();
+        let t: LB::Expr = local[CELL_T].dup();
+        let e: LB::Expr = next[CELL_E].dup();
+        let x3_next: LB::Expr = next[CELL_X3].dup();
+        let y3_next: LB::Expr = next[CELL_Y3].dup();
         // Row-1 (tail) window: the tail transients (local) + the result
         // cells (next).
-        let x3_local: LB::Expr = local[CELL_X3].into();
-        let y3_local: LB::Expr = local[CELL_Y3].into();
-        let r_next: LB::Expr = next[CELL_R].into();
-        let group_next: LB::Expr = next[CELL_GROUP].into();
+        let x3_local: LB::Expr = local[CELL_X3].dup();
+        let y3_local: LB::Expr = local[CELL_Y3].dup();
+        let r_next: LB::Expr = next[CELL_R].dup();
+        let group_next: LB::Expr = next[CELL_GROUP].dup();
         // Row-2 window: the result cells (local) + the term cells (next).
-        let r_local: LB::Expr = local[CELL_R].into();
-        let sbound: LB::Expr = local[CELL_SBOUND].into();
-        let group_local: LB::Expr = local[CELL_GROUP].into();
-        let neg_mult: LB::Expr = LB::Expr::ZERO - next[TERM_CELL_MULT].into();
-        let p_ptr: LB::Expr = next[TERM_CELL_P].into();
-        let q_ptr: LB::Expr = next[TERM_CELL_Q].into();
+        let r_local: LB::Expr = local[CELL_R].dup();
+        let sbound: LB::Expr = local[CELL_SBOUND].dup();
+        let group_local: LB::Expr = local[CELL_GROUP].dup();
+        let neg_mult: LB::Expr = LB::Expr::ZERO - next[TERM_CELL_MULT].dup();
+        let p_ptr: LB::Expr = next[TERM_CELL_P].dup();
+        let q_ptr: LB::Expr = next[TERM_CELL_Q].dup();
 
         let one: LB::Expr = LB::Expr::ONE;
         let zero: LB::Expr = LB::Expr::ZERO;
@@ -504,8 +566,8 @@ where
         let f2 = Deg { v: 2, u: 1 };
         let group_deg = Deg { v: 2, u: 2 };
         let pair_deg = Deg { v: 3, u: 2 };
-        let cert_group: LB::Expr = local[CELL_GROUP].into();
-        let cert_r: LB::Expr = local[CELL_R].into();
+        let cert_group: LB::Expr = local[CELL_GROUP].dup();
+        let cert_r: LB::Expr = local[CELL_R].dup();
         let cert_gate = sel[PCOL_RES].clone() * mints.clone();
         let gate = (sel[PCOL_RES].clone() + sel[PCOL_TERM].clone()) * mints;
 

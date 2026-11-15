@@ -24,6 +24,22 @@ mod native_registration;
 use native_registration::assert_native_registration;
 
 #[test]
+fn native_ec_add_registration_keeps_periodic_roles_and_prepared_execution() {
+    use miden_air::precompiles::native::EcGroupAddKernel;
+    use miden_air_definitions::precompiles::ec::add::EcGroupAddAir;
+
+    assert_native_registration(&EcGroupAddAir, &EcGroupAddAir, &EcGroupAddKernel::new(), &SEEDS);
+}
+
+#[test]
+fn native_ec_msm_registration_keeps_claims_and_prepared_execution() {
+    use miden_air::precompiles::native::EcMsmKernel;
+    use miden_air_definitions::precompiles::ec::msm::EcMsmAir;
+
+    assert_native_registration(&EcMsmAir, &EcMsmAir, &EcMsmKernel::new(), &SEEDS);
+}
+
+#[test]
 fn native_chunk_node_sponge_registration_keeps_composition_and_prepared_execution() {
     use miden_air::precompiles::native::ChunkNodeSpongeKernel;
     use miden_air_definitions::precompiles::hash::chunk_node_sponge::ChunkNodeSpongeAir;

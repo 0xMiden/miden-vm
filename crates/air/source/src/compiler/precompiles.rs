@@ -13,7 +13,7 @@ use crate::{
     precompiles::{
         ChipletAir,
         ace::PvmRecursiveAceCircuit,
-        ec::point_store_groups::EcPointStoreGroupsAir,
+        ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
         geometry::lookup_shape,
         hash::{
             chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir,
@@ -52,7 +52,9 @@ impl CapturedPvmRelation {
                     ChipletAir::UintAdd => CapturedAir::new_native(&UintAddAir),
                     ChipletAir::EcPointStoreGroups => {
                         CapturedAir::new_native(&EcPointStoreGroupsAir)
-                    },
+                    }
+                    ChipletAir::EcGroupAdd => CapturedAir::new_native(&EcGroupAddAir),
+                    ChipletAir::EcMsm => CapturedAir::new_native(&EcMsmAir),
                     ChipletAir::Sha256 => CapturedAir::new_native(&Sha256Air),
                     ChipletAir::Sha512 => CapturedAir::new_native(&Sha512Air),
                     _ => CapturedAir::new(air),
@@ -69,7 +71,9 @@ impl CapturedPvmRelation {
 
 /// Builds the canonical precompile chiplet ACE circuit.
 pub fn build_canonical_precompile_ace_circuit() -> Result<AceCircuit<QuadFelt>, AceError> {
-    CapturedPvmRelation::new()?.compile()?.build_circuit(LayoutKind::Masm)
+    CapturedPvmRelation::new()?
+        .compile()?
+        .build_circuit(LayoutKind::Masm)
 }
 
 /// Builds and encodes the order-invariant PVM recursive-verifier ACE circuit.

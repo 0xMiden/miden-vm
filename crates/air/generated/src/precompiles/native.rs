@@ -12,6 +12,24 @@ mod descriptors {
 }
 
 define_native_kernel!(
+    /// Generated execution of the EC group-addition relation.
+    EcGroupAddKernel,
+    descriptor_ec_group_add,
+    precompute_ec_group_add,
+    eval_ec_group_add,
+    EC_GROUP_ADD_PREPARED_TERMS
+);
+
+define_native_kernel!(
+    /// Generated execution of the MSM storage and relation claims.
+    EcMsmKernel,
+    descriptor_ec_msm,
+    precompute_ec_msm,
+    eval_ec_msm,
+    EC_MSM_PREPARED_TERMS
+);
+
+define_native_kernel!(
     /// Generated execution of the combined chunk/node and shared-capacity sponge relation.
     ///
     /// The authored source retains the physical row overlays and witness construction.
