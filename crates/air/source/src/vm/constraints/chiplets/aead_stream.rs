@@ -6,10 +6,11 @@
 
 use core::borrow::Borrow;
 
-use miden_stark::air::AirBuilder;
+use miden_stark::air::native::{Frame, LiftedAirBuilder};
+use p3_field::Dup;
 
 use crate::vm::{
-    MidenAirBuilder,
+    NativeMidenAirBuilder,
     constraints::{
         chiplets::{
             columns::{AeadStreamCols, PeriodicCols},
@@ -25,17 +26,18 @@ use crate::vm::{
 
 /// Enforce stream-row phase alignment, u32-XOR recomposition, canonical splits, and carries.
 pub fn enforce_aead_stream_constraints<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    cols: &AeadStreamCols<AB::Var>,
-    cols_next: &AeadStreamCols<AB::Var>,
+    cols: &AeadStreamCols<AB::Expr>,
+    cols_next: &AeadStreamCols<AB::Expr>,
     selectors: &ChipletSelectors<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     let stream = selectors.aead_stream_active.clone();
     let stream_next = selectors.aead_stream_next_active.clone();
-    let periodic: &PeriodicCols<_> = builder.periodic_values().borrow();
-    let phases: [AB::Expr; 8] = periodic.aead_stream.phases.map(Into::into);
+    let periodic: &PeriodicCols<_> = frame.periodic.borrow();
+    let phases: [AB::Expr; 8] = periodic.aead_stream.phases.clone();
 
     // Any entry into the stream follows phase seven, including entry from the controller.
     builder.when(stream.not() * stream_next.clone()).assert_one(phases[7].clone());
@@ -58,97 +60,129 @@ pub fn enforce_aead_stream_constraints<AB>(
 fn carry_read_to_high_first<AB>(
     builder: &mut AB,
     gate: AB::Expr,
-    cols: &AeadStreamCols<AB::Var>,
-    cols_next: &AeadStreamCols<AB::Var>,
+    cols: &AeadStreamCols<AB::Expr>,
+    cols_next: &AeadStreamCols<AB::Expr>,
     plaintext_offset: usize,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     let curr = cols.read();
     let next = cols_next.high_first();
 
-    builder.when(gate.clone()).assert_eq_arrays(
-        [next.ctx, next.clk, next.src_ptr, next.lane_base, next.next_plaintext],
-        [
-            curr.ctx,
-            curr.clk,
-            curr.src_ptr,
-            curr.lane_base,
-            curr.plaintext[plaintext_offset + 1],
-        ],
-    );
+    {
+        let builder = &mut builder.when(gate.clone());
+        for (left, right) in [
+            next.ctx.dup(),
+            next.clk.dup(),
+            next.src_ptr.dup(),
+            next.lane_base.dup(),
+            next.next_plaintext.dup(),
+        ]
+        .into_iter()
+        .zip([
+            curr.ctx.dup(),
+            curr.clk.dup(),
+            curr.src_ptr.dup(),
+            curr.lane_base.dup(),
+            curr.plaintext[plaintext_offset + 1].dup(),
+        ]) {
+            builder.assert_eq(left, right);
+        }
+    }
     builder
         .when(gate.clone())
-        .assert_eq(next.c_prev0, pack_u32_xor_bytes_le::<_, AB::Expr>(curr.bytes));
+        .assert_eq(next.c_prev0.dup(), pack_u32_xor_bytes_le::<_, AB::Expr>(curr.bytes.clone()));
     enforce_canonical_split(
         builder,
         gate,
-        curr.plaintext[plaintext_offset],
-        a_limb_expr::<AB>(curr.bytes),
-        a_limb_expr::<AB>(next.bytes),
-        next.hi_quotient,
+        curr.plaintext[plaintext_offset].dup(),
+        a_limb_expr::<AB>(&curr.bytes),
+        a_limb_expr::<AB>(&next.bytes),
+        next.hi_quotient.dup(),
     );
 }
 
 fn carry_high_first_to_low_second<AB>(
     builder: &mut AB,
     gate: AB::Expr,
-    cols: &AeadStreamCols<AB::Var>,
-    cols_next: &AeadStreamCols<AB::Var>,
+    cols: &AeadStreamCols<AB::Expr>,
+    cols_next: &AeadStreamCols<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     let curr = cols.high_first();
     let next = cols_next.low_second();
 
-    builder.when(gate.clone()).assert_eq_arrays(
-        [
-            next.ctx,
-            next.clk,
-            next.src_ptr,
-            next.lane_base,
-            next.active_plaintext,
-            next.c_prev0,
-        ],
-        [
-            curr.ctx,
-            curr.clk,
-            curr.src_ptr,
-            curr.lane_base,
-            curr.next_plaintext,
-            curr.c_prev0,
-        ],
-    );
+    {
+        let builder = &mut builder.when(gate.clone());
+        for (left, right) in [
+            next.ctx.dup(),
+            next.clk.dup(),
+            next.src_ptr.dup(),
+            next.lane_base.dup(),
+            next.active_plaintext.dup(),
+            next.c_prev0.dup(),
+        ]
+        .into_iter()
+        .zip([
+            curr.ctx.dup(),
+            curr.clk.dup(),
+            curr.src_ptr.dup(),
+            curr.lane_base.dup(),
+            curr.next_plaintext.dup(),
+            curr.c_prev0.dup(),
+        ]) {
+            builder.assert_eq(left, right);
+        }
+    }
     builder
         .when(gate)
-        .assert_eq(next.c_prev1, pack_u32_xor_bytes_le::<_, AB::Expr>(curr.bytes));
+        .assert_eq(next.c_prev1.dup(), pack_u32_xor_bytes_le::<_, AB::Expr>(curr.bytes.clone()));
 }
 
 fn carry_low_second_to_high_second<AB>(
     builder: &mut AB,
     gate: AB::Expr,
-    cols: &AeadStreamCols<AB::Var>,
-    cols_next: &AeadStreamCols<AB::Var>,
+    cols: &AeadStreamCols<AB::Expr>,
+    cols_next: &AeadStreamCols<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     let curr = cols.low_second();
     let next = cols_next.high_second();
 
-    builder.when(gate.clone()).assert_eq_arrays(
-        [next.ctx, next.clk, next.dst_ptr, next.lane_base, next.c_prev0, next.c_prev1],
-        [curr.ctx, curr.clk, curr.dst_ptr, curr.lane_base, curr.c_prev0, curr.c_prev1],
-    );
+    {
+        let builder = &mut builder.when(gate.clone());
+        for (left, right) in [
+            next.ctx.dup(),
+            next.clk.dup(),
+            next.dst_ptr.dup(),
+            next.lane_base.dup(),
+            next.c_prev0.dup(),
+            next.c_prev1.dup(),
+        ]
+        .into_iter()
+        .zip([
+            curr.ctx.dup(),
+            curr.clk.dup(),
+            curr.dst_ptr.dup(),
+            curr.lane_base.dup(),
+            curr.c_prev0.dup(),
+            curr.c_prev1.dup(),
+        ]) {
+            builder.assert_eq(left, right);
+        }
+    }
     builder
         .when(gate.clone())
-        .assert_eq(next.c_prev2, pack_u32_xor_bytes_le::<_, AB::Expr>(curr.bytes));
+        .assert_eq(next.c_prev2.dup(), pack_u32_xor_bytes_le::<_, AB::Expr>(curr.bytes.clone()));
     enforce_canonical_split(
         builder,
         gate,
-        curr.active_plaintext,
-        a_limb_expr::<AB>(curr.bytes),
-        a_limb_expr::<AB>(next.bytes),
-        next.hi_quotient,
+        curr.active_plaintext.dup(),
+        a_limb_expr::<AB>(&curr.bytes),
+        a_limb_expr::<AB>(&next.bytes),
+        next.hi_quotient.dup(),
     );
 }
 
@@ -158,12 +192,12 @@ fn carry_low_second_to_high_second<AB>(
 fn enforce_canonical_split<AB>(
     builder: &mut AB,
     gate: AB::Expr,
-    plaintext: AB::Var,
+    plaintext: AB::Expr,
     lo: AB::Expr,
     hi: AB::Expr,
-    hi_quotient: AB::Var,
+    hi_quotient: AB::Expr,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     builder
         .when(gate.clone())
@@ -174,9 +208,9 @@ fn enforce_canonical_split<AB>(
     builder.when(gate).assert_eq(hi_quotient * hi_gap, lo);
 }
 
-pub(crate) fn a_limb_expr<AB>(bytes: [AB::Var; 12]) -> AB::Expr
+fn a_limb_expr<AB>(bytes: &[AB::Expr; 12]) -> AB::Expr
 where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
-    pack_u32_bytes_le::<_, AB::Expr>([bytes[0], bytes[1], bytes[2], bytes[3]])
+    pack_u32_bytes_le::<_, AB::Expr>(core::array::from_fn(|i| bytes[i].dup()))
 }

@@ -13,7 +13,7 @@
 use chiplets::selectors::ChipletSelectors;
 use miden_stark::air::native::Frame;
 
-use crate::vm::{ChipletCols, CoreCols, MidenAirBuilder, NativeMidenAirBuilder};
+use crate::vm::{ChipletCols, CoreCols, NativeMidenAirBuilder};
 
 pub mod and8_lookup;
 pub mod chiplets;
@@ -61,12 +61,13 @@ pub fn enforce_core<AB>(
 /// Selector validity is enforced separately via
 /// [`chiplets::selectors::build_chiplet_selectors`].
 pub fn enforce_chiplets<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    local: &ChipletCols<AB::Var>,
-    next: &ChipletCols<AB::Var>,
+    local: &ChipletCols<AB::Expr>,
+    next: &ChipletCols<AB::Expr>,
     selectors: &ChipletSelectors<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
-    chiplets::enforce_main(builder, local, next, selectors);
+    chiplets::enforce_main(frame, builder, local, next, selectors);
 }

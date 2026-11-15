@@ -1,6 +1,7 @@
 //! Utility extension traits for constraint code.
 
 use miden_core::field::PrimeCharacteristicRing;
+use p3_field::Dup;
 
 use crate::vm::{
     Felt,
@@ -55,14 +56,14 @@ where
 #[inline]
 pub(crate) fn pack_u32_xor_bytes_le<T, E>(bytes: [T; 12]) -> E
 where
-    T: Copy + Into<E>,
+    T: Dup + Into<E>,
     E: PrimeCharacteristicRing,
     Felt: Into<E>,
 {
     let xor_bytes: [E; 4] = core::array::from_fn(|i| {
-        let lhs: E = bytes[i].into();
-        let rhs: E = bytes[i + 4].into();
-        let and: E = bytes[i + 8].into();
+        let lhs: E = bytes[i].dup().into();
+        let rhs: E = bytes[i + 4].dup().into();
+        let and: E = bytes[i + 8].dup().into();
         lhs + rhs - and.double()
     });
     pack_u32_bytes_le::<_, E>(xor_bytes)

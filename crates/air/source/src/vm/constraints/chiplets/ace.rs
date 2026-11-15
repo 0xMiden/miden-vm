@@ -28,14 +28,15 @@
 //! | m0        | Wire bus multiplicity for node 0               |
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_stark::air::AirBuilder;
+use miden_stark::air::native::LiftedAirBuilder;
+use p3_field::Dup;
 
 use crate::vm::{
-    MidenAirBuilder,
+    NativeMidenAirBuilder,
     constraints::{
         chiplets::{columns::AceCols, selectors::ChipletSelectors},
         constants::{F_1, F_4},
-        ext_field::{QuadFeltAirBuilder, QuadFeltExpr},
+        ext_field::{NativeQuadFeltAirBuilder, QuadFeltExpr},
         utils::BoolNot,
     },
 };
@@ -46,11 +47,11 @@ use crate::vm::{
 /// Enforce ACE chiplet constraints that apply to all rows.
 pub fn enforce_ace_constraints_all_rows<AB>(
     builder: &mut AB,
-    local: &AceCols<AB::Var>,
-    next: &AceCols<AB::Var>,
+    local: &AceCols<AB::Expr>,
+    next: &AceCols<AB::Expr>,
     selectors: &ChipletSelectors<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     let ace_flag = selectors.ace_active.clone();
     let ace_transition = selectors.ace_transition.clone();
@@ -58,9 +59,9 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     let ace_entry_next = selectors.ace_entry_next.clone();
 
     // Derived section flags
-    let s_start = local.s_start;
-    let s_start_next = next.s_start;
-    let s_transition = s_start_next.into().not();
+    let s_start = local.s_start.dup();
+    let s_start_next = next.s_start.dup();
+    let s_transition = s_start_next.not();
 
     // ==========================================================================
     // FIRST ROW CONSTRAINTS
@@ -68,7 +69,7 @@ pub fn enforce_ace_constraints_all_rows<AB>(
 
     // The entry gate is active immediately before ACE begins, even when preceding sections are
     // empty. Initialize the first ACE row with s_start = 1.
-    builder.when(ace_entry_next).assert_one(s_start_next);
+    builder.when(ace_entry_next).assert_one(s_start_next.dup());
 
     // ==========================================================================
     // BINARY CONSTRAINTS
@@ -77,33 +78,36 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // When ACE is active, section flags must be boolean.
     {
         let builder = &mut builder.when(ace_flag.clone());
-        builder.assert_bool(local.s_start);
-        builder.assert_bool(local.s_block);
+        builder.assert_bool(local.s_start.dup());
+        builder.assert_bool(local.s_block.dup());
     }
 
-    let f_eval = local.s_block;
-    let f_eval_next = next.s_block;
-    let f_read = f_eval.into().not();
-    let f_read_next = f_eval_next.into().not();
+    let f_eval = local.s_block.dup();
+    let f_eval_next = next.s_block.dup();
+    let f_read = f_eval.dup().not();
+    let f_read_next = f_eval_next.dup().not();
 
     // ==========================================================================
     // SECTION/BLOCK FLAGS CONSTRAINTS
     // ==========================================================================
     {
         // Last row of ACE chiplet cannot be section start
-        builder.when(ace_last.clone()).assert_zero(s_start);
+        builder.when(ace_last.clone()).assert_zero(s_start.dup());
 
         // Prevent consecutive section starts within ACE chiplet
-        builder.when(ace_transition.clone()).when(s_start).assert_zero(s_start_next);
+        builder
+            .when(ace_transition.clone())
+            .when(s_start.dup())
+            .assert_zero(s_start_next.dup());
 
         // Sections must start with READ blocks (not EVAL)
-        builder.when(ace_flag.clone()).when(s_start).assert_zero(f_eval);
+        builder.when(ace_flag.clone()).when(s_start.dup()).assert_zero(f_eval.dup());
 
         // EVAL blocks cannot be followed by READ blocks within same section
         builder
             .when(ace_transition.clone())
             .when(s_transition.clone())
-            .when(f_eval)
+            .when(f_eval.dup())
             .assert_zero(f_read_next.clone());
     }
 
@@ -116,18 +120,18 @@ pub fn enforce_ace_constraints_all_rows<AB>(
         let builder = &mut builder.when(ace_transition.clone() * s_transition);
 
         // clk and ctx are stable
-        builder.assert_eq(next.ctx, local.ctx);
-        builder.assert_eq(next.clk, local.clk);
+        builder.assert_eq(next.ctx.dup(), local.ctx.dup());
+        builder.assert_eq(next.clk.dup(), local.clk.dup());
 
         // Memory pointer increments: +4 in READ, +1 in EVAL
         // ptr' = ptr + 4 * f_read + f_eval
-        let expected_ptr: AB::Expr = local.ptr + f_read.clone() * F_4 + f_eval;
-        builder.assert_eq(next.ptr, expected_ptr);
+        let expected_ptr: AB::Expr = local.ptr.dup() + f_read.clone() * F_4 + f_eval.dup();
+        builder.assert_eq(next.ptr.dup(), expected_ptr);
 
         // Node ID decrements: -2 in READ, -1 in EVAL
         // id0 = id0' + 2 * f_read + f_eval
-        let expected_id0: AB::Expr = next.id_0 + f_read.double() + f_eval;
-        builder.assert_eq(local.id_0, expected_id0);
+        let expected_id0: AB::Expr = next.id_0.dup() + f_read.double() + f_eval.dup();
+        builder.assert_eq(local.id_0.dup(), expected_id0);
     }
 
     // ==========================================================================
@@ -138,16 +142,17 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     builder
         .when(ace_flag.clone())
         .when(f_read.clone())
-        .assert_eq(local.id_1, local.id_0 - F_1);
+        .assert_eq(local.id_1.dup(), local.id_0.dup() - F_1);
 
     // READ→EVAL transition occurs when n_eval matches the first EVAL id0.
     // n_eval is constant across READ rows and encodes (num_eval_rows - 1).
     // Enforce: f_read * (f_read' * n_eval' + f_eval' * id0' - n_eval) = 0
-    let selected: AB::Expr = f_read_next * next.read().num_eval + f_eval_next * next.id_0;
+    let selected: AB::Expr =
+        f_read_next * next.read().num_eval.dup() + f_eval_next.dup() * next.id_0.dup();
     builder
         .when(ace_transition.clone())
         .when(f_read.clone())
-        .assert_eq(selected, local.read().num_eval);
+        .assert_eq(selected, local.read().num_eval.dup());
 
     // ==========================================================================
     // EVAL BLOCK CONSTRAINTS
@@ -155,8 +160,8 @@ pub fn enforce_ace_constraints_all_rows<AB>(
 
     // EVAL block: op ternary validity and arithmetic operation result.
     {
-        let builder = &mut builder.when(ace_flag * f_eval);
-        let op: AB::Expr = local.eval_op.into();
+        let builder = &mut builder.when(ace_flag * f_eval.dup());
+        let op: AB::Expr = local.eval_op.dup();
 
         let op_square = op.square();
         // op must be -1, 0, or 1: ternary validity
@@ -169,9 +174,9 @@ pub fn enforce_ace_constraints_all_rows<AB>(
         // - op = -1: Subtraction (v0 = v1 - v2)
         // - op =  0: Multiplication (v0 = v1 × v2)
         // - op =  1: Addition (v0 = v1 + v2)
-        let v0: QuadFeltExpr<AB::Expr> = local.v_0.into_expr();
-        let v1: QuadFeltExpr<AB::Expr> = local.v_1.into_expr();
-        let v2: QuadFeltExpr<AB::Expr> = local.eval().v_2.into_expr();
+        let v0: QuadFeltExpr<AB::Expr> = local.v_0.clone();
+        let v1: QuadFeltExpr<AB::Expr> = local.v_1.clone();
+        let v2: QuadFeltExpr<AB::Expr> = local.eval().v_2.clone();
 
         let expected = {
             // Linear operation: v1 + op * v2 (works for ADD when op=1, SUB when op=-1)
@@ -194,16 +199,16 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // At section end: result value and node ID must be zero.
     {
         // f_end fires on the last ACE row or on section boundaries.
-        let f_end = ace_last + ace_transition * s_start_next;
+        let f_end = ace_last + ace_transition * s_start_next.dup();
         let builder = &mut builder.when(f_end);
 
         // Sections must end with EVAL blocks (not READ).
         builder.assert_zero(f_read);
 
-        let v0: QuadFeltExpr<AB::Expr> = local.v_0.into_expr();
+        let v0: QuadFeltExpr<AB::Expr> = local.v_0.clone();
 
         builder.assert_eq_quad(v0, QuadFeltExpr::new(AB::Expr::ZERO, AB::Expr::ZERO));
 
-        builder.assert_zero(local.id_0);
+        builder.assert_zero(local.id_0.dup());
     }
 }

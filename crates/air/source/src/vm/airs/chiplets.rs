@@ -5,7 +5,10 @@ use core::borrow::Borrow;
 
 use miden_core::{Felt, WORD_SIZE, field::ExtensionField};
 use miden_stark::{
-    air::{ReductionError, WindowAccess},
+    air::{
+        ReductionError, WindowAccess,
+        native::migration::{LegacySink, SourceSnapshot},
+    },
     lookup::{BoundaryBuilder, Challenges, ConstraintLookupBuilder},
 };
 
@@ -74,14 +77,17 @@ impl ChipletsAir {
     }
 
     pub(super) fn eval<AB: MidenAirBuilder>(self, builder: &mut AB) {
-        let main = builder.main();
-        let local: &ChipletCols<AB::Var> = (*main.current_slice()).borrow();
-        let next: &ChipletCols<AB::Var> = (*main.next_slice()).borrow();
-
-        let selectors =
-            constraints::chiplets::selectors::build_chiplet_selectors(builder, local, next);
-
-        constraints::enforce_chiplets(builder, local, next, &selectors);
+        let snapshot = SourceSnapshot::new(builder, 0, self.aux_width());
+        let frame = snapshot.frame();
+        let local: &ChipletCols<AB::Expr> = frame.main.current.borrow();
+        let next: &ChipletCols<AB::Expr> = frame.main.next.borrow();
+        {
+            let mut sink = LegacySink::new(builder);
+            let selectors = constraints::chiplets::selectors::build_chiplet_selectors(
+                &frame, &mut sink, local, next,
+            );
+            constraints::enforce_chiplets(&frame, &mut sink, local, next, &selectors);
+        }
 
         let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::Chiplets);
         self.lookup_eval(&mut lb);

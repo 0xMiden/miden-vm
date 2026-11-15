@@ -28,10 +28,11 @@
 //! The `4 * w1` check prevents Goldilocks field wraparound (P > 2^18).
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_stark::air::AirBuilder;
+use miden_stark::air::native::LiftedAirBuilder;
+use p3_field::Dup;
 
 use crate::vm::{
-    MidenAirBuilder,
+    NativeMidenAirBuilder,
     constraints::{
         chiplets::{columns::MemoryCols, selectors::ChipletSelectors},
         constants::{F_4, TWO_POW_16},
@@ -51,11 +52,11 @@ use crate::vm::{
 /// precedence over clock change.
 pub fn enforce_memory_constraints<AB>(
     builder: &mut AB,
-    cols: &MemoryCols<AB::Var>,
-    cols_next: &MemoryCols<AB::Var>,
+    cols: &MemoryCols<AB::Expr>,
+    cols_next: &MemoryCols<AB::Expr>,
     selectors: &ChipletSelectors<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     // ==========================================================================
     // BINARY CONSTRAINTS (all rows)
@@ -63,19 +64,19 @@ pub fn enforce_memory_constraints<AB>(
     // Selectors and indices must be binary.
     {
         let builder = &mut builder.when(selectors.memory_active.clone());
-        builder.assert_bool(cols.is_read);
-        builder.assert_bool(cols.is_word);
-        builder.assert_bool(cols.idx0);
-        builder.assert_bool(cols.idx1);
+        builder.assert_bool(cols.is_read.dup());
+        builder.assert_bool(cols.is_word.dup());
+        builder.assert_bool(cols.idx0.dup());
+        builder.assert_bool(cols.idx1.dup());
 
-        let word_addr = (cols.word_addr_hi * TWO_POW_16 + cols.word_addr_lo) * F_4;
-        builder.assert_eq(cols.word_addr, word_addr);
+        let word_addr = (cols.word_addr_hi.dup() * TWO_POW_16 + cols.word_addr_lo.dup()) * F_4;
+        builder.assert_eq(cols.word_addr.dup(), word_addr);
 
         // For word access, idx bits must be zero (only element accesses use idx0/idx1).
         {
-            let builder = &mut builder.when(cols.is_word);
-            builder.assert_zero(cols.idx0);
-            builder.assert_zero(cols.idx1);
+            let builder = &mut builder.when(cols.is_word.dup());
+            builder.assert_zero(cols.idx0.dup());
+            builder.assert_zero(cols.idx1.dup());
         }
     }
 
@@ -92,7 +93,7 @@ pub fn enforce_memory_constraints<AB>(
     {
         let builder = &mut builder.when(selectors.memory_entry_next.clone());
         for (i, nw) in not_written.iter().enumerate() {
-            builder.when(nw.clone()).assert_zero(cols_next.values[i]);
+            builder.when(nw.clone()).assert_zero(cols_next.values[i].dup());
         }
     }
 
@@ -107,11 +108,11 @@ pub fn enforce_memory_constraints<AB>(
     // d_inv (docs: column `t`) is shared across all three delta levels (ctx, addr, clk).
     // The assert_bool + assert_zero pairs below form conditional inverses that force d_inv
     // to the correct value at each level.
-    let d_inv_next = cols_next.d_inv;
+    let d_inv_next = cols_next.d_inv.dup();
 
     // Context: prover sets d_inv = 1/ctx_delta → ctx_changed = 1.
-    let ctx_delta = cols_next.ctx - cols.ctx;
-    let ctx_changed = ctx_delta.clone() * d_inv_next;
+    let ctx_delta = cols_next.ctx.dup() - cols.ctx.dup();
+    let ctx_changed = ctx_delta.clone() * d_inv_next.dup();
     let same_ctx = ctx_changed.not();
     // ctx_changed must be boolean. When ctx_delta ≠ 0, this forces ctx_changed ∈ {0, 1}.
     // If ctx_changed were 0 (same_ctx = 1), the assert_zero(ctx_delta) below would
@@ -121,8 +122,8 @@ pub fn enforce_memory_constraints<AB>(
     // Address: prover sets d_inv = 1/addr_delta → addr_changed = 1.
     // Only meaningful when same_ctx = 1; when context changes, addr_changed =
     // addr_delta/ctx_delta which is unconstrained, but always gated by same_ctx.
-    let addr_delta = cols_next.word_addr - cols.word_addr;
-    let addr_changed = addr_delta.clone() * d_inv_next;
+    let addr_delta = cols_next.word_addr.dup() - cols.word_addr.dup();
+    let addr_changed = addr_delta.clone() * d_inv_next.dup();
     let same_addr = addr_changed.not();
 
     // When context is unchanged (same_ctx = 1):
@@ -144,8 +145,8 @@ pub fn enforce_memory_constraints<AB>(
     // degree 4; the column lets downstream constraints use it at degree 1).
     // Not constrained in the first row (intentional — first-row constraints use
     // not_written flags directly, not f_sca).
-    let same_ctx_and_addr = cols_next.is_same_ctx_and_addr;
-    builder.assert_eq(same_ctx_and_addr, same_ctx.clone() * same_addr.clone());
+    let same_ctx_and_addr = cols_next.is_same_ctx_and_addr.dup();
+    builder.assert_eq(same_ctx_and_addr.dup(), same_ctx.clone() * same_addr.clone());
 
     // --- monotonicity ---
     // The priority-selected delta must equal the range-checked decomposition.
@@ -155,14 +156,14 @@ pub fn enforce_memory_constraints<AB>(
     //   ctx changed  → ctx_delta
     //   addr changed → addr_delta  (reachable only when same context)
     //   neither      → clk_delta
-    let clk_delta = cols_next.clk - cols.clk;
+    let clk_delta = cols_next.clk.dup() - cols.clk.dup();
     let computed_delta = {
         let ctx_term = ctx_changed * ctx_delta;
         let addr_term = addr_changed * addr_delta;
         let clk_term = same_addr * clk_delta.clone();
         ctx_term + same_ctx * (addr_term + clk_term)
     };
-    let delta_next = cols_next.d1 * TWO_POW_16 + cols_next.d0;
+    let delta_next = cols_next.d1.dup() * TWO_POW_16 + cols_next.d0.dup();
     builder.assert_eq(computed_delta, delta_next);
 
     // --- read-only constraint ---
@@ -177,11 +178,11 @@ pub fn enforce_memory_constraints<AB>(
     // One-sided safe: a wrong d_inv can only block writes, never enable them.
     {
         let clk_no_change = AB::Expr::ONE - clk_delta * d_inv_next;
-        let is_write = cols.is_read.into().not();
-        let is_write_next = cols_next.is_read.into().not();
+        let is_write = cols.is_read.dup().not();
+        let is_write_next = cols_next.is_read.dup().not();
         let any_write = is_write + is_write_next;
 
-        builder.when(same_ctx_and_addr).when(clk_no_change).assert_zero(any_write);
+        builder.when(same_ctx_and_addr.dup()).when(clk_no_change).assert_zero(any_write);
     }
 
     // --- value consistency ---
@@ -189,10 +190,12 @@ pub fn enforce_memory_constraints<AB>(
     //   same context/addr (f_sca'=1): v'[i] = v[i]  (copy from previous row)
     //   new context/addr  (f_sca'=0): v'[i] = 0      (initialize to zero)
     // Combined: v'[i] = f_sca' * v[i]
-    let values = cols.values;
-    let values_next = cols_next.values;
+    let values = &cols.values;
+    let values_next = &cols_next.values;
     for (i, nw) in not_written.into_iter().enumerate() {
-        builder.when(nw).assert_eq(values_next[i], same_ctx_and_addr * values[i]);
+        builder
+            .when(nw)
+            .assert_eq(values_next[i].dup(), same_ctx_and_addr.dup() * values[i].dup());
     }
 }
 
@@ -213,32 +216,32 @@ pub fn enforce_memory_constraints<AB>(
 /// Corresponds to `c_i` in the docs, with `selected[i]` ≡ `f_i`.
 ///
 /// Formula: `not_written[i] = is_read + is_write * is_element * !selected[i]`
-fn compute_not_written_flags<AB>(cols: &MemoryCols<AB::Var>) -> [AB::Expr; 4]
+fn compute_not_written_flags<AB>(cols: &MemoryCols<AB::Expr>) -> [AB::Expr; 4]
 where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
-    let is_read = cols.is_read;
-    let is_write = is_read.into().not();
+    let is_read = cols.is_read.dup();
+    let is_write = is_read.not();
 
-    let is_word = cols.is_word;
-    let is_element = is_word.into().not();
+    let is_word = cols.is_word.dup();
+    let is_element = is_word.not();
 
     // One-hot element selection: selected[i] = 1 when idx = 2*idx1 + idx0 equals i.
-    let idx0 = cols.idx0;
-    let idx1 = cols.idx1;
-    let not_idx0 = idx0.into().not();
-    let not_idx1 = idx1.into().not();
+    let idx0 = cols.idx0.dup();
+    let idx1 = cols.idx1.dup();
+    let not_idx0 = idx0.not();
+    let not_idx1 = idx1.not();
 
     let selected = [
         not_idx1.clone() * not_idx0.clone(), // element 0: idx = 0b00
-        not_idx1 * idx0,                     // element 1: idx = 0b01
-        idx1 * not_idx0,                     // element 2: idx = 0b10
+        not_idx1 * idx0.dup(),               // element 1: idx = 0b01
+        idx1.dup() * not_idx0,               // element 2: idx = 0b10
         idx1 * idx0,                         // element 3: idx = 0b11
     ];
 
     // not_written[i] = is_read + is_write * is_element * !selected[i]
     let is_element_write = is_write * is_element;
-    selected.map(|s_i| is_read + is_element_write.clone() * s_i.not())
+    selected.map(|s_i| is_read.dup() + is_element_write.clone() * s_i.not())
 }
 
 #[cfg(test)]
@@ -253,7 +256,9 @@ mod tests {
     use super::enforce_memory_constraints;
     use crate::vm::{
         MemoryCols,
-        constraints::{chiplets::selectors::ChipletSelectors, test_utils::ConstraintEvalBuilder},
+        constraints::{
+            chiplets::selectors::ChipletSelectors, test_utils::NativeConstraintEvalBuilder,
+        },
     };
 
     const EMPTY_MEMORY_ROW: MemoryCols<Felt> = MemoryCols {
@@ -299,7 +304,7 @@ mod tests {
         next: &MemoryCols<Felt>,
         selectors: &ChipletSelectors<Felt>,
     ) -> Vec<QuadFelt> {
-        let mut builder = ConstraintEvalBuilder::new();
+        let mut builder = NativeConstraintEvalBuilder::default();
         enforce_memory_constraints(&mut builder, local, next, selectors);
         builder.evaluations
     }

@@ -9,10 +9,11 @@ pub mod flags;
 
 use flags::ControllerFlags;
 use miden_core::field::PrimeCharacteristicRing;
-use miden_stark::air::AirBuilder;
+use miden_stark::air::native::{Frame, LiftedAirBuilder};
+use p3_field::Dup;
 
 use crate::vm::{
-    MidenAirBuilder,
+    NativeMidenAirBuilder,
     constraints::{
         chiplets::{columns::ControllerCols, selectors::ChipletSelectors},
         utils::BoolNot,
@@ -26,23 +27,24 @@ use crate::vm::{
 ///
 /// Merkle level increments are enforced by [`enforce_merkle_level_constraints`].
 pub fn enforce_controller_constraints<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    cols: &ControllerCols<AB::Var>,
-    cols_next: &ControllerCols<AB::Var>,
+    cols: &ControllerCols<AB::Expr>,
+    cols_next: &ControllerCols<AB::Expr>,
     selectors: &ChipletSelectors<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     let is_active = selectors.controller_active.clone();
     let is_transition = selectors.controller_transition.clone();
     let rows = ControllerFlags::<AB::Expr>::new(cols);
 
-    let merkle_start: AB::Expr = cols.merkle_is_start().into();
-    let merkle_start_next: AB::Expr = cols_next.merkle_is_start().into();
-    let op_final: AB::Expr = cols.op_final.into();
+    let merkle_start: AB::Expr = cols.merkle_is_start();
+    let merkle_start_next: AB::Expr = cols_next.merkle_is_start();
+    let op_final: AB::Expr = cols.op_final.dup();
     let is_active_next = selectors.controller_next_active.clone();
-    let merkle_or_padding: AB::Expr = cols.merkle_or_padding.into();
-    let controller_s0: AB::Expr = cols.s0.into();
+    let merkle_or_padding: AB::Expr = cols.merkle_or_padding.dup();
+    let controller_s0: AB::Expr = cols.s0.dup();
 
     // Column 1 is zero on AEAD and bitwise rows. The constraint below zeros column 22
     // in later sections, so the Merkle gate stays quadratic without an activity factor.
@@ -50,23 +52,30 @@ pub fn enforce_controller_constraints<AB>(
     let controller_merkle = merkle_or_padding.clone() * controller_s0.clone();
 
     // Trace skeleton.
-    builder.when_first_row().assert_one(is_active.clone());
-    builder.when_first_row().assert_one(cols.s0);
+    builder.when(frame.first_row()).assert_one(is_active.clone());
+    builder.when(frame.first_row()).assert_one(cols.s0.dup());
 
     // Controller row addresses start at one and advance through controller padding. The
     // address relation ends with the controller section.
-    builder.when_first_row().assert_one(cols.addr);
+    builder.when(frame.first_row()).assert_one(cols.addr.dup());
     builder
         .when(is_transition)
-        .assert_eq(cols_next.addr.into(), cols.addr.into() + AB::Expr::ONE);
+        .assert_eq(cols_next.addr.dup(), cols.addr.dup() + AB::Expr::ONE);
 
-    let first_merkle_row: AB::Expr = cols.s1 + cols.s2 - cols.s1 * cols.s2;
-    builder.when_first_row().assert_zero(first_merkle_row * merkle_start.not());
+    let first_merkle_row: AB::Expr = cols.s1.dup() + cols.s2.dup() - cols.s1.dup() * cols.s2.dup();
+    builder
+        .when(frame.first_row())
+        .assert_zero(first_merkle_row * merkle_start.not());
 
-    let first_mv_row = Into::<AB::Expr>::into(cols.s1) * Into::<AB::Expr>::into(cols.s2).not();
-    builder.when_first_row().assert_eq(cols.mrupdate_id, first_mv_row);
+    let first_mv_row = cols.s1.dup() * cols.s2.dup().not();
+    builder.when(frame.first_row()).assert_eq(cols.mrupdate_id.dup(), first_mv_row);
 
-    builder.when(is_active.clone()).assert_bools([cols.s0, cols.s1, cols.s2]);
+    {
+        let builder = &mut builder.when(is_active.clone());
+        for bit in [cols.s0.dup(), cols.s1.dup(), cols.s2.dup()] {
+            builder.assert_bool(bit);
+        }
+    }
     builder.when(is_active.clone()).assert_bool(op_final.clone());
     builder.when(is_active.clone()).assert_zero(rows.is_invalid.clone());
     builder
@@ -78,29 +87,29 @@ pub fn enforce_controller_constraints<AB>(
     {
         let gate = controller_padding.clone() * is_active_next.clone();
         let builder = &mut builder.when(gate);
-        builder.assert_zero(cols_next.s0);
-        builder.assert_one(cols_next.s1);
-        builder.assert_zero(cols_next.s2);
+        builder.assert_zero(cols_next.s0.dup());
+        builder.assert_one(cols_next.s1.dup());
+        builder.assert_zero(cols_next.s2.dup());
     }
 
     // Padding rows carry the address and MRUPDATE id, with no operation payload.
     {
         let builder = &mut builder.when(controller_padding);
-        builder.assert_zeros(cols.state);
-        builder.assert_zeros(cols.row_data);
-        builder.assert_zero(cols.op_final);
+        builder.assert_zeros(cols.state.clone());
+        builder.assert_zeros(cols.row_data.clone());
+        builder.assert_zero(cols.op_final.dup());
     }
 
     // The controller-local MRUPDATE id increments exactly when the next row starts an MV leg.
     {
-        let mrupdate_id: AB::Expr = cols.mrupdate_id.into();
-        let s1_next: AB::Expr = cols_next.s1.into();
-        let s2_next: AB::Expr = cols_next.s2.into();
+        let mrupdate_id: AB::Expr = cols.mrupdate_id.dup();
+        let s1_next: AB::Expr = cols_next.s1.dup();
+        let s2_next: AB::Expr = cols_next.s2.dup();
         let mv_start_next = s1_next * s2_next.not() * merkle_start_next.clone();
         let ctrl_pair = is_active.clone() * is_active_next.clone();
         builder
             .when(ctrl_pair)
-            .assert_eq(cols_next.mrupdate_id, mrupdate_id + mv_start_next);
+            .assert_eq(cols_next.mrupdate_id.dup(), mrupdate_id + mv_start_next);
     }
 
     // Operation sequencing.
@@ -108,42 +117,39 @@ pub fn enforce_controller_constraints<AB>(
         let gate = is_active.clone() * rows.is_hash.clone() * op_final.not();
         let builder = &mut builder.when(gate);
         builder.assert_one(is_active_next.clone());
-        builder.assert_zero(cols_next.s0);
-        builder.assert_zero(cols_next.s1);
-        builder.assert_zero(cols_next.s2);
+        builder.assert_zero(cols_next.s0.dup());
+        builder.assert_zero(cols_next.s1.dup());
+        builder.assert_zero(cols_next.s2.dup());
     }
     {
         let gate = controller_merkle.clone() * op_final.not();
         let builder = &mut builder.when(gate);
         builder.assert_one(is_active_next.clone());
-        builder.assert_one(cols_next.s0);
-        builder.assert_eq(cols_next.s1, cols.s1);
-        builder.assert_eq(cols_next.s2, cols.s2);
+        builder.assert_one(cols_next.s0.dup());
+        builder.assert_eq(cols_next.s1.dup(), cols.s1.dup());
+        builder.assert_eq(cols_next.s2.dup(), cols.s2.dup());
         builder.assert_zero(merkle_start_next.clone());
     }
 
     // Conversely, any continuation row must follow a non-final matching row.
     {
-        let hash_absorb_next = Into::<AB::Expr>::into(cols_next.s0).not()
-            * Into::<AB::Expr>::into(cols_next.s1).not()
-            * Into::<AB::Expr>::into(cols_next.s2).not();
+        let hash_absorb_next =
+            cols_next.s0.dup().not() * cols_next.s1.dup().not() * cols_next.s2.dup().not();
         let gate = is_active_next.clone() * hash_absorb_next;
         let builder = &mut builder.when(gate);
         builder.assert_zero(op_final.clone());
-        builder.assert_zero(cols.s1);
-        builder.assert_zero(cols.s2);
+        builder.assert_zero(cols.s1.dup());
+        builder.assert_zero(cols.s2.dup());
     }
     {
-        let merkle_or_padding_next: AB::Expr = cols_next.merkle_or_padding.into();
-        let merkle_cont_next = is_active_next
-            * merkle_or_padding_next
-            * Into::<AB::Expr>::into(cols_next.s0)
-            * merkle_start_next.not();
+        let merkle_or_padding_next: AB::Expr = cols_next.merkle_or_padding.dup();
+        let merkle_cont_next =
+            is_active_next * merkle_or_padding_next * cols_next.s0.dup() * merkle_start_next.not();
         let builder = &mut builder.when(merkle_cont_next);
         builder.assert_zero(op_final.clone());
-        builder.assert_one(cols.s0);
-        builder.assert_eq(cols.s1, cols_next.s1);
-        builder.assert_eq(cols.s2, cols_next.s2);
+        builder.assert_one(cols.s0.dup());
+        builder.assert_eq(cols.s1.dup(), cols_next.s1.dup());
+        builder.assert_eq(cols.s2.dup(), cols_next.s2.dup());
     }
 
     // Hash continuation: the next hash row's input CV equals this row's output CV.
@@ -153,7 +159,7 @@ pub fn enforce_controller_constraints<AB>(
         let cv_out = cols.hash_cv();
         let builder = &mut builder.when(gate);
         for i in 0..4 {
-            builder.assert_eq(cv_next[i], cv_out[i]);
+            builder.assert_eq(cv_next[i].dup(), cv_out[i].dup());
         }
     }
 
@@ -164,8 +170,8 @@ pub fn enforce_controller_constraints<AB>(
         builder.assert_bool(merkle_start.clone());
         builder.when(merkle_start).assert_zero(cols.merkle_level());
 
-        let node_index: AB::Expr = cols.merkle_node_index().into();
-        let node_index_next: AB::Expr = cols.merkle_node_index_next().into();
+        let node_index: AB::Expr = cols.merkle_node_index();
+        let node_index_next: AB::Expr = cols.merkle_node_index_next();
         let bit = node_index - node_index_next.double();
         builder.assert_bool(bit);
     }
@@ -177,16 +183,17 @@ pub fn enforce_controller_constraints<AB>(
         let builder = &mut builder.when(merkle_cont);
         builder.assert_eq(cols_next.merkle_node_index(), cols.merkle_node_index_next());
 
-        let node_index_next: AB::Expr = cols_next.merkle_node_index().into();
-        let node_index_after_next: AB::Expr = cols_next.merkle_node_index_next().into();
+        let node_index_next: AB::Expr = cols_next.merkle_node_index();
+        let node_index_after_next: AB::Expr = cols_next.merkle_node_index_next();
         let bit_next = node_index_next - node_index_after_next.double();
         let digest = cols.merkle_digest();
         let block_lo_next = cols_next.block_lo();
         let block_hi_next = cols_next.block_hi();
         for j in 0..4 {
             builder.assert_eq(
-                digest[j],
-                block_lo_next[j] + bit_next.clone() * (block_hi_next[j] - block_lo_next[j]),
+                digest[j].dup(),
+                block_lo_next[j].dup()
+                    + bit_next.clone() * (block_hi_next[j].dup() - block_lo_next[j].dup()),
             );
         }
     }
@@ -203,15 +210,15 @@ pub fn enforce_controller_constraints<AB>(
 /// [`enforce_controller_constraints`] requires level zero on the start row.
 pub fn enforce_merkle_level_constraints<AB>(
     builder: &mut AB,
-    cols: &ControllerCols<AB::Var>,
-    cols_next: &ControllerCols<AB::Var>,
+    cols: &ControllerCols<AB::Expr>,
+    cols_next: &ControllerCols<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
-    let op_final: AB::Expr = cols.op_final.into();
-    let merkle_or_padding: AB::Expr = cols.merkle_or_padding.into();
-    let controller_merkle = merkle_or_padding * Into::<AB::Expr>::into(cols.s0);
-    let level: AB::Expr = cols.merkle_level().into();
+    let op_final: AB::Expr = cols.op_final.dup();
+    let merkle_or_padding: AB::Expr = cols.merkle_or_padding.dup();
+    let controller_merkle = merkle_or_padding * cols.s0.dup();
+    let level: AB::Expr = cols.merkle_level();
 
     builder
         .when(controller_merkle * op_final.not())
@@ -231,7 +238,8 @@ mod tests {
     use crate::vm::{
         ChipletCols, ControllerCols,
         constraints::{
-            chiplets::selectors::build_chiplet_selectors, test_utils::ConstraintEvalBuilder,
+            chiplets::selectors::build_chiplet_selectors,
+            test_utils::{ConstraintEvalContext, NativeConstraintEvalBuilder},
         },
         trace::CHIPLETS_WIDTH,
     };
@@ -276,9 +284,12 @@ mod tests {
         next: &ChipletCols<Felt>,
         first_row: bool,
     ) -> Vec<QuadFelt> {
-        let mut builder = ConstraintEvalBuilder::new().with_row_flags(first_row, false, true);
-        let selectors = build_chiplet_selectors(&mut builder, local, next);
+        let context = ConstraintEvalContext::new().with_row_flags(first_row, false, true);
+        let frame = context.frame_rows(&local.chiplets, &next.chiplets);
+        let mut builder = NativeConstraintEvalBuilder::default();
+        let selectors = build_chiplet_selectors(&frame, &mut builder, local, next);
         super::enforce_controller_constraints(
+            &frame,
             &mut builder,
             local.controller_cols(),
             next.controller_cols(),

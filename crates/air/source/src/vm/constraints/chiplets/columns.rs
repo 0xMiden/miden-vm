@@ -85,19 +85,24 @@ pub struct ControllerCols<T> {
     pub addr: T,
 }
 
-impl<T: Copy> ControllerCols<T> {
+impl<T: p3_field::Dup> ControllerCols<T> {
     /// Returns the state tail (`state[8..12]`).
     ///
     /// On hash rows this is the input CV. On Merkle rows this is the output digest.
     pub fn state_tail(&self) -> [T; DIGEST_LEN] {
-        [self.state[8], self.state[9], self.state[10], self.state[11]]
+        [
+            self.state[8].dup(),
+            self.state[9].dup(),
+            self.state[10].dup(),
+            self.state[11].dup(),
+        ]
     }
 
     /// Returns the hash-row output chaining value (`row_data[0..4]`).
     ///
     /// A terminal row of a framed hash interprets this value as the completed digest.
     pub fn hash_cv(&self) -> [T; DIGEST_LEN] {
-        self.row_data
+        self.row_data.clone()
     }
 
     /// Returns the Merkle-row output digest (`state[8..12]`).
@@ -107,32 +112,42 @@ impl<T: Copy> ControllerCols<T> {
 
     /// Merkle current node index (`row_data[0]`).
     pub fn merkle_node_index(&self) -> T {
-        self.row_data[0]
+        self.row_data[0].dup()
     }
 
     /// Merkle next node index (`row_data[1]`).
     pub fn merkle_node_index_next(&self) -> T {
-        self.row_data[1]
+        self.row_data[1].dup()
     }
 
     /// Merkle operation start flag (`row_data[2]`).
     pub fn merkle_is_start(&self) -> T {
-        self.row_data[2]
+        self.row_data[2].dup()
     }
 
     /// Merkle path level (`row_data[3]`): zero on the start row, plus one per continuation row.
     pub fn merkle_level(&self) -> T {
-        self.row_data[3]
+        self.row_data[3].dup()
     }
 
     /// Returns the low block word (`state[0..4]`).
     pub fn block_lo(&self) -> [T; DIGEST_LEN] {
-        [self.state[0], self.state[1], self.state[2], self.state[3]]
+        [
+            self.state[0].dup(),
+            self.state[1].dup(),
+            self.state[2].dup(),
+            self.state[3].dup(),
+        ]
     }
 
     /// Returns the high block word (`state[4..8]`).
     pub fn block_hi(&self) -> [T; DIGEST_LEN] {
-        [self.state[4], self.state[5], self.state[6], self.state[7]]
+        [
+            self.state[4].dup(),
+            self.state[5].dup(),
+            self.state[6].dup(),
+            self.state[7].dup(),
+        ]
     }
 }
 

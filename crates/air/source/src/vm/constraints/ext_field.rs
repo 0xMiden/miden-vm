@@ -6,7 +6,6 @@
 use core::ops::{Add, Mul, Sub};
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_stark::air::AirBuilder;
 
 // Quadratic non-residue for the extension: u^2 = 7.
 const W: u16 = 7;
@@ -151,17 +150,6 @@ where
 
 // QUAD FELT AIR BUILDER EXTENSION
 // ================================================================================================
-
-/// Extension trait for asserting equality of quadratic extension field expressions.
-pub trait QuadFeltAirBuilder: AirBuilder {
-    /// Asserts `lhs == rhs` component-wise for quadratic extension field elements.
-    fn assert_eq_quad(&mut self, lhs: QuadFeltExpr<Self::Expr>, rhs: QuadFeltExpr<Self::Expr>) {
-        self.assert_eq(lhs.0, rhs.0);
-        self.assert_eq(lhs.1, rhs.1);
-    }
-}
-
-impl<AB: AirBuilder> QuadFeltAirBuilder for AB {}
 
 /// Component-wise equality for quadratic values represented by native base expressions.
 ///
