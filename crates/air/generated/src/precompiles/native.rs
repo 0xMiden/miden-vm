@@ -30,6 +30,15 @@ define_native_kernel!(
 );
 
 define_native_kernel!(
+    /// Generated execution of the public-root transcript evaluation relation.
+    TranscriptEvalKernel,
+    descriptor_transcript_eval,
+    precompute_transcript_eval,
+    eval_transcript_eval,
+    TRANSCRIPT_EVAL_PREPARED_TERMS
+);
+
+define_native_kernel!(
     /// Generated execution of the combined chunk/node and shared-capacity sponge relation.
     ///
     /// The authored source retains the physical row overlays and witness construction.

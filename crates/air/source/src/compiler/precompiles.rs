@@ -21,7 +21,7 @@ use crate::{
         },
         primitives::byte_pair_lut::BytePairLutAir,
         relation::AIRS,
-        transcript::eidos::EidosCompressionAir,
+        transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
         uint::{add::UintAddAir, store_mul::UintStoreMulAir},
     },
     shared::geometry::NUM_OOD_POINTS,
@@ -52,12 +52,12 @@ impl CapturedPvmRelation {
                     ChipletAir::UintAdd => CapturedAir::new_native(&UintAddAir),
                     ChipletAir::EcPointStoreGroups => {
                         CapturedAir::new_native(&EcPointStoreGroupsAir)
-                    }
+                    },
                     ChipletAir::EcGroupAdd => CapturedAir::new_native(&EcGroupAddAir),
                     ChipletAir::EcMsm => CapturedAir::new_native(&EcMsmAir),
                     ChipletAir::Sha256 => CapturedAir::new_native(&Sha256Air),
                     ChipletAir::Sha512 => CapturedAir::new_native(&Sha512Air),
-                    _ => CapturedAir::new(air),
+                    ChipletAir::TranscriptEval => CapturedAir::new_native(&TranscriptEvalAir),
                 })
                 .collect::<Result<_, _>>()?,
         })
@@ -71,9 +71,7 @@ impl CapturedPvmRelation {
 
 /// Builds the canonical precompile chiplet ACE circuit.
 pub fn build_canonical_precompile_ace_circuit() -> Result<AceCircuit<QuadFelt>, AceError> {
-    CapturedPvmRelation::new()?
-        .compile()?
-        .build_circuit(LayoutKind::Masm)
+    CapturedPvmRelation::new()?.compile()?.build_circuit(LayoutKind::Masm)
 }
 
 /// Builds and encodes the order-invariant PVM recursive-verifier ACE circuit.

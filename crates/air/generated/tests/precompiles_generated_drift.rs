@@ -40,6 +40,19 @@ fn native_ec_msm_registration_keeps_claims_and_prepared_execution() {
 }
 
 #[test]
+fn native_transcript_registration_keeps_public_root_and_prepared_execution() {
+    use miden_air::precompiles::native::TranscriptEvalKernel;
+    use miden_air_definitions::precompiles::transcript::eval::TranscriptEvalAir;
+
+    assert_native_registration(
+        &TranscriptEvalAir,
+        &TranscriptEvalAir,
+        &TranscriptEvalKernel::new(),
+        &SEEDS,
+    );
+}
+
+#[test]
 fn native_chunk_node_sponge_registration_keeps_composition_and_prepared_execution() {
     use miden_air::precompiles::native::ChunkNodeSpongeKernel;
     use miden_air_definitions::precompiles::hash::chunk_node_sponge::ChunkNodeSpongeAir;
