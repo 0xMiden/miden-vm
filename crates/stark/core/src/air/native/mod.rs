@@ -11,6 +11,7 @@ mod contracts;
 mod descriptor;
 mod frame;
 mod identity;
+mod kernel;
 #[doc(hidden)]
 pub mod migration;
 mod spec;
@@ -27,4 +28,5 @@ pub use descriptor::{
     AirDescriptor, Capture, DescriptorError, DescriptorParts, capture, capture_with,
 };
 pub use frame::{AirFrame, Frame, Inputs, Rows, Selectors, UniformInputs};
+pub use kernel::{AirKernel, BindError, DirectKernel, EvaluationSession};
 pub use spec::{AirSpec, PreprocessedSpec, SpecError};
