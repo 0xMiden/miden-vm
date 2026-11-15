@@ -1006,7 +1006,7 @@ mod tests {
         }
 
         fn eval(&self, builder: &mut LB) {
-            crate::air::native::migration::eval_lookup(self, builder);
+            crate::air::native::migration::eval_lookup(self, builder, 0);
         }
     }
 

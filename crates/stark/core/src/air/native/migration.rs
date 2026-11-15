@@ -28,11 +28,17 @@ where
     A: LiftedAir<F = AB::F>,
     AB: legacy::LiftedAirBuilder,
 {
-    let snapshot = SourceSnapshot::new(builder);
+    let spec = source.spec();
+    let snapshot = SourceSnapshot::new(builder, spec.preprocessed_width(), spec.aux_width);
     source.eval(&snapshot.frame(), snapshot.inputs(), &mut LegacySink(builder));
 }
 
-struct SourceSnapshot<E, EE> {
+/// Owned inputs for a legacy source whose helper bodies are migrating independently.
+///
+/// Construct before borrowing the mutable forwarding sink. The snapshot can outlive successive
+/// short sink reborrows, including an unmigrated helper call between native helper calls.
+#[doc(hidden)]
+pub struct SourceSnapshot<E, EE> {
     main: [Vec<E>; 2],
     preprocessed: [Vec<E>; 2],
     aux: [Vec<EE>; 2],
@@ -44,26 +50,38 @@ struct SourceSnapshot<E, EE> {
 }
 
 impl<E: Dup, EE> SourceSnapshot<E, EE> {
-    fn new<AB>(builder: &AB) -> Self
+    /// Snapshot declared channels, skipping absent optional windows.
+    ///
+    /// The legacy symbolic builder represents zero-width matrices with zero rows, so their
+    /// `WindowAccess` methods cannot be called. Widths come from the trusted source configuration.
+    pub fn new<AB>(builder: &AB, preprocessed_width: usize, aux_width: usize) -> Self
     where
         AB: legacy::LiftedAirBuilder<Expr = E, ExprEF = EE>,
     {
         let main = builder.main();
-        let preprocessed = builder.preprocessed();
-        let aux = builder.permutation();
         Self {
             main: [
                 main.current_slice().iter().copied().map(Into::into).collect(),
                 main.next_slice().iter().copied().map(Into::into).collect(),
             ],
-            preprocessed: [
-                preprocessed.current_slice().iter().copied().map(Into::into).collect(),
-                preprocessed.next_slice().iter().copied().map(Into::into).collect(),
-            ],
-            aux: [
-                aux.current_slice().iter().copied().map(Into::into).collect(),
-                aux.next_slice().iter().copied().map(Into::into).collect(),
-            ],
+            preprocessed: if preprocessed_width == 0 {
+                [Vec::new(), Vec::new()]
+            } else {
+                let preprocessed = builder.preprocessed();
+                [
+                    preprocessed.current_slice().iter().copied().map(Into::into).collect(),
+                    preprocessed.next_slice().iter().copied().map(Into::into).collect(),
+                ]
+            },
+            aux: if aux_width == 0 {
+                [Vec::new(), Vec::new()]
+            } else {
+                let aux = builder.permutation();
+                [
+                    aux.current_slice().iter().copied().map(Into::into).collect(),
+                    aux.next_slice().iter().copied().map(Into::into).collect(),
+                ]
+            },
             periodic: builder.periodic_values().iter().copied().map(Into::into).collect(),
             public: builder.public_values().iter().copied().map(Into::into).collect(),
             challenges: builder.permutation_randomness().iter().copied().map(Into::into).collect(),
@@ -77,7 +95,7 @@ impl<E: Dup, EE> SourceSnapshot<E, EE> {
         }
     }
 
-    fn frame(&self) -> AirFrame<'_, E, EE> {
+    pub fn frame(&self) -> AirFrame<'_, E, EE> {
         AirFrame {
             main: Rows {
                 current: &self.main[0],
@@ -100,7 +118,7 @@ impl<E: Dup, EE> SourceSnapshot<E, EE> {
         }
     }
 
-    fn inputs(&self) -> UniformInputs<'_, E, EE> {
+    pub fn inputs(&self) -> UniformInputs<'_, E, EE> {
         UniformInputs {
             public_values: &self.public,
             challenges: &self.challenges,
@@ -109,7 +127,15 @@ impl<E: Dup, EE> SourceSnapshot<E, EE> {
     }
 }
 
-struct LegacySink<'a, AB>(&'a mut AB);
+/// A short mutable reborrow for one native helper in a partially migrated source.
+#[doc(hidden)]
+pub struct LegacySink<'a, AB>(&'a mut AB);
+
+impl<'a, AB> LegacySink<'a, AB> {
+    pub fn new(builder: &'a mut AB) -> Self {
+        Self(builder)
+    }
+}
 
 impl<AB: legacy::LiftedAirBuilder> LiftedAirBuilder for LegacySink<'_, AB> {
     type F = AB::F;
@@ -126,22 +152,29 @@ impl<AB: legacy::LiftedAirBuilder> LiftedAirBuilder for LegacySink<'_, AB> {
 }
 
 /// Forward a native lookup declaration through the existing adapter callbacks.
+///
+/// `preprocessed_width` is the source-declared fixed width. An absent window must not be read:
+/// the legacy symbolic builder represents it as a zero-row matrix.
 #[doc(hidden)]
-pub fn eval_lookup<'b, A, LB>(air: &A, builder: &'b mut LB)
+pub fn eval_lookup<'b, A, LB>(air: &A, builder: &'b mut LB, preprocessed_width: usize)
 where
     LB: lookup::LookupBuilder,
     A: native::LookupAir<LegacyLookup<'b, LB>>,
 {
     let main = builder.main();
-    let preprocessed = builder.preprocessed();
     let main: [Vec<LB::Expr>; 2] = [
         main.current_slice().iter().copied().map(Into::into).collect(),
         main.next_slice().iter().copied().map(Into::into).collect(),
     ];
-    let preprocessed: [Vec<LB::Expr>; 2] = [
-        preprocessed.current_slice().iter().copied().map(Into::into).collect(),
-        preprocessed.next_slice().iter().copied().map(Into::into).collect(),
-    ];
+    let preprocessed: [Vec<LB::Expr>; 2] = if preprocessed_width == 0 {
+        [Vec::new(), Vec::new()]
+    } else {
+        let preprocessed = builder.preprocessed();
+        [
+            preprocessed.current_slice().iter().copied().map(Into::into).collect(),
+            preprocessed.next_slice().iter().copied().map(Into::into).collect(),
+        ]
+    };
     let periodic: Vec<LB::Expr> =
         builder.periodic_values().iter().copied().map(Into::into).collect();
     let frame = native::LookupFrame {

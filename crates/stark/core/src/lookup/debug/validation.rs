@@ -1129,7 +1129,7 @@ mod tests {
             1
         }
         fn eval(&self, builder: &mut LB) {
-            native::migration::eval_lookup(self, builder);
+            native::migration::eval_lookup(self, builder, 1);
         }
     }
 

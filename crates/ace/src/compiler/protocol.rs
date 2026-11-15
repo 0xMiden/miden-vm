@@ -693,10 +693,10 @@ mod tests {
         let legacy = CapturedAir::new(&source).unwrap();
         assert!(legacy.descriptor().is_none());
         assert_eq!(source.evaluations.load(Ordering::Relaxed), 1);
-        assert_eq!(source.spec_reads.load(Ordering::Relaxed), 0);
+        assert_eq!(source.spec_reads.load(Ordering::Relaxed), 1);
         let native = CapturedAir::new_native(&source).unwrap();
         assert_eq!(source.evaluations.load(Ordering::Relaxed), 2);
-        assert_eq!(source.spec_reads.load(Ordering::Relaxed), 1);
+        assert_eq!(source.spec_reads.load(Ordering::Relaxed), 2);
         assert_eq!(source.fixed_builds.load(Ordering::Relaxed), 0);
         let descriptor = native.descriptor().expect("explicit native constructor");
         assert_eq!(descriptor.analysis().layout().base_indices(), &[0, 2, 4]);
