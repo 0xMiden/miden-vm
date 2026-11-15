@@ -23,6 +23,7 @@ use core::array;
 
 use miden_core::{Felt, field::Algebra};
 use miden_stark::air::WindowAccess;
+use p3_field::Dup;
 
 /// Pack base-`base` digits LSB-first into a Felt-algebra expression.
 ///
@@ -31,9 +32,9 @@ use miden_stark::air::WindowAccess;
 /// `AirBuilder::Expr` or `LookupBuilder::Expr` over Felt — both
 /// satisfy `Algebra<Self::F>` with `F = Felt`. `base` must fit in the
 /// canonical Goldilocks range (i.e. `base < 2^64 − 2^32 + 1`).
-pub fn pack_le<E: Algebra<Felt>, V: Copy + Into<E>>(items: &[V], base: u64) -> E {
+pub fn pack_le<E: Algebra<Felt>, V: Dup + Into<E>>(items: &[V], base: u64) -> E {
     let base = Felt::new(base).expect("base fits in canonical Goldilocks range");
-    items.iter().rev().fold(E::ZERO, |acc, &item| acc * base + item.into())
+    items.iter().rev().fold(E::ZERO, |acc, item| acc * base + item.dup().into())
 }
 
 /// Split `items` in half and [`pack_le`] each half independently.
@@ -44,7 +45,7 @@ pub fn pack_le<E: Algebra<Felt>, V: Copy + Into<E>>(items: &[V], base: u64) -> E
 /// Common use: splitting a 64-bit lane (8 bytes, `base = 256`) into the
 /// two 32-bit halves needed because a single `Felt` cannot hold a full
 /// `u64` canonically (Goldilocks `p ≈ 2^64 − 2^32 + 1`).
-pub fn halves_le<E: Algebra<Felt>, V: Copy + Into<E>>(items: &[V], base: u64) -> [E; 2] {
+pub fn halves_le<E: Algebra<Felt>, V: Dup + Into<E>>(items: &[V], base: u64) -> [E; 2] {
     debug_assert_eq!(items.len() % 2, 0, "items.len() must be even");
     let (lo, hi) = items.split_at(items.len() / 2);
     [pack_le::<E, V>(lo, base), pack_le::<E, V>(hi, base)]

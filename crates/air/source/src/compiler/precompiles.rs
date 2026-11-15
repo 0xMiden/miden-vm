@@ -10,7 +10,10 @@ use miden_core::field::QuadFelt;
 use p3_security::budget::AirShape;
 
 use crate::{
-    precompiles::{ace::PvmRecursiveAceCircuit, geometry::lookup_shape, relation::AIRS},
+    precompiles::{
+        ChipletAir, ace::PvmRecursiveAceCircuit, geometry::lookup_shape,
+        hash::keccak::round::KeccakRoundAir, relation::AIRS,
+    },
     shared::geometry::NUM_OOD_POINTS,
 };
 
@@ -26,7 +29,15 @@ impl CapturedPvmRelation {
 
     pub fn new() -> Result<Self, AceError> {
         Ok(Self {
-            airs: AIRS.iter().map(CapturedAir::new).collect::<Result<_, _>>()?,
+            // Completed native sources feed every backend from this same capture. The remaining
+            // variants retain their authored legacy route until their own source port is complete.
+            airs: AIRS
+                .iter()
+                .map(|air| match air {
+                    ChipletAir::KeccakRound => CapturedAir::new_native(&KeccakRoundAir),
+                    _ => CapturedAir::new(air),
+                })
+                .collect::<Result<_, _>>()?,
         })
     }
 

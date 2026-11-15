@@ -22,14 +22,16 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
+use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
+    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
     lookup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, build_logup_aux_trace,
+        Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
+        native as native_lookup,
     },
 };
 use miden_utils_sync::LazyLock;
+use p3_field::Dup;
 pub use program::{NUM_PERIODIC_COLS, Op, ROUND_PERIOD, Slot, round_program, slots};
 
 use crate::precompiles::{
@@ -37,7 +39,7 @@ use crate::precompiles::{
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
     primitives::byte_pair_lut::{BytePairLutMsg, andnot_result_from_xor},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    utils::{current_main, halves_le, next_main, pack_le},
+    utils::{halves_le, pack_le},
 };
 
 // MAIN COLUMN LAYOUT
@@ -161,31 +163,67 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
     fn build_aux_trace(
         &self,
         main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        build_logup_aux_trace(self, main, challenges)
+        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
+            self,
+            native::AuxTraceInputs {
+                main,
+                preprocessed: None,
+                public_values: air_inputs,
+                statement: aux_inputs,
+                challenges,
+            },
+        )
+        .expect("valid Keccak round auxiliary inputs");
+        (aux.columns, aux.exports)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
+        native::migration::eval_source(self, builder);
+    }
+}
+
+impl native::LiftedAir for KeccakRoundAir {
+    type F = Felt;
+
+    fn spec(&self) -> native::AirSpec<'_, Felt> {
+        native::AirSpec {
+            main_width: NUM_MAIN_COLS,
+            aux_width: NUM_AUX_COLS,
+            num_public_values: 0,
+            num_challenges: NUM_RANDOMNESS,
+            num_exports: NUM_LOGUP_VALUES,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(PERIODIC_COLUMNS.as_slice()),
+        }
+    }
+
+    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &native::Frame<'_, AB>,
+        inputs: native::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
         // Phase 1: local row constraints, replicated per lane over its
         // disjoint column band. The periodic program is shared — every lane
         // sits on the same program slot each row.
-        let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next_window: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
+        let local = frame.main.current;
+        let next_window = frame.main.next;
 
-        let periodic = builder.periodic_values();
-        let p_last: AB::Expr = periodic[PCOL_P_LAST].into();
-        let is_xor: AB::Expr = periodic[PCOL_IS_XOR].into();
-        let is_andnot: AB::Expr = periodic[PCOL_IS_ANDNOT].into();
+        let periodic = frame.periodic;
+        let p_last = periodic[PCOL_P_LAST].dup();
+        let is_xor = periodic[PCOL_IS_XOR].dup();
+        let is_andnot = periodic[PCOL_IS_ANDNOT].dup();
 
         for lane in 0..NUM_LANES {
             let base = lane_base(lane);
-            let ip = local[base + COL_IP];
-            let next_ip = next_window[base + COL_IP];
-            let act: AB::Expr = local[base + COL_ACT].into();
-            let next_act = next_window[base + COL_ACT];
+            let ip = local[base + COL_IP].dup();
+            let next_ip = next_window[base + COL_IP].dup();
+            let act = local[base + COL_ACT].dup();
+            let next_act = next_window[base + COL_ACT].dup();
 
             // IP boundary: only lane 0 is anchored at ip = 25 (sponge
             // addresses 0..25 precede the trace IP range). A later lane
@@ -193,17 +231,17 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
             // frame is pinned by the memory64 bus (its round-0 reads of the
             // sponge-provided initial state), so no constant boundary applies.
             if lane == 0 {
-                builder.when_first_row().assert_eq(ip, AB::Expr::from(Felt::from(25u8)));
+                builder
+                    .when(frame.first_row())
+                    .assert_eq(ip.dup(), AB::Expr::from(Felt::from(25u8)));
             }
 
             // IP transition: ip' − ip − 1 = 0, per lane. `when_transition` skips the cyclic wrap
             // at row N−1 → 0; the centered LogUp recurrence independently includes that wrap.
-            builder
-                .when_transition()
-                .assert_zero(AB::Expr::from(next_ip) - AB::Expr::from(ip) - AB::Expr::ONE);
+            builder.when(frame.transition()).assert_zero(next_ip - ip - AB::Expr::ONE);
 
             // Active binarity: act ∈ {0, 1}.
-            builder.assert_bool(local[base + COL_ACT]);
+            builder.assert_bool(local[base + COL_ACT].dup());
 
             // Active constant within a round: `(1 − p_last) · (act' − act) =
             // 0`. `p_last` is the period-128 indicator that fires at slot 127
@@ -213,13 +251,12 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
             // pow2 height ≥ 128), so `p_last = 1` and the constraint is
             // vacuous. The sponge bus forces `act = 1` at row 0 by providing
             // RC[0] to the iota row, whose `act` equals the round's through this constraint.
-            builder
-                .assert_zero((AB::Expr::ONE - p_last.clone()) * (AB::Expr::from(next_act) - act));
+            builder.assert_zero((AB::Expr::ONE - p_last.dup()) * (next_act - act));
 
             // Active pure-ROL rows range-check both vectors through BytePairLut. Each
             // packed u32 embeds injectively in the field, so two equalities bind all eight
             // bytes. NOP and inactive rows have no observable operand/result bus traffic.
-            let no_logic = AB::Expr::ONE - is_xor.clone() - is_andnot.clone();
+            let no_logic = AB::Expr::ONE - is_xor.dup() - is_andnot.dup();
             for half in 0..2 {
                 let a: AB::Expr = pack_le(
                     &local[base + A_BYTES_RANGE.start + 4 * half
@@ -231,47 +268,56 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
                         ..base + R_BYTES_RANGE.start + 4 * half + 4],
                     256,
                 );
-                builder.assert_zero(no_logic.clone() * (r - a));
+                builder.assert_zero(no_logic.dup() * (r - a));
             }
         }
 
         // Phase 2: LogUp argument via the LogUp adapter.
-        let mut lb = ConstraintLookupBuilder::new(builder, self);
-        <Self as LookupAir<_>>::eval(self, &mut lb);
-        lb.finish();
+        native_lookup::eval_lookup(self, frame, inputs, builder);
+    }
+}
+
+impl native::ProverAir<QuadFelt> for KeccakRoundAir {
+    type Error = native_lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        native_lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
 /// The value this row writes to `ip` on the Memory64 bus. Active operation rows authenticate
 /// `x_bytes` as canonical XOR bytes through BytePairLut.
 /// ANDNOT rows reconstruct `(x - a + b) / 2`; rotation rows use XOR directly.
-fn memory_provide_c<E: Algebra<Felt>, V: Copy + Into<E>>(
-    a_bytes: &[V; 8],
-    b_bytes: &[V; 8],
-    x_bytes: &[V; 8],
-    mask_xors: &[V; 2],
+fn memory_provide_c<E: Algebra<Felt>>(
+    a_bytes: &[E; 8],
+    b_bytes: &[E; 8],
+    x_bytes: &[E; 8],
+    mask_xors: &[E; 2],
     periodic: &[E; NUM_PERIODIC_COLS],
     is_andnot: E,
 ) -> [E; 2] {
-    let a = halves_le(a_bytes, 256);
-    let b = halves_le(b_bytes, 256);
-    let x = halves_le(x_bytes, 256);
+    let a: [E; 2] = halves_le(a_bytes, 256);
+    let b: [E; 2] = halves_le(b_bytes, 256);
+    let x: [E; 2] = halves_le(x_bytes, 256);
     array::from_fn(|half| {
-        let andnot = andnot_result_from_xor(a[half].clone(), b[half].clone(), x[half].clone());
-        let logic = x[half].clone() + is_andnot.clone() * (andnot - x[half].clone());
+        let andnot = andnot_result_from_xor(a[half].dup(), b[half].dup(), x[half].dup());
+        let logic = x[half].dup() + is_andnot.dup() * (andnot - x[half].dup());
         // Fixed coefficients include the rotation selector and half swap. Each product in
         // the destination expression has one periodic coefficient and one witness value.
         logic
             + (0..4)
                 .map(|i| {
-                    periodic[program::COL_OUTPUT_SAME + i].clone() * x_bytes[4 * half + i].into()
-                        + periodic[program::COL_OUTPUT_OTHER + i].clone()
-                            * x_bytes[4 * (1 - half) + i].into()
+                    periodic[program::COL_OUTPUT_SAME + i].dup() * x_bytes[4 * half + i].dup()
+                        + periodic[program::COL_OUTPUT_OTHER + i].dup()
+                            * x_bytes[4 * (1 - half) + i].dup()
                 })
                 .sum::<E>()
-            + periodic[program::COL_OUTPUT_MASK_SAME].clone() * mask_xors[half].into()
-            + periodic[program::COL_OUTPUT_MASK_OTHER].clone() * mask_xors[1 - half].into()
-            + periodic[program::COL_OUTPUT_BIAS].clone()
+            + periodic[program::COL_OUTPUT_MASK_SAME].dup() * mask_xors[half].dup()
+            + periodic[program::COL_OUTPUT_MASK_OTHER].dup() * mask_xors[1 - half].dup()
+            + periodic[program::COL_OUTPUT_BIAS].dup()
     })
 }
 
@@ -309,9 +355,30 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let periodic: [LB::Expr; NUM_PERIODIC_COLS] =
-            array::from_fn(|i| builder.periodic_values()[i].into());
+        native::migration::eval_lookup(self, builder, 0);
+    }
+}
+
+impl<LB> native_lookup::LookupAir<LB> for KeccakRoundAir
+where
+    LB: native_lookup::LookupBuilder<F = Felt>,
+{
+    fn column_shape(&self) -> &[usize] {
+        &COLUMN_SHAPE
+    }
+
+    fn max_message_width(&self) -> usize {
+        MAX_MESSAGE_WIDTH
+    }
+
+    fn num_bus_ids(&self) -> usize {
+        NUM_BUS_IDS
+    }
+
+    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        let local = frame.main.current;
+        let periodic: &[LB::Expr; NUM_PERIODIC_COLS] =
+            frame.periodic.try_into().expect("Keccak round periodic columns");
         // All lanes read the same periodic operation selectors, back-pointers, and multiplicities.
         let is_xor: LB::Expr = periodic[PCOL_IS_XOR].clone();
         let is_andnot: LB::Expr = periodic[PCOL_IS_ANDNOT].clone();
@@ -329,14 +396,25 @@ where
         // same Memory64 and BytePairLut buses.
         for lane in 0..NUM_LANES {
             let base = lane_base(lane);
-            let ip: LB::Expr = local[base + COL_IP].into();
-            let act: LB::Expr = local[base + COL_ACT].into();
+            let ip = local[base + COL_IP].dup();
+            let act = local[base + COL_ACT].dup();
 
-            let a_bytes: [LB::Var; 8] = array::from_fn(|i| local[base + A_BYTES_RANGE.start + i]);
-            let b_bytes: [LB::Var; 8] = array::from_fn(|i| local[base + B_BYTES_RANGE.start + i]);
-            let x_bytes: [LB::Var; 8] = array::from_fn(|i| local[base + R_BYTES_RANGE.start + i]);
-            let mask_xors: [LB::Var; 2] =
-                array::from_fn(|i| local[base + ROT_MASK_XOR_RANGE.start + i]);
+            let a_bytes: &[LB::Expr; 8] = local
+                [base + A_BYTES_RANGE.start..base + A_BYTES_RANGE.end]
+                .try_into()
+                .expect("Keccak round A byte band");
+            let b_bytes: &[LB::Expr; 8] = local
+                [base + B_BYTES_RANGE.start..base + B_BYTES_RANGE.end]
+                .try_into()
+                .expect("Keccak round B byte band");
+            let x_bytes: &[LB::Expr; 8] = local
+                [base + R_BYTES_RANGE.start..base + R_BYTES_RANGE.end]
+                .try_into()
+                .expect("Keccak round XOR byte band");
+            let mask_xors: &[LB::Expr; 2] = local
+                [base + ROT_MASK_XOR_RANGE.start..base + ROT_MASK_XOR_RANGE.end]
+                .try_into()
+                .expect("Keccak round mask XOR band");
 
             // Multiplicity expressions, all gated by this lane's `act` so
             // dead-round / padding rows contribute nothing to the bus.
@@ -357,18 +435,12 @@ where
 
             // The destination denominator has degree two; each source denominator is affine.
             // Packing all three gives denominator degree four and closing-constraint degree five.
-            let [c_lo, c_hi] = memory_provide_c(
-                &a_bytes,
-                &b_bytes,
-                &x_bytes,
-                &mask_xors,
-                &periodic,
-                is_andnot.clone(),
-            );
+            let [c_lo, c_hi] =
+                memory_provide_c(a_bytes, b_bytes, x_bytes, mask_xors, periodic, is_andnot.clone());
             // A destination can have several readers, so its provide uses the negative read count.
             let neg_dst_mult: LB::Expr = LB::Expr::ZERO - dst_mult_act;
-            let [a_lo, a_hi] = halves_le(&a_bytes, 256);
-            let [b_lo, b_hi] = halves_le(&b_bytes, 256);
+            let [a_lo, a_hi] = halves_le(a_bytes, 256);
+            let [b_lo, b_hi] = halves_le(b_bytes, 256);
             frac_col!(
                 builder,
                 "memory64",
@@ -416,9 +488,9 @@ where
                         "byte-req",
                         is_active.clone(),
                         BytePairLutMsg::from_xor(
-                            a_bytes[i0].into(),
-                            b_bytes[i0].into(),
-                            x_bytes[i0].into(),
+                            a_bytes[i0].dup(),
+                            b_bytes[i0].dup(),
+                            x_bytes[i0].dup(),
                         ),
                         linear_interaction_deg
                     ),
@@ -426,9 +498,9 @@ where
                         "byte-req",
                         is_active.clone(),
                         BytePairLutMsg::from_xor(
-                            a_bytes[i1].into(),
-                            b_bytes[i1].into(),
-                            x_bytes[i1].into(),
+                            a_bytes[i1].dup(),
+                            b_bytes[i1].dup(),
+                            x_bytes[i1].dup(),
                         ),
                         linear_interaction_deg
                     ),
@@ -436,9 +508,9 @@ where
                         "byte-req",
                         is_active.clone(),
                         BytePairLutMsg::from_xor(
-                            a_bytes[i2].into(),
-                            b_bytes[i2].into(),
-                            x_bytes[i2].into(),
+                            a_bytes[i2].dup(),
+                            b_bytes[i2].dup(),
+                            x_bytes[i2].dup(),
                         ),
                         linear_interaction_deg
                     ),
@@ -446,9 +518,9 @@ where
                         "byte-req",
                         is_active.clone(),
                         BytePairLutMsg::from_xor(
-                            a_bytes[i3].into(),
-                            b_bytes[i3].into(),
-                            x_bytes[i3].into(),
+                            a_bytes[i3].dup(),
+                            b_bytes[i3].dup(),
+                            x_bytes[i3].dup(),
                         ),
                         linear_interaction_deg
                     ),
@@ -470,7 +542,7 @@ where
                                         let byte = (0..4)
                                             .map(|i| {
                                                 periodic[program::COL_ROT_BYTE_BEGIN + i].clone()
-                                                    * LB::Expr::from(x_bytes[4 * half + i])
+                                                    * x_bytes[4 * half + i].dup()
                                             })
                                             .sum::<LB::Expr>();
                                         batch.insert(
@@ -479,7 +551,7 @@ where
                                             BytePairLutMsg::from_xor(
                                                 byte,
                                                 periodic[program::COL_ROT_MASK].clone(),
-                                                mask_xors[half].into(),
+                                                mask_xors[half].dup(),
                                             ),
                                             Deg { v: 2, u: 2 },
                                         );
@@ -500,6 +572,117 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use miden_stark::air::native::AirKernel;
+
+    #[test]
+    fn native_round_capture_and_direct_session_preserve_geometry() {
+        // Native capture instantiates the complete source with non-Copy owned expression trees.
+        let captured = native::capture_with::<_, QuadFelt>(&KeccakRoundAir).unwrap();
+        let descriptor = &captured.descriptor;
+        let spec = descriptor.spec();
+        assert_eq!((spec.main_width, spec.aux_width), (56, 8));
+        assert_eq!((spec.num_public_values, spec.num_challenges, spec.num_exports), (0, 2, 1));
+        assert_eq!(spec.preprocessed, None);
+        assert_eq!(spec.periodic_columns.as_ref(), PERIODIC_COLUMNS.as_slice());
+        assert_eq!(COLUMN_SHAPE, [3, 4, 4, 2, 3, 4, 4, 2]);
+        assert_eq!(descriptor.analysis().counts(), native::ConstraintCounts { base: 11, ext: 9 });
+        assert_eq!(
+            descriptor.analysis().raw_degrees(),
+            native::ConstraintDegrees { base: 2, ext: 5 }
+        );
+        assert_eq!(descriptor.analysis().layout().base_indices(), &(0..11).collect::<Vec<_>>());
+        assert_eq!(descriptor.analysis().layout().ext_indices(), &(11..20).collect::<Vec<_>>());
+
+        let kernel = native::DirectKernel::new(KeccakRoundAir).unwrap();
+        let direct = native::capture_from_spec::<Felt, QuadFelt>(
+            spec.as_borrowed(),
+            |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
+        )
+        .unwrap();
+        assert_eq!(direct.descriptor.fingerprint(), descriptor.fingerprint());
+
+        #[cfg(feature = "std")]
+        native_lookup::validate_native(&KeccakRoundAir, spec).unwrap();
+    }
+
+    #[derive(Default)]
+    struct ZeroRowSink {
+        base: usize,
+        ext: usize,
+    }
+
+    impl native::LiftedAirBuilder for ZeroRowSink {
+        type F = Felt;
+        type Expr = Felt;
+        type ExtExpr = QuadFelt;
+
+        fn emit_base(&mut self, value: Felt, _meta: native::ConstraintMeta<'_>) {
+            assert_eq!(value, Felt::ZERO);
+            self.base += 1;
+        }
+
+        fn emit_ext(&mut self, value: QuadFelt, _meta: native::ConstraintMeta<'_>) {
+            assert_eq!(value, QuadFelt::ZERO);
+            self.ext += 1;
+        }
+    }
+
+    #[test]
+    fn native_round_direct_session_accepts_inactive_first_row() {
+        let mut current = [Felt::ZERO; NUM_MAIN_COLS];
+        let mut next = current;
+        for lane in 0..NUM_LANES {
+            current[lane_base(lane) + COL_IP] = Felt::from(25u32 + lane as u32 * 100);
+            next[lane_base(lane) + COL_IP] = current[lane_base(lane) + COL_IP] + Felt::ONE;
+        }
+        let periodic: [Felt; NUM_PERIODIC_COLS] = array::from_fn(|i| PERIODIC_COLUMNS[i][0]);
+        let aux = [QuadFelt::ZERO; NUM_AUX_COLS];
+        let frame = native::AirFrame {
+            main: native::Rows { current: &current, next: &next },
+            preprocessed: native::Rows { current: &[], next: &[] },
+            aux: native::Rows { current: &aux, next: &aux },
+            periodic: &periodic,
+            selectors: native::Selectors {
+                first: Felt::ONE,
+                last: Felt::ZERO,
+                transition: Felt::ONE,
+            },
+        };
+        let challenges = [QuadFelt::from_u8(7), QuadFelt::from_u8(11)];
+        let exports = [QuadFelt::ZERO];
+        let inputs = native::UniformInputs {
+            public_values: &[],
+            challenges: &challenges,
+            exports: &exports,
+        };
+        let kernel = native::DirectKernel::new(KeccakRoundAir).unwrap();
+        let mut sink = ZeroRowSink::default();
+        kernel.bind(inputs).unwrap().eval(&frame, &mut sink);
+        assert_eq!((sink.base, sink.ext), (11, 9));
+    }
+
+    #[test]
+    fn native_round_witness_rejects_wrong_main_width() {
+        let main = RowMajorMatrix::new(vec![Felt::ZERO; NUM_MAIN_COLS - 1], NUM_MAIN_COLS - 1);
+        let challenges = [QuadFelt::from_u8(7), QuadFelt::from_u8(11)];
+        let result = <KeccakRoundAir as native::ProverAir<QuadFelt>>::build_aux_trace(
+            &KeccakRoundAir,
+            native::AuxTraceInputs {
+                main: &main,
+                preprocessed: None,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            native_lookup::LookupError::MainWidth {
+                expected: NUM_MAIN_COLS,
+                actual: NUM_MAIN_COLS - 1,
+            }
+        );
+    }
 
     #[test]
     fn masked_byte_rotation_matches_native_rotation() {

@@ -5,7 +5,12 @@ use miden_air_definitions::{
     compiler::precompiles::{self as compiler, CapturedPvmRelation},
     precompiles::{fixed, relation::AIRS},
 };
-use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_optimized_module};
+use miden_constraint_compiler::backend::{
+    rust_descriptor::{self, AirDescriptorEmitter},
+    rust_eval::{
+        AirEvaluator, NativeAirEvaluator, emit_native_optimized_module, emit_optimized_module,
+    },
+};
 
 pub fn generate() {
     println!("cargo:rerun-if-changed=build/precompiles.rs");
@@ -16,6 +21,7 @@ pub fn generate() {
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
     };
     let captured = CapturedPvmRelation::new().expect("capture PVM AIRs");
+    assert_eq!(captured.airs().len(), AIRS.len(), "canonical PVM capture count");
     let evals: Vec<_> = captured
         .airs()
         .iter()
@@ -28,6 +34,38 @@ pub fn generate() {
         })
         .collect();
     write("evaluators.rs", emit_optimized_module("", &evals));
+    // Only completed source ports have native descriptors. Both temporary renderings and ACE
+    // consume this one canonical capture, in the unchanged declaration order.
+    let native: Vec<_> = captured
+        .airs()
+        .iter()
+        .zip(&AIRS)
+        .filter_map(|(air, declaration)| {
+            air.descriptor().map(|descriptor| (air, declaration, descriptor))
+        })
+        .collect();
+    let native_evals: Vec<_> = native
+        .iter()
+        .map(|(air, declaration, descriptor)| NativeAirEvaluator {
+            eval: AirEvaluator {
+                name: declaration.file_token(),
+                air_label: declaration.file_token(),
+                graph: air.graph(),
+                constraints: air.constraints(),
+            },
+            descriptor,
+        })
+        .collect();
+    let native_descriptors: Vec<_> = native
+        .iter()
+        .map(|(_, declaration, descriptor)| AirDescriptorEmitter {
+            name: declaration.file_token(),
+            air_label: declaration.file_token(),
+            descriptor,
+        })
+        .collect();
+    write("native_evaluators.rs", emit_native_optimized_module("", &native_evals));
+    write("native_descriptors.rs", rust_descriptor::emit_module("", &native_descriptors));
     let degree_arms = AIRS
         .iter()
         .zip(captured.airs())

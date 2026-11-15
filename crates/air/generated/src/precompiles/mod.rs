@@ -1,6 +1,7 @@
 //! Production precompile AIRs and relation artifacts.
 
 pub mod air;
+pub mod native;
 pub mod policy;
 pub mod protocol;
 

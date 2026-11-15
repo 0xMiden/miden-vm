@@ -20,6 +20,42 @@ const SEEDS: [u64; 4] =
     [0x243f6a8885a308d3, 0x13198a2e03707344, 0xa4093822299f31d0, 0x082efa98ec4e6c89];
 
 #[test]
+fn native_keccak_round_registration_keeps_source_metadata_and_prepared_execution() {
+    use miden_air::precompiles::native::KeccakRoundKernel;
+    use miden_air_definitions::precompiles::hash::keccak::round::KeccakRoundAir;
+    use miden_constraint_compiler::ir::{capture_kernel_native_into, capture_native_into};
+    use miden_stark::air::native::AirKernel;
+
+    let kernel = KeccakRoundKernel::new();
+    let mut builder = Graph::builder();
+    let (authored, descriptor) = capture_native_into(&KeccakRoundAir, &mut builder).unwrap();
+    let legacy = capture_into(&KeccakRoundAir, &mut builder);
+    assert_eq!(authored.base_roots, legacy.base_roots);
+    assert_eq!(authored.ext_roots, legacy.ext_roots);
+    assert_eq!(kernel.descriptor().spec(), descriptor.spec());
+    assert_eq!(kernel.descriptor().analysis(), descriptor.analysis());
+    assert_eq!(kernel.descriptor().fingerprint(), descriptor.fingerprint());
+
+    // Kernel capture binds non-Copy symbolic inputs and observes generated execution only as
+    // the comparison subject. Canonical authored roots remain the expected relation.
+    let (generated, _) = capture_kernel_native_into(&kernel, &mut builder).unwrap();
+    assert_eq!(authored.base_global_indices, generated.base_global_indices);
+    assert_eq!(authored.ext_global_indices, generated.ext_global_indices);
+    let graph = builder.freeze();
+    for seed in SEEDS {
+        let values = eval_graph(&graph, seed);
+        for (source, prepared) in authored
+            .base_roots
+            .iter()
+            .zip(&generated.base_roots)
+            .chain(authored.ext_roots.iter().zip(&generated.ext_roots))
+        {
+            assert_eq!(values[source.index()], values[prepared.index()], "seed {seed:#x}");
+        }
+    }
+}
+
+#[test]
 fn handwritten_and_generated_are_distinct_captures() {
     for air in ChipletAir::all() {
         let mut builder = Graph::builder();
