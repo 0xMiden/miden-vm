@@ -19,10 +19,12 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing},
 };
 use miden_precompiles::Keccak256Precompile;
+use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::{AirBuilder, LiftedAirBuilder},
-    lookup::{Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup},
+    air::native,
+    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, native as native_lookup},
 };
+use p3_field::Dup;
 
 use crate::precompiles::{
     hash::{
@@ -39,7 +41,6 @@ use crate::precompiles::{
         eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
         initial_cv_from_frame,
     },
-    utils::{current_main, next_main},
 };
 
 pub const NUM_MAIN_COLS: usize = 47;
@@ -87,33 +88,37 @@ pub(crate) fn periodic_columns() -> Vec<Vec<Felt>> {
     columns
 }
 
-pub(crate) fn eval_main<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
-    let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-    let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
-    let p: [AB::Expr; 10] =
-        array::from_fn(|i| builder.periodic_values()[PERIODIC_OFFSET + i].into());
-    let last: AB::Expr = builder.periodic_values()[sponge::program::COL_LAST].into();
-    let v = |i: usize| -> AB::Expr { local[i].into() };
-    let nv = |i: usize| -> AB::Expr { next[i].into() };
+pub(crate) fn eval_main<AB: native::LiftedAirBuilder<F = Felt>>(
+    frame: &native::Frame<'_, AB>,
+    builder: &mut AB,
+) {
+    let local: &[AB::Expr; NUM_MAIN_COLS] =
+        frame.main.current.try_into().expect("chunk/node local main");
+    let next: &[AB::Expr; NUM_MAIN_COLS] =
+        frame.main.next.try_into().expect("chunk/node next main");
+    let p: [AB::Expr; 10] = array::from_fn(|i| frame.periodic[PERIODIC_OFFSET + i].dup());
+    let last: AB::Expr = frame.periodic[sponge::program::COL_LAST].dup();
+    let v = |i: usize| -> AB::Expr { local[i].dup() };
+    let nv = |i: usize| -> AB::Expr { next[i].dup() };
     let one = AB::Expr::ONE;
     let node_act = v(COL_NODE_ACT);
-    builder.assert_bool(local[COL_NODE_ACT]);
+    builder.assert_bool(local[COL_NODE_ACT].dup());
     builder
-        .when_transition()
+        .when(frame.transition())
         .assert_zero((one.clone() - node_act.clone()) * nv(COL_NODE_ACT));
     builder
-        .when_transition()
+        .when(frame.transition())
         .assert_zero((one.clone() - last) * (nv(COL_NODE_ACT) - node_act.clone()));
     for column in [COL_SPONGE_HEAD, COL_CHUNK_HEAD, COL_CHUNK_SEQ] {
-        builder.when_first_row().assert_zero(local[column]);
+        builder.when(frame.first_row()).assert_zero(local[column].dup());
     }
-    builder.when_transition().assert_zero(
+    builder.when(frame.transition()).assert_zero(
         nv(COL_SPONGE_HEAD)
             - v(COL_SPONGE_HEAD)
             - p[3].clone() * v(COL_NODE_PERMS) * Felt::from_u8(32),
     );
     builder
-        .when_transition()
+        .when(frame.transition())
         .assert_zero(nv(COL_CHUNK_HEAD) - v(COL_CHUNK_HEAD) - p[6].clone() * v(COL_NODE_CHUNKS));
 
     // Each value is held from its first authenticated use through its last consumer. These
@@ -126,7 +131,7 @@ pub(crate) fn eval_main<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
         (COL_DIGEST_ID, &[2, 3, 4][..]),
     ] {
         let hold = phases.iter().map(|&i| p[i].clone()).sum::<AB::Expr>();
-        builder.when_transition().assert_zero(hold * (nv(column) - v(column)));
+        builder.when(frame.transition()).assert_zero(hold * (nv(column) - v(column)));
     }
     node::eval_chunk_count(
         builder,
@@ -141,18 +146,18 @@ pub(crate) fn eval_main<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
     let chunk = p[P_CHUNK_CAPACITY].clone() + p[P_CHUNK_LATE].clone();
     let entering = p[P_NEXT_CHUNK].clone();
     let chunk_act = v(COL_CHUNK_ACT);
-    builder.assert_bool(local[COL_CHUNK_ACT]);
+    builder.assert_bool(local[COL_CHUNK_ACT].dup());
     builder
-        .when_transition()
+        .when(frame.transition())
         .assert_zero((one.clone() - chunk_act.clone()) * nv(COL_CHUNK_ACT));
     builder
-        .when_transition()
+        .when(frame.transition())
         .assert_zero((one.clone() - entering.clone()) * (nv(COL_CHUNK_ACT) - chunk_act.clone()));
     builder
-        .when_transition()
+        .when(frame.transition())
         .assert_zero(nv(COL_CHUNK_SEQ) - v(COL_CHUNK_SEQ) - chunk);
     builder
-        .when_transition()
+        .when(frame.transition())
         .assert_zero((one.clone() - entering.clone()) * (nv(COL_CHUNK_ID) - v(COL_CHUNK_ID)));
     for (mask, columns, entry_mask) in [
         (p[P_CHUNK_CAPACITY].clone(), CHUNK_CAPACITY_COLUMNS, p[6].clone()),
@@ -161,7 +166,7 @@ pub(crate) fn eval_main<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
         let head = v(columns[3]);
         builder.assert_zero(mask.clone() * head.clone() * (head.clone() - one.clone()));
         builder.assert_zero(mask * head * (one.clone() - chunk_act.clone()));
-        builder.when_transition().assert_zero(
+        builder.when(frame.transition()).assert_zero(
             entry_mask
                 * (one.clone() - nv(columns[3]))
                 * (nv(COL_CHUNK_ID) - v(COL_CHUNK_ID) - one.clone()),
@@ -169,11 +174,15 @@ pub(crate) fn eval_main<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
     }
 }
 
-pub(crate) fn eval_lookups<LB: LookupBuilder<F = Felt>>(builder: &mut LB) {
-    let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-    let next: [LB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
-    let p: [LB::Expr; 10] =
-        array::from_fn(|i| builder.periodic_values()[PERIODIC_OFFSET + i].into());
+pub(crate) fn eval_lookups<LB: native_lookup::LookupBuilder<F = Felt>>(
+    frame: &native_lookup::LookupFrame<'_, LB::Expr>,
+    builder: &mut LB,
+) {
+    let local: &[LB::Expr; NUM_MAIN_COLS] =
+        frame.main.current.try_into().expect("chunk/node local main");
+    let next: &[LB::Expr; NUM_MAIN_COLS] =
+        frame.main.next.try_into().expect("chunk/node next main");
+    let p: [LB::Expr; 10] = array::from_fn(|i| frame.periodic[PERIODIC_OFFSET + i].dup());
     for index in 0..NUM_AUX_COLS {
         let degree = Deg { v: 4 + index, u: 4 };
         builder.next_column(
@@ -189,7 +198,7 @@ pub(crate) fn eval_lookups<LB: LookupBuilder<F = Felt>>(builder: &mut LB) {
                                 "chunk",
                                 mask,
                                 |batch| {
-                                    emit_chunk(batch, index, &columns.map(|c| local[c]));
+                                    emit_chunk(batch, index, &columns.map(|c| local[c].dup()));
                                 },
                                 degree,
                             );
@@ -202,7 +211,7 @@ pub(crate) fn eval_lookups<LB: LookupBuilder<F = Felt>>(builder: &mut LB) {
                                     "node",
                                     mask.clone(),
                                     |batch| {
-                                        emit_node(batch, phase, &local, &next);
+                                        emit_node(batch, phase, local, next);
                                     },
                                     phase_degree,
                                 );
@@ -217,11 +226,11 @@ pub(crate) fn eval_lookups<LB: LookupBuilder<F = Felt>>(builder: &mut LB) {
     }
 }
 
-fn emit_chunk<B: LookupBatch, V: Copy + Into<B::Expr>>(batch: &mut B, index: usize, local: &[V; 12])
+fn emit_chunk<B: LookupBatch>(batch: &mut B, index: usize, local: &[B::Expr; 12])
 where
     B::Expr: Algebra<Felt>,
 {
-    let v = |i: usize| -> B::Expr { local[i].into() };
+    let v = |i: usize| -> B::Expr { local[i].dup() };
     let act = v(2);
     let base = B::Expr::from_u64(CHUNK_ADDR_BASE) + v(0) * B::Expr::from_u8(4);
     let linear = Deg { v: 1, u: 1 };
@@ -260,16 +269,16 @@ where
     }
 }
 
-fn emit_node<B: LookupBatch, V: Copy + Into<B::Expr>>(
+fn emit_node<B: LookupBatch>(
     batch: &mut B,
     phase: usize,
-    local: &[V; NUM_MAIN_COLS],
-    next: &[V; NUM_MAIN_COLS],
+    local: &[B::Expr; NUM_MAIN_COLS],
+    next: &[B::Expr; NUM_MAIN_COLS],
 ) where
     B::Expr: Algebra<Felt>,
 {
-    let v = |i: usize| -> B::Expr { local[i].into() };
-    let nv = |i: usize| -> B::Expr { next[i].into() };
+    let v = |i: usize| -> B::Expr { local[i].dup() };
+    let nv = |i: usize| -> B::Expr { next[i].dup() };
     let act = v(COL_NODE_ACT);
     let degree = Deg { v: 1, u: 1 };
     let payload = || PAYLOAD.map(v);

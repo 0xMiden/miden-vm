@@ -31,7 +31,7 @@
 //! bus-pinned per row (`ChunkChain`) but not constrained across rows —
 //! Eidos is shared with other callers.
 
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 use core::array;
 
 use miden_core::{
@@ -41,13 +41,15 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_precompiles::Keccak256Precompile;
+use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
+    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
     lookup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup,
+        Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
+        native as native_lookup,
     },
 };
+use p3_field::Dup;
 
 use crate::precompiles::{
     hash::{chunk::ChunkChainMsg, keccak::sponge::KeccakSpongeMsg, memory64::Memory64Msg},
@@ -59,7 +61,6 @@ use crate::precompiles::{
         eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
         initial_cv_from_frame,
     },
-    utils::{current_main, next_main},
 };
 
 // MAIN COLUMN LAYOUT
@@ -218,7 +219,7 @@ pub(crate) fn eval_chunk_count<AB>(
     n_chunks_inv: AB::Expr,
     remainder: AB::Expr,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: native::LiftedAirBuilder<F = Felt>,
 {
     let is_empty =
         (n_chunks.clone() - AB::Expr::ONE) * Felt::from_u8(32) + remainder.clone() + AB::Expr::ONE
@@ -248,33 +249,69 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
     fn build_aux_trace(
         &self,
         main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        miden_stark::lookup::build_logup_aux_trace(&KeccakNodeAir, main, challenges)
+        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
+            self,
+            native::AuxTraceInputs {
+                main,
+                preprocessed: None,
+                public_values: air_inputs,
+                statement: aux_inputs,
+                challenges,
+            },
+        )
+        .expect("valid KeccakNodeAir auxiliary inputs");
+        (aux.columns, aux.exports)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
+        native::migration::eval_source(self, builder);
+    }
+}
 
-        let act: AB::Expr = local[COL_ACT].into();
-        let act_next: AB::Expr = next[COL_ACT].into();
-        let out_mult: AB::Expr = local[COL_OUT_MULT].into();
+impl native::LiftedAir for KeccakNodeAir {
+    type F = Felt;
 
-        let sponge_seq_id_head: AB::Expr = local[COL_SPONGE_SEQ_ID_HEAD].into();
-        let sponge_seq_id_head_next: AB::Expr = next[COL_SPONGE_SEQ_ID_HEAD].into();
-        let n_sponge_perms: AB::Expr = local[COL_N_SPONGE_PERMS].into();
+    fn spec(&self) -> native::AirSpec<'_, Felt> {
+        native::AirSpec {
+            main_width: NUM_MAIN_COLS,
+            aux_width: NUM_AUX_COLS,
+            num_public_values: 0,
+            num_challenges: NUM_RANDOMNESS,
+            num_exports: NUM_LOGUP_VALUES,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(&[]),
+        }
+    }
 
-        let chunk_seq_id_head: AB::Expr = local[COL_CHUNK_SEQ_ID_HEAD].into();
-        let chunk_seq_id_head_next: AB::Expr = next[COL_CHUNK_SEQ_ID_HEAD].into();
-        let n_chunks: AB::Expr = local[COL_N_CHUNKS].into();
+    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &native::Frame<'_, AB>,
+        inputs: native::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        let local = frame.main.current;
+        let next = frame.main.next;
+
+        let act: AB::Expr = local[COL_ACT].dup();
+        let act_next: AB::Expr = next[COL_ACT].dup();
+        let out_mult: AB::Expr = local[COL_OUT_MULT].dup();
+
+        let sponge_seq_id_head: AB::Expr = local[COL_SPONGE_SEQ_ID_HEAD].dup();
+        let sponge_seq_id_head_next: AB::Expr = next[COL_SPONGE_SEQ_ID_HEAD].dup();
+        let n_sponge_perms: AB::Expr = local[COL_N_SPONGE_PERMS].dup();
+
+        let chunk_seq_id_head: AB::Expr = local[COL_CHUNK_SEQ_ID_HEAD].dup();
+        let chunk_seq_id_head_next: AB::Expr = next[COL_CHUNK_SEQ_ID_HEAD].dup();
+        let n_chunks: AB::Expr = local[COL_N_CHUNKS].dup();
 
         // `absorption_id_chunks` is read only by the LookupAir below
         // (no local cross-row constraint — see the comment in the
         // namespace-continuity section).
-        let _ = next[COL_ABSORPTION_ID_CHUNKS];
+        let _ = next[COL_ABSORPTION_ID_CHUNKS].dup();
 
         // Boundary -----------------------------------------------
         // Pin `sponge_seq_id_head` and `chunk_seq_id_head` at row 0 to
@@ -282,22 +319,22 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
         // and chunk chiplet's row-0 anchors. Ungated by `act` — an
         // all-inactive trace's prover sets them to 0 anyway, and the
         // gating cost (one mult) is not worth it.
-        builder.when_first_row().assert_zero(sponge_seq_id_head.clone());
-        builder.when_first_row().assert_zero(chunk_seq_id_head.clone());
+        builder.when(frame.first_row()).assert_zero(sponge_seq_id_head.clone());
+        builder.when(frame.first_row()).assert_zero(chunk_seq_id_head.clone());
 
         // Activity -----------------------------------------------
         // Binary, sticky-downward (matches chunk / sponge convention).
-        builder.assert_bool(local[COL_ACT]);
+        builder.assert_bool(local[COL_ACT].dup());
         builder
-            .when_transition()
+            .when(frame.transition())
             .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
         eval_chunk_count(
             builder,
-            local[COL_ACT].into(),
-            local[COL_LEN_BYTES].into(),
-            local[COL_N_CHUNKS].into(),
-            local[COL_N_CHUNKS_INV].into(),
-            local[COL_LAST_CHUNK_REM].into(),
+            local[COL_ACT].dup(),
+            local[COL_LEN_BYTES].dup(),
+            local[COL_N_CHUNKS].dup(),
+            local[COL_N_CHUNKS_INV].dup(),
+            local[COL_LAST_CHUNK_REM].dup(),
         );
 
         // out_mult on inactive rows --------------------------------
@@ -307,7 +344,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
 
         // Continuity (gated on `act_next`) -----------------------
         // sponge namespace: 32 sponge rows per perm.
-        builder.when_transition().assert_zero(
+        builder.when(frame.transition()).assert_zero(
             act_next.clone()
                 * (sponge_seq_id_head_next
                     - sponge_seq_id_head
@@ -315,7 +352,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
         );
         // chunk namespace.
         builder
-            .when_transition()
+            .when(frame.transition())
             .assert_zero(act_next * (chunk_seq_id_head_next - chunk_seq_id_head - n_chunks));
         // No Eidos chunks-absorption namespace continuity. Other Eidos
         // callers (transcript-node hashing, the digest-chunks / keccak
@@ -328,9 +365,18 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
         // for the matching shared-namespace argument.
 
         // Phase 2: LogUp argument via the LogUp adapter.
-        let mut lb = ConstraintLookupBuilder::new(builder, self);
-        <Self as LookupAir<_>>::eval(self, &mut lb);
-        lb.finish();
+        native_lookup::eval_lookup(self, frame, inputs, builder);
+    }
+}
+
+impl native::ProverAir<QuadFelt> for KeccakNodeAir {
+    type Error = native_lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        native_lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
@@ -381,33 +427,54 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
+        native::migration::eval_lookup(self, builder, 0);
+    }
+}
 
-        let act: LB::Expr = local[COL_ACT].into();
-        let sponge_seq_id_head: LB::Expr = local[COL_SPONGE_SEQ_ID_HEAD].into();
-        let n_sponge_perms: LB::Expr = local[COL_N_SPONGE_PERMS].into();
-        let chunk_seq_id_head: LB::Expr = local[COL_CHUNK_SEQ_ID_HEAD].into();
-        let n_chunks: LB::Expr = local[COL_N_CHUNKS].into();
-        let absorption_id_chunks: LB::Expr = local[COL_ABSORPTION_ID_CHUNKS].into();
-        let len_bytes: LB::Expr = local[COL_LEN_BYTES].into();
+impl<LB> native_lookup::LookupAir<LB> for KeccakNodeAir
+where
+    LB: native_lookup::LookupBuilder<F = Felt>,
+{
+    fn column_shape(&self) -> &[usize] {
+        &COLUMN_SHAPE
+    }
+
+    fn max_message_width(&self) -> usize {
+        MAX_MESSAGE_WIDTH
+    }
+
+    fn num_bus_ids(&self) -> usize {
+        NUM_BUS_IDS
+    }
+
+    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        let local = frame.main.current;
+
+        let act: LB::Expr = local[COL_ACT].dup();
+        let sponge_seq_id_head: LB::Expr = local[COL_SPONGE_SEQ_ID_HEAD].dup();
+        let n_sponge_perms: LB::Expr = local[COL_N_SPONGE_PERMS].dup();
+        let chunk_seq_id_head: LB::Expr = local[COL_CHUNK_SEQ_ID_HEAD].dup();
+        let n_chunks: LB::Expr = local[COL_N_CHUNKS].dup();
+        let absorption_id_chunks: LB::Expr = local[COL_ABSORPTION_ID_CHUNKS].dup();
+        let len_bytes: LB::Expr = local[COL_LEN_BYTES].dup();
         let [last_block_remainder, last_block_rate_gap, full_blocks] =
             sponge_perm_count_messages(len_bytes.clone(), n_sponge_perms.clone());
-        let absorption_id_digest_chunks: LB::Expr = local[COL_ABSORPTION_ID_DIGEST_CHUNKS].into();
-        let absorption_id_keccak: LB::Expr = local[COL_ABSORPTION_ID_KECCAK].into();
+        let absorption_id_digest_chunks: LB::Expr = local[COL_ABSORPTION_ID_DIGEST_CHUNKS].dup();
+        let absorption_id_keccak: LB::Expr = local[COL_ABSORPTION_ID_KECCAK].dup();
 
-        let d: [LB::Expr; NUM_D] = array::from_fn(|i| local[COL_D_BEGIN + i].into());
+        let d: [LB::Expr; NUM_D] = array::from_fn(|i| local[COL_D_BEGIN + i].dup());
         let h_input_chunks: [LB::Expr; NUM_HASH] =
-            array::from_fn(|i| local[COL_H_INPUT_CHUNKS_BEGIN + i].into());
+            array::from_fn(|i| local[COL_H_INPUT_CHUNKS_BEGIN + i].dup());
         let h_digest_chunks: [LB::Expr; NUM_HASH] =
-            array::from_fn(|i| local[COL_H_DIGEST_CHUNKS_BEGIN + i].into());
+            array::from_fn(|i| local[COL_H_DIGEST_CHUNKS_BEGIN + i].dup());
         let h_keccak: [LB::Expr; NUM_HASH] =
-            array::from_fn(|i| local[COL_H_KECCAK_BEGIN + i].into());
+            array::from_fn(|i| local[COL_H_KECCAK_BEGIN + i].dup());
 
         // Multiplicities.
         let neg_act: LB::Expr = LB::Expr::ZERO - act.clone();
         let pos_act: LB::Expr = act.clone();
         let digest_mult: LB::Expr = act;
-        let out_mult: LB::Expr = local[COL_OUT_MULT].into();
+        let out_mult: LB::Expr = local[COL_OUT_MULT].dup();
         let neg_out_mult: LB::Expr = LB::Expr::ZERO - out_mult;
 
         // Derived addresses / cycles.
@@ -462,7 +529,7 @@ where
                 "ks-request",
                 neg_act.clone(),
                 KeccakSpongeMsg {
-                    sponge_seq_id: local[COL_SPONGE_SEQ_ID_HEAD].into(),
+                    sponge_seq_id: local[COL_SPONGE_SEQ_ID_HEAD].dup(),
                     chunk_ptr: chunk_ptr_head,
                     len_bytes: len_bytes.clone(),
                 },
@@ -594,7 +661,7 @@ where
                 interaction_deg
             ),
         );
-        let remainder: LB::Expr = local[COL_LAST_CHUNK_REM].into();
+        let remainder: LB::Expr = local[COL_LAST_CHUNK_REM].dup();
         frac_col!(
             builder,
             "digest-chunks-eidos",

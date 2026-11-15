@@ -12,6 +12,17 @@ mod descriptors {
 }
 
 define_native_kernel!(
+    /// Generated execution of the combined chunk/node and shared-capacity sponge relation.
+    ///
+    /// The authored source retains the physical row overlays and witness construction.
+    ChunkNodeSpongeKernel,
+    descriptor_chunk_node_sponge,
+    precompute_chunk_node_sponge,
+    eval_chunk_node_sponge,
+    CHUNK_NODE_SPONGE_PREPARED_TERMS
+);
+
+define_native_kernel!(
     /// Generated execution of the authored Keccak-round relation.
     ///
     /// Construction owns an embedded descriptor without source recapture or fixed-table building.

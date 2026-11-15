@@ -24,6 +24,19 @@ mod native_registration;
 use native_registration::assert_native_registration;
 
 #[test]
+fn native_chunk_node_sponge_registration_keeps_composition_and_prepared_execution() {
+    use miden_air::precompiles::native::ChunkNodeSpongeKernel;
+    use miden_air_definitions::precompiles::hash::chunk_node_sponge::ChunkNodeSpongeAir;
+
+    assert_native_registration(
+        &ChunkNodeSpongeAir,
+        &ChunkNodeSpongeAir,
+        &ChunkNodeSpongeKernel::new(),
+        &SEEDS,
+    );
+}
+
+#[test]
 fn native_keccak_round_registration_keeps_source_metadata_and_prepared_execution() {
     use miden_air::precompiles::native::KeccakRoundKernel;
     use miden_air_definitions::precompiles::hash::keccak::round::KeccakRoundAir;

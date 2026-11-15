@@ -16,14 +16,16 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
+use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
+    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
     lookup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup,
+        Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
+        native as native_lookup,
     },
 };
 use miden_utils_sync::LazyLock;
+use p3_field::Dup;
 pub use program::{NUM_PERIODIC_COLS, SPONGE_PERIOD, sponge_program};
 
 use crate::precompiles::{
@@ -31,7 +33,7 @@ use crate::precompiles::{
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
     primitives::byte_pair_lut::BytePairLutMsg,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    utils::{current_main, halves_le, next_main},
+    utils::halves_le,
 };
 
 // MAIN COLUMN LAYOUT
@@ -206,91 +208,146 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
     fn build_aux_trace(
         &self,
         main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        miden_stark::lookup::build_logup_aux_trace(&KeccakSpongeAir, main, challenges)
+        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
+            self,
+            native::AuxTraceInputs {
+                main,
+                preprocessed: None,
+                public_values: air_inputs,
+                statement: aux_inputs,
+                challenges,
+            },
+        )
+        .expect("valid KeccakSpongeAir auxiliary inputs");
+        (aux.columns, aux.exports)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        eval_main(builder, 0);
+        native::migration::eval_source(self, builder);
+    }
+}
+
+impl native::LiftedAir for KeccakSpongeAir {
+    type F = Felt;
+
+    fn spec(&self) -> native::AirSpec<'_, Felt> {
+        native::AirSpec {
+            main_width: NUM_MAIN_COLS,
+            aux_width: NUM_AUX_COLS,
+            num_public_values: 0,
+            num_challenges: NUM_RANDOMNESS,
+            num_exports: NUM_LOGUP_VALUES,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(PERIODIC_COLUMNS.as_slice()),
+        }
+    }
+
+    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &native::Frame<'_, AB>,
+        inputs: native::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        eval_main(frame, builder, 0);
 
         // Phase 2: LogUp.
-        let mut lb = ConstraintLookupBuilder::new(builder, self);
-        <Self as LookupAir<_>>::eval(self, &mut lb);
-        lb.finish();
+        native_lookup::eval_lookup(self, frame, inputs, builder);
+    }
+}
+
+impl native::ProverAir<QuadFelt> for KeccakSpongeAir {
+    type Error = native_lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        native_lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
 /// Evaluate this component's base constraints in a main-trace column band.
-pub(crate) fn eval_main<AB>(builder: &mut AB, main_col_offset: usize)
+pub(crate) fn eval_main<AB>(frame: &native::Frame<'_, AB>, builder: &mut AB, main_col_offset: usize)
 where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: native::LiftedAirBuilder<F = Felt>,
 {
-    eval_main_inner(builder, main_col_offset, false);
+    eval_main_inner(frame, builder, main_col_offset, false);
 }
 
 /// Evaluate sponge constraints without zero-filling capacity-row chunk cells.
 ///
 /// The composite node/chunk AIR uses these cells for its serialized records.
-pub(crate) fn eval_main_with_shared_capacity<AB: LiftedAirBuilder<F = Felt>>(
+pub(crate) fn eval_main_with_shared_capacity<AB: native::LiftedAirBuilder<F = Felt>>(
+    frame: &native::Frame<'_, AB>,
     builder: &mut AB,
     main_col_offset: usize,
 ) {
-    eval_main_inner(builder, main_col_offset, true);
+    eval_main_inner(frame, builder, main_col_offset, true);
 }
 
-fn eval_main_inner<AB: LiftedAirBuilder<F = Felt>>(
+fn eval_main_inner<AB: native::LiftedAirBuilder<F = Felt>>(
+    frame: &native::Frame<'_, AB>,
     builder: &mut AB,
     main_col_offset: usize,
     shared_capacity: bool,
 ) {
     // Phase 1: local row constraints.
-    let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
+    let local: &[AB::Expr; NUM_MAIN_COLS] = frame.main.current
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("sponge current main band");
     // Next-row window at row r+1. Cyclic at
     // row N-1 (`when_transition` gates out the wrap explicitly
     // where needed; other transition constraints rely on
     // `p_last`/`p_rate_block` factors making the wrap vacuous).
-    let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), main_col_offset);
+    let next: &[AB::Expr; NUM_MAIN_COLS] = frame.main.next
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("sponge next main band");
 
-    let periodic = builder.periodic_values();
-    let p_first: AB::Expr = periodic[PCOL_FIRST].into();
-    let p_last: AB::Expr = periodic[PCOL_LAST].into();
-    let p_rate_block: AB::Expr = periodic[PCOL_RATE_BLOCK].into();
-    let p_capacity: AB::Expr = periodic[PCOL_CAPACITY].into();
-    let p_extra: AB::Expr = periodic[PCOL_EXTRA].into();
-    let p_pad_0x80: AB::Expr = periodic[PCOL_PAD_0X80].into();
+    let periodic = frame.periodic;
+    let p_first: AB::Expr = periodic[PCOL_FIRST].dup();
+    let p_last: AB::Expr = periodic[PCOL_LAST].dup();
+    let p_rate_block: AB::Expr = periodic[PCOL_RATE_BLOCK].dup();
+    let p_capacity: AB::Expr = periodic[PCOL_CAPACITY].dup();
+    let p_extra: AB::Expr = periodic[PCOL_EXTRA].dup();
+    let p_pad_0x80: AB::Expr = periodic[PCOL_PAD_0X80].dup();
     let p_state_lane: AB::Expr = p_rate_block.clone() + p_capacity.clone();
 
     // Frequently-used local / next-row expressions.
-    let act: AB::Expr = local[COL_ACT].into();
-    let act_next: AB::Expr = next[COL_ACT].into();
-    let sponge_seq_id: AB::Expr = local[COL_SPONGE_SEQ_ID].into();
-    let sponge_seq_id_next: AB::Expr = next[COL_SPONGE_SEQ_ID].into();
-    let bytes_left: AB::Expr = local[COL_BYTES_LEFT].into();
-    let bytes_left_next: AB::Expr = next[COL_BYTES_LEFT].into();
-    let chunk_ptr: AB::Expr = local[COL_CHUNK_PTR].into();
-    let chunk_ptr_next: AB::Expr = next[COL_CHUNK_PTR].into();
-    let is_first_block: AB::Expr = local[COL_IS_FIRST_BLOCK_OF_INVOCATION].into();
-    let is_first_block_next: AB::Expr = next[COL_IS_FIRST_BLOCK_OF_INVOCATION].into();
-    let pad_block: AB::Expr = local[COL_IS_PAD_BLOCK].into();
-    let is_zero: AB::Expr = local[COL_IS_ZERO].into();
-    let is_zero_next: AB::Expr = next[COL_IS_ZERO].into();
-    let is_chunk_avail: AB::Expr = local[COL_IS_CHUNK_AVAIL].into();
-    let is_chunk_avail_next: AB::Expr = next[COL_IS_CHUNK_AVAIL].into();
-    let chunk_bytes: [AB::Var; 8] = array::from_fn(|i| local[CHUNK_BYTES_RANGE.start + i]);
-    let state_prev_bytes: [AB::Var; 8] =
-        array::from_fn(|i| local[STATE_PREV_BYTES_RANGE.start + i]);
-    let state_new_bytes: [AB::Var; 8] = array::from_fn(|i| local[STATE_NEW_BYTES_RANGE.start + i]);
-    let [chunk_lo, chunk_hi]: [AB::Expr; 2] = halves_le(&chunk_bytes, 256);
-    let chunk_lo = chunk_lo - local[COL_PAD_LO];
-    let chunk_hi = chunk_hi - local[COL_PAD_HI];
-    let [state_prev_lo, state_prev_hi]: [AB::Expr; 2] = halves_le(&state_prev_bytes, 256);
-    let [state_new_lo, state_new_hi]: [AB::Expr; 2] = halves_le(&state_new_bytes, 256);
+    let act: AB::Expr = local[COL_ACT].dup();
+    let act_next: AB::Expr = next[COL_ACT].dup();
+    let sponge_seq_id: AB::Expr = local[COL_SPONGE_SEQ_ID].dup();
+    let sponge_seq_id_next: AB::Expr = next[COL_SPONGE_SEQ_ID].dup();
+    let bytes_left: AB::Expr = local[COL_BYTES_LEFT].dup();
+    let bytes_left_next: AB::Expr = next[COL_BYTES_LEFT].dup();
+    let chunk_ptr: AB::Expr = local[COL_CHUNK_PTR].dup();
+    let chunk_ptr_next: AB::Expr = next[COL_CHUNK_PTR].dup();
+    let is_first_block: AB::Expr = local[COL_IS_FIRST_BLOCK_OF_INVOCATION].dup();
+    let is_first_block_next: AB::Expr = next[COL_IS_FIRST_BLOCK_OF_INVOCATION].dup();
+    let pad_block: AB::Expr = local[COL_IS_PAD_BLOCK].dup();
+    let is_zero: AB::Expr = local[COL_IS_ZERO].dup();
+    let is_zero_next: AB::Expr = next[COL_IS_ZERO].dup();
+    let is_chunk_avail: AB::Expr = local[COL_IS_CHUNK_AVAIL].dup();
+    let is_chunk_avail_next: AB::Expr = next[COL_IS_CHUNK_AVAIL].dup();
+    let chunk_bytes: &[AB::Expr; 8] =
+        local[CHUNK_BYTES_RANGE].try_into().expect("sponge chunk_bytes");
+    let state_prev_bytes: &[AB::Expr; 8] =
+        local[STATE_PREV_BYTES_RANGE].try_into().expect("sponge state_prev_bytes");
+    let state_new_bytes: &[AB::Expr; 8] =
+        local[STATE_NEW_BYTES_RANGE].try_into().expect("sponge state_new_bytes");
+    let [chunk_lo, chunk_hi]: [AB::Expr; 2] = halves_le(chunk_bytes, 256);
+    let chunk_lo = chunk_lo - local[COL_PAD_LO].dup();
+    let chunk_hi = chunk_hi - local[COL_PAD_HI].dup();
+    let [state_prev_lo, state_prev_hi]: [AB::Expr; 2] = halves_le(state_prev_bytes, 256);
+    let [state_new_lo, state_new_hi]: [AB::Expr; 2] = halves_le(state_new_bytes, 256);
 
-    let bits: [AB::Expr; 3] = array::from_fn(|i| local[OFFSET_BITS_RANGE.start + i].into());
-    let product: AB::Expr = local[COL_OFFSET_PRODUCT].into();
+    let bits: [AB::Expr; 3] = array::from_fn(|i| local[OFFSET_BITS_RANGE.start + i].dup());
+    let product: AB::Expr = local[COL_OFFSET_PRODUCT].dup();
     builder.assert_eq(product.clone(), bits[0].clone() * bits[1].clone());
     let selected = offset_selectors(bits.clone(), product.clone());
     let byte_offset = bits[0].clone()
@@ -306,13 +363,13 @@ fn eval_main_inner<AB: LiftedAirBuilder<F = Felt>>(
         + AB::Expr::from(Felt::from(65535u32)) * bits[1].clone()
         + AB::Expr::from(Felt::from(16711425u32)) * product;
     builder.assert_eq(
-        local[COL_PAD_LO],
+        local[COL_PAD_LO].dup(),
         pad_row.clone() * (AB::Expr::ONE - bits[2].clone()) * shift.clone(),
     );
-    builder.assert_eq(local[COL_PAD_HI], pad_row.clone() * bits[2].clone() * shift);
+    builder.assert_eq(local[COL_PAD_HI].dup(), pad_row.clone() * bits[2].clone() * shift);
     let mut past_suffix = AB::Expr::ZERO;
     for (i, selector) in selected.iter().enumerate() {
-        let byte: AB::Expr = chunk_bytes[i].into();
+        let byte: AB::Expr = chunk_bytes[i].dup();
         past_suffix += selector.clone();
         builder.assert_zero(pad_row.clone() * (past_suffix.clone() * byte - selector.clone()));
     }
@@ -330,23 +387,23 @@ fn eval_main_inner<AB: LiftedAirBuilder<F = Felt>>(
     // invocation by the `KeccakSponge` request (the first
     // invocation supplies base 0 by convention), and the chain is
     // relaxed at invocation seams — see the `chunk_ptr` chain below.
-    builder.when_first_row().assert_zero(sponge_seq_id.clone());
+    builder.when(frame.first_row()).assert_zero(sponge_seq_id.clone());
 
     // Activity ----------------------------------------------
     // Binary: act ∈ {0, 1}. Deg 2.
-    builder.assert_bool(local[COL_ACT]);
+    builder.assert_bool(local[COL_ACT].dup());
     // Sticky-downward: forbids 0 → 1 within [0, N-2]. The cyclic
     // wrap is intentionally unconstrained so a 1's-prefix / 0's-
     // suffix trace cycles back to `act_0 = 1` on the next loop.
     builder
-        .when_transition()
+        .when(frame.transition())
         .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
     // Drop placement: the unique 1 → 0 transition must land at
     // slot 31 (where `p_last = 1`) of a last-block period
     // (`pad_block = 1`). Equivalent to `act · (1 - act')` under the
     // sticky-down constraint above; the linear form costs one
     // fewer witness multiplication.
-    builder.when_transition().assert_zero(
+    builder.when(frame.transition()).assert_zero(
         (act.clone() - act_next) * (AB::Expr::ONE - p_last.clone() * pad_block.clone()),
     );
 
@@ -355,11 +412,11 @@ fn eval_main_inner<AB: LiftedAirBuilder<F = Felt>>(
     // `when_transition` keeps the cyclic wrap (which would force
     // sponge_seq_id_0 = N) unconstrained.
     builder
-        .when_transition()
+        .when(frame.transition())
         .assert_zero(sponge_seq_id_next - sponge_seq_id - AB::Expr::ONE);
 
     // `is_first_block_of_invocation` structure --------------
-    builder.assert_bool(local[COL_IS_FIRST_BLOCK_OF_INVOCATION]);
+    builder.assert_bool(local[COL_IS_FIRST_BLOCK_OF_INVOCATION].dup());
     // Constant within period. `(1 - p_last)` makes the wrap
     // vacuous (p_last_{N-1} = 1) and lets `is_first_block` toggle
     // at period boundaries.
@@ -399,7 +456,7 @@ fn eval_main_inner<AB: LiftedAirBuilder<F = Felt>>(
     // bus balance against the chunk chiplet's contiguous emissions,
     // not by the chain. `when_transition` also keeps the cyclic
     // wrap unconstrained.
-    builder.when_transition().assert_zero(
+    builder.when(frame.transition()).assert_zero(
         (AB::Expr::ONE - enters_new_invocation)
             * (chunk_ptr_next
                 - chunk_ptr
@@ -442,12 +499,12 @@ fn eval_main_inner<AB: LiftedAirBuilder<F = Felt>>(
 
     // Padding state machine ---------------------------------
     // Binarity.
-    builder.assert_bool(local[COL_IS_ZERO]);
-    builder.assert_bool(local[COL_IS_CHUNK_AVAIL]);
-    builder.assert_bool(local[COL_IS_PAD_BLOCK]);
+    builder.assert_bool(local[COL_IS_ZERO].dup());
+    builder.assert_bool(local[COL_IS_CHUNK_AVAIL].dup());
+    builder.assert_bool(local[COL_IS_PAD_BLOCK].dup());
     for col in OFFSET_BITS_RANGE {
-        builder.assert_bool(local[col]);
-        builder.assert_zero((AB::Expr::ONE - pad_block.clone()) * local[col]);
+        builder.assert_bool(local[col].dup());
+        builder.assert_zero((AB::Expr::ONE - pad_block.clone()) * local[col].dup());
     }
 
     // `is_zero` non-decreasing within period.
@@ -462,7 +519,8 @@ fn eval_main_inner<AB: LiftedAirBuilder<F = Felt>>(
     builder.assert_zero(p_first * (is_zero.clone() + act.clone() - AB::Expr::ONE));
     // Pad-block and offset bits are constant within a period.
     for col in COL_IS_PAD_BLOCK..OFFSET_BITS_RANGE.end {
-        builder.assert_zero((AB::Expr::ONE - p_last.clone()) * (next[col] - local[col]));
+        builder
+            .assert_zero((AB::Expr::ONE - p_last.clone()) * (next[col].dup() - local[col].dup()));
     }
     // At active capacity/slack rows, is_zero identifies the padded block; inactive rows use 1.
     builder.assert_zero(
@@ -472,14 +530,16 @@ fn eval_main_inner<AB: LiftedAirBuilder<F = Felt>>(
 
     // An active first row starts an invocation; an active last row belongs to a padded block.
     builder
-        .when_first_row()
+        .when(frame.first_row())
         .assert_zero(act.clone() * (AB::Expr::ONE - is_first_block.clone()));
-    builder.when_last_row().assert_zero(act * (AB::Expr::ONE - pad_block.clone()));
+    builder
+        .when(frame.last_row())
+        .assert_zero(act * (AB::Expr::ONE - pad_block.clone()));
     // A new invocation follows exactly a padded block, preventing truncation. Check only active
     // successors and non-wrapping transitions so inactive tails remain admissible.
     builder
-        .when_transition()
-        .assert_zero(p_last * next[COL_ACT] * (is_first_block_next - pad_block));
+        .when(frame.transition())
+        .assert_zero(p_last * next[COL_ACT].dup() * (is_first_block_next - pad_block));
 
     // Pad-lane tie-down -------------------------------------
     // On the unique pad transition row (`p_rate_block = 1`,
@@ -532,49 +592,79 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        eval_lookups(builder, 0);
+        native::migration::eval_lookup(self, builder, 0);
+    }
+}
+
+impl<LB> native_lookup::LookupAir<LB> for KeccakSpongeAir
+where
+    LB: native_lookup::LookupBuilder<F = Felt>,
+{
+    fn column_shape(&self) -> &[usize] {
+        &COLUMN_SHAPE
+    }
+
+    fn max_message_width(&self) -> usize {
+        MAX_MESSAGE_WIDTH
+    }
+
+    fn num_bus_ids(&self) -> usize {
+        NUM_BUS_IDS
+    }
+
+    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        eval_lookups(frame, builder, 0);
     }
 }
 
 /// Evaluate this component's LogUp columns in a main-trace column band.
-pub(crate) fn eval_lookups<LB>(builder: &mut LB, main_col_offset: usize)
-where
-    LB: LookupBuilder<F = Felt>,
+pub(crate) fn eval_lookups<LB>(
+    frame: &native_lookup::LookupFrame<'_, LB::Expr>,
+    builder: &mut LB,
+    main_col_offset: usize,
+) where
+    LB: native_lookup::LookupBuilder<F = Felt>,
 {
-    let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
-    let periodic = builder.periodic_values();
-    let p_first: LB::Expr = periodic[PCOL_FIRST].into();
-    let p_rate_block: LB::Expr = periodic[PCOL_RATE_BLOCK].into();
-    let p_capacity: LB::Expr = periodic[PCOL_CAPACITY].into();
-    let p_rc_active: LB::Expr = periodic[PCOL_RC_ACTIVE].into();
-    let p_squeeze_active: LB::Expr = periodic[PCOL_SQUEEZE_ACTIVE].into();
-    let p_pad_0x80: LB::Expr = periodic[PCOL_PAD_0X80].into();
-    let p_extra: LB::Expr = periodic[PCOL_EXTRA].into();
-    let p_idx: LB::Expr = periodic[PCOL_IDX].into();
-    let rc_lo: LB::Expr = periodic[PCOL_RC_LO].into();
-    let rc_hi: LB::Expr = periodic[PCOL_RC_HI].into();
+    let local: &[LB::Expr; NUM_MAIN_COLS] = frame.main.current
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("sponge lookup main band");
+    let periodic = frame.periodic;
+    let p_first: LB::Expr = periodic[PCOL_FIRST].dup();
+    let p_rate_block: LB::Expr = periodic[PCOL_RATE_BLOCK].dup();
+    let p_capacity: LB::Expr = periodic[PCOL_CAPACITY].dup();
+    let p_rc_active: LB::Expr = periodic[PCOL_RC_ACTIVE].dup();
+    let p_squeeze_active: LB::Expr = periodic[PCOL_SQUEEZE_ACTIVE].dup();
+    let p_pad_0x80: LB::Expr = periodic[PCOL_PAD_0X80].dup();
+    let p_extra: LB::Expr = periodic[PCOL_EXTRA].dup();
+    let p_idx: LB::Expr = periodic[PCOL_IDX].dup();
+    let rc_lo: LB::Expr = periodic[PCOL_RC_LO].dup();
+    let rc_hi: LB::Expr = periodic[PCOL_RC_HI].dup();
     let p_state_lane: LB::Expr = p_rate_block.clone() + p_capacity;
 
-    let act: LB::Expr = local[COL_ACT].into();
-    let sponge_seq_id: LB::Expr = local[COL_SPONGE_SEQ_ID].into();
-    let chunk_ptr: LB::Expr = local[COL_CHUNK_PTR].into();
-    let bytes_left: LB::Expr = local[COL_BYTES_LEFT].into();
-    let is_first_block: LB::Expr = local[COL_IS_FIRST_BLOCK_OF_INVOCATION].into();
-    let is_chunk_avail: LB::Expr = local[COL_IS_CHUNK_AVAIL].into();
-    let is_zero: LB::Expr = local[COL_IS_ZERO].into();
-    let state_out_lo: LB::Expr = local[COL_STATE_OUT_LO].into();
-    let state_out_hi: LB::Expr = local[COL_STATE_OUT_HI].into();
-    let chunk_bytes: [LB::Var; 8] = array::from_fn(|i| local[CHUNK_BYTES_RANGE.start + i]);
-    let state_prev_bytes: [LB::Var; 8] =
-        array::from_fn(|i| local[STATE_PREV_BYTES_RANGE.start + i]);
-    let state_new_bytes: [LB::Var; 8] = array::from_fn(|i| local[STATE_NEW_BYTES_RANGE.start + i]);
-    let [chunk_lo, chunk_hi]: [LB::Expr; 2] = halves_le(&chunk_bytes, 256);
-    let chunk_lo = chunk_lo - local[COL_PAD_LO];
-    let chunk_hi = chunk_hi - local[COL_PAD_HI];
-    let [state_prev_lo, state_prev_hi]: [LB::Expr; 2] = halves_le(&state_prev_bytes, 256);
-    let [state_new_lo, state_new_hi]: [LB::Expr; 2] = halves_le(&state_new_bytes, 256);
+    let act: LB::Expr = local[COL_ACT].dup();
+    let sponge_seq_id: LB::Expr = local[COL_SPONGE_SEQ_ID].dup();
+    let chunk_ptr: LB::Expr = local[COL_CHUNK_PTR].dup();
+    let bytes_left: LB::Expr = local[COL_BYTES_LEFT].dup();
+    let is_first_block: LB::Expr = local[COL_IS_FIRST_BLOCK_OF_INVOCATION].dup();
+    let is_chunk_avail: LB::Expr = local[COL_IS_CHUNK_AVAIL].dup();
+    let is_zero: LB::Expr = local[COL_IS_ZERO].dup();
+    let state_out_lo: LB::Expr = local[COL_STATE_OUT_LO].dup();
+    let state_out_hi: LB::Expr = local[COL_STATE_OUT_HI].dup();
+    let chunk_bytes: &[LB::Expr; 8] =
+        local[CHUNK_BYTES_RANGE].try_into().expect("sponge lookup chunk_bytes");
+    let state_prev_bytes: &[LB::Expr; 8] = local[STATE_PREV_BYTES_RANGE]
+        .try_into()
+        .expect("sponge lookup state_prev_bytes");
+    let state_new_bytes: &[LB::Expr; 8] =
+        local[STATE_NEW_BYTES_RANGE].try_into().expect("sponge lookup state_new_bytes");
+    let [chunk_lo, chunk_hi]: [LB::Expr; 2] = halves_le(chunk_bytes, 256);
+    let chunk_lo = chunk_lo - local[COL_PAD_LO].dup();
+    let chunk_hi = chunk_hi - local[COL_PAD_HI].dup();
+    let [state_prev_lo, state_prev_hi]: [LB::Expr; 2] = halves_le(state_prev_bytes, 256);
+    let [state_new_lo, state_new_hi]: [LB::Expr; 2] = halves_le(state_new_bytes, 256);
 
-    let pad_block: LB::Expr = local[COL_IS_PAD_BLOCK].into();
+    let pad_block: LB::Expr = local[COL_IS_PAD_BLOCK].dup();
 
     // Derived multiplicity signals.
     let is_intra: LB::Expr = LB::Expr::ONE - is_first_block.clone();
@@ -704,18 +794,18 @@ where
                             "bytes",
                             LB::Expr::ONE,
                             |batch| {
-                                for (i, &byte) in chunk_bytes.iter().enumerate().skip(begin).take(4)
+                                for (i, byte) in chunk_bytes.iter().enumerate().skip(begin).take(4)
                                 {
-                                    let operand = LB::Expr::from(byte)
+                                    let operand = byte.dup()
                                         + p_pad_0x80.clone()
                                             * LB::Expr::from(Felt::from(PAD_CONST_BYTES[i]));
                                     batch.insert(
                                         "xor-state",
                                         xor_mult.clone(),
                                         BytePairLutMsg::from_xor(
-                                            state_prev_bytes[i].into(),
+                                            state_prev_bytes[i].dup(),
                                             operand,
-                                            state_new_bytes[i].into(),
+                                            state_new_bytes[i].dup(),
                                         ),
                                         Deg { v: 2, u: 1 },
                                     );
