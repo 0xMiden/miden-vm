@@ -1,12 +1,13 @@
 //! VM lookup integration checks for the shared LogUp framework.
 
 use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
-use miden_stark::lookup::{
-    Challenges, accumulate_slow, build_logup_aux_trace, build_logup_aux_trace_with_width,
+use miden_stark::{
+    air::native::{AuxTraceInputs, LiftedAir, ProverAir},
+    lookup::{Challenges, accumulate_slow, native as native_lookup},
 };
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
-use crate::vm::{Felt, LiftedAir};
+use crate::vm::Felt;
 
 /// The chunked driver, over an AIR whose lookup reads a separate preprocessed window, matches
 /// slow accumulation of the same fractions. The And8 lookup's 2^16-row trace spans many
@@ -14,17 +15,19 @@ use crate::vm::{Felt, LiftedAir};
 /// boundaries and the cyclic closing edge.
 #[test]
 fn chunked_driver_matches_slow_accumulation_with_preprocessed_window() {
-    use miden_stark::lookup::build_lookup_fractions;
+    use miden_stark::lookup::native::build_lookup_fractions;
 
     use crate::vm::{
-        BaseAir, MidenAir,
+        MidenAir,
         logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     };
 
     let air = MidenAir::AND8_LOOKUP;
-    let preprocessed = air.preprocessed_trace().expect("And8 lookup has a preprocessed table");
+    let preprocessed =
+        air.build_preprocessed_trace().expect("And8 lookup has a preprocessed table");
     let num_rows = preprocessed.height();
-    let width = air.width();
+    let spec = air.spec();
+    let width = spec.main_width;
     let mut main = RowMajorMatrix::new(
         (0..num_rows * width).map(|i| Felt::from_usize(i % 17 + 1)).collect(),
         width,
@@ -37,33 +40,25 @@ fn chunked_driver_matches_slow_accumulation_with_preprocessed_window() {
         &air,
         &main,
         Some(&preprocessed),
-        &air.periodic_columns(),
+        &spec.periodic_columns,
         &lookup_challenges,
     );
     let (expected, sigma_prime) = accumulate_slow(&fractions);
-    let (actual, aux_values) = build_logup_aux_trace(&air, &main, &challenges);
-    let borrowed =
-        air.build_aux_trace_with_preprocessed(&main, Some(&preprocessed), &[], &[], &challenges);
-    assert_eq!(borrowed.0.values, actual.values);
-    assert_eq!(borrowed.1, aux_values);
-    assert_eq!(aux_values, [sigma_prime]);
-    assert_eq!(actual.height(), num_rows);
-    assert_eq!(actual.width(), expected.len());
-    let output_width = actual.width() + 2;
-    let (padded, padded_sums) = build_logup_aux_trace_with_width(
-        &air,
-        &main,
-        Some(&preprocessed),
-        &challenges,
-        output_width,
-    );
-    assert_eq!(padded.height(), num_rows);
-    assert_eq!(padded.width(), output_width);
-    assert_eq!(padded_sums, aux_values);
-    for (row_idx, row) in actual.values.chunks_exact(actual.width()).enumerate() {
-        let padded_row = &padded.values[row_idx * output_width..(row_idx + 1) * output_width];
-        assert_eq!(&padded_row[..actual.width()], row);
-        assert_eq!(&padded_row[actual.width()..], &[QuadFelt::ZERO; 2]);
+    let inputs = AuxTraceInputs {
+        main: &main,
+        preprocessed: Some(&preprocessed),
+        public_values: &[],
+        statement: &[],
+        challenges: &challenges,
+    };
+    let actual = native_lookup::build_logup_aux_trace(&air, inputs).unwrap();
+    let borrowed = ProverAir::build_aux_trace(&air, inputs).unwrap();
+    assert_eq!(borrowed.columns.values, actual.columns.values);
+    assert_eq!(borrowed.exports, actual.exports);
+    assert_eq!(actual.exports, [sigma_prime]);
+    assert_eq!(actual.columns.height(), num_rows);
+    assert_eq!(actual.columns.width(), expected.len());
+    for (row_idx, row) in actual.columns.values.chunks_exact(actual.columns.width()).enumerate() {
         for (column, &value) in row.iter().enumerate() {
             assert_eq!(value, expected[column][row_idx], "row {row_idx}, column {column}");
         }
@@ -71,58 +66,69 @@ fn chunked_driver_matches_slow_accumulation_with_preprocessed_window() {
 }
 
 #[test]
-#[should_panic(expected = "auxiliary trace width must accommodate all LogUp columns")]
-fn logup_rejects_width_smaller_than_lookup_columns() {
-    use crate::vm::BaseAir;
-
+fn native_logup_allocates_the_full_declared_width_with_a_zero_suffix() {
     let air = crate::vm::MidenAir::EIDOS_COMPRESSION;
-    let main = RowMajorMatrix::new(Felt::zero_vec(32 * air.width()), air.width());
+    let spec = air.spec();
+    let main = RowMajorMatrix::new(Felt::zero_vec(32 * spec.main_width), spec.main_width);
     let challenges = [QuadFelt::from_u32(7), QuadFelt::from_u32(13)];
     let lookup_width = air.column_shape().len();
-    assert!(lookup_width > 1);
-    let _ = build_logup_aux_trace_with_width(&air, &main, None, &challenges, lookup_width - 1);
+    assert_eq!(spec.aux_width, lookup_width + 1);
+    let auxiliary = native_lookup::build_logup_aux_trace(
+        &air,
+        AuxTraceInputs {
+            main: &main,
+            preprocessed: None,
+            public_values: &[],
+            statement: &[],
+            challenges: &challenges,
+        },
+    )
+    .unwrap();
+    assert_eq!(auxiliary.columns.width(), spec.aux_width);
+    assert_eq!(auxiliary.columns.height(), 32);
+    assert_eq!(auxiliary.exports.len(), spec.num_exports);
+    for row in auxiliary.columns.values.chunks_exact(spec.aux_width) {
+        assert!(row[lookup_width..].iter().all(|value| *value == QuadFelt::ZERO));
+    }
 }
 
 #[test]
 fn borrowed_logup_rejects_missing_or_malformed_setup_windows() {
-    use crate::vm::BaseAir;
-
     let air = crate::vm::MidenAir::AND8_LOOKUP;
-    let main = RowMajorMatrix::new(Felt::zero_vec(8 * air.width()), air.width());
-    let width = air.preprocessed_width();
+    let main =
+        RowMajorMatrix::new(Felt::zero_vec(8 * air.spec().main_width), air.spec().main_width);
+    let width = air.spec().preprocessed_width();
     let challenges = [QuadFelt::from_u32(7), QuadFelt::from_u32(13)];
     let assert_rejected = |air: crate::vm::MidenAir,
                            main: &RowMajorMatrix<Felt>,
-                           preprocessed: Option<&RowMajorMatrix<Felt>>,
-                           expected: &str| {
-        let error = std::panic::catch_unwind(|| {
-            air.build_aux_trace_with_preprocessed(main, preprocessed, &[], &[], &challenges)
-        })
-        .expect_err("invalid setup must fail before fraction accumulation");
-        let message = error
-            .downcast_ref::<&str>()
-            .copied()
-            .or_else(|| {
-                error.downcast_ref::<std::string::String>().map(std::string::String::as_str)
-            })
-            .expect("validation panic must have a message");
-        assert!(message.contains(expected), "expected {expected:?}, got {message:?}");
+                           preprocessed: Option<&RowMajorMatrix<Felt>>| {
+        let result = native_lookup::build_logup_aux_trace(
+            &air,
+            AuxTraceInputs {
+                main,
+                preprocessed,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        );
+        assert!(
+            matches!(result, Err(native_lookup::LookupError::PreprocessedShape)),
+            "invalid setup must fail before fraction accumulation"
+        );
     };
-    for (expected, preprocessed) in [
-        ("LogUp preprocessed presence", None),
-        (
-            "LogUp preprocessed width mismatch",
-            Some(RowMajorMatrix::new(Felt::zero_vec(8 * (width + 1)), width + 1)),
-        ),
-        (
-            "LogUp preprocessed height mismatch",
-            Some(RowMajorMatrix::new(Felt::zero_vec(4 * width), width)),
-        ),
+    for preprocessed in [
+        None,
+        Some(RowMajorMatrix::new(Felt::zero_vec(8 * (width + 1)), width + 1)),
+        Some(RowMajorMatrix::new(Felt::zero_vec(4 * width), width)),
     ] {
-        assert_rejected(air, &main, preprocessed.as_ref(), expected);
+        assert_rejected(air, &main, preprocessed.as_ref());
     }
     let no_table_air = crate::vm::MidenAir::EIDOS_COMPRESSION;
-    let main = RowMajorMatrix::new(Felt::zero_vec(32 * no_table_air.width()), no_table_air.width());
+    let main = RowMajorMatrix::new(
+        Felt::zero_vec(32 * no_table_air.spec().main_width),
+        no_table_air.spec().main_width,
+    );
     let unexpected = RowMajorMatrix::new(Felt::zero_vec(32), 1);
-    assert_rejected(no_table_air, &main, Some(&unexpected), "LogUp preprocessed presence");
+    assert_rejected(no_table_air, &main, Some(&unexpected));
 }

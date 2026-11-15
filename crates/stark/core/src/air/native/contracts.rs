@@ -68,10 +68,8 @@ pub trait ProverAir<EF: ExtensionField<Self::F>>: LiftedAir {
     /// Build the declared auxiliary matrix and exports from the exact supplied inputs.
     ///
     /// Source-specific recoverable construction failures are returned as errors. Lookup arithmetic
-    /// assumes nonzero divisors. Successful
-    /// output dimensions and export ordering are trusted construction invariants checked by the
-    /// caller. Temporary legacy tuple facades cannot propagate errors and retain their existing
-    /// panic boundary until native runtime activation.
+    /// assumes nonzero divisors. Successful output dimensions and export ordering are trusted
+    /// construction invariants checked by the caller.
     fn build_aux_trace(
         &self,
         inputs: AuxTraceInputs<'_, Self::F, EF>,

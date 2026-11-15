@@ -8,15 +8,11 @@ use core::array;
 use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
-    utils::RowMajorMatrix,
 };
 use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
-    lookup::{
-        Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, LookupMessage,
-        native as native_lookup,
-    },
+    air::native,
+    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage, native as native_lookup},
 };
 use miden_utils_sync::LazyLock;
 use p3_field::Dup;
@@ -118,56 +114,6 @@ pub struct Sha256CompressionAir;
 
 static PERIODIC_COLUMNS: LazyLock<[Vec<Felt>; NUM_PERIODIC_COLS]> =
     LazyLock::new(compression_program);
-
-impl BaseAir<Felt> for Sha256CompressionAir {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
-    }
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Borrowed(PERIODIC_COLUMNS.as_slice())
-    }
-}
-
-impl LiftedAir<Felt, QuadFelt> for Sha256CompressionAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn max_periodic_length(&self) -> usize {
-        MAX_PERIODIC_LENGTH
-    }
-
-    fn num_randomness(&self) -> usize {
-        NUM_RANDOMNESS
-    }
-    fn aux_width(&self) -> usize {
-        NUM_AUX_COLS
-    }
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
-            self,
-            native::AuxTraceInputs {
-                main,
-                preprocessed: None,
-                public_values: air_inputs,
-                statement: aux_inputs,
-                challenges,
-            },
-        )
-        .expect("valid SHA-256 auxiliary inputs");
-        (aux.columns, aux.exports)
-    }
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        native::migration::eval_source(self, builder);
-    }
-}
 
 impl native::LiftedAir for Sha256CompressionAir {
     type F = Felt;
@@ -715,21 +661,6 @@ pub fn eval_lookups<LB: native_lookup::LookupBuilder<F = Felt>>(
             },
             degree,
         );
-    }
-}
-
-impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha256CompressionAir {
-    fn column_shape(&self) -> &[usize] {
-        &COLUMN_SHAPE
-    }
-    fn max_message_width(&self) -> usize {
-        MAX_MESSAGE_WIDTH
-    }
-    fn num_bus_ids(&self) -> usize {
-        NUM_BUS_IDS
-    }
-    fn eval(&self, builder: &mut LB) {
-        native::migration::eval_lookup(self, builder, 0);
     }
 }
 

@@ -5,12 +5,11 @@ use alloc::borrow::Cow;
 use miden_core::{Felt, field::ExtensionField, utils::RowMajorMatrix};
 use miden_stark::{
     air::{ReductionError, native},
-    lookup::{BoundaryBuilder, Challenges, native as native_lookup},
+    lookup::{Challenges, native as native_lookup},
 };
 
-use super::MidenAirBuilder;
 use crate::vm::{
-    constraints::{self, and8_lookup, lookup::and8_lookup_air::And8LookupBuilder},
+    constraints::{self, and8_lookup},
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
 };
 
@@ -22,20 +21,8 @@ use crate::vm::{
 pub struct And8LookupAir;
 
 impl And8LookupAir {
-    pub(super) fn width(self) -> usize {
-        and8_lookup::columns::NUM_AND8_LOOKUP_COLS
-    }
-
     pub(super) fn preprocessed_trace(self) -> RowMajorMatrix<Felt> {
         and8_lookup::preprocessed_trace()
-    }
-
-    pub(super) fn preprocessed_width(self) -> usize {
-        and8_lookup::columns::NUM_AND8_LOOKUP_PREPROCESSED_COLS
-    }
-
-    pub(super) fn aux_width(self) -> usize {
-        constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE.len()
     }
 
     pub(super) fn boundary_correction<EF: ExtensionField<Felt>>(
@@ -53,27 +40,9 @@ impl And8LookupAir {
         Ok(EF::ZERO)
     }
 
-    pub(super) fn eval<AB: MidenAirBuilder>(self, builder: &mut AB) {
-        native::migration::eval_source(&self, builder);
-    }
-
     pub(super) fn lookup_column_shape(self) -> &'static [usize] {
         &constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE
     }
-
-    pub(super) fn lookup_max_message_width(self) -> usize {
-        MIDEN_MAX_MESSAGE_WIDTH
-    }
-
-    pub(super) fn lookup_num_bus_ids(self) -> usize {
-        BusId::COUNT
-    }
-
-    pub(super) fn lookup_eval<LB: And8LookupBuilder>(self, builder: &mut LB) {
-        native::migration::eval_lookup(&self, builder, self.preprocessed_width());
-    }
-
-    pub(super) fn lookup_eval_boundary<B: BoundaryBuilder>(self, _boundary: &mut B) {}
 }
 
 impl native::LiftedAir for And8LookupAir {

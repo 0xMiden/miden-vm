@@ -61,7 +61,7 @@ mod tests {
 
     use miden_core::{
         field::{PrimeCharacteristicRing, QuadFelt},
-        utils::RowMajorMatrix,
+        utils::{Matrix, RowMajorMatrix},
     };
     use miden_stark::air::native::{self, AirKernel, ProverAir};
 
@@ -72,6 +72,37 @@ mod tests {
         },
         vm::EidosCompressionAir as VmEidos,
     };
+
+    fn slow_lookup_prefix<A>(
+        air: &A,
+        main: &RowMajorMatrix<Felt>,
+        challenges: &[QuadFelt],
+    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>)
+    where
+        A: LiftedAir<F = Felt>,
+        for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
+    {
+        let spec = air.spec();
+        let encoding = miden_stark::lookup::Challenges::new(
+            challenges[0],
+            challenges[1],
+            <A as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::max_message_width(air),
+            <A as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::num_bus_ids(air),
+        );
+        let fractions = miden_stark::lookup::native::build_lookup_fractions(
+            air,
+            main,
+            None,
+            &spec.periodic_columns,
+            &encoding,
+        );
+        let (columns, sigma) = miden_stark::lookup::accumulate_slow(&fractions);
+        let width = columns.len();
+        let values = (0..main.height())
+            .flat_map(|row| columns.iter().map(move |column| column[row]))
+            .collect();
+        (RowMajorMatrix::new(values, width), vec![sigma])
+    }
 
     fn capture_geometry<A: LiftedAir<F = Felt>>(air: A, aux_width: usize, base: usize, ext: usize) {
         // Source capture uses non-Copy owned expressions; direct execution is the comparison subject.
@@ -140,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn native_full_witness_keeps_legacy_lookup_prefix_and_export() {
+    fn native_full_witness_keeps_slow_lookup_prefix_and_export() {
         let main = RowMajorMatrix::new(vec![Felt::ZERO; NUM_COLS * BLOCK_PERIOD], NUM_COLS);
         let challenges = [QuadFelt::from_u8(17), QuadFelt::from_u8(31)];
         let inputs = AuxTraceInputs {
@@ -151,13 +182,8 @@ mod tests {
             challenges: &challenges,
         };
 
-        // The retained legacy collector is an independent input/collection path, not generated output.
-        let (expected, exports) = miden_stark::lookup::build_logup_aux_trace_with_preprocessed(
-            &crate::vm::MidenAir::EidosCompression,
-            &main,
-            None,
-            &challenges,
-        );
+        // Slow fraction accumulation is independent of full witness suffix construction.
+        let (expected, exports) = slow_lookup_prefix(&VmEidos, &main, &challenges);
         let actual = VmEidos.build_aux_trace(inputs).unwrap();
         assert_eq!(actual.columns.width, 19);
         assert_eq!(actual.columns.values.len(), BLOCK_PERIOD * 19);
@@ -174,12 +200,7 @@ mod tests {
             assert_eq!(&actual[..18], expected);
         }
 
-        let (expected, exports) = miden_stark::lookup::build_logup_aux_trace_with_preprocessed(
-            &PvmEidos,
-            &main,
-            None,
-            &challenges,
-        );
+        let (expected, exports) = slow_lookup_prefix(&PvmEidos, &main, &challenges);
         let actual = PvmEidos.build_aux_trace(inputs).unwrap();
         assert_eq!(actual.columns.width, 20);
         assert_eq!(actual.columns.values.len(), BLOCK_PERIOD * 20);

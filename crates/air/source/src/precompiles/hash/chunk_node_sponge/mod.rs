@@ -5,13 +5,9 @@
 
 use alloc::{borrow::Cow, vec::Vec};
 
-use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
-use miden_stark::{
-    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
-    lookup::{LookupAir, LookupBuilder, native as native_lookup},
-};
+use miden_core::{Felt, field::QuadFelt};
+use miden_stark::{air::native, lookup::native as native_lookup};
 use miden_utils_sync::LazyLock;
-use p3_field::Algebra;
 
 use crate::precompiles::{
     hash::{
@@ -53,61 +49,6 @@ static PERIODIC_COLUMNS: LazyLock<Vec<Vec<Felt>>> = LazyLock::new(|| {
     columns
 });
 
-impl BaseAir<Felt> for ChunkNodeSpongeAir {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
-    }
-
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Borrowed(PERIODIC_COLUMNS.as_slice())
-    }
-}
-
-impl LiftedAir<Felt, QuadFelt> for ChunkNodeSpongeAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn max_periodic_length(&self) -> usize {
-        sponge::SPONGE_PERIOD
-    }
-
-    fn num_randomness(&self) -> usize {
-        NUM_RANDOMNESS
-    }
-
-    fn aux_width(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
-            self,
-            native::AuxTraceInputs {
-                main,
-                preprocessed: None,
-                public_values: air_inputs,
-                statement: aux_inputs,
-                challenges,
-            },
-        )
-        .expect("valid ChunkNodeSpongeAir auxiliary inputs");
-        (aux.columns, aux.exports)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        native::migration::eval_source(self, builder);
-    }
-}
-
 impl native::LiftedAir for ChunkNodeSpongeAir {
     type F = Felt;
 
@@ -144,27 +85,6 @@ impl native::ProverAir<QuadFelt> for ChunkNodeSpongeAir {
         inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
     ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
         native_lookup::build_logup_aux_trace(self, inputs)
-    }
-}
-
-impl<LB> LookupAir<LB> for ChunkNodeSpongeAir
-where
-    LB: LookupBuilder<F = Felt>,
-{
-    fn column_shape(&self) -> &[usize] {
-        &COLUMN_SHAPE
-    }
-
-    fn max_message_width(&self) -> usize {
-        MAX_MESSAGE_WIDTH
-    }
-
-    fn num_bus_ids(&self) -> usize {
-        NUM_BUS_IDS
-    }
-
-    fn eval(&self, builder: &mut LB) {
-        native::migration::eval_lookup(self, builder, 0);
     }
 }
 

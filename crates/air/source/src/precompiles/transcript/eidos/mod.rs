@@ -8,7 +8,7 @@ pub mod compression;
 pub mod digest;
 pub mod messages;
 
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::borrow::Cow;
 use core::{array, borrow::Borrow};
 
 use compression::{
@@ -25,15 +25,11 @@ pub use messages::{EidosBlockMsg, EidosInitMsg, EidosOutMsg};
 use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
-    utils::RowMajorMatrix,
 };
 use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
-    lookup::{
-        Deg, LookupAir, LookupBuilder, LookupColumn, LookupGroup, LookupMessage,
-        native as native_lookup,
-    },
+    air::native,
+    lookup::{Deg, LookupColumn, LookupGroup, LookupMessage, native as native_lookup},
 };
 
 use p3_field::Dup;
@@ -99,72 +95,6 @@ const COLUMN_SHAPE: [usize; NUM_LOOKUP_COLS] = column_shape();
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EidosCompressionAir;
 
-impl BaseAir<Felt> for EidosCompressionAir {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
-    }
-
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Owned(get_periodic_column_values())
-    }
-}
-
-impl LiftedAir<Felt, QuadFelt> for EidosCompressionAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        NUM_RANDOMNESS
-    }
-
-    fn aux_width(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
-            self,
-            native::AuxTraceInputs {
-                main,
-                preprocessed: None,
-                public_values: air_inputs,
-                statement: aux_inputs,
-                challenges,
-            },
-        )
-        .expect("valid PVM Eidos auxiliary inputs");
-        (aux.columns, aux.exports)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        native::migration::eval_source(self, builder);
-    }
-}
-
-impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for EidosCompressionAir {
-    fn column_shape(&self) -> &[usize] {
-        &COLUMN_SHAPE
-    }
-    fn max_message_width(&self) -> usize {
-        MAX_MESSAGE_WIDTH
-    }
-    fn num_bus_ids(&self) -> usize {
-        NUM_BUS_IDS
-    }
-    fn eval(&self, builder: &mut LB) {
-        native::migration::eval_lookup(self, builder, 0);
-    }
-}
-
 impl<LB> native_lookup::LookupAir<LB> for EidosCompressionAir
 where
     LB: native_lookup::LookupBuilder<F = Felt>,
@@ -204,57 +134,6 @@ where
 #[derive(Debug, Default, Clone, Copy)]
 #[doc(hidden)]
 pub struct EidosCompressionInterfaceAir;
-
-impl BaseAir<Felt> for EidosCompressionInterfaceAir {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
-    }
-
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Owned(get_periodic_column_values())
-    }
-}
-
-impl LiftedAir<Felt, QuadFelt> for EidosCompressionInterfaceAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        NUM_RANDOMNESS
-    }
-
-    fn aux_width(&self) -> usize {
-        PVM_AUX_COLS
-    }
-
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
-            self,
-            native::AuxTraceInputs {
-                main,
-                preprocessed: None,
-                public_values: air_inputs,
-                statement: aux_inputs,
-                challenges,
-            },
-        )
-        .expect("valid PVM Eidos auxiliary inputs");
-        (aux.columns, aux.exports)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        native::migration::eval_source(self, builder);
-    }
-}
 
 // PVM INTERFACE
 // ================================================================================================
@@ -331,21 +210,6 @@ where
             INTERNAL_CV_BUS_ID,
             [self.compression_cycle_id.clone(), self.chain_head_id.clone(), a, b, c, d],
         )
-    }
-}
-
-impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for EidosCompressionInterfaceAir {
-    fn column_shape(&self) -> &[usize] {
-        &PVM_COLUMN_SHAPE
-    }
-    fn max_message_width(&self) -> usize {
-        MAX_MESSAGE_WIDTH
-    }
-    fn num_bus_ids(&self) -> usize {
-        NUM_BUS_IDS
-    }
-    fn eval(&self, builder: &mut LB) {
-        native::migration::eval_lookup(self, builder, 0);
     }
 }
 
@@ -599,8 +463,8 @@ mod tests {
         utils::RowMajorMatrix,
     };
     use miden_stark::{
-        air::{AirBuilder, ExtensionBuilder, LiftedAir, PermutationAirBuilder, RowWindow},
-        lookup::{Challenges, ConstraintLookupBuilder, LookupAir, LookupMessage},
+        air::native,
+        lookup::{Challenges, LookupMessage, native as native_lookup},
     };
 
     use super::{
@@ -614,6 +478,65 @@ mod tests {
     };
     use crate::precompiles::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
 
+    impl InterfaceConstraintEvalBuilder {
+        fn eval_with(
+            &mut self,
+            evaluate: impl FnOnce(
+                &native::AirFrame<'_, Felt, QuadFelt>,
+                native::UniformInputs<'_, Felt, QuadFelt>,
+                &mut NumericSink<'_>,
+            ),
+        ) {
+            let width = self.main.width;
+            let aux_width = self.aux.width;
+            let frame = native::AirFrame {
+                main: native::Rows {
+                    current: &self.main.values[..width],
+                    next: &self.main.values[width..2 * width],
+                },
+                preprocessed: native::Rows { current: &[], next: &[] },
+                aux: native::Rows {
+                    current: &self.aux.values[..aux_width],
+                    next: &self.aux.values[aux_width..2 * aux_width],
+                },
+                periodic: &self.periodic_values,
+                selectors: native::Selectors {
+                    first: self.is_first_row,
+                    last: self.is_last_row,
+                    transition: Felt::ONE - self.is_last_row,
+                },
+            };
+            let inputs = native::UniformInputs {
+                public_values: &[],
+                challenges: &self.randomness,
+                exports: &self.permutation_values,
+            };
+            let mut sink = NumericSink {
+                base: &mut self.base_evaluations,
+                extension: &mut self.extension_evaluations,
+            };
+            evaluate(&frame, inputs, &mut sink);
+        }
+    }
+
+    /// Numerical outputs are separate from the borrowed rows and uniform inputs.
+    struct NumericSink<'a> {
+        base: &'a mut Vec<Felt>,
+        extension: &'a mut Vec<QuadFelt>,
+    }
+
+    impl native::LiftedAirBuilder for NumericSink<'_> {
+        type F = Felt;
+        type Expr = Felt;
+        type ExtExpr = QuadFelt;
+        fn emit_base(&mut self, value: Felt, _: native::ConstraintMeta<'_>) {
+            self.base.push(value);
+        }
+        fn emit_ext(&mut self, value: QuadFelt, _: native::ConstraintMeta<'_>) {
+            self.extension.push(value);
+        }
+    }
+
     struct InterfaceConstraintEvalBuilder {
         main: RowMajorMatrix<Felt>,
         aux: RowMajorMatrix<QuadFelt>,
@@ -622,84 +545,9 @@ mod tests {
         periodic_values: Vec<Felt>,
         base_evaluations: Vec<Felt>,
         extension_evaluations: Vec<QuadFelt>,
-        preprocessed_window: RowWindow<'static, Felt>,
+
         is_first_row: Felt,
         is_last_row: Felt,
-    }
-
-    impl AirBuilder for InterfaceConstraintEvalBuilder {
-        type F = Felt;
-        type Expr = Felt;
-        type Var = Felt;
-        type PreprocessedWindow = RowWindow<'static, Felt>;
-        type MainWindow = RowMajorMatrix<Felt>;
-        type PublicVar = Felt;
-        type PeriodicVar = Felt;
-
-        fn main(&self) -> Self::MainWindow {
-            self.main.clone()
-        }
-
-        fn preprocessed(&self) -> &Self::PreprocessedWindow {
-            &self.preprocessed_window
-        }
-
-        fn is_first_row(&self) -> Self::Expr {
-            self.is_first_row
-        }
-
-        fn is_last_row(&self) -> Self::Expr {
-            self.is_last_row
-        }
-
-        fn is_transition(&self) -> Self::Expr {
-            Felt::ONE - self.is_last_row
-        }
-
-        fn is_transition_window(&self, size: usize) -> Self::Expr {
-            assert_eq!(size, 2, "PVM Eidos interface tests use two-row transition windows");
-            self.is_transition()
-        }
-
-        fn assert_zero<I: Into<Self::Expr>>(&mut self, value: I) {
-            self.base_evaluations.push(value.into());
-        }
-
-        fn public_values(&self) -> &[Self::PublicVar] {
-            &[]
-        }
-
-        fn periodic_values(&self) -> &[Self::PeriodicVar] {
-            &self.periodic_values
-        }
-    }
-
-    impl ExtensionBuilder for InterfaceConstraintEvalBuilder {
-        type EF = QuadFelt;
-        type ExprEF = QuadFelt;
-        type VarEF = QuadFelt;
-
-        fn assert_zero_ext<I: Into<Self::ExprEF>>(&mut self, value: I) {
-            self.extension_evaluations.push(value.into());
-        }
-    }
-
-    impl PermutationAirBuilder for InterfaceConstraintEvalBuilder {
-        type MP = RowMajorMatrix<QuadFelt>;
-        type RandomVar = QuadFelt;
-        type PermutationVar = QuadFelt;
-
-        fn permutation(&self) -> Self::MP {
-            self.aux.clone()
-        }
-
-        fn permutation_randomness(&self) -> &[Self::RandomVar] {
-            &self.randomness
-        }
-
-        fn permutation_values(&self) -> &[Self::PermutationVar] {
-            &self.permutation_values
-        }
     }
 
     fn builder(row: usize, width: usize) -> InterfaceConstraintEvalBuilder {
@@ -714,7 +562,7 @@ mod tests {
                 .collect(),
             base_evaluations: Vec::new(),
             extension_evaluations: Vec::new(),
-            preprocessed_window: RowWindow::from_two_rows(&[], &[]),
+
             is_first_row: Felt::from_bool(row == 0),
             is_last_row: Felt::from_bool(row == BLOCK_PERIOD - 1),
         }
@@ -735,7 +583,17 @@ mod tests {
         let main = RowMajorMatrix::new(rows.as_flattened().to_vec(), NUM_MAIN_COLS);
         let challenges =
             [QuadFelt::from_u32(7), QuadFelt::new([Felt::from_u32(11), Felt::from_u32(13)])];
-        let (aux, sums) = air.build_aux_trace(&main, &[], &[], &challenges);
+        let native::AuxTrace { columns: aux, exports: sums } = native::ProverAir::build_aux_trace(
+            &air,
+            native::AuxTraceInputs {
+                main: &main,
+                preprocessed: None,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        )
+        .unwrap();
         assert_ne!(sums[0], QuadFelt::ZERO);
 
         for row in 0..BLOCK_PERIOD {
@@ -748,7 +606,9 @@ mod tests {
                 .copy_from_slice(&aux.values[next * PVM_AUX_COLS..(next + 1) * PVM_AUX_COLS]);
             builder.randomness = challenges.to_vec();
             builder.permutation_values = sums.clone();
-            LiftedAir::eval(&air, &mut builder, &());
+            builder.eval_with(|frame, inputs, sink| {
+                native::LiftedAir::eval(&air, frame, inputs, sink)
+            });
             assert!(builder.base_evaluations.iter().all(|v| *v == Felt::ZERO), "row {row}");
             assert!(
                 builder.extension_evaluations.iter().all(|v| *v == QuadFelt::ZERO),
@@ -764,9 +624,8 @@ mod tests {
         let mut builder = builder(1, PVM_AUX_COLS);
         builder.aux.values[..PVM_AUX_COLS].fill(QuadFelt::ONE);
         let air = EidosCompressionInterfaceAir;
-        let mut lookup_builder = ConstraintLookupBuilder::new(&mut builder, &air);
-        LookupAir::eval(&air, &mut lookup_builder);
-        lookup_builder.finish();
+        builder
+            .eval_with(|frame, inputs, sink| native_lookup::eval_lookup(&air, frame, inputs, sink));
         assert_eq!(
             builder.extension_evaluations,
             [QuadFelt::ZERO, QuadFelt::ZERO, QuadFelt::ONE, QuadFelt::ONE]
@@ -776,11 +635,9 @@ mod tests {
         builder.aux = RowMajorMatrix::new(vec![QuadFelt::ZERO; 2 * NUM_AUX_COLS], NUM_AUX_COLS);
         builder.aux.values[INTERFACE_AUX_BEGIN] = QuadFelt::ONE;
         builder.aux.values[INTERFACE_AUX_BEGIN + 2] = QuadFelt::ONE;
-        <EidosCompressionAir as LiftedAir<Felt, QuadFelt>>::eval(
-            &EidosCompressionAir,
-            &mut builder,
-            &(),
-        );
+        builder.eval_with(|frame, inputs, sink| {
+            native::LiftedAir::eval(&EidosCompressionAir, frame, inputs, sink)
+        });
         assert_eq!(builder.extension_evaluations[0], QuadFelt::ONE);
         assert_eq!(builder.extension_evaluations.last(), Some(&QuadFelt::ONE));
     }

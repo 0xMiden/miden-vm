@@ -10,12 +10,12 @@ use alloc::{borrow::Cow, vec, vec::Vec};
 
 use core::convert::Infallible;
 
-use p3_field::{Algebra, Dup, PrimeCharacteristicRing};
+use p3_field::{Dup, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::air::native::LiftedAirBuilder as _;
 use crate::{
-    air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, Statement, native},
+    air::{MultiAir, ProverStatement, Statement, native},
     domain::log_quotient_degree,
     testing::configs::goldilocks_poseidon2::{Felt, QuadFelt, prove_and_verify_statement},
 };
@@ -27,53 +27,6 @@ use crate::{
 #[derive(Clone, Copy)]
 struct PowerAir {
     power: u64,
-}
-
-impl BaseAir<Felt> for PowerAir {
-    fn width(&self) -> usize {
-        1
-    }
-}
-
-impl LiftedAir<Felt, QuadFelt> for PowerAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        1
-    }
-
-    fn aux_width(&self) -> usize {
-        1
-    }
-
-    fn num_aux_values(&self) -> usize {
-        0
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
-            self,
-            native::AuxTraceInputs {
-                main,
-                preprocessed: None,
-                public_values: air_inputs,
-                statement: aux_inputs,
-                challenges,
-            },
-        )
-        .unwrap_or_else(|never| match never {});
-        (aux.columns, aux.exports)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        native::migration::eval_source(self, builder);
-    }
 }
 
 impl native::LiftedAir for PowerAir {
@@ -132,57 +85,6 @@ impl native::ProverAir<QuadFelt> for PowerAir {
 #[derive(Clone, Copy)]
 struct PeriodicPowerAir {
     power: u64,
-}
-
-impl BaseAir<Felt> for PeriodicPowerAir {
-    fn width(&self) -> usize {
-        1
-    }
-
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        native::LiftedAir::spec(self).periodic_columns
-    }
-}
-
-impl LiftedAir<Felt, QuadFelt> for PeriodicPowerAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        1
-    }
-
-    fn aux_width(&self) -> usize {
-        1
-    }
-
-    fn num_aux_values(&self) -> usize {
-        0
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
-            self,
-            native::AuxTraceInputs {
-                main,
-                preprocessed: None,
-                public_values: air_inputs,
-                statement: aux_inputs,
-                challenges,
-            },
-        )
-        .unwrap_or_else(|never| match never {});
-        (aux.columns, aux.exports)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        native::migration::eval_source(self, builder);
-    }
 }
 
 impl native::LiftedAir for PeriodicPowerAir {

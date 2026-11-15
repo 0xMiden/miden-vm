@@ -1,11 +1,11 @@
-//! Closure-based traits for emitting LogUp lookup interactions.
+//! Shared column/group/batch and boundary callback contracts for native LogUp declarations.
 //!
 //! The trait stack sits on top of [`LookupAir`](super::LookupAir):
 //!
-//! - [`LookupBuilder`] — the top-level handle mirroring the subset of `LiftedAirBuilder` a lookup
-//!   author actually needs (trace access plus per-column scoping). It hides `assert_*` / `when_*` /
-//!   permutation-column details and does not expose the verifier challenges.
-//! - [`LookupColumn`] — per-column handle returned by [`LookupBuilder::next_column`]. It owns the
+//! - [`LookupBuilder`](super::LookupBuilder) — the mutable per-column handle. Declarations read
+//!   immutable rows through a separate [`LookupFrame`](super::native::LookupFrame); the handle
+//!   keeps assertion emission, auxiliary columns and verifier challenges with the adapter.
+//! - [`LookupColumn`] — per-column handle returned by [`super::LookupBuilder::next_column`]. It owns the
 //!   boundary between groups; its only job is to open a group (either the simple path or the
 //!   cached-encoding dual path).
 //! - [`LookupGroup`] — the simple, challenge-free interaction API used by bus authors. Every method
@@ -17,15 +17,12 @@
 //!   `insert_encoded`) for the cached-encoding path. Default implementations panic; only the
 //!   constraint-path adapter overrides them with real bodies.
 //!
-//! No adapter impls live in this file; the bounds here are chosen so that both the
-//! constraint-path adapter (which forwards to an inner `LiftedAirBuilder`, carrying
-//! symbolic `AB::Expr` / `AB::ExprEF` associated types) and the prover-path adapter
-//! (instantiated with the concrete `F` / `EF` field types) can satisfy them.
+//! These callback bounds support both symbolic constraint expressions and concrete witness
+//! field values. The top-level adapter owns row inputs and assertion emission separately.
 
 use miden_crypto::field::{Algebra, ExtensionField, Field, PrimeCharacteristicRing};
 
 use super::message::LookupMessage;
-use crate::air::WindowAccess;
 
 // DEGREE ANNOTATION
 // ================================================================================================
@@ -57,7 +54,7 @@ use crate::air::WindowAccess;
 ///   carried in the struct.
 ///
 /// - **Group / column scope** ([`LookupColumn::group`], `group_with_cached_encoding`,
-///   [`LookupBuilder::next_column`]): the total post-flag `(V, U)` contribution of the group /
+///   [`super::LookupBuilder::next_column`]): the total post-flag `(V, U)` contribution of the group /
 ///   column to the surrounding accumulator. Useful as a budget audit number when the author wants
 ///   to assert what the scope as a whole contributes.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -66,110 +63,10 @@ pub struct Deg {
     pub u: usize,
 }
 
-// LOOKUP BUILDER
-// ================================================================================================
-
-/// The trace-reading handle handed to a [`super::LookupAir`] implementation.
-///
-/// `LookupBuilder` exposes trace access and per-column scoping. It hides constraint emission,
-/// permutation columns, and challenge access from lookup authors.
-///
-/// Implementors must not shortcut the per-column scoping: a [`super::LookupAir`]
-/// author that opens `n` columns must issue exactly `n` calls to
-/// [`LookupBuilder::next_column`], matching the length of
-/// [`super::LookupAir::column_shape`].
-pub trait LookupBuilder: Sized {
-    // --- base field stack (copied from AirBuilder) ---
-
-    /// Underlying base field. Lookups only pin `Field` here (not the wider
-    /// `PrimeCharacteristicRing`) because the extension-field associated
-    /// types below require an `ExtensionField<Self::F>` relationship, and
-    /// `ExtensionField` itself bounds on `Field`.
-    type F: Field;
-
-    /// Expression type over base-field elements. Must be an algebra over
-    /// both `Self::F` (for constants) and `Self::Var` (for trace
-    /// variables), matching upstream `AirBuilder::Expr`.
-    type Expr: Algebra<Self::F> + Algebra<Self::Var>;
-
-    /// Variable type over base-field trace cells. Held by value, so bound
-    /// only by `Into<Self::Expr> + Copy + Send + Sync`; the full arithmetic
-    /// bound soup from `AirBuilder::Var` is not required here because the
-    /// `Algebra<Self::Var>` bound on `Expr` lets callers convert before
-    /// composing.
-    type Var: Into<Self::Expr> + Copy + Send + Sync;
-
-    // --- extension field stack (copied from ExtensionBuilder) ---
-
-    /// Extension field used by the auxiliary trace and the LogUp
-    /// accumulators.
-    type EF: ExtensionField<Self::F>;
-
-    /// Expression type over extension-field elements; must be an algebra
-    /// over both `Self::Expr` (to lift base expressions) and `Self::EF`
-    /// (for extension-field constants).
-    type ExprEF: Algebra<Self::Expr> + Algebra<Self::EF>;
-
-    /// Variable type over extension-field trace cells (permutation
-    /// columns and the α/β challenges).
-    type VarEF: Into<Self::ExprEF> + Copy + Send + Sync;
-
-    // --- auxiliary trace access types ---
-
-    /// Periodic column value at the current row.
-    type PeriodicVar: Into<Self::Expr> + Copy;
-
-    /// Two-row window over the main trace, returned as-is from the
-    /// underlying builder. Pinned to [`WindowAccess`] + `Clone` so a
-    /// lookup author can split it into `current_slice()` / `next_slice()`
-    /// and pass either to `borrow`-based view types without re-reading
-    /// the handle.
-    type MainWindow: WindowAccess<Self::Var> + Clone;
-
-    /// Two-row preprocessed trace window. Empty for AIRs without preprocessed columns.
-    type PreprocessedWindow: WindowAccess<Self::Var> + Clone;
-
-    /// Per-column handle opened by [`Self::next_column`]. Holds the adapter's per-column
-    /// state (running `(V, U)` on the constraint path, fraction collector on the prover
-    /// path) for the column's closure.
-    type Column<'a>: LookupColumn<Expr = Self::Expr, ExprEF = Self::ExprEF>
-    where
-        Self: 'a;
-
-    // ---- trace access ----
-
-    /// Two-row main trace window. Pass-through to the wrapped builder.
-    fn main(&self) -> Self::MainWindow;
-
-    /// Two-row preprocessed trace window.
-    fn preprocessed(&self) -> &Self::PreprocessedWindow;
-
-    /// Periodic column values at the current row.
-    fn periodic_values(&self) -> &[Self::PeriodicVar];
-
-    // ---- per-column scoping ----
-
-    /// Open a fresh permutation column and evaluate `f` inside it.
-    ///
-    /// The implementation is responsible for:
-    ///
-    /// 1. Wiring the column handle to the adapter's internal state (current `acc` / `acc_next` for
-    ///    the constraint path; the per-column fraction buffer slot for the prover path).
-    /// 2. Running the closure, which must describe at least one group via [`LookupColumn::group`]
-    ///    or [`LookupColumn::group_with_cached_encoding`].
-    /// 3. Finalizing the column on close (emitting boundary + transition constraints, or draining
-    ///    the column's fraction pair).
-    /// 4. Advancing to the next permutation column index so the next call targets a fresh
-    ///    accumulator.
-    ///
-    /// The closure's return value `R` is forwarded unchanged.
-    fn next_column<'a, R>(&'a mut self, f: impl FnOnce(&mut Self::Column<'a>) -> R, deg: Deg) -> R;
-}
-
 // LOOKUP COLUMN
 // ================================================================================================
 
-/// Per-column handle returned by [`LookupBuilder::next_column`].
+/// Per-column handle returned by [`super::LookupBuilder::next_column`].
 ///
 /// The only decision a column makes is how to open a group: either the
 /// simple path via [`group`](Self::group) or the dual cached-encoding path
@@ -181,11 +78,11 @@ pub trait LookupBuilder: Sized {
 /// column are assumed *product-closed*, not mutually exclusive.
 pub trait LookupColumn {
     /// Expression type over base-field elements. Pinned to
-    /// [`LookupBuilder::Expr`] through [`LookupBuilder::Column`].
+    /// [`super::LookupBuilder::Expr`] through [`super::LookupBuilder::Column`].
     type Expr: PrimeCharacteristicRing + Clone;
 
     /// Expression type over extension-field elements. Pinned to
-    /// [`LookupBuilder::ExprEF`] through [`LookupBuilder::Column`]. The
+    /// [`super::LookupBuilder::ExprEF`] through [`super::LookupBuilder::Column`]. The
     /// [`Algebra<Self::Expr>`] bound lets [`LookupMessage::encode`]
     /// multiply an `Expr`-typed payload slot by an `ExprEF`-typed
     /// β-power without manually lifting.
@@ -242,13 +139,13 @@ pub trait LookupColumn {
 /// expensive derivation) when `flag == 0`.
 pub trait LookupGroup {
     /// Expression type over base-field elements. Pinned to
-    /// [`LookupBuilder::Expr`] through the column. The
+    /// [`super::LookupBuilder::Expr`] through the column. The
     /// `PrimeCharacteristicRing` bound keeps [`LookupMessage`] happy when
     /// authors pass messages through `add` / `remove` / `insert`.
     type Expr: PrimeCharacteristicRing + Clone;
 
     /// Expression type over extension-field elements. Pinned to
-    /// [`LookupBuilder::ExprEF`] through the column. The
+    /// [`super::LookupBuilder::ExprEF`] through the column. The
     /// [`Algebra<Self::Expr>`] bound mirrors [`LookupColumn::ExprEF`]
     /// and lets [`LookupMessage::encode`] use `ExprEF × Expr` products.
     type ExprEF: PrimeCharacteristicRing + Clone + Algebra<Self::Expr>;

@@ -1,15 +1,14 @@
 //! Authored Eidos compression AIR constraints and lookup bindings.
 
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::borrow::Cow;
 use core::borrow::Borrow;
 
 use miden_core::{Felt, field::ExtensionField};
 use miden_stark::{
     air::{ReductionError, native},
-    lookup::{BoundaryBuilder, Challenges, native as native_lookup},
+    lookup::{Challenges, native as native_lookup},
 };
 
-use super::MidenAirBuilder;
 use crate::vm::{
     constraints::eidos_compression::{
         EidosCompressionCols, NUM_COLS as NUM_EIDOS_COMPRESSION_COLS,
@@ -18,10 +17,7 @@ use crate::vm::{
             enforce_inactive_footer_output_aux,
         },
         layout::{AUX_COLS, AUX_REGISTER_COL},
-        lookup::{
-            EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, EidosCompressionLookupBuilder,
-            emit_lookup_columns,
-        },
+        lookup::{EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, emit_lookup_columns},
         periodic::get_periodic_column_values,
         selectors::EidosCompressionSelectors,
     },
@@ -36,18 +32,6 @@ use crate::vm::{
 pub struct EidosCompressionAir;
 
 impl EidosCompressionAir {
-    pub(super) fn width(self) -> usize {
-        NUM_EIDOS_COMPRESSION_COLS
-    }
-
-    pub(in crate::vm) fn periodic_columns(self) -> Vec<Vec<Felt>> {
-        get_periodic_column_values()
-    }
-
-    pub(super) fn aux_width(self) -> usize {
-        AUX_COLS
-    }
-
     pub(super) fn boundary_correction<EF: ExtensionField<Felt>>(
         self,
         _challenges: &Challenges<EF>,
@@ -63,27 +47,9 @@ impl EidosCompressionAir {
         Ok(EF::ZERO)
     }
 
-    pub(super) fn eval<AB: MidenAirBuilder>(self, builder: &mut AB) {
-        native::migration::eval_source(&self, builder);
-    }
-
     pub(super) fn lookup_column_shape(self) -> &'static [usize] {
         &EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE
     }
-
-    pub(super) fn lookup_max_message_width(self) -> usize {
-        MIDEN_MAX_MESSAGE_WIDTH
-    }
-
-    pub(super) fn lookup_num_bus_ids(self) -> usize {
-        BusId::COUNT
-    }
-
-    pub(super) fn lookup_eval<LB: EidosCompressionLookupBuilder>(self, builder: &mut LB) {
-        native::migration::eval_lookup(&self, builder, 0);
-    }
-
-    pub(super) fn lookup_eval_boundary<B: BoundaryBuilder>(self, _boundary: &mut B) {}
 }
 
 impl native::LiftedAir for EidosCompressionAir {

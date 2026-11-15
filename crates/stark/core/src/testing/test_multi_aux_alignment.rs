@@ -4,12 +4,12 @@ use alloc::{borrow::Cow, vec, vec::Vec};
 
 use core::convert::Infallible;
 
-use p3_field::{Algebra, Dup, PrimeCharacteristicRing};
+use p3_field::{Dup, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::air::native::LiftedAirBuilder as _;
 use crate::{
-    air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, Statement, native},
+    air::{MultiAir, ProverStatement, Statement, native},
     lmcs::Lmcs,
     testing::configs::goldilocks_poseidon2::{
         Felt, QuadFelt, prove_and_verify_statement, test_config,
@@ -27,57 +27,6 @@ struct PaddingAir {
 impl PaddingAir {
     fn new(width: usize, aux_width: usize) -> Self {
         Self { width, aux_width }
-    }
-}
-
-impl BaseAir<Felt> for PaddingAir {
-    fn width(&self) -> usize {
-        self.width
-    }
-
-    fn num_public_values(&self) -> usize {
-        1
-    }
-}
-
-impl LiftedAir<Felt, QuadFelt> for PaddingAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        1
-    }
-
-    fn aux_width(&self) -> usize {
-        self.aux_width
-    }
-
-    fn num_aux_values(&self) -> usize {
-        0
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
-            self,
-            native::AuxTraceInputs {
-                main,
-                preprocessed: None,
-                public_values: air_inputs,
-                statement: aux_inputs,
-                challenges,
-            },
-        )
-        .unwrap_or_else(|never| match never {});
-        (aux.columns, aux.exports)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        native::migration::eval_source(self, builder);
     }
 }
 

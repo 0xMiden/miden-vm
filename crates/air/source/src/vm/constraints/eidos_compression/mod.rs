@@ -68,56 +68,31 @@ mod views_tests;
 #[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
 pub mod testing {
-    use alloc::vec::Vec;
-
     use miden_core::Felt;
-    use miden_stark::air::{
-        LiftedAirBuilder,
-        native::migration::{LegacySink, SourceSnapshot},
-    };
+    use miden_stark::air::native::{Frame, LiftedAirBuilder};
 
     pub use super::{periodic::get_periodic_column_values, selectors::EidosCompressionSelectors};
 
     pub const MVM_MODE_COL: usize = super::layout::F_MODE_COL;
 
-    pub fn enforce_fused_rows<AB>(
-        builder: &mut AB,
-        local: &[AB::Var],
-        next: &[AB::Var],
-        selectors: &EidosCompressionSelectors<AB::Expr>,
-    ) where
-        AB: LiftedAirBuilder<F = Felt>,
-    {
-        let snapshot = SourceSnapshot::new(builder, 0, 0);
-        let local: Vec<AB::Expr> = local.iter().copied().map(Into::into).collect();
-        let next: Vec<AB::Expr> = next.iter().copied().map(Into::into).collect();
-        super::constraints::enforce_fused_rows(
-            &snapshot.frame(),
-            &mut LegacySink::new(builder),
-            &local,
-            &next,
-            selectors,
-        );
+    pub fn enforce_fused_rows<B: LiftedAirBuilder<F = Felt>>(
+        frame: &Frame<'_, B>,
+        sink: &mut B,
+        local: &[B::Expr],
+        next: &[B::Expr],
+        selectors: &EidosCompressionSelectors<B::Expr>,
+    ) {
+        super::constraints::enforce_fused_rows(frame, sink, local, next, selectors);
     }
 
-    pub fn enforce_common_footer_rows<AB>(
-        builder: &mut AB,
-        local: &[AB::Var],
-        next: &[AB::Var],
-        selectors: &EidosCompressionSelectors<AB::Expr>,
-    ) where
-        AB: LiftedAirBuilder<F = Felt>,
-    {
-        let snapshot = SourceSnapshot::new(builder, 0, 0);
-        let local: Vec<AB::Expr> = local.iter().copied().map(Into::into).collect();
-        let next: Vec<AB::Expr> = next.iter().copied().map(Into::into).collect();
-        super::constraints::enforce_common_footer_rows(
-            &snapshot.frame(),
-            &mut LegacySink::new(builder),
-            &local,
-            &next,
-            selectors,
-        );
+    pub fn enforce_common_footer_rows<B: LiftedAirBuilder<F = Felt>>(
+        frame: &Frame<'_, B>,
+        sink: &mut B,
+        local: &[B::Expr],
+        next: &[B::Expr],
+        selectors: &EidosCompressionSelectors<B::Expr>,
+    ) {
+        super::constraints::enforce_common_footer_rows(frame, sink, local, next, selectors);
     }
 }
 

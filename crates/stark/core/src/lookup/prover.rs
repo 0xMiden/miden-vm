@@ -12,15 +12,14 @@ use miden_crypto::field::{ExtensionField, Field};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use super::{
-    Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupFractions,
-    LookupGroup, LookupMessage,
+    Challenges, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupFractions, LookupGroup,
+    LookupMessage,
 };
-use crate::air::RowWindow;
 
 // PROVER LOOKUP BUILDER
 // ================================================================================================
 
-/// [`LookupBuilder`] over one concrete current/next-row window.
+/// [`LookupBuilder`] collecting interactions from one concrete row.
 ///
 /// All expression-like associated types collapse to concrete field values on this path.
 pub struct ProverLookupBuilder<'a, F, EF>
@@ -28,9 +27,6 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
-    main: RowWindow<'a, F>,
-    preprocessed: RowWindow<'a, F>,
-    periodic_values: &'a [F],
     challenges: &'a Challenges<EF>,
     /// Flat fractions and per-column counts shared across the collected rows.
     fractions: &'a mut LookupFractions<F, EF>,
@@ -43,47 +39,11 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
-    /// Create a prover-path adapter for one row pair.
+    /// Create fraction-collection state for one row from the declared column shape.
     ///
-    /// - `main`: two-row window over the current and next base-field rows.
-    /// - `periodic_values`: periodic columns at the current row.
-    /// - `challenges`: precomputed LogUp challenges (shared across every row; the caller builds
-    ///   this once outside the row loop and passes a shared reference here).
-    /// - `air`: the lookup shape (used only to validate the fraction-buffer width; the builder
-    ///   never calls `air.eval` itself).
-    /// - `fractions`: fraction and count buffers, sized via [`LookupFractions::from_shape`] and
-    ///   reused across the collected rows.
-    ///
-    /// # Panics
-    ///
-    /// Panics in debug builds if the fraction-buffer width differs from `air.column_shape().len()`.
-    pub fn new<A>(
-        main: RowWindow<'a, F>,
-        preprocessed: RowWindow<'a, F>,
-        periodic_values: &'a [F],
-        challenges: &'a Challenges<EF>,
-        air: &A,
-        fractions: &'a mut LookupFractions<F, EF>,
-    ) -> Self
-    where
-        A: LookupAir<Self>,
-    {
-        Self::from_shape(
-            main,
-            preprocessed,
-            periodic_values,
-            challenges,
-            air.column_shape(),
-            fractions,
-        )
-    }
-
-    /// Shared constructor for legacy and native declarations. Shape is read without evaluating
-    /// a relation, so the native collection path has no legacy `LookupAir` bound.
-    pub(super) fn from_shape(
-        main: RowWindow<'a, F>,
-        preprocessed: RowWindow<'a, F>,
-        periodic_values: &'a [F],
+    /// Row expressions are passed separately to the declaration in a LookupFrame. Challenges
+    /// and output storage are shared with the surrounding collector, without copying rows.
+    pub fn new(
         challenges: &'a Challenges<EF>,
         shape: &[usize],
         fractions: &'a mut LookupFractions<F, EF>,
@@ -91,9 +51,6 @@ where
         let num_columns = shape.len();
         debug_assert_eq!(fractions.num_columns(), num_columns, "fraction-buffer width mismatch");
         Self {
-            main,
-            preprocessed,
-            periodic_values,
             challenges,
             fractions,
             column_idx: 0,
@@ -109,60 +66,6 @@ where
             self.column_idx, self.num_columns,
         );
     }
-}
-
-// BUILD LOOKUP FRACTIONS DRIVER
-// ================================================================================================
-
-/// Walk a complete main trace through [`ProverLookupBuilder`] and return its packed fractions
-/// and per-column counts.
-///
-/// Generic over the base field `F` and extension field `EF`. The caller supplies the
-/// main trace and periodic columns. This function does row slicing, periodic-column
-/// indexing, and fraction collection. Concrete AIRs wrap this with their own
-/// periodic-column layout.
-///
-/// # Arguments
-///
-/// - `air`: the [`LookupAir`] to evaluate.
-/// - `main_trace`: row-major main execution trace. Row access is zero-copy via
-///   `main_trace.values.borrow()`.
-/// - `preprocessed_trace`: verifier-known trace for AIRs that declare preprocessed columns. Its
-///   height must match `main_trace`; pass `None` when the AIR has no preprocessed columns.
-/// - `periodic_columns`: one `Vec<F>` per periodic column, each with its own period.
-/// - `challenges`: precomputed LogUp challenges (shared across every row).
-///
-/// # Panics
-///
-/// Panics in debug builds if any row pushes more fractions into a column than that
-/// column's declared [`LookupAir::column_shape`] bound. This indicates the emitter's
-/// `MAX_INTERACTIONS_PER_ROW` const is too low and needs to be bumped.
-pub fn build_lookup_fractions<A, F, EF>(
-    air: &A,
-    main_trace: &RowMajorMatrix<F>,
-    preprocessed_trace: Option<&RowMajorMatrix<F>>,
-    periodic_columns: &[Vec<F>],
-    challenges: &Challenges<EF>,
-) -> LookupFractions<F, EF>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    A: Sync,
-    for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
-{
-    let num_rows = main_trace.height();
-    let process_chunk = |rows| {
-        build_lookup_fraction_chunk(
-            air,
-            main_trace,
-            preprocessed_trace,
-            periodic_columns,
-            challenges,
-            rows,
-        )
-    };
-
-    collect_lookup_chunks(air.column_shape(), num_rows, process_chunk)
 }
 
 /// Shared chunk scheduling and ordered concatenation, independent of declaration syntax.
@@ -266,35 +169,7 @@ fn split_by_lengths_mut<T>(
     parts
 }
 
-/// Collect a row range using global periodic offsets and cyclic next-row windows.
-///
-/// `preprocessed_trace`, when present, must have the main trace's height; its rows are exposed to
-/// the lookup builder as a separate window (they are not prepended to `main`).
-pub(super) fn build_lookup_fraction_chunk<A, F, EF>(
-    air: &A,
-    main_trace: &RowMajorMatrix<F>,
-    preprocessed_trace: Option<&RowMajorMatrix<F>>,
-    periodic_columns: &[Vec<F>],
-    challenges: &Challenges<EF>,
-    rows: Range<usize>,
-) -> LookupFractions<F, EF>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
-{
-    build_lookup_fraction_chunk_with(
-        main_trace,
-        preprocessed_trace,
-        periodic_columns,
-        challenges,
-        air.column_shape(),
-        rows,
-        |_, builder| air.eval(builder),
-    )
-}
-
-/// The sole row/periodic reader for both declaration interfaces.
+/// Read cyclic row pairs and periodic values for native lookup collection.
 pub(super) fn build_lookup_fraction_chunk_with<F, EF>(
     main_trace: &RowMajorMatrix<F>,
     preprocessed_trace: Option<&RowMajorMatrix<F>>,
@@ -327,7 +202,6 @@ where
         let curr = &flat[r * width..(r + 1) * width];
         let nxt_idx = (r + 1) % num_rows;
         let next = &flat[nxt_idx * width..(nxt_idx + 1) * width];
-        let window = RowWindow::from_two_rows(curr, next);
         let (preprocessed_current, preprocessed_next) = if preprocessed_width == 0 {
             (empty_row, empty_row)
         } else {
@@ -336,7 +210,6 @@ where
                 [nxt_idx * preprocessed_width..(nxt_idx + 1) * preprocessed_width];
             (curr, next)
         };
-        let preprocessed_window = RowWindow::from_two_rows(preprocessed_current, preprocessed_next);
         for (i, col) in periodic_columns.iter().enumerate() {
             periodic_row[i] = col[r % col.len()];
         }
@@ -348,70 +221,21 @@ where
             },
             periodic: &periodic_row,
         };
-        let mut lb = ProverLookupBuilder::from_shape(
-            window,
-            preprocessed_window,
-            &periodic_row,
-            challenges,
-            shape,
-            &mut chunk,
-        );
+        let mut lb = ProverLookupBuilder::new(challenges, shape, &mut chunk);
         eval(&frame, &mut lb);
         lb.finish();
     }
     chunk
 }
 
-impl<F: Field, EF: ExtensionField<F>> super::native::LookupBuilder
-    for ProverLookupBuilder<'_, F, EF>
-{
+impl<F: Field, EF: ExtensionField<F>> LookupBuilder for ProverLookupBuilder<'_, F, EF> {
     type F = F;
     type Expr = F;
     type ExprEF = EF;
-    type Column<'a>
-        = <Self as LookupBuilder>::Column<'a>
-    where
-        Self: 'a;
-
-    fn next_column<'a, R>(&'a mut self, f: impl FnOnce(&mut Self::Column<'a>) -> R, deg: Deg) -> R {
-        LookupBuilder::next_column(self, f, deg)
-    }
-}
-
-impl<'a, F, EF> LookupBuilder for ProverLookupBuilder<'a, F, EF>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    type F = F;
-    type Expr = F;
-    type Var = F;
-
-    type EF = EF;
-    type ExprEF = EF;
-    type VarEF = EF;
-
-    type PeriodicVar = F;
-
-    type MainWindow = RowWindow<'a, F>;
-    type PreprocessedWindow = RowWindow<'a, F>;
-
     type Column<'c>
         = ProverColumn<'c, F, EF>
     where
         Self: 'c;
-
-    fn main(&self) -> Self::MainWindow {
-        self.main
-    }
-
-    fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        &self.preprocessed
-    }
-
-    fn periodic_values(&self) -> &[Self::PeriodicVar] {
-        self.periodic_values
-    }
 
     fn next_column<'c, R>(
         &'c mut self,
@@ -688,9 +512,7 @@ mod tests {
     use super::*;
     use crate::{
         air::native,
-        lookup::{
-            Deg, LookupAir, accumulate_slow, message::LookupMessage, native as native_lookup,
-        },
+        lookup::{Deg, accumulate_slow, message::LookupMessage, native as native_lookup},
     };
 
     type QuadFelt = BinomialExtensionField<Felt, 2>;
@@ -981,77 +803,6 @@ mod tests {
         }
     }
 
-    impl<F: Field, LB: LookupBuilder<F = F>> LookupAir<LB> for WindowAir<F> {
-        fn column_shape(&self) -> &[usize] {
-            &[1]
-        }
-
-        fn max_message_width(&self) -> usize {
-            1
-        }
-
-        fn num_bus_ids(&self) -> usize {
-            1
-        }
-
-        fn eval(&self, builder: &mut LB) {
-            crate::air::native::migration::eval_lookup(self, builder, 0);
-        }
-    }
-
-    // This source harness connects the same declaration to the actual private
-    // scalar/packed/debug folders via the existing public prove/check helpers.
-    impl<F: Field> crate::air::BaseAir<F> for WindowAir<F> {
-        fn width(&self) -> usize {
-            1
-        }
-
-        fn periodic_columns(&self) -> alloc::borrow::Cow<'_, [Vec<F>]> {
-            native::LiftedAir::spec(self).periodic_columns
-        }
-    }
-
-    impl<F: Field, EF: ExtensionField<F>> crate::air::LiftedAir<F, EF> for WindowAir<F> {
-        type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
-
-        fn num_randomness(&self) -> usize {
-            2
-        }
-
-        fn aux_width(&self) -> usize {
-            1
-        }
-
-        fn num_aux_values(&self) -> usize {
-            1
-        }
-
-        fn build_aux_trace(
-            &self,
-            main: &RowMajorMatrix<F>,
-            public: &[F],
-            statement: &[F],
-            challenges: &[EF],
-        ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-            let auxiliary = <Self as native::ProverAir<EF>>::build_aux_trace(
-                self,
-                native::AuxTraceInputs {
-                    main,
-                    preprocessed: None,
-                    public_values: public,
-                    statement,
-                    challenges,
-                },
-            )
-            .expect("valid expression-window auxiliary inputs");
-            (auxiliary.columns, auxiliary.exports)
-        }
-
-        fn eval<AB: crate::air::LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
-            native::migration::eval_source(self, builder);
-        }
-    }
-
     impl<F: Field> native::LiftedAir for WindowAir<F> {
         type F = F;
 
@@ -1091,7 +842,7 @@ mod tests {
     #[test]
     fn expression_window_has_real_constraint_witness_and_validation_callers() {
         use crate::{
-            air::{LiftedAir, ProverStatement, Statement},
+            air::{ProverStatement, Statement},
             testing::configs::goldilocks_poseidon2::{
                 Felt as TestFelt, QuadFelt as TestQuadFelt, TestMultiAir, prove_and_verify,
                 test_challenger,
@@ -1108,26 +859,20 @@ mod tests {
         .expect("no public inputs");
         let statement = ProverStatement::new(statement, vec![trace.clone()]).unwrap();
         crate::check_constraints(&statement, None, test_challenger());
-        // This existing helper reaches packed prover and scalar OOD folders;
-        // constraint_degree reaches the existing non-Copy symbolic builder.
-        let _degree =
-            <WindowAir<TestFelt> as LiftedAir<TestFelt, TestQuadFelt>>::constraint_degree(&air);
+        // Exercise the same authored source through checked capture and both proof folders.
+        let _degree = native::capture_with::<_, TestQuadFelt>(&air)
+            .unwrap()
+            .descriptor
+            .analysis()
+            .raw_degrees();
         prove_and_verify(&air, &[], &[trace]);
 
         #[cfg(feature = "std")]
-        crate::lookup::debug::validation::validate(
+        crate::lookup::debug::validation::validate_native(
             &WindowAir::<Felt>::new(),
-            crate::lookup::debug::validation::ValidateLayout {
-                preprocessed_width: 0,
-                trace_width: 1,
-                num_public_values: 0,
-                num_periodic_columns: 1,
-                permutation_width: 1,
-                num_permutation_challenges: 2,
-                num_permutation_values: 1,
-            },
+            &native::LiftedAir::spec(&WindowAir::<Felt>::new()),
         )
-        .expect("canonical and encoded window descriptions agree");
+        .unwrap();
     }
 
     fn native_window_direct_pilot<F: Field, EF: ExtensionField<F>>() {

@@ -1,28 +1,16 @@
 //! Authored VM AIR contracts and canonical instance dispatch.
 
-use alloc::{borrow::Cow, vec::Vec};
-
 use miden_core::{Felt, field::ExtensionField, utils::RowMajorMatrix};
 use miden_stark::{
-    air::{BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, ReductionError, native},
-    lookup::{
-        BoundaryBuilder, Challenges, LookupAir, build_logup_aux_trace_with_preprocessed,
-        native as native_lookup,
-    },
+    air::{ReductionError, native},
+    lookup::{BoundaryBuilder, Challenges, native as native_lookup},
 };
-use p3_field::Algebra;
 
 use crate::vm::{
-    constraints::{
-        eidos_compression::lookup::EidosCompressionLookupBuilder,
-        lookup::{
-            and8_lookup_air::And8LookupBuilder,
-            chiplet_air::{ChipletLookupBuilder, NativeChipletLookupBuilder},
-            main_air::{MainLookupBuilder, NativeMainLookupBuilder},
-        },
+    constraints::lookup::{
+        chiplet_air::NativeChipletLookupBuilder, main_air::NativeMainLookupBuilder,
     },
-    inputs::{AUX_KERNEL_DIGESTS, NUM_PUBLIC_VALUES},
-    trace,
+    inputs::AUX_KERNEL_DIGESTS,
 };
 
 mod and8_lookup;
@@ -38,13 +26,6 @@ pub use eidos_compression::EidosCompressionAir;
 
 // MIDEN AIR BUILDER
 // ================================================================================================
-
-/// Convenience super-trait that pins `LiftedAirBuilder` to the Miden base field.
-///
-/// Constraint functions use `AB: MidenAirBuilder` instead of the longer
-/// `LiftedAirBuilder<F = Felt>` bound.
-pub trait MidenAirBuilder: LiftedAirBuilder<F = Felt> {}
-impl<T: LiftedAirBuilder<F = Felt>> MidenAirBuilder for T {}
 
 /// Assertion sink over Miden expressions for helpers with separate immutable inputs.
 pub trait NativeMidenAirBuilder: miden_stark::air::native::LiftedAirBuilder<F = Felt> {}
@@ -219,191 +200,6 @@ impl MidenAir {
             },
             Self::EidosCompression => EidosCompressionAir.boundary_correction(challenges, &[]),
             Self::And8Lookup => And8LookupAir.boundary_correction(challenges, &[]),
-        }
-    }
-}
-
-impl BaseAir<Felt> for MidenAir {
-    fn width(&self) -> usize {
-        match self {
-            Self::Core => CoreAir.width(),
-            Self::Chiplets => ChipletsAir.width(),
-            Self::EidosCompression => EidosCompressionAir.width(),
-            Self::And8Lookup => And8LookupAir.width(),
-        }
-    }
-
-    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
-        match self {
-            Self::And8Lookup => Some(And8LookupAir.preprocessed_trace()),
-            Self::Core | Self::Chiplets | Self::EidosCompression => None,
-        }
-    }
-
-    fn preprocessed_width(&self) -> usize {
-        match self {
-            Self::And8Lookup => And8LookupAir.preprocessed_width(),
-            Self::Core | Self::Chiplets | Self::EidosCompression => 0,
-        }
-    }
-
-    fn num_public_values(&self) -> usize {
-        match self {
-            Self::Core => NUM_PUBLIC_VALUES,
-            Self::Chiplets | Self::EidosCompression | Self::And8Lookup => 0,
-        }
-    }
-
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Owned(match self {
-            Self::Core => CoreAir.periodic_columns(),
-            Self::Chiplets => ChipletsAir.periodic_columns(),
-            Self::EidosCompression => EidosCompressionAir.periodic_columns(),
-            Self::And8Lookup => Vec::new(),
-        })
-    }
-}
-
-impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn log_preprocessed_height(&self) -> Option<u8> {
-        match self {
-            Self::And8Lookup => Some(trace::and8_lookup::LOG_AND8_LOOKUP_TRACE_HEIGHT),
-            Self::Core | Self::Chiplets | Self::EidosCompression => None,
-        }
-    }
-
-    fn num_randomness(&self) -> usize {
-        // Instance-level: every AIR shares the same LogUp challenge set.
-        trace::AUX_TRACE_RAND_CHALLENGES
-    }
-
-    fn aux_width(&self) -> usize {
-        match self {
-            Self::Core => CoreAir.aux_width(),
-            Self::Chiplets => ChipletsAir.aux_width(),
-            Self::EidosCompression => EidosCompressionAir.aux_width(),
-            Self::And8Lookup => And8LookupAir.aux_width(),
-        }
-    }
-
-    fn num_aux_values(&self) -> usize {
-        // One committed normalized LogUp sum `sigma_prime = sigma / n` per AIR instance.
-        1
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        let preprocessed = self.preprocessed_trace();
-        self.build_aux_trace_with_preprocessed(
-            main,
-            preprocessed.as_ref(),
-            air_inputs,
-            aux_inputs,
-            challenges,
-        )
-    }
-
-    fn build_aux_trace_with_preprocessed(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        preprocessed: Option<&RowMajorMatrix<Felt>>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        let (aux, sums) = if *self == Self::EidosCompression {
-            let aux =
-                <EidosCompressionAir as miden_stark::air::native::ProverAir<EF>>::build_aux_trace(
-                    &EidosCompressionAir,
-                    miden_stark::air::native::AuxTraceInputs {
-                        main,
-                        preprocessed,
-                        public_values: air_inputs,
-                        statement: aux_inputs,
-                        challenges,
-                    },
-                )
-                .expect("valid Eidos compression auxiliary inputs");
-            (aux.columns, aux.exports)
-        } else {
-            build_logup_aux_trace_with_preprocessed(self, main, preprocessed, challenges)
-        };
-        debug_assert_eq!(
-            sums.len(),
-            1,
-            "build_logup_aux_trace returns one normalized LogUp sum per AIR"
-        );
-        (aux, sums)
-    }
-
-    fn constraint_degree(&self) -> ConstraintDegrees {
-        ConstraintDegrees::from_air::<Felt, EF, _>(self)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        match self {
-            Self::Core => CoreAir.eval(builder),
-            Self::Chiplets => ChipletsAir.eval(builder),
-            Self::EidosCompression => EidosCompressionAir.eval(builder),
-            Self::And8Lookup => And8LookupAir.eval(builder),
-        }
-    }
-}
-
-impl<LB> LookupAir<LB> for MidenAir
-where
-    LB: MainLookupBuilder
-        + ChipletLookupBuilder
-        + EidosCompressionLookupBuilder
-        + And8LookupBuilder,
-{
-    fn column_shape(&self) -> &[usize] {
-        MidenAir::column_shape(*self)
-    }
-
-    fn max_message_width(&self) -> usize {
-        match self {
-            Self::Core => CoreAir.lookup_max_message_width(),
-            Self::Chiplets => ChipletsAir.lookup_max_message_width(),
-            Self::EidosCompression => EidosCompressionAir.lookup_max_message_width(),
-            Self::And8Lookup => And8LookupAir.lookup_max_message_width(),
-        }
-    }
-
-    fn num_bus_ids(&self) -> usize {
-        match self {
-            Self::Core => CoreAir.lookup_num_bus_ids(),
-            Self::Chiplets => ChipletsAir.lookup_num_bus_ids(),
-            Self::EidosCompression => EidosCompressionAir.lookup_num_bus_ids(),
-            Self::And8Lookup => And8LookupAir.lookup_num_bus_ids(),
-        }
-    }
-
-    fn eval(&self, builder: &mut LB) {
-        match self {
-            Self::Core => CoreAir.lookup_eval(builder),
-            Self::Chiplets => ChipletsAir.lookup_eval(builder),
-            Self::EidosCompression => EidosCompressionAir.lookup_eval(builder),
-            Self::And8Lookup => And8LookupAir.lookup_eval(builder),
-        }
-    }
-
-    fn eval_boundary<B>(&self, boundary: &mut B)
-    where
-        B: BoundaryBuilder<F = LB::F, EF = LB::EF>,
-    {
-        match self {
-            Self::Core => CoreAir.lookup_eval_boundary(boundary),
-            Self::Chiplets => ChipletsAir.lookup_eval_boundary(boundary),
-            Self::EidosCompression => EidosCompressionAir.lookup_eval_boundary(boundary),
-            Self::And8Lookup => And8LookupAir.lookup_eval_boundary(boundary),
         }
     }
 }

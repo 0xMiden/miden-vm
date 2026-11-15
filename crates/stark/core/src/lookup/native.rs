@@ -1,9 +1,8 @@
 //! Lookup declarations over immutable expression-valued rows.
 //!
-//! Only the input boundary differs from the legacy declaration API. Columns,
-//! groups, batches, messages and degree annotations use the same arithmetic and
-//! callback contracts, so the constraint and witness paths cannot acquire
-//! separate interaction definitions.
+//! Constraint and witness paths share columns, groups, batches, messages and degree annotations.
+//! Declarations read borrowed rows separately from mutable callback handles, so both paths
+//! evaluate one authored interaction definition.
 
 use p3_field::{Algebra, Field};
 

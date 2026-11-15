@@ -19,7 +19,6 @@ miden-core.workspace             = true
 miden-utils-sync.workspace       = true
 
 # Plonky3 (always needed)
-p3-air.workspace = true
 p3-challenger.workspace  = true
 p3-dft.workspace         = true
 p3-field.workspace       = true

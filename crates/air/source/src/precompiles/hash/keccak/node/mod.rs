@@ -31,23 +31,19 @@
 //! bus-pinned per row (`ChunkChain`) but not constrained across rows —
 //! Eidos is shared with other callers.
 
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::borrow::Cow;
 use core::array;
 
 use miden_core::{
     Felt,
     deferred::DEFERRED_CHUNKS_DOMAIN,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
-    utils::RowMajorMatrix,
 };
 use miden_precompiles::Keccak256Precompile;
 use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
-    lookup::{
-        Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
-        native as native_lookup,
-    },
+    air::native,
+    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, native as native_lookup},
 };
 use p3_field::Dup;
 
@@ -199,12 +195,6 @@ pub const MAX_SPONGE_PERMS: u32 = 1 << 16;
 #[derive(Debug, Default, Clone, Copy)]
 pub struct KeccakNodeAir;
 
-impl BaseAir<Felt> for KeccakNodeAir {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
-    }
-}
-
 // LIFTED AIR — local constraints
 // ================================================================================================
 
@@ -229,47 +219,6 @@ pub(crate) fn eval_chunk_count<AB>(
     builder.assert_zero(act.clone() * is_empty.clone() * len_bytes);
     builder.assert_zero(act.clone() * is_empty * remainder);
     builder.assert_zero(act * (n_chunks * n_chunks_inv - AB::Expr::ONE));
-}
-
-impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        NUM_RANDOMNESS
-    }
-
-    fn aux_width(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
-            self,
-            native::AuxTraceInputs {
-                main,
-                preprocessed: None,
-                public_values: air_inputs,
-                statement: aux_inputs,
-                challenges,
-            },
-        )
-        .expect("valid KeccakNodeAir auxiliary inputs");
-        (aux.columns, aux.exports)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        native::migration::eval_source(self, builder);
-    }
 }
 
 impl native::LiftedAir for KeccakNodeAir {
@@ -408,27 +357,6 @@ pub(crate) fn sponge_perm_count_messages<E: Algebra<Felt>>(
         Range16Msg { w: rate_gap },
         Range16Msg { w: full_blocks },
     ]
-}
-
-impl<LB> LookupAir<LB> for KeccakNodeAir
-where
-    LB: LookupBuilder<F = Felt>,
-{
-    fn column_shape(&self) -> &[usize] {
-        &COLUMN_SHAPE
-    }
-
-    fn max_message_width(&self) -> usize {
-        MAX_MESSAGE_WIDTH
-    }
-
-    fn num_bus_ids(&self) -> usize {
-        NUM_BUS_IDS
-    }
-
-    fn eval(&self, builder: &mut LB) {
-        native::migration::eval_lookup(self, builder, 0);
-    }
 }
 
 impl<LB> native_lookup::LookupAir<LB> for KeccakNodeAir

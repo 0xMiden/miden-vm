@@ -11,24 +11,20 @@
 
 pub mod message;
 
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::borrow::Cow;
 use core::array;
 
 pub use message::ChunkChainMsg;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
-    utils::RowMajorMatrix,
 };
 use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
-    lookup::{
-        Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
-        native as native_lookup,
-    },
+    air::native,
+    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, native as native_lookup},
 };
-use p3_field::{Algebra, Dup};
+use p3_field::Dup;
 
 use crate::precompiles::{
     hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg},
@@ -103,55 +99,8 @@ pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 1];
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ChunkAir;
 
-impl BaseAir<Felt> for ChunkAir {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
-    }
-}
-
 // LIFTED AIR
 // ================================================================================================
-
-impl LiftedAir<Felt, QuadFelt> for ChunkAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        NUM_RANDOMNESS
-    }
-
-    fn aux_width(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
-            self,
-            native::AuxTraceInputs {
-                main,
-                preprocessed: None,
-                public_values: air_inputs,
-                statement: aux_inputs,
-                challenges,
-            },
-        )
-        .expect("valid ChunkAir auxiliary inputs");
-        (aux.columns, aux.exports)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        native::migration::eval_source(self, builder);
-    }
-}
 
 impl native::LiftedAir for ChunkAir {
     type F = Felt;
@@ -238,27 +187,6 @@ impl native::ProverAir<QuadFelt> for ChunkAir {
 
 // LOOKUP AIR
 // ================================================================================================
-
-impl<LB> LookupAir<LB> for ChunkAir
-where
-    LB: LookupBuilder<F = Felt>,
-{
-    fn column_shape(&self) -> &[usize] {
-        &COLUMN_SHAPE
-    }
-
-    fn max_message_width(&self) -> usize {
-        MAX_MESSAGE_WIDTH
-    }
-
-    fn num_bus_ids(&self) -> usize {
-        NUM_BUS_IDS
-    }
-
-    fn eval(&self, builder: &mut LB) {
-        native::migration::eval_lookup(self, builder, 0);
-    }
-}
 
 impl<LB> native_lookup::LookupAir<LB> for ChunkAir
 where

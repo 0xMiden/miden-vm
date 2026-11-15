@@ -9,19 +9,16 @@ use std::{borrow::Cow, vec, vec::Vec};
 
 use miden_core::{
     Felt,
-    field::{Algebra, PrimeCharacteristicRing, QuadFelt},
+    field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_stark::{
-    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
-    lookup::native as native_lookup,
-};
+use miden_stark::{air::native, lookup::native as native_lookup};
 use native::LiftedAirBuilder as _;
 use p3_field::Dup;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::prover::{
-    logup::{Deg, LookupAir, LookupBuilder, NUM_LOGUP_VALUES, NUM_RANDOMNESS},
+    logup::{Deg, NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
 };
 
@@ -39,53 +36,6 @@ const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [0];
 
 #[derive(Debug, Default, Clone, Copy)]
 struct AuxRegisterAir;
-
-impl BaseAir<Felt> for AuxRegisterAir {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
-    }
-}
-
-impl LiftedAir<Felt, QuadFelt> for AuxRegisterAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        NUM_RANDOMNESS
-    }
-
-    fn aux_width(&self) -> usize {
-        AUX_WIDTH
-    }
-
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let auxiliary = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
-            self,
-            native::AuxTraceInputs {
-                main,
-                preprocessed: None,
-                public_values: air_inputs,
-                statement: aux_inputs,
-                challenges,
-            },
-        )
-        .expect("valid auxiliary-register inputs");
-        (auxiliary.columns, auxiliary.exports)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        native::migration::eval_source(self, builder);
-    }
-}
 
 impl native::LiftedAir for AuxRegisterAir {
     type F = Felt;
@@ -137,27 +87,6 @@ impl native::ProverAir<QuadFelt> for AuxRegisterAir {
             reg = reg * beta + QuadFelt::from(inputs.main.values[row * NUM_MAIN_COLS + COL_X]);
         }
         Ok(auxiliary)
-    }
-}
-
-impl<LB> LookupAir<LB> for AuxRegisterAir
-where
-    LB: LookupBuilder<F = Felt>,
-{
-    fn column_shape(&self) -> &[usize] {
-        &COLUMN_SHAPE
-    }
-
-    fn max_message_width(&self) -> usize {
-        MAX_MESSAGE_WIDTH
-    }
-
-    fn num_bus_ids(&self) -> usize {
-        NUM_BUS_IDS
-    }
-
-    fn eval(&self, builder: &mut LB) {
-        native::migration::eval_lookup(self, builder, 0);
     }
 }
 

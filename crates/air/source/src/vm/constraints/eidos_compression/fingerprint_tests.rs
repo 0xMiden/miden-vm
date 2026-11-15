@@ -5,7 +5,10 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::LiftedAir;
+use miden_stark::{
+    air::native::{self, LiftedAir},
+    lookup::{Challenges, accumulate_slow, native as native_lookup},
+};
 
 use super::{
     algebra::{footer_cv_word, footer_message_word},
@@ -109,13 +112,35 @@ fn native_aux_preserves_lookup_prefix_and_closes_each_cycle() {
     let main = matrix(&rows);
     let challenges =
         [QuadFelt::from_u32(7), QuadFelt::new([Felt::from_u32(11), Felt::from_u32(13)])];
-    let (aux, sums) = MidenAir::EidosCompression.build_aux_trace(&main, &[], &[], &challenges);
-    let (prefix, prefix_sums) = miden_stark::lookup::build_logup_aux_trace_with_preprocessed(
-        &MidenAir::EidosCompression,
-        &main,
-        None,
-        &challenges,
+    let air = MidenAir::EidosCompression;
+    let native::AuxTrace { columns: aux, exports: sums } = native::ProverAir::build_aux_trace(
+        &air,
+        native::AuxTraceInputs {
+            main: &main,
+            preprocessed: None,
+            public_values: &[],
+            statement: &[],
+            challenges: &challenges,
+        },
+    )
+    .unwrap();
+    let spec = air.spec();
+    let encoding = Challenges::new(
+        challenges[0],
+        challenges[1],
+        crate::vm::logup::MIDEN_MAX_MESSAGE_WIDTH,
+        crate::vm::logup::BusId::COUNT,
     );
+    let fractions =
+        native_lookup::build_lookup_fractions(&air, &main, None, &spec.periodic_columns, &encoding);
+    let (columns, sigma) = accumulate_slow(&fractions);
+    let prefix = RowMajorMatrix::new(
+        (0..rows.len())
+            .flat_map(|row| columns.iter().map(move |column| column[row]))
+            .collect(),
+        NUM_LOGUP_COLS,
+    );
+    let prefix_sums = vec![sigma];
     assert_eq!(sums, prefix_sums);
     for row in 0..rows.len() {
         assert_eq!(

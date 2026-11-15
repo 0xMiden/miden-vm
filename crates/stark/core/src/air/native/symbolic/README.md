@@ -3,7 +3,7 @@
 This module owns the expression arithmetic used by native AIR inputs. It adapts the generic tree,
 constant folding, base lifting, concrete field conversions and flattened serde representation from
 `p3-air` **0.8.0**. It does not depend on upstream AIR traits, symbolic builders or variable wrappers.
-The current legacy `air::symbolic` module is separate.
+The symbolic trees are independent of upstream AIR builders and variable wrappers.
 
 ## Pinned independent source
 

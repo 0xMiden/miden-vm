@@ -3,9 +3,7 @@
 use core::borrow::Borrow;
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_stark::lookup::{
-    Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, LookupMessage, native,
-};
+use miden_stark::lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage, native};
 use p3_field::Dup;
 
 use super::messages::{BytePairLookupMsg, EidosRotationMsg, RangeMsg};
@@ -16,9 +14,6 @@ use crate::vm::{
         eidos::{self, BytePairRelation},
     },
 };
-
-/// Extension trait required by the byte-pair table [`LookupAir`](miden_stark::lookup::LookupAir).
-pub(crate) trait And8LookupBuilder: LookupBuilder<F = Felt> {}
 
 /// Per-column fraction stride for the byte-pair table AIR.
 pub(crate) const AND8_LOOKUP_COLUMN_SHAPE: [usize; 4] = [1, 2, 2, 2];

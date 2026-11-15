@@ -13,7 +13,6 @@ mod frame;
 mod identity;
 mod kernel;
 #[doc(hidden)]
-pub mod migration;
 mod spec;
 pub mod symbolic;
 

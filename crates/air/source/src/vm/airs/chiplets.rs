@@ -9,13 +9,9 @@ use miden_stark::{
     lookup::{BoundaryBuilder, Challenges, native as native_lookup},
 };
 
-use super::{MidenAirBuilder, boundary::ReduceBoundaryBuilder};
+use super::boundary::ReduceBoundaryBuilder;
 use crate::vm::{
-    constraints::{
-        self,
-        columns::ChipletCols,
-        lookup::chiplet_air::{ChipletLookupBuilder, NativeChipletLookupBuilder},
-    },
+    constraints::{self, columns::ChipletCols, lookup::chiplet_air::NativeChipletLookupBuilder},
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
 };
 
@@ -30,16 +26,8 @@ use crate::vm::{
 pub struct ChipletsAir;
 
 impl ChipletsAir {
-    pub(super) fn width(self) -> usize {
-        constraints::columns::NUM_CHIPLETS_COLS
-    }
-
     pub(in crate::vm) fn periodic_columns(self) -> Vec<Vec<Felt>> {
         constraints::chiplets::columns::PeriodicCols::periodic_columns()
-    }
-
-    pub(super) fn aux_width(self) -> usize {
-        constraints::lookup::chiplet_air::CHIPLET_COLUMN_SHAPE.len()
     }
 
     /// LogUp boundary correction for the chiplets trace.
@@ -77,28 +65,8 @@ impl ChipletsAir {
         reducer.finalize()
     }
 
-    pub(super) fn eval<AB: MidenAirBuilder>(self, builder: &mut AB) {
-        native::migration::eval_source(&self, builder);
-    }
-
     pub(super) fn lookup_column_shape(self) -> &'static [usize] {
         &constraints::lookup::chiplet_air::CHIPLET_COLUMN_SHAPE
-    }
-
-    pub(super) fn lookup_max_message_width(self) -> usize {
-        MIDEN_MAX_MESSAGE_WIDTH
-    }
-
-    pub(super) fn lookup_num_bus_ids(self) -> usize {
-        BusId::COUNT
-    }
-
-    pub(super) fn lookup_eval<LB: ChipletLookupBuilder>(self, builder: &mut LB) {
-        native::migration::eval_lookup(&self, builder, 0);
-    }
-
-    pub(super) fn lookup_eval_boundary<B: BoundaryBuilder>(self, boundary: &mut B) {
-        constraints::lookup::miden_air::emit_chiplets_boundary(boundary);
     }
 }
 
@@ -167,10 +135,13 @@ mod tests {
         field::{PrimeCharacteristicRing, QuadFelt},
         utils::RowMajorMatrix,
     };
-    use miden_stark::air::{LiftedAir as LegacyAir, native};
+    use miden_stark::{
+        air::native,
+        lookup::{Challenges, accumulate_slow, native as native_lookup},
+    };
 
     use super::ChipletsAir;
-    use crate::vm::{MidenAir, constraints::columns::NUM_CHIPLETS_COLS};
+    use crate::vm::constraints::columns::NUM_CHIPLETS_COLS;
 
     #[test]
     fn complete_native_chiplets_capture_preserves_ordinary_then_lookup_order() {
@@ -202,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn native_and_legacy_chiplet_witness_values_and_exports_match() {
+    fn native_chiplet_witness_matches_slow_fractions_and_exports() {
         let main = RowMajorMatrix::new(
             (0..8)
                 .flat_map(|row| {
@@ -225,16 +196,26 @@ mod tests {
             },
         )
         .unwrap();
-        let (legacy, exports) =
-            <MidenAir as LegacyAir<Felt, QuadFelt>>::build_aux_trace_with_preprocessed(
-                &MidenAir::Chiplets,
-                &main,
-                None,
-                &[],
-                &[],
-                &challenges,
-            );
-        assert_eq!(native.columns.values, legacy.values);
-        assert_eq!(native.exports, exports);
+        let spec = native::LiftedAir::spec(&ChipletsAir);
+        let encoding = Challenges::new(
+            challenges[0],
+            challenges[1],
+            crate::vm::logup::MIDEN_MAX_MESSAGE_WIDTH,
+            crate::vm::logup::BusId::COUNT,
+        );
+        let fractions = native_lookup::build_lookup_fractions(
+            &ChipletsAir,
+            &main,
+            None,
+            &spec.periodic_columns,
+            &encoding,
+        );
+        let (expected, sigma) = accumulate_slow(&fractions);
+        for (row, values) in native.columns.values.chunks_exact(expected.len()).enumerate() {
+            for (column, value) in values.iter().enumerate() {
+                assert_eq!(*value, expected[column][row]);
+            }
+        }
+        assert_eq!(native.exports, [sigma]);
     }
 }

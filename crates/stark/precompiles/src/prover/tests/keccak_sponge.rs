@@ -6,11 +6,11 @@
 //! across the canonical edge cases (empty input, single-byte, full
 //! block, multi-block, padding-only trailing block).
 
-use std::{borrow::Cow, vec, vec::Vec};
+use std::{vec, vec::Vec};
 
 use miden_core::{
     Felt,
-    field::{Algebra, PrimeCharacteristicRing, QuadFelt},
+    field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_crypto::hash::keccak::Keccak256;
 use miden_stark::air::native::{ConstraintDegrees, LiftedAir};
@@ -135,14 +135,14 @@ fn main_column_layout_matches_sponge_band() {
     assert_eq!(STATE_NEW_BYTES_RANGE, 32..40);
     // Total matches the spec.
     assert_eq!(NUM_MAIN_COLS, 40);
-    // `BaseAir::width()` agrees.
+    // the native source main width agrees.
     assert_eq!(KeccakSpongeAir.spec().main_width, NUM_MAIN_COLS);
 }
 
 #[test]
 fn lifted_air_validates_and_layout_matches_spec() {
     let air = KeccakSpongeAir;
-    // `air_layout` is the single source of truth that downstream
+    // The source schema is the single source of truth that downstream
     // builders consume. Pin every dimension to a documented constant
     // so any column-count drift fails fast.
     let layout = air.spec();
@@ -166,7 +166,7 @@ fn lifted_air_validates_and_layout_matches_spec() {
 
 #[test]
 fn periodic_columns_match_program() {
-    // `BaseAir::periodic_columns()` is plumbed through to the
+    // the native source periodic data is plumbed through to the
     // verifier; ensure it returns exactly what `sponge_program()`
     // produced (same shape, same values).
     let air = KeccakSpongeAir;
@@ -445,73 +445,13 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
     // Rebuilding the auxiliary trace after main-trace corruption produces a consistent witness.
     // Perturbing the built accumulator instead directly exercises the centered recurrence.
     // The wrapper keeps the same relation and perturbs only the constructed auxiliary witness.
-    use miden_core::{field::PrimeCharacteristicRing, utils::RowMajorMatrix};
-    use miden_stark::{
-        air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
-        lookup::native as native_lookup,
-    };
+    use miden_core::field::PrimeCharacteristicRing;
+    use miden_stark::{air::native, lookup::native as native_lookup};
 
     use crate::prover::hash::keccak::sponge::NUM_AUX_COLS;
 
     #[derive(Debug, Clone, Copy)]
     struct AuxCorruptAir;
-
-    impl BaseAir<Felt> for AuxCorruptAir {
-        fn width(&self) -> usize {
-            <KeccakSpongeAir as BaseAir<Felt>>::width(&KeccakSpongeAir)
-        }
-
-        fn num_public_values(&self) -> usize {
-            <KeccakSpongeAir as BaseAir<Felt>>::num_public_values(&KeccakSpongeAir)
-        }
-
-        fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-            Cow::Owned(
-                <KeccakSpongeAir as BaseAir<Felt>>::periodic_columns(&KeccakSpongeAir).into_owned(),
-            )
-        }
-    }
-
-    impl LiftedAir<Felt, QuadFelt> for AuxCorruptAir {
-        type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-        fn num_randomness(&self) -> usize {
-            <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::num_randomness(&KeccakSpongeAir)
-        }
-
-        fn aux_width(&self) -> usize {
-            <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::aux_width(&KeccakSpongeAir)
-        }
-
-        fn num_aux_values(&self) -> usize {
-            <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::num_aux_values(&KeccakSpongeAir)
-        }
-
-        fn build_aux_trace(
-            &self,
-            main: &RowMajorMatrix<Felt>,
-            air_inputs: &[Felt],
-            aux_inputs: &[Felt],
-            challenges: &[QuadFelt],
-        ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-            let auxiliary = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
-                self,
-                native::AuxTraceInputs {
-                    main,
-                    preprocessed: None,
-                    public_values: air_inputs,
-                    statement: aux_inputs,
-                    challenges,
-                },
-            )
-            .expect("valid Keccak sponge auxiliary inputs");
-            (auxiliary.columns, auxiliary.exports)
-        }
-
-        fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-            native::migration::eval_source(self, builder);
-        }
-    }
 
     impl native::LiftedAir for AuxCorruptAir {
         type F = Felt;

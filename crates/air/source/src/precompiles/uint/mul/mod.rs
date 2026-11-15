@@ -88,14 +88,13 @@ use core::array;
 use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
-    utils::RowMajorMatrix,
 };
 use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
+    air::native,
     lookup::{
-        Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
-        LookupMessage, native as native_lookup,
+        Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage,
+        native as native_lookup,
     },
 };
 use miden_utils_sync::LazyLock;
@@ -354,78 +353,8 @@ static PERIODIC_COLUMNS: LazyLock<Vec<Vec<Felt>>> = LazyLock::new(|| {
         .collect()
 });
 
-impl BaseAir<Felt> for UintMulAir {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
-    }
-
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Borrowed(PERIODIC_COLUMNS.as_slice())
-    }
-}
-
-impl LiftedAir<Felt, QuadFelt> for UintMulAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn max_periodic_length(&self) -> usize {
-        PERIOD
-    }
-
-    fn num_randomness(&self) -> usize {
-        NUM_RANDOMNESS
-    }
-
-    fn aux_width(&self) -> usize {
-        AUX_WIDTH
-    }
-
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
-            self,
-            native::AuxTraceInputs {
-                main,
-                preprocessed: None,
-                public_values: air_inputs,
-                statement: aux_inputs,
-                challenges,
-            },
-        )
-        .expect("valid uint auxiliary inputs");
-        (aux.columns, aux.exports)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        native::migration::eval_source(self, builder);
-    }
-}
-
 // LOOKUP AIR
 // ================================================================================================
-
-impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for UintMulAir {
-    fn column_shape(&self) -> &[usize] {
-        &COLUMN_SHAPE
-    }
-    fn max_message_width(&self) -> usize {
-        MAX_MESSAGE_WIDTH
-    }
-    fn num_bus_ids(&self) -> usize {
-        NUM_BUS_IDS
-    }
-    fn eval(&self, builder: &mut LB) {
-        native::migration::eval_lookup(self, builder, 0);
-    }
-}
 
 impl<LB> native_lookup::LookupAir<LB> for UintMulAir
 where

@@ -4,17 +4,11 @@ use alloc::{vec, vec::Vec};
 use core::borrow::Borrow;
 
 use miden_core::Felt;
-use miden_stark::{
-    air::native::migration,
-    lookup::{LookupAir, native as native_lookup},
-};
+use miden_stark::lookup::native as native_lookup;
 
 use super::{
     layout::*,
-    lookup::{
-        EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, EidosCompressionCols, EidosCompressionLookupBuilder,
-        emit_lookup_columns,
-    },
+    lookup::{EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, EidosCompressionCols, emit_lookup_columns},
     model::initial_working_state,
     narrow::{NARROW_SLOTS, NarrowSlotBus},
     schedule::{G_IDX_COL, G_IDX_DIAG, SIGMA, fused_step_at},
@@ -78,27 +72,6 @@ impl LookupPlan {
 
 #[derive(Copy, Clone, Debug, Default)]
 pub struct EidosCompressionLookupAir;
-
-impl<LB> LookupAir<LB> for EidosCompressionLookupAir
-where
-    LB: EidosCompressionLookupBuilder,
-{
-    fn column_shape(&self) -> &[usize] {
-        &EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE
-    }
-
-    fn max_message_width(&self) -> usize {
-        MIDEN_MAX_MESSAGE_WIDTH
-    }
-
-    fn num_bus_ids(&self) -> usize {
-        crate::vm::logup::BusId::COUNT
-    }
-
-    fn eval(&self, builder: &mut LB) {
-        migration::eval_lookup(self, builder, 0);
-    }
-}
 
 impl<LB: native_lookup::LookupBuilder<F = Felt>> native_lookup::LookupAir<LB>
     for EidosCompressionLookupAir

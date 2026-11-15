@@ -11,12 +11,12 @@
 //! - shared wiring column: ACE wiring + hasher compression link.
 //! - four-Felt hasher result and chaining-value returns.
 //!
-//! [`ChipletLookupBuilder`] builds the shared active flags from the chiplet selector columns.
+//! [`NativeChipletLookupBuilder`] builds the shared active flags from the chiplet selector columns.
 //! Adapters may override the default construction while preserving those flag semantics.
 
 use core::borrow::Borrow;
 
-use miden_stark::lookup::{LookupBuilder, native};
+use miden_stark::lookup::native;
 
 use super::buses::{
     chiplet_responses::{self, emit_chiplet_responses},
@@ -28,29 +28,6 @@ use crate::vm::{
     ChipletCols, Felt,
     constraints::chiplets::{columns::PeriodicCols, selectors::ChipletActiveFlags},
 };
-
-// CHIPLET LOOKUP BUILDER
-// ================================================================================================
-
-/// Extension trait the chiplet-trace [`LookupAir`] requires from its [`LookupBuilder`].
-///
-/// Carries a single hook, [`build_chiplet_active`](Self::build_chiplet_active), for
-/// constructing the shared [`ChipletActiveFlags`] snapshot consumed by the four
-/// chiplet-trace bus emitters. Symmetric to [`super::main_air::MainLookupBuilder`]; see its
-/// docs for the rationale behind the explicit-impl-no-blanket pattern.
-pub(crate) trait ChipletLookupBuilder: LookupBuilder<F = Felt> {
-    /// Build the shared [`ChipletActiveFlags`] snapshot for one `eval` call.
-    ///
-    /// Default body calls [`ChipletActiveFlags::from_chiplet_cols`] against the multi-AIR
-    /// `ChipletCols` view. Adapters can override this when a cheaper construction path is
-    /// worthwhile.
-    fn build_chiplet_active(
-        &self,
-        local: &ChipletCols<Self::Var>,
-    ) -> ChipletActiveFlags<Self::Expr> {
-        ChipletActiveFlags::from_chiplet_cols(local)
-    }
-}
 
 // NATIVE CHIPLET LOOKUP BUILDER
 // ================================================================================================
@@ -129,69 +106,54 @@ mod tests {
         field::{PrimeCharacteristicRing, QuadFelt},
     };
     use miden_stark::{
-        air::{RowWindow, WindowAccess},
-        lookup::{Challenges, Deg, LookupBuilder, LookupFractions, ProverLookupBuilder},
+        air::native::Rows,
+        lookup::{Challenges, Deg, LookupFractions, ProverLookupBuilder, native as native_lookup},
     };
 
-    use super::{CHIPLET_COLUMN_SHAPE, ChipletLookupBuilder};
+    use super::{CHIPLET_COLUMN_SHAPE, NativeChipletLookupBuilder};
     use crate::vm::{
-        ChipletCols, ChipletsAir, MidenAir,
+        ChipletCols, ChipletsAir,
         constraints::chiplets::{columns::PeriodicCols, selectors::ChipletActiveFlags},
         logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
         trace::CHIPLETS_WIDTH,
     };
 
-    /// A concrete old adapter override, retaining the real scalar column callbacks.
+    /// A concrete native adapter override, retaining the real scalar column callbacks.
     struct HookProbe<'a> {
         inner: ProverLookupBuilder<'a, Felt, QuadFelt>,
         calls: Cell<usize>,
+        next: &'a [Felt],
     }
 
-    impl<'a> LookupBuilder for HookProbe<'a> {
+    impl<'a> native_lookup::LookupBuilder for HookProbe<'a> {
         type F = Felt;
         type Expr = Felt;
-        type Var = Felt;
-        type EF = QuadFelt;
         type ExprEF = QuadFelt;
-        type VarEF = QuadFelt;
-        type PeriodicVar = Felt;
-        type MainWindow = RowWindow<'a, Felt>;
-        type PreprocessedWindow = RowWindow<'a, Felt>;
         type Column<'b>
-            = <ProverLookupBuilder<'a, Felt, QuadFelt> as LookupBuilder>::Column<'b>
+            = <ProverLookupBuilder<'a, Felt, QuadFelt> as native_lookup::LookupBuilder>::Column<'b>
         where
             Self: 'b;
 
-        fn main(&self) -> Self::MainWindow {
-            LookupBuilder::main(&self.inner)
-        }
-        fn preprocessed(&self) -> &Self::PreprocessedWindow {
-            LookupBuilder::preprocessed(&self.inner)
-        }
-        fn periodic_values(&self) -> &[Felt] {
-            LookupBuilder::periodic_values(&self.inner)
-        }
         fn next_column<'b, R>(
             &'b mut self,
             f: impl FnOnce(&mut Self::Column<'b>) -> R,
             deg: Deg,
         ) -> R {
-            LookupBuilder::next_column(&mut self.inner, f, deg)
+            native_lookup::LookupBuilder::next_column(&mut self.inner, f, deg)
         }
     }
 
-    impl ChipletLookupBuilder for HookProbe<'_> {
+    impl NativeChipletLookupBuilder for HookProbe<'_> {
         fn build_chiplet_active(&self, local: &ChipletCols<Felt>) -> ChipletActiveFlags<Felt> {
             self.calls.set(self.calls.get() + 1);
             assert_eq!(local.controller_cols().addr, Felt::from_u32(19));
-            let window = LookupBuilder::main(&self.inner);
-            assert_eq!(window.next_slice()[23], Felt::from_u32(41));
+            assert_eq!(self.next[23], Felt::from_u32(41));
             ChipletActiveFlags::from_chiplet_cols(local)
         }
     }
 
     #[test]
-    fn legacy_chiplet_override_receives_the_stable_current_next_pair_once() {
+    fn native_chiplet_override_receives_the_stable_current_next_pair_once() {
         let mut current = [Felt::ZERO; CHIPLETS_WIDTH];
         let mut next = current;
         current[23] = Felt::from_u32(19);
@@ -206,16 +168,15 @@ mod tests {
         );
         let mut fractions = LookupFractions::from_shape(CHIPLET_COLUMN_SHAPE.to_vec(), 1);
         {
-            let inner = ProverLookupBuilder::new(
-                RowWindow::from_two_rows(&current, &next),
-                RowWindow::from_two_rows(&[], &[]),
-                &periodic,
-                &challenges,
-                &MidenAir::Chiplets,
-                &mut fractions,
-            );
-            let mut builder = HookProbe { inner, calls: Cell::new(0) };
-            miden_stark::air::native::migration::eval_lookup(&ChipletsAir, &mut builder, 0);
+            let frame = native_lookup::LookupFrame {
+                main: Rows { current: &current, next: &next },
+                preprocessed: Rows { current: &[], next: &[] },
+                periodic: &periodic,
+            };
+            let inner =
+                ProverLookupBuilder::new(&challenges, &CHIPLET_COLUMN_SHAPE, &mut fractions);
+            let mut builder = HookProbe { inner, calls: Cell::new(0), next: &next };
+            native_lookup::LookupAir::eval(&ChipletsAir, &frame, &mut builder);
             assert_eq!(builder.calls.get(), 1);
         }
         assert_eq!(fractions.counts().len(), CHIPLET_COLUMN_SHAPE.len());

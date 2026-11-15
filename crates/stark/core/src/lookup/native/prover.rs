@@ -97,7 +97,7 @@ where
 /// Exactly one export, `sigma / height`, is initialized here. A source with further exports must
 /// append them in its own declared order before returning its complete `ProverAir` result.
 ///
-/// Chunk collection, inversion and centering use the same arithmetic as the legacy path.
+/// Chunk collection, inversion and centering share the prover callback arithmetic.
 /// All active lookup denominators and the trace-length divisor are assumed nonzero.
 pub fn build_logup_aux_trace<A, F, EF>(
     air: &A,
@@ -226,6 +226,7 @@ mod tests {
 
     struct Fixture {
         active: bool,
+        aux_width: usize,
         periodic: Vec<Vec<Felt>>,
     }
 
@@ -233,6 +234,7 @@ mod tests {
         fn new(active: bool) -> Self {
             Self {
                 active,
+                aux_width: 3,
                 periodic: vec![vec![Felt::ZERO; 2]],
             }
         }
@@ -305,14 +307,13 @@ mod tests {
         }
     }
 
-    // This fixture implements no legacy AIR/source declaration traits.
     impl LiftedAir for Fixture {
         type F = Felt;
 
         fn spec(&self) -> AirSpec<'_, Felt> {
             AirSpec {
                 main_width: 1,
-                aux_width: 3,
+                aux_width: self.aux_width,
                 num_public_values: 0,
                 num_challenges: 2,
                 num_exports: 1,
@@ -377,13 +378,18 @@ mod tests {
     }
 
     #[test]
-    fn inactive_interactions_emit_no_fractions_and_empty_trace_is_typed() {
+    fn inactive_interactions_and_invalid_trace_shapes() {
         let source = Fixture::new(false);
         let main = RowMajorMatrix::new(vec![Felt::ONE; 4], 1);
         let values = [QuadFelt::from_u64(7), QuadFelt::ZERO];
         let witness = source.build_aux_trace(inputs(&main, &values)).unwrap();
         assert!(witness.columns.values.iter().all(Field::is_zero));
         assert_eq!(witness.exports, vec![QuadFelt::ZERO]);
+        let undersized = Fixture { aux_width: 1, ..Fixture::new(false) };
+        assert_eq!(
+            undersized.build_aux_trace(inputs(&main, &values)).unwrap_err(),
+            LookupError::AuxiliaryWidth { width: 1, columns: 2 }
+        );
         let empty = RowMajorMatrix::new(vec![], 1);
         assert_eq!(
             source.build_aux_trace(inputs(&empty, &values)).unwrap_err(),

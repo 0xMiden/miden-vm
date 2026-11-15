@@ -46,7 +46,7 @@ pub(super) struct PeriodicLde<F: TwoAdicField> {
 impl<F: TwoAdicField> PeriodicLde<F> {
     /// Build periodic LDEs from a periodic column matrix.
     ///
-    /// Takes the output of [`crate::air::BaseAir::periodic_columns_matrix`], where
+    /// Takes the output of [`crate::air::native::LiftedAir::spec`], where
     /// columns with smaller periods have been repeated cyclically to the maximum period.
     ///
     /// # Arguments

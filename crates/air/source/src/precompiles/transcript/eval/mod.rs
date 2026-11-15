@@ -56,25 +56,21 @@
 //! first-row `h = public_root`. An empty transcript is `is_zero = 1` on
 //! the first row: `public_root = 0`, nothing provided or consumed.
 
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::borrow::Cow;
 use core::array;
 
 use miden_core::{
     Felt,
     deferred::DEFERRED_AND_DOMAIN,
     field::{PrimeCharacteristicRing, QuadFelt},
-    utils::RowMajorMatrix,
 };
 use miden_precompiles::{CurveId, CurvePrecompile, UintDomain, UintPrecompile};
 use miden_stark::{
-    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
-    lookup::{
-        Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
-        native as native_lookup,
-    },
+    air::native,
+    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, native as native_lookup},
 };
 use native::LiftedAirBuilder as _;
-use p3_field::{Algebra, Dup};
+use p3_field::Dup;
 
 use crate::precompiles::{
     ec::{
@@ -386,59 +382,8 @@ const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [2, 2, 2, 1, 1, 1, 2, 2];
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TranscriptEvalAir;
 
-impl BaseAir<Felt> for TranscriptEvalAir {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
-    }
-
-    fn num_public_values(&self) -> usize {
-        NUM_PUBLIC_VALUES
-    }
-}
-
 // LIFTED AIR — local constraints
 // ================================================================================================
-
-impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        NUM_RANDOMNESS
-    }
-
-    fn aux_width(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
-            self,
-            native::AuxTraceInputs {
-                main,
-                preprocessed: None,
-                public_values: air_inputs,
-                statement: aux_inputs,
-                challenges,
-            },
-        )
-        .expect("valid transcript eval auxiliary inputs");
-        (aux.columns, aux.exports)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        native::migration::eval_source(self, builder);
-    }
-}
 
 impl native::LiftedAir for TranscriptEvalAir {
     type F = Felt;
@@ -754,24 +699,6 @@ impl native::ProverAir<QuadFelt> for TranscriptEvalAir {
 // LOOKUP AIR — bus interactions
 // ================================================================================================
 
-impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for TranscriptEvalAir {
-    fn column_shape(&self) -> &[usize] {
-        &COLUMN_SHAPE
-    }
-
-    fn max_message_width(&self) -> usize {
-        MAX_MESSAGE_WIDTH
-    }
-
-    fn num_bus_ids(&self) -> usize {
-        NUM_BUS_IDS
-    }
-
-    fn eval(&self, builder: &mut LB) {
-        native::migration::eval_lookup(self, builder, 0);
-    }
-}
-
 impl<LB> native_lookup::LookupAir<LB> for TranscriptEvalAir
 where
     LB: native_lookup::LookupBuilder<F = Felt>,
@@ -872,7 +799,7 @@ where
         let output_gate = node.clone() - is_ec_msm + local[COL_IS_MSM_LAST].dup();
 
         // Exact (numerator, denominator) degrees for the interaction forms
-        // below. ValidateLookupAir checks the group and column declarations.
+        // below. Native lookup validation checks the group and column declarations.
         let linear_deg = Deg { v: 1, u: 1 };
         let selected_mult_deg = Deg { v: 2, u: 1 };
         let selected_relation_deg = Deg { v: 1, u: 2 };

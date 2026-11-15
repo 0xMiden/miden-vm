@@ -13,11 +13,10 @@ use alloc::{borrow::Cow, vec::Vec};
 use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
-    utils::RowMajorMatrix,
 };
 use miden_stark::{
-    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
-    lookup::{Deg, LookupAir, LookupBuilder, LookupColumn, LookupMessage, native as native_lookup},
+    air::native,
+    lookup::{Deg, LookupColumn, LookupMessage, native as native_lookup},
 };
 use miden_utils_sync::LazyLock;
 use p3_field::Dup;
@@ -97,63 +96,6 @@ static PERIODIC_COLUMNS: LazyLock<Vec<Vec<Felt>>> = LazyLock::new(|| {
     columns
 });
 
-impl BaseAir<Felt> for Sha512Air {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
-    }
-
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Borrowed(PERIODIC_COLUMNS.as_slice())
-    }
-}
-
-impl LiftedAir<Felt, QuadFelt> for Sha512Air {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn max_periodic_length(&self) -> usize {
-        <compression::Sha512CompressionAir as LiftedAir<Felt, QuadFelt>>::max_periodic_length(
-            &compression::Sha512CompressionAir,
-        )
-    }
-
-    fn num_randomness(&self) -> usize {
-        NUM_RANDOMNESS
-    }
-
-    fn aux_width(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
-            self,
-            native::AuxTraceInputs {
-                main,
-                preprocessed: None,
-                public_values: air_inputs,
-                statement: aux_inputs,
-                challenges,
-            },
-        )
-        .expect("valid SHA-512 auxiliary inputs");
-        (aux.columns, aux.exports)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        native::migration::eval_source(self, builder);
-    }
-}
-
 impl native::LiftedAir for Sha512Air {
     type F = Felt;
 
@@ -212,21 +154,6 @@ impl native::ProverAir<QuadFelt> for Sha512Air {
         inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
     ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
         native_lookup::build_logup_aux_trace(self, inputs)
-    }
-}
-
-impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha512Air {
-    fn column_shape(&self) -> &[usize] {
-        &COLUMN_SHAPE
-    }
-    fn max_message_width(&self) -> usize {
-        MAX_MESSAGE_WIDTH
-    }
-    fn num_bus_ids(&self) -> usize {
-        NUM_BUS_IDS
-    }
-    fn eval(&self, builder: &mut LB) {
-        native::migration::eval_lookup(self, builder, 0);
     }
 }
 
@@ -305,15 +232,8 @@ mod tests {
         field::{PrimeCharacteristicRing, QuadFelt},
     };
     use miden_stark::{
-        air::{
-            LiftedAir,
-            native::{self, AirKernel},
-        },
-        lookup::{
-            Deg, LookupAir,
-            debug::{ValidateLayout, ValidateLookupAir, ValidationBuilder},
-            native as native_lookup,
-        },
+        air::native::{self, AirKernel},
+        lookup::{Deg, native as native_lookup},
     };
 
     fn native_geometry<A>(
@@ -413,20 +333,11 @@ mod tests {
 
     fn validate_degrees<A>(air: A)
     where
-        A: LiftedAir<Felt, QuadFelt>,
-        for<'ab, 'r> A: LookupAir<ValidationBuilder<'ab, 'r>>,
+        A: native::LiftedAir<F = Felt>,
+        for<'a> A: native_lookup::LookupAir<native_lookup::NativeValidationBuilder<'a>>,
     {
-        let layout = air.air_layout();
-        air.validate(ValidateLayout {
-            trace_width: layout.main_width,
-            preprocessed_width: layout.preprocessed_width,
-            num_public_values: layout.num_public_values,
-            num_periodic_columns: layout.num_periodic_columns,
-            permutation_width: layout.permutation_width,
-            num_permutation_challenges: layout.num_permutation_challenges,
-            num_permutation_values: layout.num_permutation_values,
-        })
-        .expect("SHA-512 lookup degree annotations must match their symbolic expressions");
+        native_lookup::validate_native(&air, &native::LiftedAir::spec(&air))
+            .expect("SHA-512 lookup degree annotations must match their symbolic expressions");
     }
 
     #[test]

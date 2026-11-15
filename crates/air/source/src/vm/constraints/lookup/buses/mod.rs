@@ -3,7 +3,7 @@
 //! The Miden VM's LogUp buses are emitted across 8 columns — most host a single bus, but
 //! several host two or more linearly-independent buses sharing one running accumulator via
 //! distinct `bus_prefix[bus]` additive bases (see per-bus module docs for the merges).
-//! Each emitter opens one [`miden_stark::lookup::LookupBuilder::next_column`] closure and fixes
+//! Each emitter opens one [`miden_stark::lookup::native::LookupBuilder::next_column`] closure and fixes
 //! group placement, column degree, and per-row fraction capacity. AEAD and Merkle logic lives in
 //! [`super::operations`]; these emitters call it inside the appropriate column groups.
 //!
@@ -38,8 +38,8 @@
 //!   snapshot consumed by the 4 chiplet-trace emitters.
 //!
 //! Each context is built once per `eval` through an extension-trait hook
-//! ([`super::main_air::MainLookupBuilder::build_op_flags`] /
-//! [`super::chiplet_air::ChipletLookupBuilder::build_chiplet_active`]). Prover-side
+//! ([`super::main_air::NativeMainLookupBuilder::build_op_flags`] /
+//! [`super::chiplet_air::NativeChipletLookupBuilder::build_chiplet_active`]). Prover-side
 //! implementations can override those hooks with boolean fast paths without changing
 //! emitter code. Chiplet membership is decoded centrally by
 //! [`crate::vm::constraints::chiplets::selectors`].

@@ -194,7 +194,6 @@ windows-sys     = { version = "0.61.2" }
 x25519-dalek    = { version = "3.0.0", default-features = false }
 zerocopy        = { version = "0.8", default-features = false, features = ["derive"] }
 
-p3-air           = { version = "0.8.0", default-features = false }
 p3-blake3        = { version = "0.8.0", default-features = false }
 p3-bn254         = { version = "0.8.0", default-features = false }
 p3-challenger    = { version = "0.8.0", default-features = false }

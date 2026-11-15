@@ -1,12 +1,11 @@
 //! Single AIR self-validation entry point, backed by one unified walker.
 //!
-//! Exposes one free function, [`validate`], and one extension trait,
-//! [`ValidateLookupAir`], so any qualifying [`LookupAir`] can be checked with
-//! `air.validate(layout)`. One short-circuit [`Result<(), ValidationError>`] covers:
+//! [`validate_native`] checks a lookup declaration against its checked source schema.
+//! One short-circuit [`Result<(), ValidationError>`] covers:
 //!
 //! - `column_shape().len()` declared vs observed (the walker counts `next_column` calls).
 //! - Per-group and per-column `Deg { v, u }` declared vs observed (via
-//!   [`SymbolicExpression::degree_multiple`] on the running `(V, U)`).
+//!   [`native::symbolic::SymbolicExpression::degree_multiple`] on the running `(V, U)`).
 //! - Cached-encoding canonical vs encoded `(V, U)` equivalence, checked by evaluating the symbolic
 //!   difference `U_c·V_e − U_e·V_c` at a random row.
 //! - Group scope: no illegal [`LookupGroup::insert_encoded`] outside the `encoded` closure.
@@ -17,39 +16,26 @@
 //! blur this module's purpose.
 
 use alloc::vec::Vec;
-use core::{fmt, marker::PhantomData};
+use core::fmt;
 
 use miden_crypto::{
     Felt,
-    field::{Algebra, BinomialExtensionField, PrimeCharacteristicRing},
+    field::{BinomialExtensionField, PrimeCharacteristicRing},
 };
 use rand::RngExt;
 
-use super::super::{
-    Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
-    LookupMessage,
-};
+use super::super::{Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage};
 use crate::air::native;
-use crate::air::{
-    AirBuilder, PermutationAirBuilder,
-    symbolic::{
-        BaseEntry, BaseLeaf, ExtEntry, ExtLeaf, SymbolicAirBuilder, SymbolicExpr,
-        SymbolicExpression, SymbolicExpressionExt, SymbolicVariable, SymbolicVariableExt,
-    },
-};
 use crate::lookup::native as native_lookup;
 
 type QuadFelt = BinomialExtensionField<Felt, 2>;
-type Inner = SymbolicAirBuilder<Felt, QuadFelt>;
-type Expr = SymbolicExpression<Felt>;
-type ExprEF = SymbolicExpressionExt<Felt, QuadFelt>;
 type NativeExpr = native::symbolic::SymbolicExpression<Felt>;
 type NativeExprEF = native::symbolic::SymbolicExpressionExt<Felt, QuadFelt>;
 
 // VALIDATION ERROR
 // ================================================================================================
 
-/// First problem [`validate`] observed. See the module docstring for the per-check
+/// First problem [`validate_native`] observed. See the module docstring for the per-check
 /// semantics; each variant corresponds to one of the checks.
 #[derive(Clone, Debug)]
 pub enum ValidationError {
@@ -57,7 +43,7 @@ pub enum ValidationError {
     Spec(native::SpecError),
     /// Lookup challenge encoding requires the alpha/beta prefix.
     Challenges { declared: usize },
-    /// [`LookupAir::column_shape`] disagreed with the number of `next_column` calls issued by
+    /// [`native_lookup::LookupAir::column_shape`] disagreed with the number of `next_column` calls issued by
     /// `eval`.
     NumColumnsMismatch { declared: usize, observed: usize },
     /// A column's declared `Deg` differs from the observed symbolic degree of
@@ -134,66 +120,13 @@ impl fmt::Display for ValidationError {
     }
 }
 
-// LAYOUT
-// ================================================================================================
-
-/// Subset of the full `AirLayout` struct that [`validate`] actually consumes. Kept
-/// local so callers don't need to thread prover-only fields (permutation width,
-/// committed final count) through just to run the self-check.
-#[derive(Clone, Copy, Debug)]
-pub struct ValidateLayout {
-    pub preprocessed_width: usize,
-    pub trace_width: usize,
-    pub num_public_values: usize,
-    pub num_periodic_columns: usize,
-    pub permutation_width: usize,
-    pub num_permutation_challenges: usize,
-    pub num_permutation_values: usize,
-}
-
-impl ValidateLayout {
-    fn to_symbolic(self) -> crate::air::symbolic::AirLayout {
-        crate::air::symbolic::AirLayout {
-            preprocessed_width: self.preprocessed_width,
-            main_width: self.trace_width,
-            num_public_values: self.num_public_values,
-            permutation_width: self.permutation_width,
-            num_permutation_challenges: self.num_permutation_challenges,
-            num_permutation_values: self.num_permutation_values,
-            num_periodic_columns: self.num_periodic_columns,
-        }
-    }
-}
-
 // VALIDATE
-// ================================================================================================
-
-/// Run every AIR self-check in one walk.
-///
-/// Short-circuits on the first problem. See [`ValidationError`] for the variants.
-pub fn validate<A>(air: &A, layout: ValidateLayout) -> Result<(), ValidationError>
-where
-    for<'ab, 'r> A: LookupAir<ValidationBuilder<'ab, 'r>>,
-{
-    let sampled =
-        SampledRow::new(layout.trace_width, layout.preprocessed_width, layout.num_periodic_columns);
-    let mut sym = SymbolicAirBuilder::<Felt, QuadFelt>::new(layout.to_symbolic());
-    let row_valuation = sampled.valuation();
-    let mut builder = ValidationBuilder::new(&mut sym, air, row_valuation);
-    air.eval(&mut builder);
-    match builder.take_error() {
-        Some(err) => Err(err),
-        None => Ok(()),
-    }
-}
-
-// NATIVE VALIDATE
 // ================================================================================================
 
 /// Validate a native lookup declaration over expression-valued borrowed rows.
 ///
-/// This diagnostic uses the same production Felt/QuadFelt field pair as [`validate`]; it does not
-/// claim generic-field coverage. The borrowed schema is checked before symbolic allocation or
+/// This diagnostic uses the production Felt/QuadFelt field pair; it does not claim generic-field
+/// coverage. The borrowed schema is checked before symbolic allocation or
 /// random sampling. Every cached description within this walk uses one shared concrete valuation.
 /// Public, auxiliary and export leaves are outside the lookup frame and remain invalid inputs.
 pub fn validate_native<A>(air: &A, spec: &native::AirSpec<'_, Felt>) -> Result<(), ValidationError>
@@ -238,8 +171,8 @@ where
 
 /// Native top-level driver for the shared validation column/group/batch callbacks.
 ///
-/// Rows are borrowed separately by the declaration. This driver contains no upstream symbolic
-/// builder or variable/window facade; its callbacks retain native expression trees directly.
+/// Rows are borrowed separately by the declaration; callbacks retain symbolic expression trees
+/// directly.
 pub struct NativeValidationBuilder<'r> {
     sym_challenges: Challenges<NativeExprEF>,
     row_valuation: RowValuation<'r>,
@@ -279,7 +212,7 @@ impl<'r> native_lookup::LookupBuilder for NativeValidationBuilder<'r> {
     type ExprEF = NativeExprEF;
 
     type Column<'c>
-        = ValidationColumn<'c, 'r, NativeExpr, NativeExprEF>
+        = ValidationColumn<'c, 'r>
     where
         Self: 'c;
 
@@ -287,36 +220,13 @@ impl<'r> native_lookup::LookupBuilder for NativeValidationBuilder<'r> {
         let column_idx = self.column_idx;
         self.column_idx += 1;
         let already_errored = self.error.is_some();
-        let mut column = ValidationColumn::new(
-            &self.sym_challenges,
-            self.row_valuation,
-            column_idx,
-            native_operations(),
-        );
+        let mut column =
+            ValidationColumn::new(&self.sym_challenges, self.row_valuation, column_idx);
         let result = f(&mut column);
         if !already_errored {
             self.error = column.finish(deg);
         }
         result
-    }
-}
-
-// EXTENSION TRAIT
-// ================================================================================================
-
-/// Extension trait that adapts [`validate`] into a method on any qualifying
-/// [`LookupAir`]. Call sites write `MyLookupAir.validate(layout)` instead of
-/// `validate(&MyLookupAir, layout)`.
-pub trait ValidateLookupAir {
-    fn validate(&self, layout: ValidateLayout) -> Result<(), ValidationError>;
-}
-
-impl<A> ValidateLookupAir for A
-where
-    for<'ab, 'r> A: LookupAir<ValidationBuilder<'ab, 'r>>,
-{
-    fn validate(&self, layout: ValidateLayout) -> Result<(), ValidationError> {
-        validate(self, layout)
     }
 }
 
@@ -376,71 +286,6 @@ struct RowValuation<'r> {
     beta: QuadFelt,
 }
 
-impl<'r> RowValuation<'r> {
-    fn eval_base(&self, expr: &Expr) -> Felt {
-        match expr {
-            SymbolicExpr::Leaf(leaf) => self.eval_base_leaf(leaf),
-            SymbolicExpr::Add { x, y, .. } => self.eval_base(x) + self.eval_base(y),
-            SymbolicExpr::Sub { x, y, .. } => self.eval_base(x) - self.eval_base(y),
-            SymbolicExpr::Neg { x, .. } => -self.eval_base(x),
-            SymbolicExpr::Mul { x, y, .. } => self.eval_base(x) * self.eval_base(y),
-        }
-    }
-
-    fn eval_base_leaf(&self, leaf: &BaseLeaf<Felt>) -> Felt {
-        match leaf {
-            BaseLeaf::Constant(c) => *c,
-            BaseLeaf::Variable(SymbolicVariable { entry, index, .. }) => match entry {
-                BaseEntry::Main { offset: 0 } => self.current[*index],
-                BaseEntry::Main { offset: 1 } => self.next[*index],
-                BaseEntry::Periodic => self.periodic[*index],
-                BaseEntry::Preprocessed { offset: 0 } => self.preprocessed_current[*index],
-                BaseEntry::Preprocessed { offset: 1 } => self.preprocessed_next[*index],
-                BaseEntry::Main { offset } | BaseEntry::Preprocessed { offset } => {
-                    panic!("unexpected {entry:?} offset {offset} in LookupAir::eval")
-                },
-                // LookupBuilder doesn't expose public values, and LookupAir::eval can't
-                // construct these leaves.
-                BaseEntry::Public => panic!("unexpected {entry:?} leaf in LookupAir::eval"),
-            },
-            // Selector leaves are only produced by `AirBuilder::is_first_row` / etc.,
-            // which LookupBuilder does not expose.
-            BaseLeaf::IsFirstRow | BaseLeaf::IsLastRow | BaseLeaf::IsTransition => {
-                panic!("selector leaf {leaf:?} unexpected in LookupAir::eval")
-            },
-        }
-    }
-
-    fn eval_ext(&self, expr: &ExprEF) -> QuadFelt {
-        match expr {
-            SymbolicExpr::Leaf(leaf) => self.eval_ext_leaf(leaf),
-            SymbolicExpr::Add { x, y, .. } => self.eval_ext(x) + self.eval_ext(y),
-            SymbolicExpr::Sub { x, y, .. } => self.eval_ext(x) - self.eval_ext(y),
-            SymbolicExpr::Neg { x, .. } => -self.eval_ext(x),
-            SymbolicExpr::Mul { x, y, .. } => self.eval_ext(x) * self.eval_ext(y),
-        }
-    }
-
-    fn eval_ext_leaf(&self, leaf: &ExtLeaf<Felt, QuadFelt>) -> QuadFelt {
-        match leaf {
-            ExtLeaf::Base(inner) => self.eval_base(inner).into(),
-            ExtLeaf::ExtConstant(c) => *c,
-            ExtLeaf::ExtVariable(SymbolicVariableExt { entry, index, .. }) => match entry {
-                ExtEntry::Challenge => match *index {
-                    0 => self.alpha,
-                    1 => self.beta,
-                    i => panic!("unexpected challenge index {i} in LookupAir::eval"),
-                },
-                // LookupBuilder doesn't expose permutation columns or permutation
-                // values — the prover-side builder is the only one that touches them.
-                ExtEntry::Permutation { .. } | ExtEntry::PermutationValue => {
-                    panic!("unexpected {entry:?} leaf in LookupAir::eval")
-                },
-            },
-        }
-    }
-}
-
 impl RowValuation<'_> {
     fn eval_native_base(&self, expression: &NativeExpr) -> Felt {
         use native::symbolic::{BaseInput, BaseLeaf, SymbolicExpr};
@@ -493,100 +338,6 @@ impl RowValuation<'_> {
     }
 }
 
-// BUILDER
-// ================================================================================================
-
-/// Unified walker that cross-checks `(V, U)` degrees, cached-encoding equivalence,
-/// and group scope in a single pass over [`LookupAir::eval`]. The first
-/// error observed is preserved in an internal slot; any later problem is ignored
-/// so [`validate`] can short-circuit cleanly once `eval` returns.
-pub struct ValidationBuilder<'ab, 'r> {
-    ab: &'ab mut Inner,
-    sym_challenges: Challenges<ExprEF>,
-    row_valuation: RowValuation<'r>,
-    column_idx: usize,
-    declared_columns: usize,
-    error: Option<ValidationError>,
-}
-
-impl<'ab, 'r> ValidationBuilder<'ab, 'r> {
-    fn new<A>(ab: &'ab mut Inner, air: &A, row_valuation: RowValuation<'r>) -> Self
-    where
-        A: LookupAir<Self>,
-    {
-        let (alpha, beta): (ExprEF, ExprEF) = {
-            let r = ab.permutation_randomness();
-            (r[0].into(), r[1].into())
-        };
-        let sym_challenges =
-            Challenges::<ExprEF>::new(alpha, beta, air.max_message_width(), air.num_bus_ids());
-        Self {
-            ab,
-            sym_challenges,
-            row_valuation,
-            column_idx: 0,
-            declared_columns: air.column_shape().len(),
-            error: None,
-        }
-    }
-
-    fn take_error(self) -> Option<ValidationError> {
-        finish_columns(self.error, self.declared_columns, self.column_idx)
-    }
-}
-
-impl<'ab, 'r> LookupBuilder for ValidationBuilder<'ab, 'r> {
-    type F = Felt;
-    type Expr = Expr;
-    type Var = SymbolicVariable<Felt>;
-
-    type EF = QuadFelt;
-    type ExprEF = ExprEF;
-    type VarEF = SymbolicVariableExt<Felt, QuadFelt>;
-
-    type PeriodicVar = SymbolicVariable<Felt>;
-
-    type MainWindow = <Inner as AirBuilder>::MainWindow;
-    type PreprocessedWindow = <Inner as AirBuilder>::PreprocessedWindow;
-
-    type Column<'c>
-        = ValidationColumn<'c, 'r>
-    where
-        Self: 'c;
-
-    fn main(&self) -> Self::MainWindow {
-        self.ab.main()
-    }
-
-    fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        self.ab.preprocessed()
-    }
-
-    fn periodic_values(&self) -> &[Self::PeriodicVar] {
-        self.ab.periodic_values()
-    }
-
-    fn next_column<'c, R>(&'c mut self, f: impl FnOnce(&mut Self::Column<'c>) -> R, deg: Deg) -> R {
-        let column_idx = self.column_idx;
-        self.column_idx += 1;
-
-        let already_errored = self.error.is_some();
-        let mut col = ValidationColumn::new(
-            &self.sym_challenges,
-            self.row_valuation,
-            column_idx,
-            legacy_operations(),
-        );
-        let result = f(&mut col);
-
-        if !already_errored {
-            self.error = col.finish(deg);
-        }
-
-        result
-    }
-}
-
 fn finish_columns(
     error: Option<ValidationError>,
     declared: usize,
@@ -597,69 +348,44 @@ fn finish_columns(
     })
 }
 
-/// Only raw diagnostic degree and concrete valuation differ between the two symbolic ASTs.
-/// All column/group/batch arithmetic and validation policy remains in the shared callbacks below.
-struct ExpressionOperations<E> {
-    raw_degree: fn(&E) -> usize,
-    evaluate: for<'r> fn(RowValuation<'r>, &E) -> QuadFelt,
-}
-
-fn legacy_operations() -> ExpressionOperations<ExprEF> {
-    ExpressionOperations {
-        raw_degree: ExprEF::degree_multiple,
-        evaluate: |valuation, expression| valuation.eval_ext(expression),
-    }
-}
-
-fn native_operations() -> ExpressionOperations<NativeExprEF> {
-    ExpressionOperations {
-        raw_degree: NativeExprEF::degree_multiple,
-        evaluate: |valuation, expression| valuation.eval_native_ext(expression),
-    }
-}
-
 // COLUMN
 // ================================================================================================
 
-pub struct ValidationColumn<'c, 'r, B: PrimeCharacteristicRing = Expr, E: Algebra<B> = ExprEF> {
-    challenges: &'c Challenges<E>,
+pub struct ValidationColumn<'c, 'r> {
+    challenges: &'c Challenges<NativeExprEF>,
     row_valuation: RowValuation<'r>,
-    operations: ExpressionOperations<E>,
-    u: E,
-    v: E,
+
+    u: NativeExprEF,
+    v: NativeExprEF,
     column_idx: usize,
     next_group_idx: usize,
     /// First group-level error observed while walking this column, drained by
-    /// [`ValidationBuilder::next_column`] after the closure returns.
+    /// [`NativeValidationBuilder::next_column`] after the closure returns.
     error: Option<ValidationError>,
-    _phantom: PhantomData<B>,
 }
 
-impl<'c, 'r, B: PrimeCharacteristicRing, E: Algebra<B>> ValidationColumn<'c, 'r, B, E> {
+impl<'c, 'r> ValidationColumn<'c, 'r> {
     fn new(
-        challenges: &'c Challenges<E>,
+        challenges: &'c Challenges<NativeExprEF>,
         row_valuation: RowValuation<'r>,
         column_idx: usize,
-        operations: ExpressionOperations<E>,
     ) -> Self {
         Self {
             challenges,
             row_valuation,
-            operations,
-            u: E::ONE,
-            v: E::ZERO,
+            u: NativeExprEF::ONE,
+            v: NativeExprEF::ZERO,
             column_idx,
             next_group_idx: 0,
             error: None,
-            _phantom: PhantomData,
         }
     }
 
     fn finish(self, declared: Deg) -> Option<ValidationError> {
         self.error.or_else(|| {
             let observed = Deg {
-                v: (self.operations.raw_degree)(&self.v),
-                u: (self.operations.raw_degree)(&self.u),
+                v: self.v.degree_multiple(),
+                u: self.u.degree_multiple(),
             };
             (observed != declared).then_some(ValidationError::ColumnDegreeMismatch {
                 column_idx: self.column_idx,
@@ -669,7 +395,7 @@ impl<'c, 'r, B: PrimeCharacteristicRing, E: Algebra<B>> ValidationColumn<'c, 'r,
         })
     }
 
-    fn fold_group(&mut self, u_g: E, v_g: E) {
+    fn fold_group(&mut self, u_g: NativeExprEF, v_g: NativeExprEF) {
         self.v = self.v.clone() * u_g.clone() + v_g * self.u.clone();
         self.u = self.u.clone() * u_g;
     }
@@ -679,15 +405,15 @@ impl<'c, 'r, B: PrimeCharacteristicRing, E: Algebra<B>> ValidationColumn<'c, 'r,
         name: &'static str,
         group_idx: usize,
         declared: Deg,
-        u: &E,
-        v: &E,
+        u: &NativeExprEF,
+        v: &NativeExprEF,
     ) {
         if self.error.is_some() {
             return;
         }
         let observed = Deg {
-            v: (self.operations.raw_degree)(v),
-            u: (self.operations.raw_degree)(u),
+            v: v.degree_multiple(),
+            u: u.degree_multiple(),
         };
         if observed != declared {
             self.error = Some(ValidationError::GroupDegreeMismatch {
@@ -704,28 +430,25 @@ impl<'c, 'r, B: PrimeCharacteristicRing, E: Algebra<B>> ValidationColumn<'c, 'r,
 /// Build a fresh group scoped to `challenges`. Taken as a free function (not a
 /// method) so calling it doesn't borrow the containing `ValidationColumn` —
 /// the caller can still mutate `self.error` while the group is alive.
-fn fresh_group<'g, B: PrimeCharacteristicRing, E: Algebra<B>>(
-    challenges: &'g Challenges<E>,
+fn fresh_group<'g>(
+    challenges: &'g Challenges<NativeExprEF>,
     inside_encoded_closure: bool,
-) -> ValidationGroup<'g, B, E> {
+) -> ValidationGroup<'g> {
     ValidationGroup {
         challenges,
-        u: E::ONE,
-        v: E::ZERO,
+        u: NativeExprEF::ONE,
+        v: NativeExprEF::ZERO,
         inside_encoded_closure,
         used_insert_encoded: false,
-        _phantom: PhantomData,
     }
 }
 
-impl<'c, 'r, B: PrimeCharacteristicRing, E: Algebra<B>> LookupColumn
-    for ValidationColumn<'c, 'r, B, E>
-{
-    type Expr = B;
-    type ExprEF = E;
+impl<'c, 'r> LookupColumn for ValidationColumn<'c, 'r> {
+    type Expr = NativeExpr;
+    type ExprEF = NativeExprEF;
 
     type Group<'g>
-        = ValidationGroup<'g, B, E>
+        = ValidationGroup<'g>
     where
         Self: 'g;
 
@@ -777,7 +500,7 @@ impl<'c, 'r, B: PrimeCharacteristicRing, E: Algebra<B>> LookupColumn
         // at the shared random row.
         if self.error.is_none() {
             let diff_expr = canon.v.clone() * enc.u.clone() - enc.v.clone() * canon.u;
-            let diff = (self.operations.evaluate)(self.row_valuation, &diff_expr);
+            let diff = self.row_valuation.eval_native_ext(&diff_expr);
             if diff != QuadFelt::ZERO {
                 self.error = Some(ValidationError::EncodingMismatch {
                     column_idx: self.column_idx,
@@ -799,10 +522,10 @@ impl<'c, 'r, B: PrimeCharacteristicRing, E: Algebra<B>> LookupColumn
 // GROUP
 // ================================================================================================
 
-pub struct ValidationGroup<'g, B: PrimeCharacteristicRing = Expr, E: Algebra<B> = ExprEF> {
-    challenges: &'g Challenges<E>,
-    u: E,
-    v: E,
+pub struct ValidationGroup<'g> {
+    challenges: &'g Challenges<NativeExprEF>,
+    u: NativeExprEF,
+    v: NativeExprEF,
     /// Set when this group was opened via the `encoded` closure of
     /// `group_with_cached_encoding`; toggles the legal use of `insert_encoded`.
     inside_encoded_closure: bool,
@@ -810,91 +533,94 @@ pub struct ValidationGroup<'g, B: PrimeCharacteristicRing = Expr, E: Algebra<B> 
     /// inspects this flag at close time and raises `ScopeViolation` if the group
     /// was simple.
     used_insert_encoded: bool,
-    _phantom: PhantomData<B>,
 }
 
-impl<'g, B: PrimeCharacteristicRing, E: Algebra<B>> LookupGroup for ValidationGroup<'g, B, E> {
-    type Expr = B;
-    type ExprEF = E;
+impl<'g> LookupGroup for ValidationGroup<'g> {
+    type Expr = NativeExpr;
+    type ExprEF = NativeExprEF;
 
     type Batch<'b>
-        = ValidationBatch<'b, B, E>
+        = ValidationBatch<'b>
     where
         Self: 'b;
 
-    fn add<M>(&mut self, _name: &'static str, flag: B, msg: impl FnOnce() -> M, _deg: Deg)
+    fn add<M>(&mut self, _name: &'static str, flag: NativeExpr, msg: impl FnOnce() -> M, _deg: Deg)
     where
-        M: LookupMessage<B, E>,
+        M: LookupMessage<NativeExpr, NativeExprEF>,
     {
         let v_msg = msg().encode(self.challenges);
-        self.u += (v_msg - E::ONE) * flag.clone();
+        self.u += (v_msg - NativeExprEF::ONE) * flag.clone();
         self.v += flag;
     }
 
-    fn remove<M>(&mut self, _name: &'static str, flag: B, msg: impl FnOnce() -> M, _deg: Deg)
-    where
-        M: LookupMessage<B, E>,
+    fn remove<M>(
+        &mut self,
+        _name: &'static str,
+        flag: NativeExpr,
+        msg: impl FnOnce() -> M,
+        _deg: Deg,
+    ) where
+        M: LookupMessage<NativeExpr, NativeExprEF>,
     {
         let v_msg = msg().encode(self.challenges);
-        self.u += (v_msg - E::ONE) * flag.clone();
+        self.u += (v_msg - NativeExprEF::ONE) * flag.clone();
         self.v -= flag;
     }
 
     fn insert<M>(
         &mut self,
         _name: &'static str,
-        flag: B,
-        multiplicity: B,
+        flag: NativeExpr,
+        multiplicity: NativeExpr,
         msg: impl FnOnce() -> M,
         _deg: Deg,
     ) where
-        M: LookupMessage<B, E>,
+        M: LookupMessage<NativeExpr, NativeExprEF>,
     {
         let v_msg = msg().encode(self.challenges);
-        self.u += (v_msg - E::ONE) * flag.clone();
+        self.u += (v_msg - NativeExprEF::ONE) * flag.clone();
         self.v += flag * multiplicity;
     }
 
     fn batch<'b>(
         &'b mut self,
         _name: &'static str,
-        flag: B,
+        flag: NativeExpr,
         build: impl FnOnce(&mut Self::Batch<'b>),
         _deg: Deg,
     ) {
         let mut batch = ValidationBatch {
             challenges: self.challenges,
-            n: E::ZERO,
-            d: E::ONE,
-            _phantom: PhantomData,
+            n: NativeExprEF::ZERO,
+            d: NativeExprEF::ONE,
         };
         build(&mut batch);
         let ValidationBatch { n, d, .. } = batch;
-        self.u += (d - E::ONE) * flag.clone();
+        self.u += (d - NativeExprEF::ONE) * flag.clone();
         self.v += n * flag;
     }
 
-    fn beta_powers(&self) -> &[E] {
+    fn beta_powers(&self) -> &[NativeExprEF] {
         &self.challenges.beta_powers[..]
     }
 
-    fn bus_prefix(&self, bus_id: usize) -> E {
+    fn bus_prefix(&self, bus_id: usize) -> NativeExprEF {
         self.challenges.bus_prefix[bus_id].clone()
     }
 
     fn insert_encoded(
         &mut self,
         _name: &'static str,
-        flag: B,
-        multiplicity: B,
-        encoded: impl FnOnce() -> E,
+        flag: NativeExpr,
+        multiplicity: NativeExpr,
+        encoded: impl FnOnce() -> NativeExprEF,
         _deg: Deg,
     ) {
         if !self.inside_encoded_closure {
             self.used_insert_encoded = true;
         }
         let v_msg = encoded();
-        self.u += (v_msg - E::ONE) * flag.clone();
+        self.u += (v_msg - NativeExprEF::ONE) * flag.clone();
         self.v += flag * multiplicity;
     }
 }
@@ -902,20 +628,19 @@ impl<'g, B: PrimeCharacteristicRing, E: Algebra<B>> LookupGroup for ValidationGr
 // BATCH
 // ================================================================================================
 
-pub struct ValidationBatch<'b, B: PrimeCharacteristicRing = Expr, E: Algebra<B> = ExprEF> {
-    challenges: &'b Challenges<E>,
-    n: E,
-    d: E,
-    _phantom: PhantomData<B>,
+pub struct ValidationBatch<'b> {
+    challenges: &'b Challenges<NativeExprEF>,
+    n: NativeExprEF,
+    d: NativeExprEF,
 }
 
-impl<'b, B: PrimeCharacteristicRing, E: Algebra<B>> LookupBatch for ValidationBatch<'b, B, E> {
-    type Expr = B;
-    type ExprEF = E;
+impl<'b> LookupBatch for ValidationBatch<'b> {
+    type Expr = NativeExpr;
+    type ExprEF = NativeExprEF;
 
-    fn insert<M>(&mut self, _name: &'static str, multiplicity: B, msg: M, _deg: Deg)
+    fn insert<M>(&mut self, _name: &'static str, multiplicity: NativeExpr, msg: M, _deg: Deg)
     where
-        M: LookupMessage<B, E>,
+        M: LookupMessage<NativeExpr, NativeExprEF>,
     {
         let v_msg = msg.encode(self.challenges);
         let d_prev = self.d.clone();
@@ -926,8 +651,8 @@ impl<'b, B: PrimeCharacteristicRing, E: Algebra<B>> LookupBatch for ValidationBa
     fn insert_encoded(
         &mut self,
         _name: &'static str,
-        multiplicity: B,
-        encoded: impl FnOnce() -> E,
+        multiplicity: NativeExpr,
+        encoded: impl FnOnce() -> NativeExprEF,
         _deg: Deg,
     ) {
         let v_msg = encoded();
@@ -942,7 +667,7 @@ mod tests {
     use alloc::{borrow::Cow, vec};
     use core::cell::Cell;
 
-    use p3_field::Dup;
+    use p3_field::{Algebra, Dup};
 
     use super::*;
 
@@ -1117,22 +842,6 @@ mod tests {
         }
     }
 
-    // A test-only legacy facade reaches the same declaration, not a second equation body.
-    impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Probe {
-        fn column_shape(&self) -> &[usize] {
-            self.shape()
-        }
-        fn max_message_width(&self) -> usize {
-            1
-        }
-        fn num_bus_ids(&self) -> usize {
-            1
-        }
-        fn eval(&self, builder: &mut LB) {
-            native::migration::eval_lookup(self, builder, 1);
-        }
-    }
-
     fn spec() -> native::AirSpec<'static, Felt> {
         native::AirSpec {
             main_width: 1,
@@ -1145,20 +854,8 @@ mod tests {
         }
     }
 
-    fn layout(spec: &native::AirSpec<'_, Felt>) -> ValidateLayout {
-        ValidateLayout {
-            preprocessed_width: spec.preprocessed_width(),
-            trace_width: spec.main_width,
-            num_public_values: spec.num_public_values,
-            num_periodic_columns: spec.periodic_columns.len(),
-            permutation_width: spec.aux_width,
-            num_permutation_challenges: spec.num_challenges,
-            num_permutation_values: spec.num_exports,
-        }
-    }
-
     #[test]
-    fn old_and_native_callbacks_share_degree_cache_scope_and_column_checks() {
+    fn native_callbacks_check_degrees_cache_scope_and_columns() {
         for issue in [
             Issue::None,
             Issue::PlainEncodedBatch,
@@ -1171,45 +868,44 @@ mod tests {
         ] {
             let probe = Probe::new(issue);
             let spec = spec();
-            for result in [validate(&probe, layout(&spec)), validate_native(&probe, &spec)] {
-                match issue {
-                    Issue::None | Issue::PlainEncodedBatch => result.unwrap(),
-                    Issue::GroupDegree => assert!(matches!(
-                        result,
-                        Err(ValidationError::GroupDegreeMismatch {
-                            column_idx: 0,
-                            group_idx: 0,
-                            name: "probe",
-                            declared: Deg { v: 2, u: 3 },
-                            observed: Deg { v: 1, u: 2 }
-                        })
-                    )),
-                    Issue::ColumnDegree => assert!(matches!(
-                        result,
-                        Err(ValidationError::ColumnDegreeMismatch {
-                            column_idx: 0,
-                            declared: Deg { v: 2, u: 3 },
-                            observed: Deg { v: 1, u: 2 }
-                        })
-                    )),
-                    Issue::ColumnCount => assert!(matches!(
-                        result,
-                        Err(ValidationError::NumColumnsMismatch { declared: 2, observed: 1 })
-                    )),
-                    Issue::CachedMismatch => assert!(
-                        matches!(result, Err(ValidationError::EncodingMismatch { column_idx: 0, group_idx: 0, name: "probe", diff }) if diff == QuadFelt::ONE)
-                    ),
-                    Issue::SimpleScope | Issue::CanonicalScope => assert!(matches!(
-                        result,
-                        Err(ValidationError::ScopeViolation {
-                            column_idx: 0,
-                            group_idx: 0,
-                            name: "probe"
-                        })
-                    )),
-                }
+            let result = validate_native(&probe, &spec);
+            match issue {
+                Issue::None | Issue::PlainEncodedBatch => result.unwrap(),
+                Issue::GroupDegree => assert!(matches!(
+                    result,
+                    Err(ValidationError::GroupDegreeMismatch {
+                        column_idx: 0,
+                        group_idx: 0,
+                        name: "probe",
+                        declared: Deg { v: 2, u: 3 },
+                        observed: Deg { v: 1, u: 2 }
+                    })
+                )),
+                Issue::ColumnDegree => assert!(matches!(
+                    result,
+                    Err(ValidationError::ColumnDegreeMismatch {
+                        column_idx: 0,
+                        declared: Deg { v: 2, u: 3 },
+                        observed: Deg { v: 1, u: 2 }
+                    })
+                )),
+                Issue::ColumnCount => assert!(matches!(
+                    result,
+                    Err(ValidationError::NumColumnsMismatch { declared: 2, observed: 1 })
+                )),
+                Issue::CachedMismatch => assert!(
+                    matches!(result, Err(ValidationError::EncodingMismatch { column_idx: 0, group_idx: 0, name: "probe", diff }) if diff == QuadFelt::ONE)
+                ),
+                Issue::SimpleScope | Issue::CanonicalScope => assert!(matches!(
+                    result,
+                    Err(ValidationError::ScopeViolation {
+                        column_idx: 0,
+                        group_idx: 0,
+                        name: "probe"
+                    })
+                )),
             }
-            assert_eq!(probe.calls.get(), 2);
+            assert_eq!(probe.calls.get(), 1);
         }
     }
 
@@ -1233,8 +929,7 @@ mod tests {
     }
 
     #[test]
-    fn old_and_native_visitors_use_the_same_explicit_namespaced_assignment() {
-        use crate::air::WindowAccess;
+    fn native_visitor_uses_explicit_namespaced_assignment() {
         use native::symbolic::{AuxInput, BaseInput, RowOffset};
 
         let current = [Felt::from_u32(1)];
@@ -1253,17 +948,6 @@ mod tests {
             alpha,
             beta,
         };
-        let symbolic = Inner::new(layout(&spec()).to_symbolic());
-        let main = symbolic.main();
-        let preprocessed = symbolic.preprocessed();
-        let legacy_base = Expr::from(main.current_slice()[0])
-            + Expr::from(main.next_slice()[0]) * Felt::from_u32(2)
-            + Expr::from(preprocessed.current_slice()[0]) * Felt::from_u32(3)
-            + Expr::from(preprocessed.next_slice()[0]) * Felt::from_u32(4)
-            + Expr::from(symbolic.periodic_values()[0]) * Felt::from_u32(5);
-        let legacy = ExprEF::from(legacy_base)
-            + ExprEF::from(symbolic.permutation_randomness()[0])
-            + ExprEF::from(symbolic.permutation_randomness()[1]) * Felt::TWO;
         let native_base =
             NativeExpr::input(BaseInput::Main { offset: RowOffset::Current, index: 0 })
                 + NativeExpr::input(BaseInput::Main { offset: RowOffset::Next, index: 0 })
@@ -1279,7 +963,6 @@ mod tests {
             + NativeExprEF::input(AuxInput::Challenge(0))
             + NativeExprEF::input(AuxInput::Challenge(1)) * Felt::TWO;
         let expected = QuadFelt::from(Felt::from_u32(55)) + alpha + beta.double();
-        assert_eq!(valuation.eval_ext(&legacy), expected);
         assert_eq!(valuation.eval_native_ext(&native), expected);
     }
 

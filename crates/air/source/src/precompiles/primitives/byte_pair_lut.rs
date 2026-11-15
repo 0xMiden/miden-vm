@@ -36,10 +36,10 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_stark::{
-    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
+    air::native,
     lookup::{
-        Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
-        LookupMessage, native as native_lookup,
+        Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage,
+        native as native_lookup,
     },
 };
 
@@ -260,78 +260,6 @@ where
 #[derive(Debug, Default, Clone, Copy)]
 pub struct BytePairLutAir;
 
-impl BaseAir<Felt> for BytePairLutAir {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
-    }
-
-    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
-        Some(preprocessed_table())
-    }
-
-    fn preprocessed_width(&self) -> usize {
-        NUM_PREPROCESSED_COLS
-    }
-}
-
-impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn log_preprocessed_height(&self) -> Option<u8> {
-        Some(LOG_TRACE_HEIGHT)
-    }
-
-    fn num_randomness(&self) -> usize {
-        // Single global (α, β) pair shared across all relations; each
-        // relation's bus_prefix keeps encodings unambiguous.
-        NUM_RANDOMNESS
-    }
-
-    fn aux_width(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        build_aux(main, challenges)
-    }
-
-    fn build_aux_trace_with_preprocessed(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        preprocessed: Option<&RowMajorMatrix<Felt>>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
-            self,
-            native::AuxTraceInputs {
-                main,
-                preprocessed,
-                public_values: air_inputs,
-                statement: aux_inputs,
-                challenges,
-            },
-        )
-        .expect("valid byte-pair table auxiliary inputs");
-        (aux.columns, aux.exports)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        native::migration::eval_source(self, builder);
-    }
-}
-
 // LOOKUP AIR
 // ================================================================================================
 
@@ -340,21 +268,6 @@ impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
 /// Keeping the singleton in column zero leaves the centered cyclic recurrence at degree two; the
 /// remaining columns are degree three.
 const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2];
-
-impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for BytePairLutAir {
-    fn column_shape(&self) -> &[usize] {
-        &COLUMN_SHAPE
-    }
-    fn max_message_width(&self) -> usize {
-        MAX_MESSAGE_WIDTH
-    }
-    fn num_bus_ids(&self) -> usize {
-        NUM_BUS_IDS
-    }
-    fn eval(&self, builder: &mut LB) {
-        native::migration::eval_lookup(self, builder, NUM_PREPROCESSED_COLS);
-    }
-}
 
 impl<LB> native_lookup::LookupAir<LB> for BytePairLutAir
 where
@@ -480,27 +393,6 @@ where
 // PROVER
 // ================================================================================================
 
-/// Legacy convenience constructor that builds the fixed table before native witness construction.
-/// Native proving instead supplies setup's existing matrix to `ProverAir::build_aux_trace`.
-pub(crate) fn build_aux(
-    main: &RowMajorMatrix<Felt>,
-    challenges: &[QuadFelt],
-) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    let preprocessed = preprocessed_table();
-    let aux = <BytePairLutAir as native::ProverAir<QuadFelt>>::build_aux_trace(
-        &BytePairLutAir,
-        native::AuxTraceInputs {
-            main,
-            preprocessed: Some(&preprocessed),
-            public_values: &[],
-            statement: &[],
-            challenges,
-        },
-    )
-    .expect("valid byte-pair table auxiliary inputs");
-    (aux.columns, aux.exports)
-}
-
 impl native::LiftedAir for BytePairLutAir {
     type F = Felt;
     fn spec(&self) -> native::AirSpec<'_, Felt> {
@@ -608,7 +500,7 @@ mod tests {
         }
     }
     #[test]
-    fn borrowed_byte_table_matches_owned_aux_and_chiplet_dispatch() {
+    fn borrowed_byte_table_matches_slow_fractions_and_chiplet_dispatch() {
         let air = BytePairLutAir;
         let preprocessed = preprocessed_table();
         let main = RowMajorMatrix::new(
@@ -618,30 +510,39 @@ mod tests {
             NUM_MAIN_COLS,
         );
         let challenges = [QuadFelt::new([Felt::from_u32(7), Felt::ONE]), QuadFelt::from_u32(13)];
-        let owned = air.build_aux_trace(&main, &[], &[], &challenges);
-        let borrowed = air.build_aux_trace_with_preprocessed(
-            &main,
-            Some(&preprocessed),
-            &[],
-            &[],
-            &challenges,
-        );
-        assert_eq!(borrowed.0.values, owned.0.values);
-        assert_eq!(borrowed.1, owned.1);
-        let dispatched = crate::precompiles::air::ChipletAir::BytePairLut
-            .build_aux_trace_with_preprocessed(&main, Some(&preprocessed), &[], &[], &challenges);
-        assert_eq!(dispatched.0.values, owned.0.values);
-        assert_eq!(dispatched.1, owned.1);
+        let inputs = native::AuxTraceInputs {
+            main: &main,
+            preprocessed: Some(&preprocessed),
+            public_values: &[],
+            statement: &[],
+            challenges: &challenges,
+        };
+        let borrowed = native::ProverAir::build_aux_trace(&air, inputs).unwrap();
+        let encoding =
+            Challenges::new(challenges[0], challenges[1], MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+        let fractions =
+            native_lookup::build_lookup_fractions(&air, &main, Some(&preprocessed), &[], &encoding);
+        let (expected, sigma) = miden_stark::lookup::accumulate_slow(&fractions);
+        let (rows, remainder) = borrowed.columns.values.as_chunks::<NUM_AUX_COLS>();
+        assert!(remainder.is_empty());
+        for (row, values) in rows.iter().enumerate() {
+            for (column, value) in values.iter().enumerate() {
+                assert_eq!(*value, expected[column][row]);
+            }
+        }
+        assert_eq!(borrowed.exports, [sigma]);
+        let dispatched = native::ProverAir::build_aux_trace(
+            &crate::precompiles::air::ChipletAir::BytePairLut,
+            inputs,
+        )
+        .unwrap();
+        assert_eq!(dispatched.columns.values, borrowed.columns.values);
+        assert_eq!(dispatched.exports, borrowed.exports);
         assert!(
-            std::panic::catch_unwind(|| {
-                crate::precompiles::air::ChipletAir::BytePairLut.build_aux_trace_with_preprocessed(
-                    &main,
-                    None,
-                    &[],
-                    &[],
-                    &challenges,
-                )
-            })
+            native::ProverAir::build_aux_trace(
+                &crate::precompiles::air::ChipletAir::BytePairLut,
+                native::AuxTraceInputs { preprocessed: None, ..inputs }
+            )
             .is_err(),
             "chiplet dispatch must reach the borrowed hook's setup validation"
         );

@@ -23,11 +23,11 @@
 //!
 //! ## Algebra location
 //!
-//! Per Amendment B the per-interaction encoding lives inside each
+//! Per-interaction encoding lives inside each
 //! [`LookupMessage::encode`] body, so the adapter carries **no scratch
 //! buffer**: every `add` / `remove` / `insert` body is a two-liner that
 //! calls `msg.encode(self.challenges)` and absorbs the resulting
-//! `AB::ExprEF` denominator into the running `(V, U)` (group) or
+//! `EE` denominator into the running `(V, U)` (group) or
 //! `(N, D)` (batch) pair.
 //!
 //! The running-pair updates are also inlined at every call site (no
@@ -38,173 +38,17 @@
 //!
 //! ## Challenge handling
 //!
-//! The top-level [`ConstraintLookupBuilder`] reads α/β out of
-//! `ab.permutation_randomness()[0..2]` exactly once at construction time
-//! and stores them in a [`Challenges<AB::ExprEF>`], which
-//! precomputes both the β-power table (β⁰..β^(W-1)) and the bus-prefix
-//! table (`bus_prefix[i] = α + (i + 1) · β^W`) sized from the
-//! [`LookupAir`] passed to [`ConstraintLookupBuilder::new`]. The cached
-//! challenges flow through the per-column / per-group handles by shared
-//! reference, so each interaction sees the same precomputed tables
-//! without reconstructing them.
-//!
-//! The permutation column slices are *not* cached — each
-//! [`LookupBuilder::next_column`] call re-queries `ab.permutation()` to pick
-//! up the current-row / next-row `VarEF` values. `ab.permutation()` is
-//! cheap (it builds a window over references) and not caching keeps the
-//! builder small.
+//! The top-level [`ConstraintLookupBuilder`](super::ConstraintLookupBuilder) reads α/β from
+//! the borrowed uniform inputs once at construction and stores shared [`Challenges<EE>`].
+//! Its β powers and bus prefixes are sized from the authored
+//! [`LookupAir`](super::LookupAir). Immutable current/next auxiliary slices stay with that
+//! adapter and each completed column emits its equations through the separate assertion sink.
 
 use core::marker::PhantomData;
 
 use p3_field::{Algebra, PrimeCharacteristicRing};
 
-use super::{
-    Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
-    LookupMessage,
-};
-use crate::air::{LiftedAirBuilder, WindowAccess};
-
-// CONSTRAINT LOOKUP BUILDER
-// ================================================================================================
-
-/// Constraint-path [`LookupBuilder`] over a wrapped [`LiftedAirBuilder`].
-///
-/// Column 0 is the sole running-sum accumulator; columns 1+ are fraction columns.
-/// All constraints are emitted inline during [`LookupBuilder::next_column`].
-pub struct ConstraintLookupBuilder<'ab, AB>
-where
-    AB: LiftedAirBuilder + 'ab,
-{
-    ab: &'ab mut AB,
-    challenges: Challenges<AB::ExprEF>,
-    column_idx: usize,
-    num_columns: usize,
-}
-
-impl<'ab, AB> ConstraintLookupBuilder<'ab, AB>
-where
-    AB: LiftedAirBuilder,
-{
-    pub fn new<A>(ab: &'ab mut AB, air: &A) -> Self
-    where
-        A: LookupAir<Self>,
-    {
-        let num_columns = air.column_shape().len();
-        assert!(num_columns > 0, "a LogUp argument must declare at least one column");
-        let (alpha, beta): (AB::ExprEF, AB::ExprEF) = {
-            let r = ab.permutation_randomness();
-            (r[0].into(), r[1].into())
-        };
-        let challenges =
-            Challenges::<AB::ExprEF>::new(alpha, beta, air.max_message_width(), air.num_bus_ids());
-
-        Self {
-            ab,
-            challenges,
-            column_idx: 0,
-            num_columns,
-        }
-    }
-
-    /// Finish one symbolic lookup evaluation and validate its declared column shape.
-    pub fn finish(self) {
-        assert_eq!(
-            self.column_idx, self.num_columns,
-            "LookupAir::eval emitted {} columns, but column_shape declares {}",
-            self.column_idx, self.num_columns,
-        );
-    }
-}
-
-impl<'ab, AB> LookupBuilder for ConstraintLookupBuilder<'ab, AB>
-where
-    AB: LiftedAirBuilder,
-{
-    type F = AB::F;
-    type Expr = AB::Expr;
-    type Var = AB::Var;
-
-    type EF = AB::EF;
-    type ExprEF = AB::ExprEF;
-    type VarEF = AB::VarEF;
-
-    type PeriodicVar = AB::PeriodicVar;
-
-    type MainWindow = AB::MainWindow;
-    type PreprocessedWindow = AB::PreprocessedWindow;
-
-    type Column<'a>
-        = ConstraintColumn<'a, AB::Expr, AB::ExprEF>
-    where
-        Self: 'a,
-        AB: 'a;
-
-    fn main(&self) -> Self::MainWindow {
-        self.ab.main()
-    }
-
-    fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        self.ab.preprocessed()
-    }
-
-    fn periodic_values(&self) -> &[Self::PeriodicVar] {
-        self.ab.periodic_values()
-    }
-
-    fn next_column<'a, R>(
-        &'a mut self,
-        f: impl FnOnce(&mut Self::Column<'a>) -> R,
-        _deg: Deg,
-    ) -> R {
-        // Open the column with an empty `(V, U) = (0, 1)` accumulator.
-        // The column only holds a shared borrow of the challenges and
-        // the two running-pair slots — the `&mut AB` stays on the
-        // builder and is only reached back into for the constraint
-        // emission below.
-        let mut col = ConstraintColumn::new(&self.challenges);
-        let result = f(&mut col);
-        let (u, v) = col.into_pair();
-
-        // Pick up permutation column values now that the column borrow is released.
-        let col_idx = self.column_idx;
-        assert!(
-            col_idx < self.num_columns,
-            "LookupAir::eval emitted more columns than column_shape declares ({})",
-            self.num_columns,
-        );
-        self.column_idx += 1;
-
-        let (anchor, relation) = {
-            let window = self.ab.permutation();
-            let current = window.current_slice();
-            assert!(
-                current.len() >= self.num_columns,
-                "auxiliary trace has {} columns, but LogUp declares {}",
-                current.len(),
-                self.num_columns,
-            );
-            let (band, accumulator) = if col_idx == 0 {
-                (
-                    &current[..self.num_columns],
-                    Some(AccumulatorInputs {
-                        next: window.next_slice()[0].into(),
-                        sigma: self.ab.permutation_values()[0].clone().into(),
-                        first: self.ab.is_first_row(),
-                    }),
-                )
-            } else {
-                (&current[col_idx..col_idx + 1], None)
-            };
-            column_constraints(u, v, band.iter().copied().map(Into::into), accumulator)
-        };
-        if let Some(anchor) = anchor {
-            self.ab.assert_zero_ext(anchor);
-        }
-        self.ab.assert_zero_ext(relation);
-
-        result
-    }
-}
+use super::{Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage};
 
 /// Inputs used only when closing the accumulator column.
 pub(super) struct AccumulatorInputs<E, EE> {
@@ -213,11 +57,11 @@ pub(super) struct AccumulatorInputs<E, EE> {
     pub first: E,
 }
 
-/// One finalization formula shared by old and native constraint adapters.
+/// Finalization in native lookup assertion order.
 ///
 /// `current` contains the declared LogUp prefix for the accumulator, or just the selected
 /// fraction-column value otherwise. Trailing auxiliary registers never enter the recurrence.
-/// The optional anchor precedes the all-row equation and retains the old `acc * first` order.
+/// The optional anchor precedes the all-row equation and uses the `acc * first` multiplication order.
 pub(super) fn column_constraints<E, EE>(
     u: EE,
     v: EE,
@@ -245,7 +89,7 @@ where
 // CONSTRAINT COLUMN
 // ================================================================================================
 
-/// Per-column arithmetic shared by legacy and native constraint adapters.
+/// Per-column arithmetic for native constraint emission.
 ///
 /// Holds only the running `(V, U)` accumulator and shared precomputed challenges. Inputs and
 /// mutable assertion emission stay with the top-level adapter, outside this callback's borrow.

@@ -4,13 +4,13 @@
 //! single degree-9 base constraint producing 8 quotient chunks, and 8 extension-field
 //! auxiliary columns (= 16 base-field columns with Goldilocks `ext_degree=2`).
 
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::borrow::Cow;
 use core::{convert::Infallible, marker::PhantomData};
 
-use p3_field::{Algebra, Dup, ExtensionField, Field, PrimeCharacteristicRing};
+use p3_field::{Dup, ExtensionField, Field, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
-use crate::air::{BaseAir, LiftedAir, LiftedAirBuilder, native};
+use crate::air::native;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -51,53 +51,6 @@ impl<F> DummyMidenAir<F> {
 // ---------------------------------------------------------------------------
 // Trait impls for lifted STARK path
 // ---------------------------------------------------------------------------
-
-impl<F: Field> BaseAir<F> for DummyMidenAir<F> {
-    fn width(&self) -> usize {
-        self.width
-    }
-}
-
-impl<F: Field, EF: ExtensionField<F>> LiftedAir<F, EF> for DummyMidenAir<F> {
-    type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        2
-    }
-
-    fn aux_width(&self) -> usize {
-        self.num_aux_cols
-    }
-
-    fn num_aux_values(&self) -> usize {
-        self.num_aux_cols
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<F>,
-        air_inputs: &[F],
-        aux_inputs: &[F],
-        challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        let auxiliary = <Self as native::ProverAir<EF>>::build_aux_trace(
-            self,
-            native::AuxTraceInputs {
-                main,
-                preprocessed: None,
-                public_values: air_inputs,
-                statement: aux_inputs,
-                challenges,
-            },
-        )
-        .unwrap_or_else(|never| match never {});
-        (auxiliary.columns, auxiliary.exports)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
-        native::migration::eval_source(self, builder);
-    }
-}
 
 impl<F: Field> native::LiftedAir for DummyMidenAir<F> {
     type F = F;

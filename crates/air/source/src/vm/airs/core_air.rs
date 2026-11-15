@@ -1,20 +1,20 @@
 //! Authored Core AIR constraints and lookup bindings.
 
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::borrow::Cow;
 use core::borrow::Borrow;
 
 use miden_core::{Felt, WORD_SIZE, field::ExtensionField};
 use miden_stark::{
     air::{ReductionError, native},
-    lookup::{BoundaryBuilder, Challenges, LookupAir, native as native_lookup},
+    lookup::{BoundaryBuilder, Challenges, native as native_lookup},
 };
 
-use super::{MidenAirBuilder, boundary::ReduceBoundaryBuilder};
+use super::boundary::ReduceBoundaryBuilder;
 use crate::vm::{
     constraints::{
         self,
         columns::CoreCols,
-        lookup::main_air::{MainLookupAir, MainLookupBuilder, NativeMainLookupBuilder},
+        lookup::main_air::{MainLookupAir, NativeMainLookupBuilder},
     },
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
 };
@@ -29,18 +29,6 @@ use crate::vm::{
 pub struct CoreAir;
 
 impl CoreAir {
-    pub(super) fn width(self) -> usize {
-        constraints::columns::NUM_CORE_COLS
-    }
-
-    pub(super) fn periodic_columns(self) -> Vec<Vec<Felt>> {
-        Vec::new()
-    }
-
-    pub(super) fn aux_width(self) -> usize {
-        constraints::lookup::main_air::MAIN_COLUMN_SHAPE.len()
-    }
-
     /// LogUp boundary correction for the core trace: the running sum of every
     /// boundary interaction reduced to its denominator contribution. The single var-len slice
     /// carries `[program_hash (4) | deferred_root (4)]`, the statement inputs the core
@@ -76,28 +64,8 @@ impl CoreAir {
         reducer.finalize()
     }
 
-    pub(super) fn eval<AB: MidenAirBuilder>(self, builder: &mut AB) {
-        native::migration::eval_source(&self, builder);
-    }
-
     pub(super) fn lookup_column_shape(self) -> &'static [usize] {
         &constraints::lookup::main_air::MAIN_COLUMN_SHAPE
-    }
-
-    pub(super) fn lookup_max_message_width(self) -> usize {
-        MIDEN_MAX_MESSAGE_WIDTH
-    }
-
-    pub(super) fn lookup_num_bus_ids(self) -> usize {
-        BusId::COUNT
-    }
-
-    pub(super) fn lookup_eval<LB: MainLookupBuilder>(self, builder: &mut LB) {
-        MainLookupAir.eval(builder);
-    }
-
-    pub(super) fn lookup_eval_boundary<B: BoundaryBuilder>(self, boundary: &mut B) {
-        constraints::lookup::miden_air::emit_core_boundary(boundary);
     }
 }
 
@@ -175,11 +143,13 @@ mod tests {
         operations::opcodes,
         utils::RowMajorMatrix,
     };
-    use miden_stark::air::{LiftedAir as LegacyAir, native};
+    use miden_stark::{
+        air::native,
+        lookup::{Challenges, accumulate_slow, native as native_lookup},
+    };
 
     use super::CoreAir;
     use crate::vm::{
-        MidenAir,
         constraints::{columns::NUM_CORE_COLS, op_flags::generate_test_row},
         inputs::NUM_PUBLIC_VALUES,
     };
@@ -233,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn native_and_legacy_core_witnesses_preserve_values_and_normalized_export() {
+    fn native_core_witness_matches_slow_fractions_and_normalized_export() {
         let mut current = generate_test_row(opcodes::PUSH.into());
         let mut next = generate_test_row(opcodes::END.into());
         current.system.clk = Felt::from_u32(19);
@@ -255,16 +225,26 @@ mod tests {
             },
         )
         .unwrap();
-        let (legacy, exports) =
-            <MidenAir as LegacyAir<Felt, QuadFelt>>::build_aux_trace_with_preprocessed(
-                &MidenAir::Core,
-                &main,
-                None,
-                &public,
-                &[],
-                &challenges,
-            );
-        assert_eq!(native.columns.values, legacy.values);
-        assert_eq!(native.exports, exports);
+        let spec = native::LiftedAir::spec(&CoreAir);
+        let encoding = Challenges::new(
+            challenges[0],
+            challenges[1],
+            crate::vm::logup::MIDEN_MAX_MESSAGE_WIDTH,
+            crate::vm::logup::BusId::COUNT,
+        );
+        let fractions = native_lookup::build_lookup_fractions(
+            &CoreAir,
+            &main,
+            None,
+            &spec.periodic_columns,
+            &encoding,
+        );
+        let (expected, sigma) = accumulate_slow(&fractions);
+        for (row, values) in native.columns.values.chunks_exact(expected.len()).enumerate() {
+            for (column, value) in values.iter().enumerate() {
+                assert_eq!(*value, expected[column][row]);
+            }
+        }
+        assert_eq!(native.exports, [sigma]);
     }
 }

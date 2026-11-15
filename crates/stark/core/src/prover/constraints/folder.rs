@@ -144,7 +144,7 @@ mod tests {
     type Folder<'a> = ProverConstraintFolder<'a, Felt, QuadFelt, PackedFelt, PackedQuadFelt>;
 
     fn folder<'a>(base: &'a [Vec<Felt>], ext: &'a [QuadFelt]) -> Folder<'a> {
-        // Native evaluation receives independent frame/input buffers, not these legacy fields.
+        // Evaluation borrows its frame and uniform inputs separately from this assertion sink.
         ProverConstraintFolder {
             base_alpha_powers: base,
             ext_alpha_powers: ext,

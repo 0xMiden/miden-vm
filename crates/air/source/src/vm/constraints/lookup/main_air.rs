@@ -11,14 +11,14 @@
 //! - chiplet requests from the decoder + U32DIV remainder-bound range checks.
 //! - stack overflow table.
 //!
-//! The legacy [`MainLookupBuilder`] and native [`NativeMainLookupBuilder`] hooks let flag construction diverge
+//! The [`NativeMainLookupBuilder`] hook lets flag construction diverge
 //! between the constraint path (polynomial, the default body) and the prover path (boolean fast
 //! path). The constraint and debug adapters use the default body; the prover adapter overrides the
 //! hook in [`super::extension_impls`].
 
 use core::borrow::Borrow;
 
-use miden_stark::lookup::{LookupAir, LookupBuilder, native};
+use miden_stark::lookup::native;
 
 use super::{
     BusId,
@@ -31,36 +31,6 @@ use super::{
     },
 };
 use crate::vm::{CoreCols, Felt, constraints::columns::NUM_CORE_COLS};
-
-// MAIN LOOKUP BUILDER
-// ================================================================================================
-
-/// Extension trait the main-trace [`LookupAir`] requires from its [`LookupBuilder`].
-///
-/// Carries a single hook, [`build_op_flags`](Self::build_op_flags), for constructing the
-/// shared [`LookupOpFlags`] instance that the four main-trace bus emitters consume. The
-/// default body uses the polynomial path. The prover-path adapter overrides this method to skip
-/// the dead polynomial products that come from decoder bits already being concrete 0/1 values; no
-/// emitter code moves.
-///
-/// There is intentionally **no** blanket `impl<LB: LookupBuilder> MainLookupBuilder for LB`
-/// Rust coherence would then forbid the prover adapter from overriding the default body.
-/// Each adapter implements this trait explicitly with an empty `impl` block that picks up
-/// the default.
-pub(crate) trait MainLookupBuilder: LookupBuilder<F = Felt> {
-    /// Build the shared [`LookupOpFlags`] instance for one `eval` call.
-    ///
-    /// Default body calls [`LookupOpFlags::from_main_cols`], the polynomial path, against
-    /// the multi-AIR `CoreCols` view. Adapters override this when a cheaper construction
-    /// path is available (e.g. the prover path, where decoder bits are concrete 0/1).
-    fn build_op_flags(
-        &self,
-        local: &CoreCols<Self::Var>,
-        next: &CoreCols<Self::Var>,
-    ) -> LookupOpFlags<Self::Expr> {
-        LookupOpFlags::from_main_cols(&local.decoder, &local.stack, &next.decoder)
-    }
-}
 
 // NATIVE MAIN LOOKUP BUILDER
 // ================================================================================================
@@ -142,7 +112,7 @@ where
     }
 
     fn eval(&self, frame: &native::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
-        // Legacy callers may supply a wider combined trace; Core owns its leading columns.
+        // Combined-trace readers may supply wider rows; Core owns its leading columns.
         let local: &CoreCols<_> = frame.main.current[..NUM_CORE_COLS].borrow();
         let next: &CoreCols<_> = frame.main.next[..NUM_CORE_COLS].borrow();
 
@@ -152,25 +122,6 @@ where
         emit_block_hash_and_op_group::<LB>(builder, &ctx);
         emit_chiplet_requests::<LB>(builder, &ctx);
         emit_stack_overflow::<LB>(builder, &ctx);
-    }
-}
-
-/// Legacy entry point forwards to the sole native declaration, retaining its specialized hook.
-impl<LB: MainLookupBuilder> LookupAir<LB> for MainLookupAir {
-    fn column_shape(&self) -> &[usize] {
-        &MAIN_COLUMN_SHAPE
-    }
-
-    fn max_message_width(&self) -> usize {
-        super::messages::MIDEN_MAX_MESSAGE_WIDTH
-    }
-
-    fn num_bus_ids(&self) -> usize {
-        BusId::COUNT
-    }
-
-    fn eval(&self, builder: &mut LB) {
-        miden_stark::air::native::migration::eval_lookup(self, builder, 0);
     }
 }
 
@@ -184,11 +135,11 @@ mod tests {
         operations::opcodes,
     };
     use miden_stark::{
-        air::RowWindow,
-        lookup::{Challenges, Deg, LookupBuilder, LookupFractions, ProverLookupBuilder},
+        air::native::Rows,
+        lookup::{Challenges, Deg, LookupFractions, ProverLookupBuilder, native as native_lookup},
     };
 
-    use super::{MAIN_COLUMN_SHAPE, MainLookupAir, MainLookupBuilder};
+    use super::{MAIN_COLUMN_SHAPE, MainLookupAir, NativeMainLookupBuilder};
     use crate::vm::{
         CoreCols,
         constraints::{
@@ -197,47 +148,32 @@ mod tests {
         },
     };
 
-    /// Test-only custom legacy hook over the real scalar collector. Its row checks distinguish
+    /// Test-only custom native hook over the real scalar collector. Its row checks distinguish
     /// current from next and its counter detects accidental default-polynomial dispatch.
     struct HookProbe<'a> {
         inner: ProverLookupBuilder<'a, Felt, QuadFelt>,
         calls: Cell<usize>,
     }
 
-    impl<'a> LookupBuilder for HookProbe<'a> {
+    impl<'a> native_lookup::LookupBuilder for HookProbe<'a> {
         type F = Felt;
         type Expr = Felt;
-        type Var = Felt;
-        type EF = QuadFelt;
         type ExprEF = QuadFelt;
-        type VarEF = QuadFelt;
-        type PeriodicVar = Felt;
-        type MainWindow = RowWindow<'a, Felt>;
-        type PreprocessedWindow = RowWindow<'a, Felt>;
         type Column<'b>
-            = <ProverLookupBuilder<'a, Felt, QuadFelt> as LookupBuilder>::Column<'b>
+            = <ProverLookupBuilder<'a, Felt, QuadFelt> as native_lookup::LookupBuilder>::Column<'b>
         where
             Self: 'b;
 
-        fn main(&self) -> Self::MainWindow {
-            LookupBuilder::main(&self.inner)
-        }
-        fn preprocessed(&self) -> &Self::PreprocessedWindow {
-            LookupBuilder::preprocessed(&self.inner)
-        }
-        fn periodic_values(&self) -> &[Felt] {
-            LookupBuilder::periodic_values(&self.inner)
-        }
         fn next_column<'b, R>(
             &'b mut self,
             f: impl FnOnce(&mut Self::Column<'b>) -> R,
             deg: Deg,
         ) -> R {
-            LookupBuilder::next_column(&mut self.inner, f, deg)
+            native_lookup::LookupBuilder::next_column(&mut self.inner, f, deg)
         }
     }
 
-    impl MainLookupBuilder for HookProbe<'_> {
+    impl NativeMainLookupBuilder for HookProbe<'_> {
         fn build_op_flags(
             &self,
             local: &CoreCols<Felt>,
@@ -255,12 +191,12 @@ mod tests {
     }
 
     #[test]
-    fn legacy_bridge_invokes_custom_hook_once_on_the_original_row_pair() {
+    fn native_hook_runs_once_on_the_original_row_pair() {
         let mut local = generate_test_row(opcodes::PUSH.into());
         let mut next = generate_test_row(opcodes::END.into());
         local.system.clk = Felt::from_u32(19);
         next.system.clk = Felt::from_u32(41);
-        // MainLookupAir is also called by old combined-trace readers. Its Core prefix and hook
+        // MainLookupAir also accepts combined-trace readers. Its Core prefix and hook
         // must keep working even when the row contains additional unrelated columns.
         let mut current = local.as_slice().to_vec();
         let mut following = next.as_slice().to_vec();
@@ -274,16 +210,14 @@ mod tests {
         );
         let mut fractions = LookupFractions::from_shape(MAIN_COLUMN_SHAPE.to_vec(), 1);
         {
-            let inner = ProverLookupBuilder::new(
-                RowWindow::from_two_rows(&current, &following),
-                RowWindow::from_two_rows(&[], &[]),
-                &[],
-                &challenges,
-                &MainLookupAir,
-                &mut fractions,
-            );
+            let frame = native_lookup::LookupFrame {
+                main: Rows { current: &current, next: &following },
+                preprocessed: Rows { current: &[], next: &[] },
+                periodic: &[],
+            };
+            let inner = ProverLookupBuilder::new(&challenges, &MAIN_COLUMN_SHAPE, &mut fractions);
             let mut builder = HookProbe { inner, calls: Cell::new(0) };
-            miden_stark::lookup::LookupAir::eval(&MainLookupAir, &mut builder);
+            native_lookup::LookupAir::eval(&MainLookupAir, &frame, &mut builder);
             assert_eq!(builder.calls.get(), 1);
         }
         assert_eq!(fractions.counts().len(), MAIN_COLUMN_SHAPE.len());

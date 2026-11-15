@@ -1,15 +1,8 @@
 //! Helpers shared across chiplets.
 //!
-//! Two themes:
-//!
-//! - **Field-element packing** ([`pack_le`], [`halves_le`]) — LSB-first base-`base` digit
-//!   reconstruction. Generic over the expression type `E` and the variable type `V`, so the same
-//!   helpers serve constraint evaluation against either an `AirBuilder` or a `LookupBuilder`. Both
-//!   use Horner's method.
-//! - **Two-row window access** ([`current_main`], [`next_main`]) — extract a fixed-size `[V; N]`
-//!   from the current or next slice of any [`WindowAccess`]-bearing window. Used to pull a row out
-//!   of `builder.main()` (or any other windowed source) and release the window's borrow before
-//!   calling further mutating methods on the builder.
+//! **Field-element packing** ([`pack_le`], [`halves_le`]) — LSB-first base-`base` digit
+//! reconstruction. Generic over the expression type `E` and the variable type `V`, so the same
+//! helpers evaluate borrowed constraint or lookup expressions using Horner's method.
 //!
 //! Typical packing bases:
 //!
@@ -19,18 +12,14 @@
 //! - `base = 256` — byte-into-32-bit-half packing (e.g. the `KeccakRound` bitwise chiplet's 64-bit
 //!   lane split).
 
-use core::array;
-
 use miden_core::{Felt, field::Algebra};
-use miden_stark::air::WindowAccess;
 use p3_field::Dup;
 
 /// Pack base-`base` digits LSB-first into a Felt-algebra expression.
 ///
 /// Computes `items[0] + base·items[1] + base²·items[2] + …` via
 /// Horner's method. `E: Algebra<Felt>` is the natural shape for any
-/// `AirBuilder::Expr` or `LookupBuilder::Expr` over Felt — both
-/// satisfy `Algebra<Self::F>` with `F = Felt`. `base` must fit in the
+/// native constraint or lookup expression over Felt. `base` must fit in the
 /// canonical Goldilocks range (i.e. `base < 2^64 − 2^32 + 1`).
 pub fn pack_le<E: Algebra<Felt>, V: Dup + Into<E>>(items: &[V], base: u64) -> E {
     let base = Felt::new(base).expect("base fits in canonical Goldilocks range");
@@ -49,38 +38,6 @@ pub fn halves_le<E: Algebra<Felt>, V: Dup + Into<E>>(items: &[V], base: u64) -> 
     debug_assert_eq!(items.len() % 2, 0, "items.len() must be even");
     let (lo, hi) = items.split_at(items.len() / 2);
     [pack_le::<E, V>(lo, base), pack_le::<E, V>(hi, base)]
-}
-
-/// Snapshot `N` consecutive elements from `window`'s current slice,
-/// starting at column `start`.
-///
-/// Generic over any [`WindowAccess`]-bearing window so it works against
-/// `AirBuilder::main()` (returns a constraint-side window),
-/// `LookupBuilder::main()` (returns the lookup-builder's mirror), or
-/// any other source that exposes the same trait. Pass `start = 0` for
-/// the full row.
-///
-/// Consuming the window by value lets the caller write the typical
-/// terse form `current_main(builder.main(), 0)` — the helper produces
-/// an owned `[V; N]` and drops the window so the caller can freely
-/// resume mutating builder methods afterward.
-pub fn current_main<W, V, const N: usize>(window: W, start: usize) -> [V; N]
-where
-    W: WindowAccess<V>,
-    V: Copy,
-{
-    let row = window.current_slice();
-    array::from_fn(|i| row[start + i])
-}
-
-/// Like [`current_main`], but reads from the next (cyclic) row.
-pub fn next_main<W, V, const N: usize>(window: W, start: usize) -> [V; N]
-where
-    W: WindowAccess<V>,
-    V: Copy,
-{
-    let row = window.next_slice();
-    array::from_fn(|i| row[start + i])
 }
 
 /// Split a `u64` into 32-bit halves as `[lo, hi]`, each held in a `u64`

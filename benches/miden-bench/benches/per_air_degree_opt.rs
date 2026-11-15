@@ -31,7 +31,7 @@ use eidos::{Dft, Felt, QuadFelt, test_challenger, test_lmcs};
 use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
     GenericStarkConfig, ProverInstance,
-    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
+    air::native,
     testing::{MultiAir, PcsParams, ProverStatement, Statement},
 };
 use p3_field::{Algebra, Dup, PrimeCharacteristicRing};
@@ -77,53 +77,6 @@ impl BenchAirKind {
 #[derive(Clone, Copy, Debug)]
 struct BenchAir {
     kind: BenchAirKind,
-}
-
-impl BaseAir<Felt> for BenchAir {
-    fn width(&self) -> usize {
-        WIDTH
-    }
-}
-
-impl LiftedAir<Felt, QuadFelt> for BenchAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        1
-    }
-
-    fn aux_width(&self) -> usize {
-        1
-    }
-
-    fn num_aux_values(&self) -> usize {
-        0
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let aux = native::ProverAir::build_aux_trace(
-            self,
-            native::AuxTraceInputs {
-                main,
-                preprocessed: None,
-                public_values: air_inputs,
-                statement: aux_inputs,
-                challenges,
-            },
-        )
-        .expect("benchmark witness is infallible");
-        (aux.columns, aux.exports)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        native::migration::eval_source(self, builder);
-    }
 }
 
 impl native::LiftedAir for BenchAir {

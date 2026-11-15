@@ -6,9 +6,10 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 #[cfg(feature = "std")]
-use miden_stark::lookup::debug::{ValidateLayout, ValidateLookupAir};
+use miden_stark::lookup::native::validate_native;
 use miden_stark::lookup::{
-    Challenges, LookupFractions, LookupMessage, accumulate, accumulate_slow, build_lookup_fractions,
+    Challenges, LookupFractions, LookupMessage, accumulate, accumulate_slow,
+    native::build_lookup_fractions,
 };
 
 use super::{
@@ -256,17 +257,16 @@ fn lookup_air_emits_expected_aead_fraction_counts() {
 #[test]
 #[cfg(feature = "std")]
 fn lookup_degree_annotations_match_air_expressions() {
-    let layout = ValidateLayout {
-        preprocessed_width: 0,
-        trace_width: NUM_COLS,
+    let spec = miden_stark::air::native::AirSpec {
+        main_width: NUM_COLS,
+        aux_width: EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len(),
         num_public_values: 0,
-        num_periodic_columns: get_periodic_column_values().len(),
-        permutation_width: EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len(),
-        num_permutation_challenges: 2,
-        num_permutation_values: 1,
+        num_challenges: 2,
+        num_exports: 1,
+        preprocessed: None,
+        periodic_columns: alloc::borrow::Cow::Owned(get_periodic_column_values()),
     };
-
-    ValidateLookupAir::validate(&EidosCompressionLookupAir, layout)
+    validate_native(&EidosCompressionLookupAir, &spec)
         .unwrap_or_else(|err| panic!("EidosCompression lookup validation failed: {err}"));
 }
 

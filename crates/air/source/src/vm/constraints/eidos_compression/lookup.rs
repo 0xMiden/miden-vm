@@ -5,8 +5,7 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing},
 };
 use miden_stark::lookup::{
-    Challenges, Deg, LookupBatch, LookupBuilder as LegacyLookupBuilder, LookupColumn, LookupGroup,
-    LookupMessage, native::LookupBuilder,
+    Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage, native::LookupBuilder,
 };
 
 use p3_field::Dup;
@@ -87,11 +86,6 @@ const MVM_NARROW_LOOKUP_CONFIG: NarrowLookupConfig = NarrowLookupConfig {
     xor_expression: XorExpression::DoubleAnd,
     pair_name: "narrow_pair",
 };
-
-/// Lookup builder accepted by the Eidos compression AIR.
-pub(crate) trait EidosCompressionLookupBuilder: LegacyLookupBuilder<F = Felt> {}
-
-impl<T> EidosCompressionLookupBuilder for T where T: LegacyLookupBuilder<F = Felt> {}
 
 /// Emits all Eidos compression lookup groups in their fixed auxiliary-column order.
 pub(crate) fn emit_lookup_columns<LB>(
