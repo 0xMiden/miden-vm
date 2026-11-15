@@ -10,7 +10,7 @@ use miden_core::{
     field::{Field, PrimeCharacteristicRing, QuadFelt},
 };
 use miden_stark::{
-    air::{BaseAir, LiftedAir, ReductionError},
+    air::{ReductionError, native::LiftedAir},
     lookup::{Challenges, LookupMessage},
 };
 
@@ -58,7 +58,7 @@ pub fn eval_external(
         || AIRS
             .iter()
             .zip(air_inputs)
-            .any(|(air, inputs)| inputs.len() != air.num_public_values())
+            .any(|(air, inputs)| inputs.len() != air.spec().num_public_values)
     {
         return Err("public-input shape does not match the AIRs".into());
     }
@@ -70,7 +70,7 @@ pub fn eval_external(
     for (index, ((air, values), &log_height)) in
         AIRS.iter().zip(aux_values).zip(log_trace_heights).enumerate()
     {
-        let expected = air.num_aux_values();
+        let expected = air.spec().num_exports;
         if values.len() != expected {
             return Err(format!(
                 "AIR {index} expects {expected} auxiliary boundary values, got {}",
@@ -122,7 +122,6 @@ where
 #[cfg(test)]
 mod tests {
     use miden_core::field::PrimeCharacteristicRing;
-    use miden_stark::air::LiftedAir;
 
     use super::*;
     use crate::precompiles::{ChipletAir, NUM_CHIPLETS};
@@ -147,7 +146,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, air)| {
-                (0..air.num_aux_values())
+                (0..air.spec().num_exports)
                     .map(|j| {
                         QuadFelt::new([
                             Felt::from((i + j + 1) as u32),
@@ -165,7 +164,7 @@ mod tests {
             &challenges,
             &AIRS
                 .iter()
-                .map(|air| vec![Felt::ZERO; air.num_public_values()])
+                .map(|air| vec![Felt::ZERO; air.spec().num_public_values])
                 .collect::<Vec<_>>(),
             &[],
             &aux_refs,
@@ -192,9 +191,9 @@ mod tests {
     fn chiplet_multi_air_rejects_malformed_external_inputs() {
         let challenges = [QuadFelt::ONE; crate::precompiles::logup::NUM_RANDOMNESS];
         let air_inputs: Vec<_> =
-            AIRS.iter().map(|air| vec![Felt::ZERO; air.num_public_values()]).collect();
+            AIRS.iter().map(|air| vec![Felt::ZERO; air.spec().num_public_values]).collect();
         let aux_values: Vec<Vec<QuadFelt>> =
-            AIRS.iter().map(|air| vec![QuadFelt::ZERO; air.num_aux_values()]).collect();
+            AIRS.iter().map(|air| vec![QuadFelt::ZERO; air.spec().num_exports]).collect();
         let aux_refs: Vec<&[QuadFelt]> = aux_values.iter().map(Vec::as_slice).collect();
         let log_heights: [u8; NUM_CHIPLETS] = [8, 16, 7, 16, 5, 9, 10, 11, 12, 13, 14, 15];
         let rejects = |case: &str,

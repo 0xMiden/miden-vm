@@ -4,8 +4,11 @@ use alloc::{borrow::Cow, vec::Vec};
 
 use miden_core::{Felt, field::ExtensionField, utils::RowMajorMatrix};
 use miden_stark::{
-    air::{BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, ReductionError},
-    lookup::{BoundaryBuilder, Challenges, LookupAir, build_logup_aux_trace_with_preprocessed},
+    air::{BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, ReductionError, native},
+    lookup::{
+        BoundaryBuilder, Challenges, LookupAir, build_logup_aux_trace_with_preprocessed,
+        native as native_lookup,
+    },
 };
 use p3_field::Algebra;
 
@@ -13,8 +16,9 @@ use crate::vm::{
     constraints::{
         eidos_compression::lookup::EidosCompressionLookupBuilder,
         lookup::{
-            and8_lookup_air::And8LookupBuilder, chiplet_air::ChipletLookupBuilder,
-            main_air::MainLookupBuilder,
+            and8_lookup_air::And8LookupBuilder,
+            chiplet_air::{ChipletLookupBuilder, NativeChipletLookupBuilder},
+            main_air::{MainLookupBuilder, NativeMainLookupBuilder},
         },
     },
     inputs::{AUX_KERNEL_DIGESTS, NUM_PUBLIC_VALUES},
@@ -65,6 +69,86 @@ pub enum MidenAir {
     Chiplets,
     EidosCompression,
     And8Lookup,
+}
+
+macro_rules! with_source {
+    ($self:ident, |$air:ident| $body:expr) => {
+        match $self {
+            MidenAir::Core => {
+                let $air = &CoreAir;
+                $body
+            },
+            MidenAir::Chiplets => {
+                let $air = &ChipletsAir;
+                $body
+            },
+            MidenAir::EidosCompression => {
+                let $air = &EidosCompressionAir;
+                $body
+            },
+            MidenAir::And8Lookup => {
+                let $air = &And8LookupAir;
+                $body
+            },
+        }
+    };
+}
+
+impl native::LiftedAir for MidenAir {
+    type F = Felt;
+
+    fn spec(&self) -> native::AirSpec<'_, Felt> {
+        with_source!(self, |air| native::LiftedAir::spec(air))
+    }
+
+    fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
+        with_source!(self, |air| native::LiftedAir::build_preprocessed_trace(air))
+    }
+
+    fn eval<B: native::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &native::Frame<'_, B>,
+        inputs: native::Inputs<'_, B>,
+        sink: &mut B,
+    ) {
+        with_source!(self, |air| native::LiftedAir::eval(air, frame, inputs, sink));
+    }
+}
+
+impl<EF: ExtensionField<Felt>> native::ProverAir<EF> for MidenAir {
+    type Error = crate::shared::WitnessError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: native::AuxTraceInputs<'_, Felt, EF>,
+    ) -> Result<native::AuxTrace<EF>, Self::Error> {
+        with_source!(self, |air| native::ProverAir::build_aux_trace(air, inputs)
+            .map_err(Into::into))
+    }
+}
+
+impl<LB: NativeMainLookupBuilder + NativeChipletLookupBuilder> native_lookup::LookupAir<LB>
+    for MidenAir
+{
+    fn column_shape(&self) -> &[usize] {
+        with_source!(self, |air| native_lookup::LookupAir::<LB>::column_shape(air))
+    }
+
+    fn max_message_width(&self) -> usize {
+        with_source!(self, |air| native_lookup::LookupAir::<LB>::max_message_width(air))
+    }
+
+    fn num_bus_ids(&self) -> usize {
+        with_source!(self, |air| native_lookup::LookupAir::<LB>::num_bus_ids(air))
+    }
+
+    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        with_source!(self, |air| native_lookup::LookupAir::<LB>::eval(air, frame, builder));
+    }
+
+    fn eval_boundary<B: BoundaryBuilder<F = Felt>>(&self, boundary: &mut B) {
+        with_source!(self, |air| native_lookup::LookupAir::<LB>::eval_boundary(air, boundary));
+    }
 }
 
 impl MidenAir {

@@ -11,13 +11,13 @@ use miden_core::{
     program::{KernelDescriptor, NUM_CLAIM_ELEMENTS},
 };
 use miden_stark::{
-    air::{LiftedAir, ReductionError},
+    air::{ReductionError, native::LiftedAir},
     lookup::Challenges,
 };
 use p3_challenger::CanObserve;
 
 use super::{
-    AIRS, Felt, MidenAir,
+    AIRS, Felt,
     inputs::{AUX_DEFERRED_ROOT, AUX_KERNEL_DIGESTS, AUX_PROGRAM_HASH, NUM_PUBLIC_VALUES},
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     trace,
@@ -139,7 +139,7 @@ pub fn eval_external<EF: ExtensionField<Felt>>(
         AIRS.iter().copied().zip(aux_values.iter()).zip(log_trace_heights)
     {
         boundary_correction += air.boundary_correction(&challenges, aux_inputs)?;
-        let expected = <MidenAir as LiftedAir<Felt, EF>>::num_aux_values(&air);
+        let expected = air.spec().num_exports;
         if values.len() != expected {
             return Err(format!(
                 "{} expects {expected} aux boundary values, got {}",

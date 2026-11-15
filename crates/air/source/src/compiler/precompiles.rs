@@ -10,20 +10,7 @@ use miden_core::field::QuadFelt;
 use p3_security::budget::AirShape;
 
 use crate::{
-    precompiles::{
-        ChipletAir,
-        ace::PvmRecursiveAceCircuit,
-        ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
-        geometry::lookup_shape,
-        hash::{
-            chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir,
-            sha256::Sha256Air, sha512::Sha512Air,
-        },
-        primitives::byte_pair_lut::BytePairLutAir,
-        relation::AIRS,
-        transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
-        uint::{add::UintAddAir, store_mul::UintStoreMulAir},
-    },
+    precompiles::{ace::PvmRecursiveAceCircuit, geometry::lookup_shape, relation::AIRS},
     shared::geometry::NUM_OOD_POINTS,
 };
 
@@ -39,27 +26,8 @@ impl CapturedPvmRelation {
 
     pub fn new() -> Result<Self, AceError> {
         Ok(Self {
-            // Completed native sources feed every backend from this same capture. The remaining
-            // variants retain their authored legacy route until their own source port is complete.
-            airs: AIRS
-                .iter()
-                .map(|air| match air {
-                    ChipletAir::ChunkNodeSponge => CapturedAir::new_native(&ChunkNodeSpongeAir),
-                    ChipletAir::KeccakRound => CapturedAir::new_native(&KeccakRoundAir),
-                    ChipletAir::BytePairLut => CapturedAir::new_native(&BytePairLutAir),
-                    ChipletAir::EidosCompression => CapturedAir::new_native(&EidosCompressionAir),
-                    ChipletAir::UintStoreMul => CapturedAir::new_native(&UintStoreMulAir),
-                    ChipletAir::UintAdd => CapturedAir::new_native(&UintAddAir),
-                    ChipletAir::EcPointStoreGroups => {
-                        CapturedAir::new_native(&EcPointStoreGroupsAir)
-                    },
-                    ChipletAir::EcGroupAdd => CapturedAir::new_native(&EcGroupAddAir),
-                    ChipletAir::EcMsm => CapturedAir::new_native(&EcMsmAir),
-                    ChipletAir::Sha256 => CapturedAir::new_native(&Sha256Air),
-                    ChipletAir::Sha512 => CapturedAir::new_native(&Sha512Air),
-                    ChipletAir::TranscriptEval => CapturedAir::new_native(&TranscriptEvalAir),
-                })
-                .collect::<Result<_, _>>()?,
+            // Every backend consumes this one authored capture in canonical instance order.
+            airs: AIRS.iter().map(CapturedAir::new_native).collect::<Result<_, _>>()?,
         })
     }
 

@@ -6,7 +6,10 @@
 use alloc::{borrow::Cow, vec::Vec};
 
 use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
-use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use miden_stark::{
+    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
+    lookup::native as native_lookup,
+};
 use p3_field::Algebra;
 
 use crate::precompiles::{
@@ -58,6 +61,118 @@ macro_rules! delegate {
             ChipletAir::Sha256 => Sha256Air.$method($($arg),*),
         }
     };
+}
+
+// One concrete source per branch lets each native capability keep its own trait bounds and
+// witness error. The expression is checked for every variant; no dynamic source object is used.
+macro_rules! with_source {
+    ($self:ident, |$air:ident| $body:expr) => {
+        match $self {
+            ChipletAir::ChunkNodeSponge => {
+                let $air = &ChunkNodeSpongeAir;
+                $body
+            },
+            ChipletAir::EidosCompression => {
+                let $air = &EidosCompressionAir;
+                $body
+            },
+            ChipletAir::KeccakRound => {
+                let $air = &KeccakRoundAir;
+                $body
+            },
+            ChipletAir::BytePairLut => {
+                let $air = &BytePairLutAir;
+                $body
+            },
+            ChipletAir::TranscriptEval => {
+                let $air = &TranscriptEvalAir;
+                $body
+            },
+            ChipletAir::UintStoreMul => {
+                let $air = &UintStoreMulAir;
+                $body
+            },
+            ChipletAir::UintAdd => {
+                let $air = &UintAddAir;
+                $body
+            },
+            ChipletAir::EcPointStoreGroups => {
+                let $air = &EcPointStoreGroupsAir;
+                $body
+            },
+            ChipletAir::EcGroupAdd => {
+                let $air = &EcGroupAddAir;
+                $body
+            },
+            ChipletAir::EcMsm => {
+                let $air = &EcMsmAir;
+                $body
+            },
+            ChipletAir::Sha512 => {
+                let $air = &Sha512Air;
+                $body
+            },
+            ChipletAir::Sha256 => {
+                let $air = &Sha256Air;
+                $body
+            },
+        }
+    };
+}
+
+impl native::LiftedAir for ChipletAir {
+    type F = Felt;
+
+    fn spec(&self) -> native::AirSpec<'_, Felt> {
+        with_source!(self, |air| native::LiftedAir::spec(air))
+    }
+
+    fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
+        with_source!(self, |air| native::LiftedAir::build_preprocessed_trace(air))
+    }
+
+    fn eval<B: native::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &native::Frame<'_, B>,
+        inputs: native::Inputs<'_, B>,
+        sink: &mut B,
+    ) {
+        with_source!(self, |air| native::LiftedAir::eval(air, frame, inputs, sink));
+    }
+}
+
+impl native::ProverAir<QuadFelt> for ChipletAir {
+    type Error = crate::shared::WitnessError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        with_source!(self, |air| native::ProverAir::build_aux_trace(air, inputs)
+            .map_err(Into::into))
+    }
+}
+
+impl<LB: native_lookup::LookupBuilder<F = Felt>> native_lookup::LookupAir<LB> for ChipletAir {
+    fn column_shape(&self) -> &[usize] {
+        with_source!(self, |air| native_lookup::LookupAir::<LB>::column_shape(air))
+    }
+
+    fn max_message_width(&self) -> usize {
+        with_source!(self, |air| native_lookup::LookupAir::<LB>::max_message_width(air))
+    }
+
+    fn num_bus_ids(&self) -> usize {
+        with_source!(self, |air| native_lookup::LookupAir::<LB>::num_bus_ids(air))
+    }
+
+    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        with_source!(self, |air| native_lookup::LookupAir::<LB>::eval(air, frame, builder));
+    }
+
+    fn eval_boundary<B: miden_stark::lookup::BoundaryBuilder<F = Felt>>(&self, boundary: &mut B) {
+        with_source!(self, |air| native_lookup::LookupAir::<LB>::eval_boundary(air, boundary));
+    }
 }
 
 fn eval_lifted<A, AB>(air: &A, builder: &mut AB)

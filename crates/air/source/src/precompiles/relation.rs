@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use miden_stark::air::LiftedAir;
+use miden_stark::air::native::LiftedAir;
 
 use crate::precompiles::{ChipletAir, NUM_CHIPLETS};
 
@@ -23,24 +23,19 @@ pub const AIRS: [ChipletAir; NUM_CHIPLETS] = [
 ];
 
 pub fn protocol() -> RelationProtocol {
-    let airs = &AIRS;
-    RelationProtocol {
-        heights: airs
-            .iter()
-            .map(|air| {
-                air.log_preprocessed_height()
-                    .map(|log_height| HeightRule::Fixed(u32::from(log_height)))
-                    .unwrap_or_else(|| {
-                        HeightRule::Minimum(air.max_periodic_length().max(2).ilog2())
-                    })
-            })
-            .collect(),
-        max_periodic_log: airs
-            .iter()
-            .map(|air| air.max_periodic_length().max(1).ilog2())
-            .max()
-            .unwrap_or(0),
+    let mut heights = Vec::with_capacity(AIRS.len());
+    let mut max_periodic_log = 0;
+    for air in &AIRS {
+        let spec = air.spec();
+        let period = spec.max_periodic_length();
+        heights.push(
+            spec.preprocessed
+                .map(|fixed| HeightRule::Fixed(u32::from(fixed.log_height)))
+                .unwrap_or_else(|| HeightRule::Minimum(period.max(2).ilog2())),
+        );
+        max_periodic_log = max_periodic_log.max(period.max(1).ilog2());
     }
+    RelationProtocol { heights, max_periodic_log }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
