@@ -10,6 +10,10 @@ use p3_field::{Algebra, Field};
 use super::{BoundaryBuilder, Deg, LookupColumn};
 use crate::air::native::{AirFrame, Rows};
 
+mod constraint;
+
+pub use constraint::{ConstraintLookupBuilder, eval_lookup};
+
 /// The inputs a per-row lookup declaration may read.
 ///
 /// Auxiliary registers, challenges, exports and public inputs deliberately stay
