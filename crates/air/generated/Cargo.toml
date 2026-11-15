@@ -20,7 +20,7 @@ doctest = false
 [features]
 default = ["std"]
 arbitrary = ["std", "miden-air-definitions/arbitrary"]
-std = ["miden-air-definitions/std", "miden-core/std"]
+std = ["miden-air-definitions/std", "miden-core/std", "miden-utils-sync/std"]
 concurrent = ["miden-air-definitions/concurrent", "std", "miden-crypto/concurrent", "miden-stark/concurrent"]
 testing = ["arbitrary", "miden-air-definitions/testing"]
 
@@ -34,6 +34,7 @@ miden-air-definitions.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-stark.workspace = true
+miden-utils-sync.workspace = true
 
 # External dependencies
 p3-field.workspace = true

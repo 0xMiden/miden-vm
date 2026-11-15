@@ -23,6 +23,13 @@ const SEEDS: [u64; 4] =
 mod native_registration;
 
 #[test]
+fn native_production_wrapper_dispatch_matches_each_authored_vm_source() {
+    for air in AIRS {
+        native_registration::assert_native_registration(&air.0, &air.0, &air, &SEEDS);
+    }
+}
+
+#[test]
 fn native_core_registration_keeps_source_metadata_and_prepared_execution() {
     use miden_air::vm::native::CoreKernel;
     use miden_air_definitions::vm::{CoreAir, MidenAir};

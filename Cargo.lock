@@ -2763,6 +2763,7 @@ dependencies = [
  "miden-core",
  "miden-crypto",
  "miden-stark",
+ "miden-utils-sync",
  "p3-challenger",
  "p3-field",
  "p3-security",

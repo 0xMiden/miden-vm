@@ -1,6 +1,8 @@
 //! Prepared native execution for independently completed VM source ports.
 
-use crate::native_kernel::define_native_kernel;
+use miden_air_definitions::vm::MidenAir as Source;
+
+use crate::native_kernel::{define_native_dispatch, define_native_kernel};
 
 #[allow(clippy::eq_op)]
 mod evaluators {
@@ -10,6 +12,13 @@ mod evaluators {
 mod descriptors {
     include!(concat!(env!("OUT_DIR"), "/native_descriptors.rs"));
 }
+
+define_native_dispatch!(super::MidenAir, Source, VmPrepared;
+    Core => (CORE_DESCRIPTOR, descriptor_core, precompute_core, eval_core, CORE_PREPARED_TERMS),
+    Chiplets => (CHIPLETS_DESCRIPTOR, descriptor_chiplets, precompute_chiplets, eval_chiplets, CHIPLETS_PREPARED_TERMS),
+    EidosCompression => (EIDOS_DESCRIPTOR, descriptor_eidos_compression, precompute_eidos_compression, eval_eidos_compression, EIDOS_COMPRESSION_PREPARED_TERMS),
+    And8Lookup => (AND8_DESCRIPTOR, descriptor_and8_lookup, precompute_and8_lookup, eval_and8_lookup, AND8_LOOKUP_PREPARED_TERMS),
+);
 
 define_native_kernel!(
     /// Generated execution of the authored Core relation, including its lookup columns.

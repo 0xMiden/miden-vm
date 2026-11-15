@@ -24,6 +24,14 @@ mod native_registration;
 use native_registration::assert_native_registration;
 
 #[test]
+fn native_production_wrapper_dispatch_matches_each_authored_precompile_source() {
+    for air in ChipletAir::all() {
+        let source = air.definition();
+        assert_native_registration(&source, &source, &air, &SEEDS);
+    }
+}
+
+#[test]
 fn native_ec_add_registration_keeps_periodic_roles_and_prepared_execution() {
     use miden_air::precompiles::native::EcGroupAddKernel;
     use miden_air_definitions::precompiles::ec::add::EcGroupAddAir;
