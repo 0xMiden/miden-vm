@@ -677,7 +677,7 @@ where
 mod tests {
     extern crate std;
 
-    use std::{vec, vec::Vec};
+    use std::{marker::PhantomData, vec, vec::Vec};
 
     use miden_crypto::{
         Felt,
@@ -687,7 +687,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        air::{RowWindow, WindowAccess},
+        air::{RowWindow, WindowAccess, native},
         lookup::{Deg, LookupAir, accumulate_slow, message::LookupMessage},
     };
 
@@ -913,7 +913,13 @@ mod tests {
     }
 
     #[derive(Clone)]
-    struct WindowAir;
+    struct WindowAir<F>(PhantomData<fn() -> F>);
+
+    impl<F: Field> WindowAir<F> {
+        fn new() -> Self {
+            Self(PhantomData)
+        }
+    }
 
     #[derive(Debug)]
     struct WindowMsg<E> {
@@ -930,9 +936,9 @@ mod tests {
         }
     }
 
-    impl<LB> crate::lookup::native::LookupAir<LB> for WindowAir
+    impl<F: Field, LB> crate::lookup::native::LookupAir<LB> for WindowAir<F>
     where
-        LB: crate::lookup::native::LookupBuilder,
+        LB: crate::lookup::native::LookupBuilder<F = F>,
     {
         fn column_shape(&self) -> &[usize] {
             &[1]
@@ -992,7 +998,7 @@ mod tests {
         }
     }
 
-    impl<LB: LookupBuilder> LookupAir<LB> for WindowAir {
+    impl<F: Field, LB: LookupBuilder<F = F>> LookupAir<LB> for WindowAir<F> {
         fn column_shape(&self) -> &[usize] {
             &[1]
         }
@@ -1012,17 +1018,17 @@ mod tests {
 
     // This source harness connects the same declaration to the actual private
     // scalar/packed/debug folders via the existing public prove/check helpers.
-    impl<F: Field> crate::air::BaseAir<F> for WindowAir {
+    impl<F: Field> crate::air::BaseAir<F> for WindowAir<F> {
         fn width(&self) -> usize {
             1
         }
 
         fn periodic_columns(&self) -> alloc::borrow::Cow<'_, [Vec<F>]> {
-            alloc::borrow::Cow::Owned(vec![vec![F::ZERO, F::ONE]])
+            native::LiftedAir::spec(self).periodic_columns
         }
     }
 
-    impl<F: Field, EF: ExtensionField<F>> crate::air::LiftedAir<F, EF> for WindowAir {
+    impl<F: Field, EF: ExtensionField<F>> crate::air::LiftedAir<F, EF> for WindowAir<F> {
         type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
 
         fn num_randomness(&self) -> usize {
@@ -1040,17 +1046,62 @@ mod tests {
         fn build_aux_trace(
             &self,
             main: &RowMajorMatrix<F>,
-            _public: &[F],
-            _statement: &[F],
+            public: &[F],
+            statement: &[F],
             challenges: &[EF],
         ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-            crate::lookup::build_logup_aux_trace(self, main, challenges)
+            let auxiliary = <Self as native::ProverAir<EF>>::build_aux_trace(
+                self,
+                native::AuxTraceInputs {
+                    main,
+                    preprocessed: None,
+                    public_values: public,
+                    statement,
+                    challenges,
+                },
+            )
+            .expect("valid expression-window auxiliary inputs");
+            (auxiliary.columns, auxiliary.exports)
         }
 
         fn eval<AB: crate::air::LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
-            let mut lookups = crate::lookup::ConstraintLookupBuilder::new(builder, self);
-            <Self as LookupAir<_>>::eval(self, &mut lookups);
-            lookups.finish();
+            native::migration::eval_source(self, builder);
+        }
+    }
+
+    impl<F: Field> native::LiftedAir for WindowAir<F> {
+        type F = F;
+
+        fn spec(&self) -> native::AirSpec<'_, F> {
+            native::AirSpec {
+                main_width: 1,
+                aux_width: 1,
+                num_public_values: 0,
+                num_challenges: 2,
+                num_exports: 1,
+                preprocessed: None,
+                periodic_columns: alloc::borrow::Cow::Owned(vec![vec![F::ZERO, F::ONE]]),
+            }
+        }
+
+        fn eval<AB: native::LiftedAirBuilder<F = F>>(
+            &self,
+            frame: &native::Frame<'_, AB>,
+            inputs: native::Inputs<'_, AB>,
+            builder: &mut AB,
+        ) {
+            crate::lookup::native::eval_lookup(self, frame, inputs, builder);
+        }
+    }
+
+    impl<F: Field, EF: ExtensionField<F>> native::ProverAir<EF> for WindowAir<F> {
+        type Error = crate::lookup::native::LookupError;
+
+        fn build_aux_trace(
+            &self,
+            inputs: native::AuxTraceInputs<'_, F, EF>,
+        ) -> Result<native::AuxTrace<EF>, Self::Error> {
+            crate::lookup::native::build_logup_aux_trace(self, inputs)
         }
     }
 
@@ -1064,20 +1115,21 @@ mod tests {
             },
         };
 
+        let air = WindowAir::<TestFelt>::new();
         let trace = RowMajorMatrix::new(vec![TestFelt::ONE; 8], 1);
-        let statement = Statement::new(TestMultiAir::new(vec![WindowAir]), vec![], vec![])
+        let statement = Statement::new(TestMultiAir::new(vec![air.clone()]), vec![], vec![])
             .expect("no public inputs");
         let statement = ProverStatement::new(statement, vec![trace.clone()]).unwrap();
         crate::check_constraints(&statement, test_challenger());
         // This existing helper reaches packed prover and scalar OOD folders;
         // constraint_degree reaches the existing non-Copy symbolic builder.
         let _degree =
-            <WindowAir as LiftedAir<TestFelt, TestQuadFelt>>::constraint_degree(&WindowAir);
-        prove_and_verify(&WindowAir, &[], &[trace]);
+            <WindowAir<TestFelt> as LiftedAir<TestFelt, TestQuadFelt>>::constraint_degree(&air);
+        prove_and_verify(&air, &[], &[trace]);
 
         #[cfg(feature = "std")]
         crate::lookup::debug::validation::validate(
-            &WindowAir,
+            &WindowAir::<Felt>::new(),
             crate::lookup::debug::validation::ValidateLayout {
                 preprocessed_width: 0,
                 trace_width: 1,
@@ -1089,6 +1141,66 @@ mod tests {
             },
         )
         .expect("canonical and encoded window descriptions agree");
+    }
+
+    fn native_window_direct_pilot<F: Field, EF: ExtensionField<F>>() {
+        use native::AirKernel;
+
+        let source = WindowAir::<F>::new();
+        let expected = native::capture_with::<_, EF>(&source).unwrap();
+        assert!(expected.descriptor.analysis().layout().base_indices().is_empty());
+        assert_eq!(expected.descriptor.analysis().layout().ext_indices(), &[0, 1]);
+        let kernel = native::DirectKernel::new(source).unwrap();
+        let main = RowMajorMatrix::new(vec![F::ONE; 8], 1);
+        let challenges = [EF::from_u32(7), EF::from_u32(13)];
+        let auxiliary = native::ProverAir::build_aux_trace(
+            &kernel,
+            native::AuxTraceInputs {
+                main: &main,
+                preprocessed: None,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        )
+        .unwrap();
+        assert_eq!(auxiliary.columns.width(), 1);
+        assert_eq!(auxiliary.columns.height(), 8);
+        // Independent fraction arithmetic for the constant trace: current+2*next+periodic
+        // alternates between3 and4, so its normalized export is the two-fraction mean.
+        let encoding = Challenges::new(challenges[0], challenges[1], 1, 1);
+        let fraction = |value| {
+            (encoding.bus_prefix[0] + encoding.beta_powers[0] * F::from_u32(value)).inverse()
+        };
+        let mean = (fraction(3) + fraction(4)) * EF::from_u32(2).inverse();
+        assert_eq!(auxiliary.exports, vec![mean]);
+        assert!(native::LiftedAir::build_preprocessed_trace(&kernel).is_none());
+
+        let observed = native::capture_from_spec::<F, EF>(
+            kernel.descriptor().spec().as_borrowed(),
+            |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
+        )
+        .unwrap();
+        assert_eq!(observed.descriptor.fingerprint(), expected.descriptor.fingerprint());
+        assert_eq!(observed.descriptor.analysis(), expected.descriptor.analysis());
+    }
+
+    #[test]
+    fn native_window_sources_keep_both_actual_field_routes() {
+        native_window_direct_pilot::<Felt, QuadFelt>();
+        native_window_direct_pilot::<
+            crate::testing::configs::Felt,
+            crate::testing::configs::QuadFelt,
+        >();
+
+        #[cfg(feature = "std")]
+        {
+            // The validator intentionally supports the production Felt/QuadFelt pair only.
+            let source = WindowAir::<Felt>::new();
+            let spec = native::LiftedAir::spec(&source);
+            crate::lookup::native::validate_native(&source, &spec)
+                .expect("native canonical and encoded window descriptions agree");
+        }
     }
 
     #[test]
@@ -1104,7 +1216,7 @@ mod tests {
         // Start inside the trace and include the last-to-first edge.
         let rows = period / 2 - 1..num_rows;
         let actual = build_lookup_fraction_chunk(
-            &WindowAir,
+            &WindowAir::<Felt>::new(),
             &main,
             None,
             &periodic,
