@@ -2746,6 +2746,7 @@ dependencies = [
  "miden-crypto",
  "miden-stark",
  "p3-dft",
+ "p3-field",
  "p3-matrix",
  "proptest",
  "thiserror 2.0.19",

@@ -36,5 +36,6 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 miden-core = { workspace = true, features = ["std"] }
+p3-field.workspace = true
 p3-matrix.workspace = true
 proptest.workspace = true

@@ -1,8 +1,10 @@
 //! Captured AIRs and the geometry shared by relation artifact generators.
 
-use miden_constraint_compiler::ir::{CapturedConstraints, Graph, Leaf, Node, OpKind, capture};
+use miden_constraint_compiler::ir::{
+    CapturedConstraints, Graph, Leaf, Node, OpKind, capture, capture_native,
+};
 use miden_core::{Felt, field::QuadFelt};
-use miden_stark::air::{ConstraintCounts, ConstraintDegrees, LiftedAir};
+use miden_stark::air::{ConstraintCounts, ConstraintDegrees, LiftedAir, native};
 
 use crate::{
     AceError, EXT_DEGREE, InputCounts, InputKey, InputLayout, MAX_ORDER_AIRS,
@@ -24,6 +26,9 @@ pub struct CapturedAir {
     pub(crate) periodic_columns: Vec<Vec<Felt>>,
     /// Minimum trace height imposed by periodic columns, or zero when absent.
     pub(crate) max_periodic_length: usize,
+    // Transitional only: legacy captures have no native descriptor. Both paths still feed the
+    // same compiler graph, geometry and ACE pipeline. Remove optionality with the old constructor.
+    descriptor: Option<native::AirDescriptor<Felt>>,
 }
 
 impl CapturedAir {
@@ -60,7 +65,56 @@ impl CapturedAir {
             degrees,
             periodic_columns,
             max_periodic_length,
+            descriptor: None,
         })
+    }
+
+    /// Capture an authored native source once for the existing compiler and ACE pipeline.
+    ///
+    /// Metadata comes from the same validated descriptor as the captured equations. The raw
+    /// degree diagnostics retain height-independent artifact geometry; setup must separately
+    /// check the descriptor's actual-height capacity before execution. No fixed-table factory
+    /// or witness construction is invoked, and no prover capability is required.
+    pub fn new_native<A: native::LiftedAir<F = Felt>>(air: &A) -> Result<Self, AceError> {
+        let (graph, constraints, descriptor) = capture_native(air)
+            .map_err(|error| invalid(format!("native AIR capture failed: {error}")))?;
+        let spec = descriptor.spec();
+        if spec.num_challenges != 2 {
+            return Err(invalid(format!(
+                "AIR must declare exactly 2 randomness challenges (alpha, beta), got {}",
+                spec.num_challenges,
+            )));
+        }
+        let raw = descriptor.analysis().raw_degrees();
+        let degrees = ConstraintDegrees { base: raw.base, ext: raw.ext };
+        let counts = InputCounts {
+            preprocessed_width: spec.preprocessed_width(),
+            width: spec.main_width,
+            aux_width: spec.aux_width,
+            num_aux_boundary: spec.num_exports,
+            num_public: spec.num_public_values,
+            num_randomness: spec.num_challenges,
+            num_quotient_chunks: quotient_chunks(degrees.max())?,
+        };
+        let periodic_columns = spec.periodic_columns.to_vec();
+        let max_periodic_length = spec.max_periodic_length();
+        Ok(Self {
+            graph,
+            constraints,
+            counts,
+            degrees,
+            periodic_columns,
+            max_periodic_length,
+            descriptor: Some(descriptor),
+        })
+    }
+
+    /// The native descriptor, when this product was created by [`Self::new_native`].
+    ///
+    /// Legacy captures deliberately return `None`; generic compiler consumers must not assume
+    /// every captured AIR has already migrated. Neither result authenticates arbitrary Rust code.
+    pub fn descriptor(&self) -> Option<&native::AirDescriptor<Felt>> {
+        self.descriptor.as_ref()
     }
 
     pub fn graph(&self) -> &Graph {
@@ -76,6 +130,10 @@ impl CapturedAir {
     }
 
     pub(crate) fn constraint_counts(&self) -> ConstraintCounts {
+        if let Some(descriptor) = &self.descriptor {
+            let counts = descriptor.analysis().counts();
+            return ConstraintCounts { base: counts.base, ext: counts.ext };
+        }
         ConstraintCounts {
             base: self.constraints.base_roots.len(),
             ext: self.constraints.ext_roots.len(),
@@ -436,5 +494,292 @@ impl<'a> CompiledRelation<'a> {
                 layout,
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        borrow::Cow,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    use miden_core::utils::RowMajorMatrix;
+    use miden_crypto::field::{Algebra, PrimeCharacteristicRing};
+    use miden_stark::air::{BaseAir, LiftedAirBuilder};
+    use native::LiftedAirBuilder as _;
+    use p3_field::Dup;
+
+    use super::*;
+
+    struct PairedAir {
+        main_width: usize,
+        challenges: usize,
+        offset: Felt,
+        periodic: Vec<Vec<Felt>>,
+        spec_reads: AtomicUsize,
+        evaluations: AtomicUsize,
+        fixed_builds: AtomicUsize,
+    }
+
+    impl PairedAir {
+        fn new(challenges: usize, period: usize, offset: u32) -> Self {
+            Self {
+                main_width: 2,
+                challenges,
+                offset: Felt::from_u32(offset),
+                periodic: vec![vec![Felt::ONE, Felt::TWO], vec![Felt::from_u32(offset); period]],
+                spec_reads: AtomicUsize::new(0),
+                evaluations: AtomicUsize::new(0),
+                fixed_builds: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl native::LiftedAir for PairedAir {
+        type F = Felt;
+
+        fn spec(&self) -> native::AirSpec<'_, Felt> {
+            self.spec_reads.fetch_add(1, Ordering::Relaxed);
+            native::AirSpec {
+                main_width: self.main_width,
+                aux_width: 2,
+                num_public_values: 2,
+                num_challenges: self.challenges,
+                num_exports: 1,
+                preprocessed: Some(native::PreprocessedSpec { width: 1, log_height: 3 }),
+                periodic_columns: Cow::Borrowed(&self.periodic),
+            }
+        }
+
+        fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
+            self.fixed_builds.fetch_add(1, Ordering::Relaxed);
+            Some(RowMajorMatrix::new(vec![Felt::ONE; 8], 1))
+        }
+
+        fn eval<B: native::LiftedAirBuilder<F = Felt>>(
+            &self,
+            frame: &native::Frame<'_, B>,
+            inputs: native::Inputs<'_, B>,
+            sink: &mut B,
+        ) {
+            self.evaluations.fetch_add(1, Ordering::Relaxed);
+            let alpha = if self.challenges > 0 {
+                inputs.challenge(0)
+            } else {
+                B::ExtExpr::ZERO
+            };
+            let beta = if self.challenges > 1 {
+                inputs.challenge(1)
+            } else {
+                B::ExtExpr::ZERO
+            };
+            sink.when(frame.first_row()).assert_zero(
+                frame.main.current[0].dup()
+                    + frame.preprocessed.current[0].dup()
+                    + inputs.public(0)
+                    - self.offset,
+            );
+            sink.assert_zero_ext(frame.aux.current[0].dup() + alpha + inputs.export(0));
+            sink.when(frame.transition()).assert_zero(
+                frame.main.next[1].dup() - frame.main.current[1].dup().square()
+                    + frame.preprocessed.next[0].dup()
+                    + frame.periodic[0].dup(),
+            );
+            sink.when(frame.last_row()).assert_zero_ext(
+                frame.aux.next[1].dup()
+                    + beta * inputs.public(1)
+                    + B::ExtExpr::from(frame.periodic[1].dup()),
+            );
+            // Both classes retain their zero-gated emissions at the original global positions.
+            sink.when(B::Expr::ZERO).assert_zero(frame.main.current[0].dup());
+            sink.when(B::Expr::ZERO).assert_zero_ext(frame.aux.current[0].dup());
+        }
+    }
+
+    // The legacy facade has no equation body or prepared state of its own.
+    impl BaseAir<Felt> for PairedAir {
+        fn width(&self) -> usize {
+            self.main_width
+        }
+        fn preprocessed_width(&self) -> usize {
+            1
+        }
+        fn num_public_values(&self) -> usize {
+            2
+        }
+        fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
+            Cow::Borrowed(&self.periodic)
+        }
+        fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
+            native::LiftedAir::build_preprocessed_trace(self)
+        }
+    }
+
+    impl LiftedAir<Felt, QuadFelt> for PairedAir {
+        type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+        fn num_randomness(&self) -> usize {
+            self.challenges
+        }
+        fn aux_width(&self) -> usize {
+            2
+        }
+        fn num_aux_values(&self) -> usize {
+            1
+        }
+        fn log_preprocessed_height(&self) -> Option<u8> {
+            Some(3)
+        }
+        fn build_aux_trace(
+            &self,
+            _main: &RowMajorMatrix<Felt>,
+            _public: &[Felt],
+            _statement: &[Felt],
+            _challenges: &[QuadFelt],
+        ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+            panic!("capture must not construct a witness");
+        }
+        fn eval<B: LiftedAirBuilder<F = Felt>>(&self, builder: &mut B, _prepared: &()) {
+            native::migration::eval_source(self, builder);
+        }
+    }
+
+    fn counts(air: &CapturedAir) -> [usize; 7] {
+        let counts = air.counts;
+        [
+            counts.preprocessed_width,
+            counts.width,
+            counts.aux_width,
+            counts.num_aux_boundary,
+            counts.num_public,
+            counts.num_randomness,
+            counts.num_quotient_chunks,
+        ]
+    }
+
+    fn assert_geometry_matches(expected: &RelationGeometry, actual: &RelationGeometry) {
+        assert_eq!(expected.preprocessed_width, actual.preprocessed_width);
+        assert_eq!(expected.main_width, actual.main_width);
+        assert_eq!(expected.aux_width, actual.aux_width);
+        assert_eq!(expected.num_aux_boundary, actual.num_aux_boundary);
+        assert_eq!(expected.num_public, actual.num_public);
+        assert_eq!(expected.num_randomness, actual.num_randomness);
+        assert_eq!(expected.num_constraints, actual.num_constraints);
+        assert_eq!(expected.max_constraint_degree, actual.max_constraint_degree);
+        assert_eq!(expected.num_quotient_chunks, actual.num_quotient_chunks);
+        assert_eq!(expected.quotient_width, actual.quotient_width);
+        assert_eq!(expected.shared_period, actual.shared_period);
+        assert_eq!(expected.trace_alignment, actual.trace_alignment);
+        assert_eq!(expected.raw_widths(), actual.raw_widths());
+        assert_eq!(expected.airs.len(), actual.airs.len());
+        for (expected, actual) in expected.airs.iter().zip(&actual.airs) {
+            assert_eq!(expected.public_offset, actual.public_offset);
+            assert_eq!(expected.num_public, actual.num_public);
+            assert_eq!(expected.preprocessed, actual.preprocessed);
+            assert_eq!(expected.main, actual.main);
+            assert_eq!(expected.aux, actual.aux);
+            assert_eq!(expected.aux_boundary_offset, actual.aux_boundary_offset);
+            assert_eq!(expected.num_aux_boundary, actual.num_aux_boundary);
+            assert_eq!(expected.constraint_counts.base, actual.constraint_counts.base);
+            assert_eq!(expected.constraint_counts.ext, actual.constraint_counts.ext);
+            assert_eq!(expected.degrees, actual.degrees);
+            assert_eq!(expected.period, actual.period);
+        }
+    }
+
+    #[test]
+    fn native_capture_owns_its_descriptor_and_preserves_the_legacy_ir_product() {
+        let source = PairedAir::new(2, 4, 3);
+        let legacy = CapturedAir::new(&source).unwrap();
+        assert!(legacy.descriptor().is_none());
+        assert_eq!(source.evaluations.load(Ordering::Relaxed), 1);
+        assert_eq!(source.spec_reads.load(Ordering::Relaxed), 0);
+        let native = CapturedAir::new_native(&source).unwrap();
+        assert_eq!(source.evaluations.load(Ordering::Relaxed), 2);
+        assert_eq!(source.spec_reads.load(Ordering::Relaxed), 1);
+        assert_eq!(source.fixed_builds.load(Ordering::Relaxed), 0);
+        let descriptor = native.descriptor().expect("explicit native constructor");
+        assert_eq!(descriptor.analysis().layout().base_indices(), &[0, 2, 4]);
+        assert_eq!(descriptor.analysis().layout().ext_indices(), &[1, 3, 5]);
+        assert_eq!(native.constraint_counts().base, 3);
+        assert_eq!(native.constraint_counts().ext, 3);
+        assert_eq!(legacy.graph(), native.graph());
+        assert_eq!(legacy.constraints().base_roots, native.constraints().base_roots);
+        assert_eq!(legacy.constraints().ext_roots, native.constraints().ext_roots);
+        assert_eq!(
+            legacy.constraints().base_global_indices,
+            native.constraints().base_global_indices
+        );
+        assert_eq!(
+            legacy.constraints().ext_global_indices,
+            native.constraints().ext_global_indices
+        );
+        assert_eq!(legacy.degrees(), native.degrees());
+        assert_eq!(counts(&legacy), counts(&native));
+        assert_eq!(legacy.periodic_columns, native.periodic_columns);
+        assert_eq!(legacy.max_periodic_length, native.max_periodic_length);
+        drop(source);
+        assert_eq!(native.descriptor().unwrap().spec().periodic_columns[1].len(), 4);
+    }
+
+    #[test]
+    fn old_native_and_mixed_captures_share_geometry_and_encoded_ace_pipeline() {
+        let sources = [PairedAir::new(2, 4, 3), PairedAir::new(2, 8, 7)];
+        let legacy = sources.iter().map(CapturedAir::new).collect::<Result<Vec<_>, _>>().unwrap();
+        let native = sources
+            .iter()
+            .map(CapturedAir::new_native)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(sources.iter().all(|source| source.fixed_builds.load(Ordering::Relaxed) == 0));
+        drop(sources);
+        let legacy_relation =
+            CompiledRelation::from_captured(&legacy.iter().collect::<Vec<_>>(), 8).unwrap();
+        let native_relation =
+            CompiledRelation::from_captured(&native.iter().collect::<Vec<_>>(), 8).unwrap();
+        let mixed_relation = CompiledRelation::from_captured(&[&legacy[0], &native[1]], 8).unwrap();
+        assert_geometry_matches(legacy_relation.geometry(), native_relation.geometry());
+        assert_geometry_matches(legacy_relation.geometry(), mixed_relation.geometry());
+        for layout in [LayoutKind::Native, LayoutKind::Masm] {
+            let expected_circuit = legacy_relation.build_circuit(layout).unwrap();
+            if matches!(layout, LayoutKind::Masm) {
+                legacy_relation
+                    .geometry()
+                    .validate_masm_layout(expected_circuit.layout())
+                    .unwrap();
+            }
+            let expected = expected_circuit.to_ace().unwrap();
+            for relation in [&native_relation, &mixed_relation] {
+                let actual_circuit = relation.build_circuit(layout).unwrap();
+                if matches!(layout, LayoutKind::Masm) {
+                    relation.geometry().validate_masm_layout(actual_circuit.layout()).unwrap();
+                }
+                let actual = actual_circuit.to_ace().unwrap();
+                assert_eq!(expected.num_vars(), actual.num_vars());
+                assert_eq!(expected.num_eval_rows(), actual.num_eval_rows());
+                assert_eq!(expected.instructions(), actual.instructions());
+                assert_eq!(expected.circuit_hash(), actual.circuit_hash());
+            }
+        }
+    }
+
+    #[test]
+    fn native_constructor_keeps_ace_challenge_policy_and_checked_schema() {
+        for challenges in [0, 1, 3] {
+            let source = PairedAir::new(challenges, 4, 3);
+            assert!(
+                matches!(CapturedAir::new_native(&source), Err(AceError::InvalidInputLayout { message }) if message.contains("exactly 2 randomness challenges"))
+            );
+            assert_eq!(source.spec_reads.load(Ordering::Relaxed), 1);
+            assert_eq!(source.evaluations.load(Ordering::Relaxed), 1);
+            assert_eq!(source.fixed_builds.load(Ordering::Relaxed), 0);
+        }
+        let source = PairedAir { main_width: 0, ..PairedAir::new(2, 4, 3) };
+        assert!(
+            matches!(CapturedAir::new_native(&source), Err(AceError::InvalidInputLayout { message }) if message.contains("at least one main column"))
+        );
+        assert_eq!(source.spec_reads.load(Ordering::Relaxed), 1);
+        assert_eq!(source.evaluations.load(Ordering::Relaxed), 0);
+        assert_eq!(source.fixed_builds.load(Ordering::Relaxed), 0);
     }
 }
