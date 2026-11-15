@@ -39,6 +39,13 @@ fn native_sha256_registration_keeps_source_metadata_and_prepared_execution() {
     assert_native_registration(&Sha256Air, &Sha256Air, &Sha256Kernel::new(), &SEEDS);
 }
 
+#[test]
+fn native_sha512_registration_keeps_source_metadata_and_prepared_execution() {
+    use miden_air::precompiles::native::Sha512Kernel;
+    use miden_air_definitions::precompiles::hash::sha512::Sha512Air;
+
+    assert_native_registration(&Sha512Air, &Sha512Air, &Sha512Kernel::new(), &SEEDS);
+}
 
 #[test]
 fn handwritten_and_generated_are_distinct_captures() {

@@ -39,3 +39,16 @@ define_native_kernel!(
     SHA256_PREPARED_TERMS
 );
 
+define_native_kernel!(
+    /// Generated execution of the composed SHA-512 relation and its shared lookup columns.
+    ///
+    /// Construction owns an embedded descriptor without source recapture or fixed-table building.
+    /// Witness construction remains on the authored
+    /// [`Sha512Air`](miden_air_definitions::precompiles::hash::sha512::Sha512Air).
+    /// The canonical multi-AIR runtime selects its current wrapper until activation.
+    Sha512Kernel,
+    descriptor_sha512,
+    precompute_sha512,
+    eval_sha512,
+    SHA512_PREPARED_TERMS
+);
