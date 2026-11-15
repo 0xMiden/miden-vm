@@ -39,13 +39,6 @@ proptest! {
     }
 
     #[test]
-    fn word_encoding_roundtrip(word in any::<Word>()) {
-        let string: String = word.into();
-        let round_trip: Word = string.try_into().expect("decoding failed");
-        prop_assert_eq!(word, round_trip);
-    }
-
-    #[test]
     fn word_bool_conversion_roundtrip(v in any::<[bool; Word::NUM_ELEMENTS]>()) {
         let word: Word = v.into();
         prop_assert_eq!(v, <[bool; Word::NUM_ELEMENTS]>::try_from(word).unwrap());
@@ -117,14 +110,17 @@ proptest! {
     }
 
     #[test]
-    fn word_string_conversion_roundtrip(word in any::<Word>()) {
-        let string: String = word.into();
-        let round_trip: Word = string.try_into().unwrap();
-        prop_assert_eq!(word, round_trip);
+    fn word_string_conversion_roundtrip(words in prop::array::uniform2(any::<Word>())) {
+        // Preserve both former properties' random-case budget, including PROPTEST_CASES overrides.
+        for word in words {
+            let string: String = word.into();
+            let round_trip: Word = string.try_into().unwrap();
+            prop_assert_eq!(word, round_trip);
 
-        let string: String = (&word).into();
-        let round_trip: Word = (&string).try_into().unwrap();
-        prop_assert_eq!(word, round_trip);
+            let string: String = (&word).into();
+            let round_trip: Word = (&string).try_into().unwrap();
+            prop_assert_eq!(word, round_trip);
+        }
     }
 
     #[test]
