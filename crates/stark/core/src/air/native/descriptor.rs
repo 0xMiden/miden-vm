@@ -8,7 +8,9 @@ use thiserror::Error;
 use super::{
     AirSpec, LiftedAir, SpecError,
     analysis::{AirAnalysis, AnalysisError, DegreeOp, analyze_with_identity},
-    capture::{Assertion, RawCapture, capture_raw, capture_raw_with},
+    capture::{
+        Assertion, RawCapture, SymbolicSink, capture_raw, capture_raw_from_spec, capture_raw_with,
+    },
 };
 
 /// Validated shape, ordered analysis and structural identity for one immutable configuration.
@@ -113,12 +115,34 @@ pub fn capture<A: LiftedAir>(source: &A) -> Result<Capture<A::F>, DescriptorErro
 }
 
 /// Select the symbolic constant extension field while retaining the same source input namespaces.
+/// The field encoding contract documented on [`capture()`] also applies here.
 pub fn capture_with<A, EF>(source: &A) -> Result<Capture<A::F, EF>, DescriptorError>
 where
     A: LiftedAir,
     EF: ExtensionField<A::F>,
 {
     finish_capture(capture_raw_with::<A, EF>(source)?)
+}
+
+/// Capture a selected authored relation over a checked input specification.
+///
+/// This shares the ordinary source capture's allocation, ordering and analysis. A lookup-only
+/// callback describes a subset for compiler/security inspection; it is not the complete source
+/// relation. Kernel callbacks are comparison subjects and must never become artifact oracles.
+/// The field encoding contract documented on [`capture()`] also applies here.
+pub fn capture_from_spec<F, EF>(
+    spec: AirSpec<'_, F>,
+    eval: impl FnOnce(
+        &super::Frame<'_, SymbolicSink<F, EF>>,
+        super::Inputs<'_, SymbolicSink<F, EF>>,
+        &mut SymbolicSink<F, EF>,
+    ),
+) -> Result<Capture<F, EF>, DescriptorError>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    finish_capture(capture_raw_from_spec(spec, eval)?)
 }
 
 fn finish_capture<F: Field, EF: ExtensionField<F>>(

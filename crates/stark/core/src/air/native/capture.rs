@@ -26,7 +26,11 @@ pub(crate) struct RawCapture<F: Field, EF: ExtensionField<F> = F> {
     pub labels: Vec<Option<String>>,
 }
 
-struct SymbolicSink<F: Field, EF: ExtensionField<F>> {
+/// Ordered symbolic emission for a checked source-input frame.
+///
+/// Constructed by capture entrypoints; callbacks receive inputs separately and return a validated
+/// capture rather than mutable access to the sink's internal assertion/diagnostic storage.
+pub struct SymbolicSink<F: Field, EF: ExtensionField<F> = F> {
     assertions: Vec<Assertion<F, EF>>,
     labels: Vec<Option<String>>,
 }
@@ -73,8 +77,22 @@ where
     A: LiftedAir,
     EF: ExtensionField<A::F>,
 {
+    capture_raw_from_spec(source.spec(), |frame, inputs, sink| source.eval(frame, inputs, sink))
+}
+
+pub(crate) fn capture_raw_from_spec<F, EF>(
+    spec: AirSpec<'_, F>,
+    eval: impl FnOnce(
+        &super::Frame<'_, SymbolicSink<F, EF>>,
+        super::Inputs<'_, SymbolicSink<F, EF>>,
+        &mut SymbolicSink<F, EF>,
+    ),
+) -> Result<RawCapture<F, EF>, SpecError>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
     // One coherent configuration snapshot, checked before symbolic allocation.
-    let spec = source.spec();
     spec.validate()?;
     let spec = spec.into_owned();
     let row_offsets = [RowOffset::Current, RowOffset::Next];
@@ -128,7 +146,7 @@ where
         assertions: Vec::new(),
         labels: Vec::new(),
     };
-    source.eval(&frame, inputs, &mut sink);
+    eval(&frame, inputs, &mut sink);
     Ok(RawCapture {
         spec,
         assertions: sink.assertions,

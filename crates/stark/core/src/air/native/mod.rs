@@ -22,10 +22,11 @@ pub use analysis::{
     DegreeOp, DegreeProfile,
 };
 pub use builder::{ConstraintMeta, ConstraintPath, Filtered, LiftedAirBuilder, Named};
-pub use capture::Assertion;
+pub use capture::{Assertion, SymbolicSink};
 pub use contracts::{AuxTrace, AuxTraceInputs, LiftedAir, ProverAir};
 pub use descriptor::{
-    AirDescriptor, Capture, DescriptorError, DescriptorParts, capture, capture_with,
+    AirDescriptor, Capture, DescriptorError, DescriptorParts, capture, capture_from_spec,
+    capture_with,
 };
 pub use frame::{AirFrame, Frame, Inputs, Rows, Selectors, UniformInputs};
 pub use kernel::{AirKernel, BindError, DirectKernel, EvaluationSession};

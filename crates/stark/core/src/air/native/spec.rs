@@ -45,6 +45,19 @@ pub enum SpecError {
 }
 
 impl<F: Field> AirSpec<'_, F> {
+    /// Borrow this configuration, including periodic definitions, without cloning their data.
+    pub fn as_borrowed(&self) -> AirSpec<'_, F> {
+        AirSpec {
+            main_width: self.main_width,
+            aux_width: self.aux_width,
+            num_public_values: self.num_public_values,
+            num_challenges: self.num_challenges,
+            num_exports: self.num_exports,
+            preprocessed: self.preprocessed,
+            periodic_columns: Cow::Borrowed(&self.periodic_columns),
+        }
+    }
+
     pub fn into_owned(self) -> AirSpec<'static, F> {
         AirSpec {
             main_width: self.main_width,
