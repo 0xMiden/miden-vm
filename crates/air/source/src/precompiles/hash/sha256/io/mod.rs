@@ -12,14 +12,16 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_precompiles::Sha256Precompile;
+use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
+    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
     lookup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, build_logup_aux_trace,
+        Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
+        native as native_lookup,
     },
 };
 use miden_utils_sync::LazyLock;
+use p3_field::Dup;
 pub use program::{IO_PERIOD, NUM_PERIODIC_COLS, io_program};
 
 use crate::precompiles::{
@@ -32,7 +34,7 @@ use crate::precompiles::{
         eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
         initial_cv_from_frame,
     },
-    utils::{current_main, halves_le, next_main, pack_le},
+    utils::{halves_le, pack_le},
 };
 
 pub const NUM_MAIN_COLS: usize = 28;
@@ -104,164 +106,218 @@ impl LiftedAir<Felt, QuadFelt> for Sha256IoAir {
     fn build_aux_trace(
         &self,
         main: &RowMajorMatrix<Felt>,
-        _: &[Felt],
-        _: &[Felt],
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        build_logup_aux_trace(self, main, challenges)
+        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
+            self,
+            native::AuxTraceInputs {
+                main,
+                preprocessed: None,
+                public_values: air_inputs,
+                statement: aux_inputs,
+                challenges,
+            },
+        )
+        .expect("valid SHA-256 auxiliary inputs");
+        (aux.columns, aux.exports)
     }
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        eval_main(builder, 0, 0);
-        let mut lb = ConstraintLookupBuilder::new(builder, self);
-        eval_lookups(&mut lb, 0, 0);
-        lb.finish();
+        native::migration::eval_source(self, builder);
+    }
+}
+
+impl native::LiftedAir for Sha256IoAir {
+    type F = Felt;
+
+    fn spec(&self) -> native::AirSpec<'_, Felt> {
+        native::AirSpec {
+            main_width: NUM_MAIN_COLS,
+            aux_width: NUM_AUX_COLS,
+            num_public_values: 0,
+            num_challenges: NUM_RANDOMNESS,
+            num_exports: NUM_LOGUP_VALUES,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(PERIODIC_COLUMNS.as_slice()),
+        }
+    }
+
+    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &native::Frame<'_, AB>,
+        inputs: native::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        eval_main(frame, builder, 0, 0);
+        native_lookup::eval_lookup(self, frame, inputs, builder);
+    }
+}
+
+impl native::ProverAir<QuadFelt> for Sha256IoAir {
+    type Error = native_lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        native_lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
 /// Evaluate the local constraints in an independent main/periodic column band.
-pub fn eval_main<AB: LiftedAirBuilder<F = Felt>>(
+pub fn eval_main<AB: native::LiftedAirBuilder<F = Felt>>(
+    frame: &native::Frame<'_, AB>,
     builder: &mut AB,
     main_col_offset: usize,
     periodic_col_offset: usize,
 ) {
-    let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
-    let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), main_col_offset);
-    let periods = builder.periodic_values();
-    let p: [AB::Expr; NUM_PERIODIC_COLS] =
-        array::from_fn(|i| periods[periodic_col_offset + i].into());
+    let local: &[AB::Expr; NUM_MAIN_COLS] = frame.main.current
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("SHA-256 current row band");
+    let next: &[AB::Expr; NUM_MAIN_COLS] = frame.main.next
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("SHA-256 next row band");
+    let p: &[AB::Expr; NUM_PERIODIC_COLS] = frame.periodic
+        [periodic_col_offset..periodic_col_offset + NUM_PERIODIC_COLS]
+        .try_into()
+        .expect("SHA-256 IO periodic band");
     let one = AB::Expr::ONE;
-    let v = |i: usize| -> AB::Expr { local[i].into() };
-    let nv = |i: usize| -> AB::Expr { next[i].into() };
+    let v = |i: usize| -> AB::Expr { local[i].dup() };
+    let nv = |i: usize| -> AB::Expr { next[i].dup() };
     let act = v(COL_ACT);
     let next_act = nv(COL_ACT);
     let first = v(COL_FIRST_BLOCK);
     let final_block = v(COL_FINAL_BLOCK);
-    let last = p[program::P_LAST].clone();
-    let end = last.clone() * final_block.clone();
-    let carry = next_act.clone() * (one.clone() - end);
+    let last = p[program::P_LAST].dup();
+    let end = last.dup() * final_block.dup();
+    let carry = next_act.dup() * (one.dup() - end);
 
-    eval_main_rows(builder, &local, &next, &p, one.clone(), carry);
+    eval_main_rows(frame, builder, local, next, p, one.dup(), carry);
 
     // These controller constraints belong to the dense standalone wrapper. A composite caller
     // supplies the corresponding block/coverage constraints from the shared compression rows.
-    builder.when_first_row().assert_zero(v(COL_BLOCK_ID));
-    builder.when_first_row().assert_zero(act.clone() * (first - one.clone()));
+    builder.when(frame.first_row()).assert_zero(v(COL_BLOCK_ID));
+    builder.when(frame.first_row()).assert_zero(act.dup() * (first - one.dup()));
     builder
-        .when_transition()
-        .assert_zero(nv(COL_BLOCK_ID) - v(COL_BLOCK_ID) - last.clone());
+        .when(frame.transition())
+        .assert_zero(nv(COL_BLOCK_ID) - v(COL_BLOCK_ID) - last.dup());
     builder
-        .when_transition()
-        .assert_zero((one.clone() - act.clone()) * next_act.clone());
+        .when(frame.transition())
+        .assert_zero((one.dup() - act.dup()) * next_act.dup());
     builder
-        .when_transition()
-        .assert_zero((one.clone() - last.clone()) * (next_act.clone() - act.clone()));
+        .when(frame.transition())
+        .assert_zero((one.dup() - last.dup()) * (next_act.dup() - act.dup()));
     builder
-        .when_transition()
-        .assert_zero(next_act.clone() * last.clone() * (nv(COL_FIRST_BLOCK) - final_block.clone()));
+        .when(frame.transition())
+        .assert_zero(next_act.dup() * last.dup() * (nv(COL_FIRST_BLOCK) - final_block.dup()));
     builder
-        .when_transition()
-        .assert_zero((act.clone() - next_act) * last * (one.clone() - final_block.clone()));
-    builder.when_last_row().assert_zero(act * (one - final_block));
+        .when(frame.transition())
+        .assert_zero((act.dup() - next_act) * last * (one.dup() - final_block.dup()));
+    builder.when(frame.last_row()).assert_zero(act * (one - final_block));
 }
 
 /// `owned` gates reused cells; `carry` also includes non-final block boundaries in standalone IO.
-pub(super) fn eval_main_rows<AB: LiftedAirBuilder<F = Felt>>(
+pub(super) fn eval_main_rows<AB: native::LiftedAirBuilder<F = Felt>>(
+    frame: &native::Frame<'_, AB>,
     builder: &mut AB,
-    local: &[AB::Var; NUM_MAIN_COLS],
-    next: &[AB::Var; NUM_MAIN_COLS],
+    local: &[AB::Expr; NUM_MAIN_COLS],
+    next: &[AB::Expr; NUM_MAIN_COLS],
     p: &[AB::Expr; NUM_PERIODIC_COLS],
     owned: AB::Expr,
     carry: AB::Expr,
 ) {
-    let v = |i: usize| -> AB::Expr { local[i].into() };
-    let nv = |i: usize| -> AB::Expr { next[i].into() };
+    let v = |i: usize| -> AB::Expr { local[i].dup() };
+    let nv = |i: usize| -> AB::Expr { next[i].dup() };
     let one = AB::Expr::ONE;
     let act = v(COL_ACT);
     let first = v(COL_FIRST_BLOCK);
     let final_block = v(COL_FINAL_BLOCK);
-    let raw = owned.clone() * p[program::P_RAW].clone();
+    let raw = owned.dup() * p[program::P_RAW].dup();
     for column in [COL_ACT, COL_FIRST_BLOCK, COL_FINAL_BLOCK, COL_BEFORE] {
-        builder.assert_zero(owned.clone() * v(column) * (one.clone() - v(column)));
+        builder.assert_zero(owned.dup() * v(column) * (one.dup() - v(column)));
     }
-    builder.assert_zero(raw.clone() * v(COL_CHUNK_ACTIVE) * (one.clone() - v(COL_CHUNK_ACTIVE)));
+    builder.assert_zero(raw.dup() * v(COL_CHUNK_ACTIVE) * (one.dup() - v(COL_CHUNK_ACTIVE)));
     for column in [COL_FIRST_BLOCK, COL_FINAL_BLOCK] {
-        builder.when_transition().assert_zero(
-            owned.clone() * (one.clone() - p[program::P_LAST].clone()) * (nv(column) - v(column)),
+        builder.when(frame.transition()).assert_zero(
+            owned.dup() * (one.dup() - p[program::P_LAST].dup()) * (nv(column) - v(column)),
         );
     }
     for column in [COL_LEN, COL_INPUT_HEAD] {
-        builder.when_transition().assert_zero(carry.clone() * (nv(column) - v(column)));
+        builder
+            .when(frame.transition())
+            .assert_zero(carry.dup() * (nv(column) - v(column)));
     }
-    let start = act.clone() * p[program::P_FIRST].clone() * first.clone();
-    builder.assert_zero(start.clone() * (v(COL_LEFT) - v(COL_LEN)));
-    builder.assert_zero(start.clone() * (v(COL_BEFORE) - one.clone()));
+    let start = act.dup() * p[program::P_FIRST].dup() * first.dup();
+    builder.assert_zero(start.dup() * (v(COL_LEFT) - v(COL_LEN)));
+    builder.assert_zero(start.dup() * (v(COL_BEFORE) - one.dup()));
     builder.assert_zero(start * (v(COL_INPUT_HEAD) - v(COL_INPUT_EIDOS)));
     builder.assert_zero(
-        act.clone()
-            * p[program::P_RAW].clone()
+        act.dup()
+            * p[program::P_RAW].dup()
             * (v(COL_LEFT) - v(COL_LEFT_LO16) - v(COL_LEFT_HI16) * Felt::from_u32(1 << 16)),
     );
     let mut sum = AB::Expr::ZERO;
     let mut previous = v(COL_BEFORE);
     let padded: [AB::Expr; 4] = array::from_fn(|i| {
         let msg = v(COL_MSG_BEGIN + i);
-        builder.assert_zero(raw.clone() * msg.clone() * (one.clone() - msg.clone()));
-        builder.assert_zero(raw.clone() * msg.clone() * (one.clone() - previous.clone()));
-        builder.assert_zero(raw.clone() * v(COL_RAW_BEGIN + i) * (one.clone() - msg.clone()));
-        let byte = v(COL_RAW_BEGIN + i) + (previous.clone() - msg.clone()) * Felt::from_u8(128);
-        sum += msg.clone();
+        builder.assert_zero(raw.dup() * msg.dup() * (one.dup() - msg.dup()));
+        builder.assert_zero(raw.dup() * msg.dup() * (one.dup() - previous.dup()));
+        builder.assert_zero(raw.dup() * v(COL_RAW_BEGIN + i) * (one.dup() - msg.dup()));
+        let byte = v(COL_RAW_BEGIN + i) + (previous.dup() - msg.dup()) * Felt::from_u8(128);
+        sum += msg.dup();
         previous = msg;
         byte
     });
-    builder.assert_zero(raw * (one.clone() - previous.clone()) * (v(COL_LEFT) - sum.clone()));
-    builder.when_transition().assert_zero(
-        carry.clone() * (nv(COL_LEFT) - v(COL_LEFT) + p[program::P_RAW].clone() * sum.clone()),
+    builder.assert_zero(raw * (one.dup() - previous.dup()) * (v(COL_LEFT) - sum.dup()));
+    builder.when(frame.transition()).assert_zero(
+        carry.dup() * (nv(COL_LEFT) - v(COL_LEFT) + p[program::P_RAW].dup() * sum.dup()),
     );
-    builder.when_transition().assert_zero(
-        carry.clone()
+    builder.when(frame.transition()).assert_zero(
+        carry.dup()
             * (nv(COL_BEFORE)
                 - v(COL_BEFORE)
-                - p[program::P_RAW].clone() * (previous - v(COL_BEFORE))),
+                - p[program::P_RAW].dup() * (previous - v(COL_BEFORE))),
     );
     builder.assert_zero(
-        act.clone() * p[program::P_RAW_LAST].clone() * final_block.clone() * (v(COL_LEFT) - sum),
+        act.dup() * p[program::P_RAW_LAST].dup() * final_block.dup() * (v(COL_LEFT) - sum),
     );
     // The marker must precede W14/W15 exactly when this block is final.
     builder.assert_zero(
-        act.clone()
-            * p[program::P_LENGTH].clone()
-            * (final_block.clone() + v(COL_BEFORE) - one.clone()),
+        act.dup() * p[program::P_LENGTH].dup() * (final_block.dup() + v(COL_BEFORE) - one.dup()),
     );
     let padded_word = padded
         .into_iter()
         .fold(AB::Expr::ZERO, |word, byte| word * Felt::from_u32(256) + byte);
     builder.assert_zero(
-        act.clone()
-            * (p[program::P_RAW].clone() - final_block.clone() * p[program::P_SUFFIX].clone())
+        act.dup()
+            * (p[program::P_RAW].dup() - final_block.dup() * p[program::P_SUFFIX].dup())
             * (v(COL_WORD) - padded_word),
     );
     builder.assert_zero(
-        act.clone()
-            * p[program::P_LENGTH].clone()
-            * final_block.clone()
+        act.dup()
+            * p[program::P_LENGTH].dup()
+            * final_block.dup()
             * (nv(COL_WORD) + v(COL_WORD) * Felt::new_unchecked(1u64 << 32)
                 - v(COL_LEN) * Felt::from_u8(8)),
     );
-    let expected_chunk = v(COL_MSG_BEGIN)
-        + p[program::P_FIRST].clone() * first.clone() * (one.clone() - v(COL_MSG_BEGIN));
+    let expected_chunk =
+        v(COL_MSG_BEGIN) + p[program::P_FIRST].dup() * first.dup() * (one.dup() - v(COL_MSG_BEGIN));
     builder.assert_zero(
-        act.clone() * p[program::P_CHUNK_FIRST].clone() * (v(COL_CHUNK_ACTIVE) - expected_chunk),
+        act.dup() * p[program::P_CHUNK_FIRST].dup() * (v(COL_CHUNK_ACTIVE) - expected_chunk),
     );
-    builder.when_transition().assert_zero(
-        owned.clone()
-            * (p[program::P_RAW].clone() - p[program::P_CHUNK_END].clone())
+    builder.when(frame.transition()).assert_zero(
+        owned.dup()
+            * (p[program::P_RAW].dup() - p[program::P_CHUNK_END].dup())
             * (nv(COL_CHUNK_ACTIVE) - v(COL_CHUNK_ACTIVE)),
     );
-    builder.when_transition().assert_zero(
+    builder.when(frame.transition()).assert_zero(
         carry
             * (nv(COL_INPUT_EIDOS)
                 - v(COL_INPUT_EIDOS)
-                - (p[program::P_CHUNK_ADVANCE].clone() + p[program::P_LAST].clone())
+                - (p[program::P_CHUNK_ADVANCE].dup() + p[program::P_LAST].dup())
                     * nv(COL_CHUNK_ACTIVE)),
     );
     for i in 0..7 {
@@ -270,57 +326,60 @@ pub(super) fn eval_main_rows<AB: LiftedAirBuilder<F = Felt>>(
         } else {
             pack_le(&local[COL_RAW_BEGIN..COL_RAW_BEGIN + 4], 256)
         };
-        builder.when_transition().assert_zero(
-            owned.clone() * p[program::P_RAW_NEXT].clone() * (nv(COL_RAW_BUFFER + i) - value),
+        builder.when(frame.transition()).assert_zero(
+            owned.dup() * p[program::P_RAW_NEXT].dup() * (nv(COL_RAW_BUFFER + i) - value),
         );
     }
-    let state = act.clone() * first * p[program::P_STATE].clone();
-    builder.assert_zero(state.clone() * (v(COL_STATE_HI) - p[program::P_IV_HI].clone()));
-    builder.assert_zero(state * (v(COL_STATE_LO) - p[program::P_IV_LO].clone()));
-    let digest: [AB::Var; 8] = array::from_fn(|i| local[COL_DIGEST_BEGIN + i]);
-    for (i, half) in halves_le(&digest, 256).into_iter().enumerate() {
-        builder.when_transition().assert_zero(
-            act.clone()
-                * final_block.clone()
-                * p[program::P_DIGEST_NEXT].clone()
+    let state = act.dup() * first * p[program::P_STATE].dup();
+    builder.assert_zero(state.dup() * (v(COL_STATE_HI) - p[program::P_IV_HI].dup()));
+    builder.assert_zero(state * (v(COL_STATE_LO) - p[program::P_IV_LO].dup()));
+    let digest: &[AB::Expr; 8] = local[COL_DIGEST_BEGIN..COL_DIGEST_BEGIN + 8]
+        .try_into()
+        .expect("SHA-256 digest byte band");
+    for (i, half) in halves_le::<AB::Expr, _>(digest, 256).into_iter().enumerate() {
+        builder.when(frame.transition()).assert_zero(
+            act.dup()
+                * final_block.dup()
+                * p[program::P_DIGEST_NEXT].dup()
                 * (nv(COL_PREVIOUS_DIGEST + i) - half),
         );
-        builder.when_transition().assert_zero(
-            act.clone()
-                * final_block.clone()
-                * p[program::P_DIGEST_SECOND].clone()
+        builder.when(frame.transition()).assert_zero(
+            act.dup()
+                * final_block.dup()
+                * p[program::P_DIGEST_SECOND].dup()
                 * (nv(COL_CHUNK_HEAD_DIGEST + i) - v(COL_PREVIOUS_DIGEST + i)),
         );
     }
-    builder.when_transition().assert_zero(
-        act.clone()
-            * final_block.clone()
-            * p[program::P_DIGEST_CARRY].clone()
+    builder.when(frame.transition()).assert_zero(
+        act.dup()
+            * final_block.dup()
+            * p[program::P_DIGEST_CARRY].dup()
             * (nv(COL_DIGEST_EIDOS) - v(COL_DIGEST_EIDOS)),
     );
-    builder.assert_zero(act * p[program::P_BIND].clone() * (one - final_block) * v(COL_OUT_MULT));
+    builder.assert_zero(act * p[program::P_BIND].dup() * (one - final_block) * v(COL_OUT_MULT));
 }
 
 fn chunks_initial_cv<E: Algebra<Felt>>(num_felts: E) -> [E; 4] {
     initial_cv_from_frame([E::from(DEFERRED_CHUNKS_DOMAIN), num_felts, E::ZERO, E::ZERO])
 }
-fn halves_be<E: Algebra<Felt>, V: Clone + Into<E>>(bytes: &[V; 8]) -> [E; 2] {
-    let pack = |s: &[V]| s.iter().fold(E::ZERO, |a, b| a * Felt::from_u32(256) + b.clone().into());
+fn halves_be<E: Algebra<Felt>>(bytes: &[E; 8]) -> [E; 2] {
+    let pack = |s: &[E]| s.iter().fold(E::ZERO, |a, b| a * Felt::from_u32(256) + b.dup());
     [pack(&bytes[4..]), pack(&bytes[..4])]
 }
-fn digest_block<E: Algebra<Felt>, V: Copy + Into<E>>(
-    local: &[V; NUM_MAIN_COLS],
-    next: &[V; NUM_MAIN_COLS],
-) -> [E; 8] {
-    let current: [V; 8] = array::from_fn(|i| local[COL_DIGEST_BEGIN + i]);
-    let following: [V; 8] = array::from_fn(|i| next[COL_DIGEST_BEGIN + i]);
-    let [a, b] = halves_le(&current, 256);
-    let [c, d] = halves_le(&following, 256);
+fn digest_block<E: Algebra<Felt>>(local: &[E; NUM_MAIN_COLS], next: &[E; NUM_MAIN_COLS]) -> [E; 8] {
+    let current: &[E; 8] = local[COL_DIGEST_BEGIN..COL_DIGEST_BEGIN + 8]
+        .try_into()
+        .expect("SHA-256 current digest band");
+    let following: &[E; 8] = next[COL_DIGEST_BEGIN..COL_DIGEST_BEGIN + 8]
+        .try_into()
+        .expect("SHA-256 next digest band");
+    let [a, b] = halves_le(current, 256);
+    let [c, d] = halves_le(following, 256);
     [
-        local[COL_CHUNK_HEAD_DIGEST].into(),
-        local[COL_CHUNK_HEAD_DIGEST + 1].into(),
-        local[COL_PREVIOUS_DIGEST].into(),
-        local[COL_PREVIOUS_DIGEST + 1].into(),
+        local[COL_CHUNK_HEAD_DIGEST].dup(),
+        local[COL_CHUNK_HEAD_DIGEST + 1].dup(),
+        local[COL_PREVIOUS_DIGEST].dup(),
+        local[COL_PREVIOUS_DIGEST + 1].dup(),
         a,
         b,
         c,
@@ -419,30 +478,29 @@ pub(super) fn lookup_column_degree(index: usize, continuation: bool) -> Deg {
 
 /// Add IO batches under disjoint fixed row masks. Continuation endpoints replace adjacent-row
 /// state transport when the IO rows share a trace with compression.
-pub(super) fn eval_lookup_group<G, V>(
+pub(super) fn eval_lookup_group<G>(
     group: &mut G,
     index: usize,
-    local: &[V; NUM_MAIN_COLS],
-    next: &[V; NUM_MAIN_COLS],
+    local: &[G::Expr; NUM_MAIN_COLS],
+    next: &[G::Expr; NUM_MAIN_COLS],
     p: &[G::Expr; NUM_PERIODIC_COLS],
     act: G::Expr,
     continuation: bool,
 ) where
     G: LookupGroup,
     G::Expr: Algebra<Felt>,
-    V: Copy + Into<G::Expr>,
 {
     use program::*;
     let masks = [
-        p[P_FIRST].clone(),
-        p[P_RAW_EMIT].clone(),
-        p[P_LENGTH].clone(),
-        p[P_RAW].clone() - p[P_FIRST].clone() - p[P_RAW_EMIT].clone() - p[P_LENGTH].clone(),
-        p[P_STATE].clone(),
-        p[P_DIGEST_EMIT].clone(),
-        p[P_DIGEST].clone() - p[P_DIGEST_EMIT].clone(),
-        p[P_BIND].clone(),
-        p[P_LAST].clone(),
+        p[P_FIRST].dup(),
+        p[P_RAW_EMIT].dup(),
+        p[P_LENGTH].dup(),
+        p[P_RAW].dup() - p[P_FIRST].dup() - p[P_RAW_EMIT].dup() - p[P_LENGTH].dup(),
+        p[P_STATE].dup(),
+        p[P_DIGEST_EMIT].dup(),
+        p[P_DIGEST].dup() - p[P_DIGEST_EMIT].dup(),
+        p[P_BIND].dup(),
+        p[P_LAST].dup(),
     ];
     for (phase, mask) in masks.into_iter().enumerate() {
         let Some(degree) = phase_degree(phase, index, continuation) else {
@@ -450,7 +508,7 @@ pub(super) fn eval_lookup_group<G, V>(
         };
         group.batch(
             "io-phase",
-            act.clone() * mask,
+            act.dup() * mask,
             |batch| {
                 for kind in selected_batches(phase, index, continuation) {
                     eval_batch(batch, kind, local, next, p);
@@ -460,18 +518,17 @@ pub(super) fn eval_lookup_group<G, V>(
         );
     }
 }
-fn eval_batch<B, V>(
+fn eval_batch<B>(
     batch: &mut B,
     kind: Batch,
-    local: &[V; NUM_MAIN_COLS],
-    next: &[V; NUM_MAIN_COLS],
+    local: &[B::Expr; NUM_MAIN_COLS],
+    next: &[B::Expr; NUM_MAIN_COLS],
     p: &[B::Expr; NUM_PERIODIC_COLS],
 ) where
     B: LookupBatch,
     B::Expr: Algebra<Felt>,
-    V: Copy + Into<B::Expr>,
 {
-    let e = |i: usize| -> B::Expr { local[i].into() };
+    let e = |i: usize| -> B::Expr { local[i].dup() };
     let final_block = e(COL_FINAL_BLOCK);
     let word = |bid, addr, value| Sha256WordMsg { block_id: bid, addr, value };
     let one = B::Expr::ONE;
@@ -483,7 +540,7 @@ fn eval_batch<B, V>(
             -one,
             word(
                 e(COL_BLOCK_ID),
-                B::Expr::from_u32(INPUT_ADDR_BASE) + p[program::P_IDX].clone(),
+                B::Expr::from_u32(INPUT_ADDR_BASE) + p[program::P_IDX].dup(),
                 e(COL_WORD),
             ),
             d0,
@@ -494,15 +551,11 @@ fn eval_batch<B, V>(
             } else {
                 (1, COL_STATE_LO)
             };
-            let addr = p[program::P_STATE_IDX].clone() * Felt::from_u8(2) + B::Expr::from_u32(off);
+            let addr = p[program::P_STATE_IDX].dup() * Felt::from_u8(2) + B::Expr::from_u32(off);
             batch.insert(
                 "incoming",
-                -one.clone(),
-                word(
-                    e(COL_BLOCK_ID),
-                    B::Expr::from_u32(INPUT_ADDR_BASE + 16) + addr.clone(),
-                    e(col),
-                ),
+                -one.dup(),
+                word(e(COL_BLOCK_ID), B::Expr::from_u32(INPUT_ADDR_BASE + 16) + addr.dup(), e(col)),
                 d0,
             );
             batch.insert(
@@ -519,7 +572,7 @@ fn eval_batch<B, V>(
         Batch::Init => {
             batch.insert(
                 "raw-init",
-                final_block.clone(),
+                final_block.dup(),
                 EidosInitMsg {
                     compression_id: e(COL_INPUT_HEAD),
                     initial_cv: chunks_initial_cv(
@@ -541,7 +594,7 @@ fn eval_batch<B, V>(
         Batch::Out => {
             batch.insert(
                 "raw-out",
-                final_block.clone(),
+                final_block.dup(),
                 EidosOutMsg {
                     chain_head_id: e(COL_INPUT_HEAD),
                     compression_id: e(COL_INPUT_EIDOS),
@@ -571,7 +624,7 @@ fn eval_batch<B, V>(
             ];
             batch.insert(
                 "node-init",
-                final_block.clone(),
+                final_block.dup(),
                 EidosInitMsg {
                     compression_id: e(COL_NODE_EIDOS),
                     initial_cv: initial_cv_from_frame(frame),
@@ -592,7 +645,7 @@ fn eval_batch<B, V>(
             let digest = H_SHA256_COLS.map(e);
             batch.insert(
                 "node-out",
-                final_block.clone(),
+                final_block.dup(),
                 EidosOutMsg {
                     chain_head_id: e(COL_NODE_EIDOS),
                     compression_id: e(COL_NODE_EIDOS),
@@ -611,7 +664,7 @@ fn eval_batch<B, V>(
             for i in offset..offset + 2 {
                 batch.insert(
                     "byte",
-                    one.clone(),
+                    one.dup(),
                     BytePairLutMsg::from_xor(
                         B::Expr::ZERO,
                         e(COL_RAW_BEGIN + i),
@@ -626,7 +679,7 @@ fn eval_batch<B, V>(
             for (i, &column) in COL_DIGEST_XOR.iter().enumerate().skip(offset).take(2) {
                 batch.insert(
                     "digest-byte-pair",
-                    final_block.clone(),
+                    final_block.dup(),
                     BytePairLutMsg::from_xor(
                         e(COL_DIGEST_BEGIN + 2 * i),
                         e(COL_DIGEST_BEGIN + 2 * i + 1),
@@ -637,7 +690,7 @@ fn eval_batch<B, V>(
             }
         },
         Batch::Left => {
-            batch.insert("left-low", one.clone(), Range16Msg { w: e(COL_LEFT_LO16) }, d0);
+            batch.insert("left-low", one.dup(), Range16Msg { w: e(COL_LEFT_LO16) }, d0);
             batch.insert("left-high", one, Range16Msg { w: e(COL_LEFT_HI16) }, d0);
         },
         Batch::RawBlock => batch.insert(
@@ -656,16 +709,13 @@ fn eval_batch<B, V>(
             d1,
         ),
         Batch::DigestWords => {
-            let bytes: [V; 8] = array::from_fn(|i| local[COL_DIGEST_BEGIN + i]);
-            let [lo, hi] = halves_be(&bytes);
+            let bytes: &[B::Expr; 8] = local[COL_DIGEST_BEGIN..COL_DIGEST_BEGIN + 8]
+                .try_into()
+                .expect("SHA-256 digest word band");
+            let [lo, hi] = halves_be(bytes);
             let addr = B::Expr::from_u32(OUTPUT_SLOTS[0])
-                + p[program::P_DIGEST_IDX].clone() * Felt::from_u8(2);
-            batch.insert(
-                "digest-hi",
-                final_block.clone(),
-                word(e(COL_BLOCK_ID), addr.clone(), hi),
-                d1,
-            );
+                + p[program::P_DIGEST_IDX].dup() * Felt::from_u8(2);
+            batch.insert("digest-hi", final_block.dup(), word(e(COL_BLOCK_ID), addr.dup(), hi), d1);
             batch.insert("digest-lo", final_block, word(e(COL_BLOCK_ID), addr + one, lo), d1);
         },
         Batch::Length => {
@@ -710,22 +760,32 @@ fn eval_batch<B, V>(
     }
 }
 
-pub fn eval_lookups<LB: LookupBuilder<F = Felt>>(
+pub fn eval_lookups<LB: native_lookup::LookupBuilder<F = Felt>>(
+    frame: &native_lookup::LookupFrame<'_, LB::Expr>,
     builder: &mut LB,
     main_col_offset: usize,
     periodic_col_offset: usize,
 ) {
-    let local = current_main(builder.main(), main_col_offset);
-    let next = next_main(builder.main(), main_col_offset);
-    let p = array::from_fn(|i| builder.periodic_values()[periodic_col_offset + i].into());
-    let act: LB::Expr = local[COL_ACT].into();
+    let local: &[LB::Expr; NUM_MAIN_COLS] = frame.main.current
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("SHA-256 IO lookup current row band");
+    let next: &[LB::Expr; NUM_MAIN_COLS] = frame.main.next
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("SHA-256 IO lookup next row band");
+    let p: &[LB::Expr; NUM_PERIODIC_COLS] = frame.periodic
+        [periodic_col_offset..periodic_col_offset + NUM_PERIODIC_COLS]
+        .try_into()
+        .expect("SHA-256 IO lookup periodic band");
+    let act = local[COL_ACT].dup();
     for index in 0..NUM_AUX_COLS {
         let degree = lookup_column_degree(index, false);
         builder.next_column(
             |column| {
                 column.group(
                     "io",
-                    |group| eval_lookup_group(group, index, &local, &next, &p, act.clone(), false),
+                    |group| eval_lookup_group(group, index, local, next, p, act.dup(), false),
                     degree,
                 )
             },
@@ -744,6 +804,21 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha256IoAir {
         NUM_BUS_IDS
     }
     fn eval(&self, builder: &mut LB) {
-        eval_lookups(builder, 0, 0);
+        native::migration::eval_lookup(self, builder, 0);
+    }
+}
+
+impl<LB: native_lookup::LookupBuilder<F = Felt>> native_lookup::LookupAir<LB> for Sha256IoAir {
+    fn column_shape(&self) -> &[usize] {
+        &COLUMN_SHAPE
+    }
+    fn max_message_width(&self) -> usize {
+        MAX_MESSAGE_WIDTH
+    }
+    fn num_bus_ids(&self) -> usize {
+        NUM_BUS_IDS
+    }
+    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        eval_lookups(frame, builder, 0, 0);
     }
 }

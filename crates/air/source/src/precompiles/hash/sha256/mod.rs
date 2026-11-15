@@ -11,15 +11,15 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_stark::{
-    air::{BaseAir, LiftedAir, LiftedAirBuilder},
-    lookup::{ConstraintLookupBuilder, Deg, LookupAir, LookupBuilder, LookupColumn, LookupMessage},
+    air::{BaseAir, LiftedAir, LiftedAirBuilder, native},
+    lookup::{Deg, LookupAir, LookupBuilder, LookupColumn, LookupMessage, native as native_lookup},
 };
 use miden_utils_sync::LazyLock;
+use p3_field::Dup;
 
 use crate::precompiles::{
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    utils::{current_main, next_main},
 };
 
 pub const IO_PERIODIC_OFFSET: usize = compression::NUM_PERIODIC_COLS;
@@ -118,36 +118,83 @@ impl LiftedAir<Felt, QuadFelt> for Sha256Air {
     fn build_aux_trace(
         &self,
         main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        miden_stark::lookup::build_logup_aux_trace(self, main, challenges)
+        let aux = <Self as native::ProverAir<QuadFelt>>::build_aux_trace(
+            self,
+            native::AuxTraceInputs {
+                main,
+                preprocessed: None,
+                public_values: air_inputs,
+                statement: aux_inputs,
+                challenges,
+            },
+        )
+        .expect("valid SHA-256 auxiliary inputs");
+        (aux.columns, aux.exports)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
-        let periods = builder.periodic_values();
-        let io_periods = core::array::from_fn(|i| periods[IO_PERIODIC_OFFSET + i].into());
-        let io_act: AB::Expr = local[COL_IO_ACT].into();
-        builder.assert_bool(local[COL_IO_ACT]);
-        builder.assert_zero(
-            io_act.clone()
-                - AB::Expr::from(local[compression::COL_ACT])
-                    * local[compression::COL_PHASE_BEGIN + compression::program::PHASE_PADDING]
-                        .into()
-                    * local[compression::COL_PHASE_END].into(),
-        );
-        compression::eval_main_with_io(builder, 0, 0, io_act.clone());
-        let io_local = IO_COLUMNS.map(|column| local[column]);
-        let io_next = IO_COLUMNS.map(|column| next[column]);
-        let carry = io_act.clone() * (AB::Expr::ONE - io_periods[io::program::P_LAST].clone());
-        io::eval_main_rows(builder, &io_local, &io_next, &io_periods, io_act, carry);
+        native::migration::eval_source(self, builder);
+    }
+}
 
-        let mut lb = ConstraintLookupBuilder::new(builder, self);
-        <Self as LookupAir<_>>::eval(self, &mut lb);
-        lb.finish();
+impl native::LiftedAir for Sha256Air {
+    type F = Felt;
+
+    fn spec(&self) -> native::AirSpec<'_, Felt> {
+        native::AirSpec {
+            main_width: NUM_MAIN_COLS,
+            aux_width: NUM_AUX_COLS,
+            num_public_values: 0,
+            num_challenges: NUM_RANDOMNESS,
+            num_exports: NUM_LOGUP_VALUES,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(PERIODIC_COLUMNS.as_slice()),
+        }
+    }
+
+    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &native::Frame<'_, AB>,
+        inputs: native::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        let local = frame.main.current;
+        let next = frame.main.next;
+        let io_periods: &[AB::Expr; io::NUM_PERIODIC_COLS] = frame.periodic
+            [IO_PERIODIC_OFFSET..IO_PERIODIC_OFFSET + io::NUM_PERIODIC_COLS]
+            .try_into()
+            .expect("SHA-256 composed IO periodic band");
+        let io_act: AB::Expr = local[COL_IO_ACT].dup();
+        builder.assert_bool(local[COL_IO_ACT].dup());
+        builder.assert_zero(
+            io_act.dup()
+                - local[compression::COL_ACT].dup()
+                    * local[compression::COL_PHASE_BEGIN + compression::program::PHASE_PADDING]
+                        .dup()
+                    * local[compression::COL_PHASE_END].dup(),
+        );
+        compression::eval_main_with_io(frame, builder, 0, 0, io_act.dup());
+        let io_local = IO_COLUMNS.map(|column| local[column].dup());
+        let io_next = IO_COLUMNS.map(|column| next[column].dup());
+        let carry = io_act.dup() * (AB::Expr::ONE - io_periods[io::program::P_LAST].dup());
+        io::eval_main_rows(frame, builder, &io_local, &io_next, io_periods, io_act, carry);
+
+        native_lookup::eval_lookup(self, frame, inputs, builder);
+    }
+}
+
+impl native::ProverAir<QuadFelt> for Sha256Air {
+    type Error = native_lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        native_lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
@@ -155,27 +202,46 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha256Air {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
-
     fn max_message_width(&self) -> usize {
         MAX_MESSAGE_WIDTH
     }
-
     fn num_bus_ids(&self) -> usize {
         NUM_BUS_IDS
     }
-
     fn eval(&self, builder: &mut LB) {
-        let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let comp_local = core::array::from_fn(|i| local[i]);
-        let io_local = IO_COLUMNS.map(|column| local[column]);
-        let next: [LB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
-        let io_next = IO_COLUMNS.map(|column| next[column]);
-        let periods = builder.periodic_values();
-        let comp_periods = core::array::from_fn(|i| periods[i].into());
-        let io_periods: [LB::Expr; io::NUM_PERIODIC_COLS] =
-            core::array::from_fn(|i| periods[IO_PERIODIC_OFFSET + i].into());
-        let io_act: LB::Expr = local[COL_IO_ACT].into();
-        let exec_act = LB::Expr::from(local[compression::COL_ACT]) - io_act.clone();
+        native::migration::eval_lookup(self, builder, 0);
+    }
+}
+
+impl<LB: native_lookup::LookupBuilder<F = Felt>> native_lookup::LookupAir<LB> for Sha256Air {
+    fn column_shape(&self) -> &[usize] {
+        &COLUMN_SHAPE
+    }
+    fn max_message_width(&self) -> usize {
+        MAX_MESSAGE_WIDTH
+    }
+    fn num_bus_ids(&self) -> usize {
+        NUM_BUS_IDS
+    }
+    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        let local = frame.main.current;
+        let comp_local: &[LB::Expr; compression::NUM_MAIN_COLS] = local
+            [..compression::NUM_MAIN_COLS]
+            .try_into()
+            .expect("SHA-256 composed compression lookup row band");
+        let io_local = IO_COLUMNS.map(|column| local[column].dup());
+        let next = frame.main.next;
+        let io_next = IO_COLUMNS.map(|column| next[column].dup());
+        let comp_periods: &[LB::Expr; compression::NUM_PERIODIC_COLS] = frame.periodic
+            [..IO_PERIODIC_OFFSET]
+            .try_into()
+            .expect("SHA-256 composed compression lookup periodic band");
+        let io_periods: &[LB::Expr; io::NUM_PERIODIC_COLS] = frame.periodic
+            [IO_PERIODIC_OFFSET..IO_PERIODIC_OFFSET + io::NUM_PERIODIC_COLS]
+            .try_into()
+            .expect("SHA-256 composed IO lookup periodic band");
+        let io_act: LB::Expr = local[COL_IO_ACT].dup();
+        let exec_act = local[compression::COL_ACT].dup() - io_act.dup();
         for index in 0..NUM_AUX_COLS {
             let comp = compression::lookup_column_degree(index);
             let io = io::lookup_column_degree(index, true);
@@ -188,17 +254,17 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha256Air {
                             compression::eval_lookup_group(
                                 group,
                                 index,
-                                &comp_local,
-                                &comp_periods,
-                                exec_act.clone(),
+                                comp_local,
+                                comp_periods,
+                                exec_act.dup(),
                             );
                             io::eval_lookup_group(
                                 group,
                                 index,
                                 &io_local,
                                 &io_next,
-                                &io_periods,
-                                io_act.clone(),
+                                io_periods,
+                                io_act.dup(),
                                 true,
                             );
                         },
@@ -213,14 +279,110 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha256Air {
 
 #[cfg(all(test, feature = "std"))]
 mod tests {
-    use miden_core::{Felt, field::QuadFelt};
+    use alloc::vec::Vec;
+
+    use miden_core::{
+        Felt,
+        field::{PrimeCharacteristicRing, QuadFelt},
+    };
     use miden_stark::{
-        air::{ConstraintDegrees, LiftedAir},
+        air::{
+            ConstraintDegrees, LiftedAir,
+            native::{self, AirKernel},
+        },
         lookup::{
             LookupAir,
             debug::{ValidateLayout, ValidateLookupAir, ValidationBuilder},
+            native as native_lookup,
         },
     };
+
+    fn native_geometry<A>(air: A, main_width: usize, periodic_columns: usize, base_count: usize)
+    where
+        A: native::ProverAir<QuadFelt, F = Felt, Error = native_lookup::LookupError>,
+    {
+        // The expected relation comes from the authored source, instantiated with non-Copy trees.
+        // Direct execution is the comparison subject, rather than a source of expected metadata.
+        let captured = native::capture_with::<_, QuadFelt>(&air).unwrap();
+        let descriptor = &captured.descriptor;
+        let spec = descriptor.spec();
+        assert_eq!((spec.main_width, spec.aux_width), (main_width, 4));
+        assert_eq!((spec.num_public_values, spec.num_challenges, spec.num_exports), (0, 2, 1));
+        assert_eq!(spec.preprocessed, None);
+        assert_eq!(spec.periodic_columns.len(), periodic_columns);
+        assert_eq!(spec.max_periodic_length(), if main_width == 28 { 32 } else { 128 });
+        assert_eq!(
+            descriptor.analysis().counts(),
+            native::ConstraintCounts { base: base_count, ext: 5 }
+        );
+        assert_eq!(
+            descriptor.analysis().layout().base_indices(),
+            &(0..base_count).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            descriptor.analysis().layout().ext_indices(),
+            &(base_count..base_count + 5).collect::<Vec<_>>()
+        );
+        assert!(descriptor.analysis().raw_degrees().max() <= 5);
+
+        let main = miden_core::utils::RowMajorMatrix::new(
+            vec![Felt::ZERO; main_width - 1],
+            main_width - 1,
+        );
+        let challenges = [QuadFelt::from_u8(17), QuadFelt::from_u8(31)];
+        let error = native::ProverAir::build_aux_trace(
+            &air,
+            native::AuxTraceInputs {
+                main: &main,
+                preprocessed: None,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            native_lookup::LookupError::MainWidth {
+                expected: main_width,
+                actual: main_width - 1,
+            }
+        );
+
+        let kernel = native::DirectKernel::new(air).unwrap();
+        let direct = native::capture_from_spec::<Felt, QuadFelt>(
+            spec.as_borrowed(),
+            |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
+        )
+        .unwrap();
+        assert_eq!(direct.descriptor.fingerprint(), descriptor.fingerprint());
+    }
+
+    #[test]
+    fn native_sha256_sources_preserve_shape_and_class_order() {
+        native_geometry(super::compression::Sha256CompressionAir, 39, 115, 48);
+        native_geometry(super::io::Sha256IoAir, 28, 23, 58);
+        native_geometry(super::Sha256Air, 40, 138, 100);
+        assert_eq!(super::IO_ROW_START, 4064);
+        assert_eq!(super::IO_PERIODIC_OFFSET, 115);
+        assert_eq!(super::IO_COLUMNS[super::io::COL_ACT], 39);
+        assert_eq!(super::IO_COLUMNS[super::io::COL_BLOCK_ID], 0);
+        assert_eq!(&super::IO_COLUMNS[2..], &(11..37).collect::<Vec<_>>());
+        assert_eq!(super::COLUMN_SHAPE, [2; 4]);
+        assert_eq!(super::compression::COLUMN_SHAPE, [2; 4]);
+        assert_eq!(super::io::COLUMN_SHAPE, [2; 4]);
+    }
+
+    #[test]
+    fn native_sha256_lookup_degrees_match_annotations() {
+        let compression = super::compression::Sha256CompressionAir;
+        native_lookup::validate_native(&compression, &native::LiftedAir::spec(&compression))
+            .unwrap();
+        let io = super::io::Sha256IoAir;
+        native_lookup::validate_native(&io, &native::LiftedAir::spec(&io)).unwrap();
+        let composed = super::Sha256Air;
+        native_lookup::validate_native(&composed, &native::LiftedAir::spec(&composed)).unwrap();
+    }
 
     fn validate_degrees<A>(air: A)
     where

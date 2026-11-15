@@ -11,8 +11,11 @@ use p3_security::budget::AirShape;
 
 use crate::{
     precompiles::{
-        ChipletAir, ace::PvmRecursiveAceCircuit, geometry::lookup_shape,
-        hash::keccak::round::KeccakRoundAir, relation::AIRS,
+        ChipletAir,
+        ace::PvmRecursiveAceCircuit,
+        geometry::lookup_shape,
+        hash::{keccak::round::KeccakRoundAir, sha256::Sha256Air},
+        relation::AIRS,
     },
     shared::geometry::NUM_OOD_POINTS,
 };
@@ -35,6 +38,7 @@ impl CapturedPvmRelation {
                 .iter()
                 .map(|air| match air {
                     ChipletAir::KeccakRound => CapturedAir::new_native(&KeccakRoundAir),
+                    ChipletAir::Sha256 => CapturedAir::new_native(&Sha256Air),
                     _ => CapturedAir::new(air),
                 })
                 .collect::<Result<_, _>>()?,
