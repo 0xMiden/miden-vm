@@ -11,6 +11,7 @@ pub mod constraint;
 #[cfg(feature = "std")]
 pub mod debug;
 pub mod message;
+pub mod native;
 pub mod prover;
 
 pub use aux_builder::{

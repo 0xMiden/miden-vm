@@ -13,6 +13,7 @@ mod builder;
 mod contracts;
 pub mod debug;
 mod encoding;
+pub mod native;
 mod statement;
 mod util;
 

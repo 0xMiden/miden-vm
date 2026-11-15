@@ -2,15 +2,16 @@
 //! single-column AIR with periodic columns and auxiliary traces.
 
 use alloc::{borrow::Cow, vec, vec::Vec};
+use core::convert::Infallible;
 
-use p3_field::{Algebra, PrimeCharacteristicRing};
+use p3_field::{Algebra, Dup, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
+use crate::air::native::LiftedAirBuilder as _;
 use crate::{
     ProverInstance, VerifierError, VerifierInstance,
     air::{
-        AirBuilder, BaseAir, ExtensionBuilder, InstanceError, LiftedAir, LiftedAirBuilder,
-        ProverStatement, Statement, WindowAccess,
+        BaseAir, InstanceError, LiftedAir, LiftedAirBuilder, ProverStatement, Statement, native,
     },
     domain::DomainError,
     order::{ShapeError, TraceOrder},
@@ -89,54 +90,88 @@ impl LiftedAir<Felt, QuadFelt> for TinyAir {
         &self,
         main: &RowMajorMatrix<Felt>,
         air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
+        aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let (mut trace, values) = tiny_aux(
-            main,
-            challenges[0] + QuadFelt::from(air_inputs.iter().copied().sum::<Felt>()),
+        let result = native::ProverAir::build_aux_trace(
+            self,
+            native::AuxTraceInputs {
+                main,
+                preprocessed: None,
+                public_values: air_inputs,
+                statement: aux_inputs,
+                challenges,
+            },
         );
-        trace.values[0] += QuadFelt::from(self.aux_offset);
-        (trace, values)
+        let aux = match result {
+            Ok(aux) => aux,
+            Err(never) => match never {},
+        };
+        (aux.columns, aux.exports)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        let main = builder.main();
-        let public_sum = builder
-            .public_values()
-            .iter()
-            .fold(AB::Expr::ZERO, |sum, &value| sum + Into::<AB::Expr>::into(value));
-        let periodic = builder.periodic_values().to_vec();
-        let (local, next) = (main.current_slice(), main.next_slice());
+        native::migration::eval_source(self, builder);
+    }
+}
 
-        // First row: main[0] is the sum of this AIR's public values.
-        builder.when_first_row().assert_eq(local[0], public_sum.clone());
+impl native::LiftedAir for TinyAir {
+    type F = Felt;
 
-        // Transition: main_next = main^4
-        let main_pow4: AB::Expr = local[0].into().exp_power_of_2(2);
-        builder.when_transition().assert_eq(next[0], main_pow4);
+    fn spec(&self) -> native::AirSpec<'_, Felt> {
+        native::AirSpec {
+            main_width: 1,
+            aux_width: 1,
+            num_public_values: self.num_public_values,
+            num_challenges: 1,
+            num_exports: 1,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(&self.periodic_cols),
+        }
+    }
 
-        // Periodic column constraints: first and last row see 1
-        for p in &periodic {
-            let p_expr: AB::Expr = (*p).into();
-            builder.when_first_row().assert_one(p_expr.clone());
-            builder.when_last_row().assert_one(p_expr);
+    fn eval<B: native::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &native::Frame<'_, B>,
+        inputs: native::Inputs<'_, B>,
+        sink: &mut B,
+    ) {
+        let local = frame.main.current;
+        let next = frame.main.next;
+        let public_sum =
+            inputs.public_values.iter().fold(B::Expr::ZERO, |sum, value| sum + value.dup());
+
+        // Preserve both expression construction and global assertion order.
+        sink.when(frame.first_row()).assert_eq(local[0].dup(), public_sum.dup());
+        sink.when(frame.transition())
+            .assert_eq(next[0].dup(), local[0].dup().exp_power_of_2(2));
+        for periodic in frame.periodic {
+            sink.when(frame.first_row()).assert_one(periodic.dup());
+            sink.when(frame.last_row()).assert_one(periodic.dup());
         }
 
-        // Aux trace constraints
-        let aux = builder.permutation();
-        let aux_local = aux.current_slice();
-        let aux_next = aux.next_slice();
-        let challenge: AB::ExprEF = builder.permutation_randomness()[0].into();
+        let aux = frame.aux.current[0].dup();
+        sink.when(frame.first_row())
+            .assert_eq_ext(aux.dup(), inputs.challenges[0].dup() + B::ExtExpr::from(public_sum));
+        sink.when(frame.transition())
+            .assert_eq_ext(frame.aux.next[0].dup(), aux.exp_power_of_2(2));
+    }
+}
 
-        let aux_local_ef: AB::ExprEF = aux_local[0].into();
-        let public_sum_ext: AB::ExprEF = public_sum.into();
-        builder
-            .when_first_row()
-            .assert_eq_ext(aux_local_ef.clone(), challenge + public_sum_ext);
+impl native::ProverAir<QuadFelt> for TinyAir {
+    type Error = Infallible;
 
-        let aux_pow4: AB::ExprEF = aux_local_ef.exp_power_of_2(2);
-        builder.when_transition().assert_eq_ext(aux_next[0].into(), aux_pow4);
+    fn build_aux_trace(
+        &self,
+        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        let (mut trace, values) = tiny_aux(
+            inputs.main,
+            inputs.challenges[0]
+                + QuadFelt::from(inputs.public_values.iter().copied().sum::<Felt>()),
+        );
+        trace.values[0] += QuadFelt::from(self.aux_offset);
+        Ok(native::AuxTrace { columns: trace, exports: values })
     }
 }
 

@@ -597,8 +597,9 @@ mod tests {
 
     use miden_crypto::{
         Felt,
-        field::{BinomialExtensionField, PrimeCharacteristicRing},
+        field::{Algebra, BinomialExtensionField, PrimeCharacteristicRing},
     };
+    use p3_field::Dup;
 
     use super::*;
     use crate::{
@@ -827,13 +828,28 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
     struct WindowAir;
 
-    impl LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>> for WindowAir {
-        fn num_columns(&self) -> usize {
-            1
-        }
+    #[derive(Debug)]
+    struct WindowMsg<E> {
+        value: E,
+    }
 
+    impl<E, EE> LookupMessage<E, EE> for WindowMsg<E>
+    where
+        E: PrimeCharacteristicRing,
+        EE: Algebra<E>,
+    {
+        fn encode(&self, challenges: &Challenges<EE>) -> EE {
+            challenges.bus_prefix[0].dup() + challenges.beta_powers[0].dup() * self.value.dup()
+        }
+    }
+
+    impl<LB> crate::lookup::native::LookupAir<LB> for WindowAir
+    where
+        LB: crate::lookup::native::LookupBuilder,
+    {
         fn column_shape(&self) -> &[usize] {
             &[1]
         }
@@ -846,24 +862,149 @@ mod tests {
             1
         }
 
-        fn eval(&self, builder: &mut ProverLookupBuilder<'_, Felt, QuadFelt>) {
-            let main = builder.main();
-            let value = main.current_slice()[0]
-                + main.next_slice()[0].double()
-                + builder.periodic_values()[0];
-            builder.next_column(
+        fn eval(&self, frame: &crate::lookup::native::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+            let value =
+                frame.main.current[0].dup() + frame.main.next[0].double() + frame.periodic[0].dup();
+            let encoded_value = value.dup();
+            // Keep the single original interaction. The two descriptions also
+            // exercise cached encoding, a nested batch and a nonunit callback
+            // result while borrowing expressions outside the mutable handle.
+            let count = builder.next_column(
                 |col| {
-                    col.group(
+                    col.group_with_cached_encoding(
                         "window",
                         |group| {
-                            group.add("row", Felt::ONE, || SmokeMsg { value }, Deg { v: 0, u: 0 });
+                            group.add(
+                                "row",
+                                LB::Expr::ONE,
+                                || WindowMsg { value: value.dup() },
+                                Deg { v: 0, u: 1 },
+                            );
                         },
-                        Deg { v: 0, u: 0 },
+                        |group| {
+                            let encoded =
+                                group.bus_prefix(0) + group.beta_powers()[0].dup() * encoded_value;
+                            group.batch(
+                                "window_batch",
+                                LB::Expr::ONE,
+                                |batch| {
+                                    batch.insert_encoded(
+                                        "row",
+                                        LB::Expr::ONE,
+                                        || encoded,
+                                        Deg { v: 0, u: 1 },
+                                    );
+                                },
+                                Deg { v: 0, u: 1 },
+                            );
+                        },
+                        Deg { v: 0, u: 1 },
                     );
+                    1usize
                 },
-                Deg { v: 0, u: 0 },
+                Deg { v: 0, u: 1 },
             );
+            assert_eq!(count, 1);
         }
+    }
+
+    impl<LB: LookupBuilder> LookupAir<LB> for WindowAir {
+        fn column_shape(&self) -> &[usize] {
+            &[1]
+        }
+
+        fn max_message_width(&self) -> usize {
+            1
+        }
+
+        fn num_bus_ids(&self) -> usize {
+            1
+        }
+
+        fn eval(&self, builder: &mut LB) {
+            crate::air::native::migration::eval_lookup(self, builder);
+        }
+    }
+
+    // This source harness connects the same declaration to the actual private
+    // scalar/packed/debug folders via the existing public prove/check helpers.
+    impl<F: Field> crate::air::BaseAir<F> for WindowAir {
+        fn width(&self) -> usize {
+            1
+        }
+
+        fn periodic_columns(&self) -> alloc::borrow::Cow<'_, [Vec<F>]> {
+            alloc::borrow::Cow::Owned(vec![vec![F::ZERO, F::ONE]])
+        }
+    }
+
+    impl<F: Field, EF: ExtensionField<F>> crate::air::LiftedAir<F, EF> for WindowAir {
+        type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
+
+        fn num_randomness(&self) -> usize {
+            2
+        }
+
+        fn aux_width(&self) -> usize {
+            1
+        }
+
+        fn num_aux_values(&self) -> usize {
+            1
+        }
+
+        fn build_aux_trace(
+            &self,
+            main: &RowMajorMatrix<F>,
+            _public: &[F],
+            _statement: &[F],
+            challenges: &[EF],
+        ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+            crate::lookup::build_logup_aux_trace(self, main, challenges)
+        }
+
+        fn eval<AB: crate::air::LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
+            let mut lookups = crate::lookup::ConstraintLookupBuilder::new(builder, self);
+            <Self as LookupAir<_>>::eval(self, &mut lookups);
+            lookups.finish();
+        }
+    }
+
+    #[test]
+    fn expression_window_has_real_constraint_witness_and_validation_callers() {
+        use crate::{
+            air::{LiftedAir, ProverStatement, Statement},
+            testing::configs::goldilocks_poseidon2::{
+                Felt as TestFelt, QuadFelt as TestQuadFelt, TestMultiAir, prove_and_verify,
+                test_challenger,
+            },
+        };
+
+        let trace = RowMajorMatrix::new(vec![TestFelt::ONE; 8], 1);
+        let statement = Statement::new(TestMultiAir::new(vec![WindowAir]), vec![], vec![])
+            .expect("no public inputs");
+        let statement = ProverStatement::new(statement, vec![trace.clone()]).unwrap();
+        crate::check_constraints(&statement, test_challenger());
+        // This existing helper reaches packed prover and scalar OOD folders;
+        // constraint_degree reaches the existing non-Copy symbolic builder.
+        let _degree =
+            <WindowAir as LiftedAir<TestFelt, TestQuadFelt>>::constraint_degree(&WindowAir);
+        prove_and_verify(&WindowAir, &[], &[trace]);
+
+        #[cfg(feature = "std")]
+        crate::lookup::debug::validation::validate(
+            &WindowAir,
+            crate::lookup::debug::validation::ValidateLayout {
+                preprocessed_width: 0,
+                trace_width: 1,
+                num_public_values: 0,
+                num_periodic_columns: 1,
+                permutation_width: 1,
+                num_permutation_challenges: 2,
+                num_permutation_values: 1,
+            },
+        )
+        .expect("canonical and encoded window descriptions agree");
     }
 
     #[test]
