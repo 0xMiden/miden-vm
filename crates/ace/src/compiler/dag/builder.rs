@@ -117,6 +117,9 @@ where
         if let Some(result) = self.cancel_add(a, b) {
             return result;
         }
+        if let Some(result) = self.cancel_common_terms(a, b, false) {
+            return result;
+        }
         match (self.negated(a), self.negated(b)) {
             (Some(a), None) => return self.sub(b, a),
             (None, Some(b)) => return self.sub(a, b),
@@ -137,10 +140,16 @@ where
         if self.is_zero(b) {
             return a;
         }
+        if self.is_zero(a) {
+            return self.neg(b);
+        }
         if a == b {
             return self.constant(EF::ZERO);
         }
         if let Some(result) = self.cancel_sub(a, b) {
+            return result;
+        }
+        if let Some(result) = self.cancel_common_terms(a, b, true) {
             return result;
         }
         if let Some(b) = self.negated(b) {
@@ -169,13 +178,17 @@ where
         self.intern(NodeKind::Mul(l, r))
     }
 
-    /// Add a negation node (with constant folding).
+    /// Add a negation node with constant folding and inverse normalization.
     pub fn neg(&mut self, a: NodeId) -> NodeId {
         let a = self.resolve_node(a);
         if let Some(x) = self.const_value(a) {
             return self.constant(-x);
         }
-        self.intern(NodeKind::Neg(a))
+        match self.nodes[a.index()] {
+            NodeKind::Neg(inner) => inner,
+            NodeKind::Sub(lhs, rhs) => self.sub(rhs, lhs),
+            _ => self.intern(NodeKind::Neg(a)),
+        }
     }
 
     fn const_value(&self, id: NodeId) -> Option<EF> {
@@ -224,6 +237,43 @@ where
             && lhs == a
         {
             return Some(rhs);
+        }
+        None
+    }
+
+    /// Cancel an equal term with opposite signs across two sums or differences.
+    ///
+    /// The remaining pair replaces the parent with at most one operation, so this is safe even
+    /// when either original child has other consumers. Two negative remaining terms are skipped:
+    /// representing them would need both an addition and a negation.
+    fn cancel_common_terms(&mut self, a: NodeId, b: NodeId, subtract: bool) -> Option<NodeId> {
+        let terms = |id: NodeId| match self.nodes[id.index()] {
+            NodeKind::Add(x, y) => Some([(x, false), (y, false)]),
+            NodeKind::Sub(x, y) => Some([(x, false), (y, true)]),
+            _ => None,
+        };
+        let a_terms = terms(a)?;
+        let mut b_terms = terms(b)?;
+        if subtract {
+            for (_, negative) in &mut b_terms {
+                *negative = !*negative;
+            }
+        }
+
+        for (a_index, b_index) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+            let (a_term, a_negative) = a_terms[a_index];
+            let (b_term, b_negative) = b_terms[b_index];
+            if a_term != b_term || a_negative == b_negative {
+                continue;
+            }
+            let (a_remaining, a_negative) = a_terms[1 - a_index];
+            let (b_remaining, b_negative) = b_terms[1 - b_index];
+            return match (a_negative, b_negative) {
+                (false, false) => Some(self.add(a_remaining, b_remaining)),
+                (false, true) => Some(self.sub(a_remaining, b_remaining)),
+                (true, false) => Some(self.sub(b_remaining, a_remaining)),
+                (true, true) => None,
+            };
         }
         None
     }
@@ -467,6 +517,27 @@ mod tests {
     }
 
     #[test]
+    fn negation_cancels_itself_and_reverses_subtraction() {
+        let mut builder = DagBuilder::<QuadFelt>::new();
+        let a = builder.input(InputKey::Public(0));
+        let b = builder.input(InputKey::Public(1));
+        let neg_a = builder.neg(a);
+        assert_eq!(builder.neg(neg_a), a);
+
+        let difference = builder.sub(a, b);
+        let reversed = builder.sub(b, a);
+        let root = builder.neg(difference);
+        assert_eq!(root, reversed);
+        let zero = builder.constant(felt(0));
+        assert_eq!(builder.sub(zero, neg_a), a);
+        assert_eq!(builder.sub(zero, a), neg_a);
+
+        let mut dag = builder.build(root);
+        dag.compact();
+        assert_eq!(dag.nodes.len(), 3, "negating a difference needs only its reversed gate");
+    }
+
+    #[test]
     fn addition_and_subtraction_cancel_inverse_terms() {
         let mut builder = DagBuilder::<QuadFelt>::new();
         let a = builder.input(InputKey::Public(0));
@@ -480,6 +551,35 @@ mod tests {
         assert_eq!(builder.sub(sum, b), a);
         assert_eq!(builder.sub(a, difference), b);
         assert_eq!(builder.sub(a, a), builder.constant(felt(0)));
+    }
+
+    #[test]
+    fn cancels_common_signed_terms_across_additions_and_subtractions() {
+        let mut builder = DagBuilder::<QuadFelt>::new();
+        let a = builder.input(InputKey::Public(0));
+        let b = builder.input(InputKey::Public(1));
+        let c = builder.input(InputKey::Public(2));
+        let a_plus_b = builder.add(a, b);
+        let a_plus_c = builder.add(a, c);
+        let a_minus_b = builder.sub(a, b);
+        let a_minus_c = builder.sub(a, c);
+        let c_minus_a = builder.sub(c, a);
+        let c_minus_b = builder.sub(c, b);
+
+        let b_minus_c = builder.sub(b, c);
+        assert_eq!(builder.sub(a_plus_b, a_plus_c), b_minus_c);
+        let b_plus_c = builder.add(b, c);
+        assert_eq!(builder.sub(a_plus_b, a_minus_c), b_plus_c);
+        assert_eq!(builder.add(a_minus_b, c_minus_a), c_minus_b);
+        assert_eq!(builder.sub(a_minus_b, c_minus_b), a_minus_c);
+        assert_eq!(builder.add(a_plus_b, c_minus_a), b_plus_c);
+
+        // Keeping the first sum live must not prevent removing the second sum and difference.
+        let difference = builder.sub(a_plus_b, a_plus_c);
+        let root = builder.mul(a_plus_b, difference);
+        let mut dag = builder.build(root);
+        dag.compact();
+        assert_eq!(dag.nodes.len(), 6, "three inputs, one shared sum, one difference, one product");
     }
 
     #[test]

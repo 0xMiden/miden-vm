@@ -1,9 +1,9 @@
-//! Temporary indexing of borrowed source expressions for native scheduling.
+//! Canonical indexing of borrowed source expressions for arithmetic lowering and native scheduling.
 //!
 //! The source expressions own all operation semantics. This table supplies dense
 //! IDs and canonical child IDs without copying operations into another AST.
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     mem::{Discriminant, discriminant},
 };
 
@@ -18,14 +18,14 @@ use crate::ir::Class;
 
 type View<'a> = ExprView<'a, Felt, QuadFelt>;
 
-pub(super) struct IndexedExpression<'a> {
-    pub expression: ExprRef<'a, Felt, QuadFelt>,
-    pub children: Box<[usize]>,
+pub(crate) struct IndexedExpression<'a> {
+    pub(crate) expression: ExprRef<'a, Felt, QuadFelt>,
+    pub(crate) children: Box<[usize]>,
 }
 
-pub(super) struct ExpressionIndex<'a> {
-    pub nodes: Vec<IndexedExpression<'a>>,
-    pub roots: Vec<(usize, Class)>,
+pub(crate) struct ExpressionIndex<'a> {
+    pub(crate) nodes: Vec<IndexedExpression<'a>>,
+    pub(crate) roots: Vec<(usize, Class)>,
 }
 
 // Exact keys, rather than allocation identities or arithmetic equivalence, recover
@@ -39,7 +39,7 @@ struct Key<'a> {
 }
 
 impl<'a> ExpressionIndex<'a> {
-    pub fn new(assertions: &'a [Assertion<Felt, QuadFelt>]) -> Self {
+    pub(crate) fn new(assertions: &'a [Assertion<Felt, QuadFelt>]) -> Self {
         let mut index = Self {
             nodes: Vec::new(),
             roots: vec![(0, Class::Base); assertions.len()],
@@ -90,16 +90,16 @@ impl<'a> ExpressionIndex<'a> {
         id
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.nodes.len()
     }
-    pub fn node(&self, id: usize) -> ExprRef<'a, Felt, QuadFelt> {
+    pub(crate) fn node(&self, id: usize) -> ExprRef<'a, Felt, QuadFelt> {
         self.nodes[id].expression
     }
-    pub fn children(&self, id: usize) -> &[usize] {
+    pub(crate) fn children(&self, id: usize) -> &[usize] {
         &self.nodes[id].children
     }
-    pub fn class(&self, id: usize) -> Class {
+    pub(crate) fn class(&self, id: usize) -> Class {
         match self.node(id).domain() {
             ExpressionDomain::Base => Class::Base,
             ExpressionDomain::Extension => Class::Ext,
@@ -107,13 +107,13 @@ impl<'a> ExpressionIndex<'a> {
     }
     /// The native operand type before embedding a base value into the extension.
     /// Base constants and explicit lifts remain usable through `E: Algebra<B>`.
-    pub fn value_class(&self, id: usize) -> Class {
+    pub(crate) fn value_class(&self, id: usize) -> Class {
         match self.node(id).view() {
             ExprView::BaseConstant(_) | ExprView::Lift { .. } => Class::Base,
             _ => self.class(id),
         }
     }
-    pub fn constant(&self, id: usize) -> Option<u64> {
+    pub(crate) fn constant(&self, id: usize) -> Option<u64> {
         match self.node(id).view() {
             ExprView::BaseConstant(value) => Some(value.as_canonical_u64()),
             ExprView::ExtensionConstant(value) => {
@@ -124,13 +124,21 @@ impl<'a> ExpressionIndex<'a> {
             _ => None,
         }
     }
-    pub fn challenge_dependencies(&self) -> Vec<bool> {
+    pub(crate) fn challenge_dependencies(&self) -> Vec<bool> {
+        self.preparation_dependencies(false)
+    }
+    pub(crate) fn uniform_dependencies(&self) -> Vec<bool> {
+        self.preparation_dependencies(true)
+    }
+    fn preparation_dependencies(&self, all_uniform: bool) -> Vec<bool> {
         let mut only = Vec::with_capacity(self.len());
         for node in &self.nodes {
             only.push(match node.expression.view() {
                 ExprView::BaseConstant(_)
                 | ExprView::ExtensionConstant(_)
                 | ExprView::AuxInput(AuxInput::Challenge { .. }) => true,
+                ExprView::BaseInput(BaseInput::Public { .. })
+                | ExprView::AuxInput(AuxInput::Export { .. }) => all_uniform,
                 ExprView::BaseInput(_)
                 | ExprView::AuxInput(_)
                 | ExprView::IsFirstRow
@@ -203,6 +211,53 @@ fn parameters(view: View<'_>) -> Vec<u8> {
     bytes
 }
 
+/// Source allocation identities eligible for left-only associative lowering.
+/// Exact structural use counts also protect independently allocated identical computations.
+pub(crate) fn left_flattenable_sum_identities(
+    assertions: &[Assertion<Felt, QuadFelt>],
+) -> HashSet<usize> {
+    fn aliases(
+        expression: ExprRef<'_, Felt, QuadFelt>,
+        canonical: usize,
+        index: &ExpressionIndex<'_>,
+        mapped: &mut HashMap<usize, usize>,
+    ) {
+        if let Some(identity) = expression.identity()
+            && let Some(previous) = mapped.insert(identity, canonical)
+        {
+            debug_assert_eq!(previous, canonical);
+            return;
+        }
+        for (child, &id) in expression.children().zip(index.children(canonical)) {
+            aliases(child, id, index, mapped);
+        }
+    }
+
+    let index = ExpressionIndex::new(assertions);
+    let uniform = index.uniform_dependencies();
+    let mut uses = vec![0usize; index.len()];
+    for id in 0..index.len() {
+        for &child in index.children(id) {
+            uses[child] += 1;
+        }
+    }
+    let mut mapped = HashMap::new();
+    for (assertion, &(id, _)) in assertions.iter().zip(&index.roots) {
+        uses[id] += 1;
+        match assertion {
+            Assertion::Base(value) => aliases(value.as_ref(), id, &index, &mut mapped),
+            Assertion::Extension(value) => aliases(value.as_ref(), id, &index, &mut mapped),
+        }
+    }
+    mapped
+        .into_iter()
+        .filter_map(|(identity, id)| {
+            (uses[id] == 1 && !uniform[id] && matches!(index.node(id).view(), ExprView::Sum { .. }))
+                .then_some(identity)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,6 +326,28 @@ mod tests {
         assert_eq!(index.roots[4], index.roots[5]);
         assert_eq!(index.roots[6], index.roots[7]);
         assert_eq!(index.roots[6], index.roots[8]);
+    }
+
+    #[test]
+    fn uniform_dependencies_include_public_values_and_exports_without_row_inputs() {
+        let public: B = BaseInput::Public { index: 0 }.into();
+        let export: E = AuxInput::Export { index: 0 }.into();
+        let assertions = vec![
+            Assertion::Base(public.square()),
+            Assertion::Extension(export.square()),
+            Assertion::Extension(E::from(public) + export),
+            Assertion::Base(main()),
+            Assertion::Base(BaseInput::Periodic { index: 0 }.into()),
+            Assertion::Base(B::is_first_row()),
+        ];
+        let index = ExpressionIndex::new(&assertions);
+        let uniform = index.uniform_dependencies();
+        for &(root, _) in &index.roots[..3] {
+            assert!(uniform[root]);
+        }
+        for &(root, _) in &index.roots[3..] {
+            assert!(!uniform[root]);
+        }
     }
 
     #[test]

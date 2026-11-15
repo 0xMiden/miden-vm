@@ -3,17 +3,144 @@
 //! One source index supplies sharing, use counts and preparation boundaries.
 //! Structured operations remain intact until their specialized trait call is emitted.
 
-use std::fmt::Write as _;
+use std::{collections::HashMap, fmt::Write as _};
 
-use crate::ir::{CapturedProgram, Class, Leaf, Node, OpKind};
+use crate::ir::{CapturedProgram, Class, Leaf, Node, OpKind, index::ExpressionIndex};
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::BasedVectorSpace;
 use miden_stark::air::symbolic::{AuxInput, BaseInput, ExprView};
 
-mod index;
 mod plan;
-use index::ExpressionIndex;
 use plan::{Coefficient, DotKind, MAX_TERMS, Piece, Plan, Rewrite};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct NativeOptions {
+    uniform: bool,
+    fragments: bool,
+    prepared_fragments_only: bool,
+    signed_dots: bool,
+    factor_runs: bool,
+    fragment_min_uses: usize,
+    left_sum_folding: bool,
+}
+
+impl NativeOptions {
+    const fn baseline() -> Self {
+        Self {
+            uniform: false,
+            fragments: false,
+            prepared_fragments_only: false,
+            signed_dots: false,
+            factor_runs: false,
+            fragment_min_uses: 0,
+            left_sum_folding: false,
+        }
+    }
+}
+
+impl Default for NativeOptions {
+    fn default() -> Self {
+        Self {
+            uniform: true,
+            fragments: true,
+            ..Self::baseline()
+        }
+    }
+}
+
+/// Scoped host-code-generation experiments. Ordinary emission prepares uniform data and shares sum fragments.
+#[cfg(any(test, feature = "testing"))]
+#[derive(Clone, Copy, Debug)]
+pub enum NativeExperiment {
+    Baseline,
+    LeftSumFolding,
+    Uniform,
+    UniformFragments,
+    PreparedFragmentsOnly,
+    SignedDots,
+    UniformFragmentsSignedDots,
+    FactorRuns,
+    FrequentFragments,
+    VeryFrequentFragments,
+}
+
+#[cfg(any(test, feature = "testing"))]
+std::thread_local! {
+    static NATIVE_OPTIONS: std::cell::Cell<Option<NativeOptions>> = const { std::cell::Cell::new(None) };
+}
+
+/// Select one native scheduling policy for a generator invocation; nested scopes restore on unwind.
+#[cfg(any(test, feature = "testing"))]
+pub fn with_native_experiment<T>(mode: NativeExperiment, emit: impl FnOnce() -> T) -> T {
+    let options = match mode {
+        NativeExperiment::Baseline => NativeOptions::baseline(),
+        NativeExperiment::LeftSumFolding => NativeOptions {
+            left_sum_folding: true,
+            ..NativeOptions::baseline()
+        },
+        NativeExperiment::Uniform => NativeOptions {
+            uniform: true,
+            ..NativeOptions::baseline()
+        },
+        NativeExperiment::UniformFragments => NativeOptions {
+            uniform: true,
+            fragments: true,
+            ..NativeOptions::baseline()
+        },
+        NativeExperiment::PreparedFragmentsOnly => NativeOptions {
+            uniform: true,
+            fragments: true,
+            prepared_fragments_only: true,
+            ..NativeOptions::baseline()
+        },
+        NativeExperiment::FrequentFragments => NativeOptions {
+            uniform: true,
+            fragments: true,
+            fragment_min_uses: 3,
+            ..NativeOptions::baseline()
+        },
+        NativeExperiment::VeryFrequentFragments => NativeOptions {
+            uniform: true,
+            fragments: true,
+            fragment_min_uses: 4,
+            ..NativeOptions::baseline()
+        },
+        NativeExperiment::FactorRuns => NativeOptions {
+            factor_runs: true,
+            ..NativeOptions::baseline()
+        },
+        NativeExperiment::SignedDots => NativeOptions {
+            signed_dots: true,
+            ..NativeOptions::baseline()
+        },
+        NativeExperiment::UniformFragmentsSignedDots => NativeOptions {
+            uniform: true,
+            fragments: true,
+            signed_dots: true,
+            ..NativeOptions::baseline()
+        },
+    };
+    struct Restore(Option<NativeOptions>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            NATIVE_OPTIONS.with(|current| current.set(self.0));
+        }
+    }
+    let previous = NATIVE_OPTIONS.with(|current| current.replace(Some(options)));
+    let _restore = Restore(previous);
+    emit()
+}
+
+fn native_options() -> NativeOptions {
+    #[cfg(any(test, feature = "testing"))]
+    {
+        NATIVE_OPTIONS.with(std::cell::Cell::get).unwrap_or_default()
+    }
+    #[cfg(not(any(test, feature = "testing")))]
+    {
+        NativeOptions::default()
+    }
+}
 
 const MODULE_IMPORTS: &str = r"
 use miden_core::Felt;
@@ -100,7 +227,7 @@ pub fn emit_native_optimized_module(header: &str, evals: &[AirEvaluator<'_>]) ->
     let plans: Vec<_> = indexes.iter().map(Preparation::new).collect();
     for ((eval, graph), preparation) in evals.iter().zip(&indexes).zip(&plans) {
         validate_native(eval);
-        let capacity = preparation.terms.len();
+        let capacity = preparation.capacity();
         let terms_name = format!("{}_PREPARED_TERMS", eval.name.to_ascii_uppercase());
         writeln!(out, "\npub const {terms_name}: usize = {capacity};").unwrap();
         let mut precompute = Emitter::new(graph, preparation, true);
@@ -108,7 +235,17 @@ pub fn emit_native_optimized_module(header: &str, evals: &[AirEvaluator<'_>]) ->
         for &id in &preparation.terms {
             results.push(precompute.expr(id, Class::Ext));
         }
-        writeln!(out, "\n/// Prepare challenge-only results for `{}`.", eval.air_label).unwrap();
+        for (fragment, value) in preparation.fragments.iter().enumerate() {
+            if value.slot.is_some() {
+                results.push(operand(&precompute.fragment(fragment)));
+            }
+        }
+        let dependencies = if native_options().uniform {
+            "uniform-only"
+        } else {
+            "challenge-only"
+        };
+        writeln!(out, "\n/// Prepare {dependencies} results for `{}`.", eval.air_label).unwrap();
         writeln!(out, "pub fn precompute_{}<B: Algebra<Felt>, E: Algebra<B>>(inputs: UniformInputs<'_, B, E>) -> [E; {terms_name}] {{", eval.name).unwrap();
         writeln!(out, "    let challenges = inputs.challenges; let _ = challenges;").unwrap();
         for line in precompute.lines {
@@ -211,15 +348,34 @@ fn validate_native(native: &AirEvaluator<'_>) {
     }
 }
 
-/// Whole expression results that cross from challenge-only preparation into row work.
+/// Whole extension results that cross from uniform-only preparation into row work.
 struct Preparation {
     terms: Vec<usize>,
     slots: Vec<Option<usize>>,
+    fragments: Vec<SumFragment>,
+    replacements: Vec<Option<Vec<FragmentPiece>>>,
+}
+
+#[derive(Clone)]
+enum FragmentPiece {
+    Source(Vec<usize>),
+    Cached(usize),
+}
+
+struct SumFragment {
+    class: Class,
+    inputs: Vec<usize>,
+    slot: Option<usize>,
 }
 
 impl Preparation {
     fn new(graph: &ExpressionIndex<'_>) -> Self {
-        let challenge_only = graph.challenge_dependencies();
+        let options = native_options();
+        let challenge_only = if options.uniform {
+            graph.uniform_dependencies()
+        } else {
+            graph.challenge_dependencies()
+        };
         let mut needed = vec![false; graph.len()];
         let mut pending: Vec<_> = graph.roots.iter().map(|&(id, _)| id).collect();
         while let Some(id) = pending.pop() {
@@ -244,8 +400,117 @@ impl Preparation {
                 terms.push(id);
             }
         }
-        Self { terms, slots }
+        let (fragments, replacements) = if options.fragments {
+            sum_fragments(graph, &terms, &slots, &challenge_only, options.prepared_fragments_only)
+        } else {
+            (Vec::new(), vec![None; graph.len()])
+        };
+        Self { terms, slots, fragments, replacements }
     }
+
+    fn capacity(&self) -> usize {
+        self.terms.len() + self.fragments.iter().filter(|fragment| fragment.slot.is_some()).count()
+    }
+}
+
+// A native scheduling recipe only: operands remain references to the original source index.
+// Exact ordered IDs include Neg nodes, so opposite signs and source domains cannot alias.
+fn sum_fragments(
+    graph: &ExpressionIndex<'_>,
+    materialized: &[usize],
+    slots: &[Option<usize>],
+    uniform: &[bool],
+    only_prepared: bool,
+) -> (Vec<SumFragment>, Vec<Option<Vec<FragmentPiece>>>) {
+    let minimum_uses = native_options().fragment_min_uses.max(2);
+    let plan = Plan::new(graph, materialized);
+    let mut pending: Vec<_> = graph.roots.iter().rev().map(|&(id, _)| id).collect();
+    let mut seen = vec![false; graph.len()];
+    let mut regions = Vec::new();
+    while let Some(id) = pending.pop() {
+        if seen[id] || slots[id].is_some() {
+            continue;
+        }
+        seen[id] = true;
+        if matches!(graph.node(id).view(), ExprView::Sum { .. }) {
+            let terms = plan.sum_terms(id);
+            pending.extend(terms.iter().rev().copied());
+            regions.push((id, graph.class(id), terms));
+        } else {
+            pending.extend(graph.children(id).iter().rev().copied());
+        }
+    }
+    struct Candidate {
+        class: Class,
+        inputs: Vec<usize>,
+        uses: usize,
+        prepared: bool,
+    }
+    let mut lookup = HashMap::new();
+    let mut candidates: Vec<Candidate> = Vec::new();
+    for (_, class, terms) in &regions {
+        for start in 0..terms.len() {
+            for len in 2..=MAX_TERMS.min(terms.len() - start) {
+                let inputs = terms[start..start + len].to_vec();
+                let next = candidates.len();
+                let index = *lookup.entry((*class, inputs.clone())).or_insert_with(|| {
+                    let prepared = *class == Class::Ext && inputs.iter().all(|&id| uniform[id]);
+                    candidates.push(Candidate { class: *class, inputs, uses: 0, prepared });
+                    next
+                });
+                candidates[index].uses += 1;
+            }
+        }
+    }
+    let mut fragments = Vec::new();
+    let mut fragment_ids = vec![None; candidates.len()];
+    let mut replacements = vec![None; graph.len()];
+    let mut next_slot = materialized.len();
+    for (owner, class, terms) in regions {
+        let mut pieces = Vec::new();
+        let mut source = Vec::new();
+        let mut start = 0;
+        while start < terms.len() {
+            let selected = (2..=MAX_TERMS.min(terms.len() - start)).rev().find_map(|len| {
+                let candidate = lookup[&(class, terms[start..start + len].to_vec())];
+                ((!only_prepared && candidates[candidate].uses >= minimum_uses)
+                    || candidates[candidate].prepared)
+                    .then_some((len, candidate))
+            });
+            if let Some((len, candidate)) = selected {
+                if !source.is_empty() {
+                    pieces.push(FragmentPiece::Source(core::mem::take(&mut source)));
+                }
+                let fragment = *fragment_ids[candidate].get_or_insert_with(|| {
+                    let value = &candidates[candidate];
+                    let slot = value.prepared.then(|| {
+                        let slot = next_slot;
+                        next_slot += 1;
+                        slot
+                    });
+                    let id = fragments.len();
+                    fragments.push(SumFragment {
+                        class: value.class,
+                        inputs: value.inputs.clone(),
+                        slot,
+                    });
+                    id
+                });
+                pieces.push(FragmentPiece::Cached(fragment));
+                start += len;
+            } else {
+                source.push(terms[start]);
+                start += 1;
+            }
+        }
+        if !source.is_empty() {
+            pieces.push(FragmentPiece::Source(source));
+        }
+        if pieces.iter().any(|piece| matches!(piece, FragmentPiece::Cached(_))) {
+            replacements[owner] = Some(pieces);
+        }
+    }
+    (fragments, replacements)
 }
 
 struct Emitter<'g, 'a> {
@@ -254,6 +519,7 @@ struct Emitter<'g, 'a> {
     preparing: bool,
     plan: Plan<'g, 'a>,
     tokens: Vec<Option<Token>>,
+    fragment_tokens: Vec<Option<Token>>,
     lines: Vec<String>,
     hoisted: usize,
 }
@@ -266,6 +532,7 @@ impl<'g, 'a> Emitter<'g, 'a> {
             preparing,
             plan: Plan::new(graph, &preparation.terms),
             tokens: vec![None; graph.len()],
+            fragment_tokens: vec![None; preparation.fragments.len()],
             lines: Vec::new(),
             hoisted: 0,
         }
@@ -310,7 +577,18 @@ impl<'g, 'a> Emitter<'g, 'a> {
             | ExprView::IsLastRow
             | ExprView::IsTransition => self.leaf(view),
             _ => {
-                let rhs = if let Some(rewrite) = self.plan.rewrite(id) {
+                let rhs = if !self.preparing
+                    && let Some(pieces) = self.preparation.replacements[id].clone()
+                {
+                    let mut values = Vec::with_capacity(pieces.len());
+                    for piece in pieces {
+                        values.push(match piece {
+                            FragmentPiece::Source(inputs) => self.region_sum(class, &inputs),
+                            FragmentPiece::Cached(fragment) => operand(&self.fragment(fragment)),
+                        });
+                    }
+                    self.sum_values(class, &values)
+                } else if let Some(rewrite) = self.plan.rewrite(id) {
                     self.rewrite_rhs(class, rewrite)
                 } else {
                     self.operation(class, view, inputs)
@@ -319,6 +597,35 @@ impl<'g, 'a> Emitter<'g, 'a> {
             },
         };
         self.tokens[id] = Some(token.clone());
+        token
+    }
+
+    fn region_sum(&mut self, class: Class, inputs: &[usize]) -> String {
+        if inputs.len() < 4 {
+            self.signed_sum(class, inputs)
+        } else {
+            let pieces = self.plan.sum_pieces(inputs, class);
+            self.rewrite_rhs(class, Rewrite::Sum(pieces))
+        }
+    }
+
+    fn fragment(&mut self, id: usize) -> Token {
+        if let Some(token) = &self.fragment_tokens[id] {
+            return token.clone();
+        }
+        let fragment = &self.preparation.fragments[id];
+        let class = fragment.class;
+        let slot = fragment.slot;
+        let inputs = fragment.inputs.clone();
+        let token = if !self.preparing
+            && let Some(slot) = slot
+        {
+            self.hoist(Class::Ext, format!("terms[{slot}].dup()"))
+        } else {
+            let rhs = self.region_sum(class, &inputs);
+            self.hoist(class, rhs)
+        };
+        self.fragment_tokens[id] = Some(token.clone());
         token
     }
 
@@ -644,6 +951,28 @@ impl<'g, 'a> Emitter<'g, 'a> {
                 for piece in pieces {
                     values.push(match piece {
                         Piece::Node(id) => self.expr(id, class),
+                        Piece::Factor { common, terms } => {
+                            let sum_class = terms
+                                .iter()
+                                .map(|&id| self.graph.value_class(id))
+                                .reduce(plan::join)
+                                .expect("nonempty factor run");
+                            let sum = self.region_sum(sum_class, &terms);
+                            let rhs = if let Some(scalar) =
+                                self.graph.constant(common).filter(|_| class == Class::Base)
+                            {
+                                format!("({sum}) * Felt::from_u64({scalar})")
+                            } else {
+                                let factor_class = self.graph.value_class(common);
+                                let common = self.expr(common, factor_class);
+                                if factor_class == Class::Base && sum_class == Class::Ext {
+                                    format!("({sum}) * {common}")
+                                } else {
+                                    format!("{common} * ({sum})")
+                                }
+                            };
+                            operand(&self.hoist(class, rhs))
+                        },
                         Piece::Dot { kind, pairs } => {
                             let n = pairs.len();
                             let mut terms = Vec::with_capacity(n);
@@ -653,6 +982,23 @@ impl<'g, 'a> Emitter<'g, 'a> {
                                 coeffs.push(match coefficient {
                                     Coefficient::Scalar(c) => format!("Felt::from_u64({c})"),
                                     Coefficient::One => format!("{}::ONE", self.types().base),
+                                    Coefficient::NegativeScalar(c) => {
+                                        format!("-Felt::from_u64({c})")
+                                    },
+                                    Coefficient::NegativeOne => {
+                                        format!("-{}::ONE", self.types().base)
+                                    },
+                                    Coefficient::NegativeNode(id) => format!(
+                                        "-{}",
+                                        self.expr(
+                                            id,
+                                            if kind == DotKind::Mixed {
+                                                Class::Base
+                                            } else {
+                                                class
+                                            },
+                                        )
+                                    ),
                                     Coefficient::Node(id) => self.expr(
                                         id,
                                         if kind == DotKind::Mixed { Class::Base } else { class },
@@ -864,6 +1210,10 @@ mod tests {
                         .into_iter()
                         .map(|piece| match piece {
                             Piece::Node(id) => values[id],
+                            Piece::Factor { common, terms } => {
+                                values[common]
+                                    * terms.into_iter().map(|id| values[id]).sum::<QuadFelt>()
+                            },
                             Piece::Dot { pairs, .. } => pairs
                                 .into_iter()
                                 .map(|(id, coefficient)| {
@@ -874,6 +1224,13 @@ mod tests {
                                                 QuadFelt::from(Felt::from_u64(value))
                                             },
                                             Coefficient::One => QuadFelt::ONE,
+                                            Coefficient::NegativeNode(coefficient) => {
+                                                -values[coefficient]
+                                            },
+                                            Coefficient::NegativeScalar(value) => {
+                                                -QuadFelt::from(Felt::from_u64(value))
+                                            },
+                                            Coefficient::NegativeOne => -QuadFelt::ONE,
                                         }
                                 })
                                 .sum(),
@@ -883,6 +1240,104 @@ mod tests {
                 assert_eq!(result, values[id], "rewrite of source node {id} with seed {seed}");
             }
         }
+    }
+
+    #[test]
+    fn native_experiment_scopes_restore_the_production_policy() {
+        assert_eq!(native_options(), NativeOptions::default());
+        assert!(native_options().uniform && native_options().fragments);
+        assert!(!native_options().left_sum_folding);
+        with_native_experiment(NativeExperiment::LeftSumFolding, || {
+            assert!(native_options().left_sum_folding);
+            assert!(!native_options().uniform && !native_options().fragments);
+        });
+        with_native_experiment(NativeExperiment::UniformFragments, || {
+            assert!(native_options().uniform && native_options().fragments);
+            with_native_experiment(NativeExperiment::Baseline, || {
+                assert_eq!(native_options(), NativeOptions::baseline());
+            });
+            assert!(native_options().uniform && native_options().fragments);
+        });
+        assert_eq!(native_options(), NativeOptions::default());
+        let _ = std::panic::catch_unwind(|| {
+            with_native_experiment(NativeExperiment::Uniform, || panic!("restore experiment"));
+        });
+        assert_eq!(native_options(), NativeOptions::default());
+    }
+
+    #[test]
+    fn factor_runs_extract_contiguous_products_without_swallowing_dot_boundaries() {
+        with_native_experiment(NativeExperiment::FactorRuns, || {
+            let common = main(0);
+            let values: [B; 11] = core::array::from_fn(|i| {
+                if (4..7).contains(&i) {
+                    common.clone() * main(i + 1)
+                } else {
+                    main(20 + i * 2) * main(21 + i * 2)
+                }
+            });
+            let assertion = Assertion::Base(B::sum_array::<11>(&values));
+            let program = CapturedProgram::from_assertions(vec![assertion]);
+            let index = ExpressionIndex::new(program.assertions());
+            let preparation = Preparation::new(&index);
+            let plan = Plan::new(&index, &preparation.terms);
+            let root = index.roots[0].0;
+            let pieces = plan.sum_pieces(&plan.sum_terms(root), Class::Base);
+            assert!(
+                matches!(&pieces[..], [Piece::Dot { pairs: before, .. }, Piece::Factor { terms, .. }, Piece::Dot { pairs: after, .. }]
+                if before.len() == 4 && terms.len() == 3 && after.len() == 4)
+            );
+            assert_rewrites_preserve_values(&program);
+            let output = emit(program.assertions());
+            assert_eq!(output.matches(" * ").count(), 1, "{output}");
+        });
+    }
+
+    #[test]
+    fn factor_runs_preserve_base_and_extension_operand_types_and_shared_products() {
+        with_native_experiment(NativeExperiment::FactorRuns, || {
+            let shared = challenge(0) * E::from(main(9));
+            let base_residuals: [E; 3] = core::array::from_fn(|i| challenge(0) * E::from(main(i)));
+            let aux = |column| E::from(AuxInput::Trace { row: RowOffset::Current, column });
+            let extension_residuals: [E; 3] = core::array::from_fn(|i| E::from(main(3)) * aux(i));
+            let homogeneous: [E; 3] = core::array::from_fn(|i| challenge(4) * aux(i));
+            let assertions = [
+                Assertion::Extension(E::sum_array::<3>(&base_residuals)),
+                Assertion::Extension(E::sum_array::<3>(&extension_residuals)),
+                Assertion::Extension(E::sum_array::<3>(&homogeneous)),
+                Assertion::Extension(
+                    shared.clone()
+                        + challenge(0) * E::from(main(10))
+                        + challenge(0) * E::from(main(11)),
+                ),
+                Assertion::Extension(shared),
+            ];
+            let output = emit(&assertions);
+            assert!(!output.is_empty());
+            let index = ExpressionIndex::new(&assertions);
+            let preparation = Preparation::new(&index);
+            let plan = Plan::new(&index, &preparation.terms);
+            for (root_index, expected) in [
+                (0, (Class::Ext, Class::Base)),
+                (1, (Class::Base, Class::Ext)),
+                (2, (Class::Ext, Class::Ext)),
+            ] {
+                let root = index.roots[root_index].0;
+                let pieces = plan.sum_pieces(&plan.sum_terms(root), Class::Ext);
+                let [Piece::Factor { common, terms }] = &pieces[..] else {
+                    panic!("expected typed factor run: {pieces:?}");
+                };
+                assert_eq!((index.value_class(*common), index.value_class(terms[0])), expected);
+                assert_eq!(terms.len(), 3);
+            }
+            let root = index.roots[3].0;
+            assert!(
+                !plan
+                    .sum_pieces(&plan.sum_terms(root), Class::Ext)
+                    .iter()
+                    .any(|piece| matches!(piece, Piece::Factor { .. }))
+            );
+        });
     }
 
     #[test]
@@ -1126,7 +1581,7 @@ mod tests {
         for method in [".square()", ".double()", ".mul_2exp_u64(3)", ".halve()"] {
             assert!(output.contains(method), "{output}");
         }
-        assert!(output.contains(" + Felt::from_u64(2)"), "{output}");
+        assert!(output.contains("AB::Expr::from(Felt::from_u64(2)).dup() - "), "{output}");
     }
 
     #[test]
@@ -1166,6 +1621,40 @@ mod tests {
         assert!(!row(&output).contains("sum_array"), "{output}");
         assert!(row(&output).contains(" - h"), "{output}");
         assert_eq!(row(&output).matches("AB::ExtExpr::from(").count(), 1, "{output}");
+    }
+
+    #[test]
+    fn signed_product_regions_recover_typed_dots() {
+        with_native_experiment(NativeExperiment::SignedDots, || {
+            let scalar = base_sum((0..4).map(|i| {
+                let value = main(i) * Felt::from_u64(i as u64 + 7);
+                if i % 2 == 0 { value } else { -value }
+            }));
+            let mixed = ext_sum((0..4).map(|i| {
+                let value = aux(i) * main(i);
+                if i % 2 == 0 { value } else { -value }
+            }));
+            let same = ext_sum((0..4).map(|i| {
+                let value = aux(i) * aux(i + 4);
+                if i % 2 == 0 { value } else { -value }
+            }));
+            let output = emit(&[
+                Assertion::Base(scalar),
+                Assertion::Extension(mixed),
+                Assertion::Extension(same),
+            ]);
+            assert!(
+                output.contains("<AB::Expr as Algebra<Felt>>::mixed_dot_product::<4>"),
+                "{output}"
+            );
+            assert!(
+                output.contains("<AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product::<4>"),
+                "{output}"
+            );
+            assert!(output.contains("AB::ExtExpr::dot_product::<4>"), "{output}");
+            assert!(output.contains("-Felt::from_u64("), "{output}");
+            assert!(!row(&output).contains(" = -"), "{output}");
+        });
     }
 
     #[test]
@@ -1306,6 +1795,86 @@ mod tests {
                 assert!(!output.contains("dot_product"), "{n} terms: {output}");
             }
         }
+    }
+
+    #[test]
+    fn public_and_export_extension_computations_are_prepared_once() {
+        with_native_experiment(NativeExperiment::Uniform, || {
+            let public: B = BaseInput::Public { index: 0 }.into();
+            let export: E = AuxInput::Export { index: 0 }.into();
+            let uniform = (export + E::from(public.square())).square();
+            let output = emit(&[Assertion::Extension(aux(0) * uniform)]);
+            let (preparation, rows) = output.split_once("pub fn eval_fixture").unwrap();
+            assert!(preparation.contains("inputs.public_values[0]"), "{output}");
+            assert!(preparation.contains("inputs.exports[0]"), "{output}");
+            assert!(rows.contains("terms[0]"), "{output}");
+            assert!(!rows.contains("inputs.public_values"), "{output}");
+            assert!(!rows.contains("inputs.exports"), "{output}");
+        });
+    }
+
+    #[test]
+    fn base_uniform_coefficients_do_not_enter_extension_preparation_slots() {
+        with_native_experiment(NativeExperiment::Uniform, || {
+            let public: B = BaseInput::Public { index: 0 }.into();
+            let output = emit(&[Assertion::Base(main(0) * public.square())]);
+            assert!(output.contains("FIXTURE_PREPARED_TERMS: usize = 0"), "{output}");
+            assert!(row(&output).contains("inputs.public_values[0]"), "{output}");
+            assert!(!row(&output).contains("terms[0]"), "{output}");
+        });
+    }
+
+    #[test]
+    fn contiguous_row_sum_fragments_are_shared_without_source_nodes() {
+        with_native_experiment(NativeExperiment::UniformFragments, || {
+            let a = main(0);
+            let b = main(1);
+            let c = main(2);
+            let first: B = [main(3), a.dup(), b.dup(), c.dup()].into_iter().sum();
+            let second: B = [main(4), a, b, c].into_iter().sum();
+            let assertions = vec![Assertion::Base(first), Assertion::Base(second)];
+            let index = ExpressionIndex::new(&assertions);
+            let preparation = Preparation::new(&index);
+            assert_eq!(preparation.fragments.len(), 1);
+            assert_eq!(preparation.fragments[0].inputs.len(), 3);
+            assert!(preparation.fragments[0].slot.is_none());
+            let output = emit(&assertions);
+            assert_eq!(row(&output).matches("builder.emit_base").count(), 2, "{output}");
+        });
+    }
+
+    #[test]
+    fn a_uniform_segment_inside_a_flat_row_sum_is_prepared() {
+        with_native_experiment(NativeExperiment::UniformFragments, || {
+            let expression: E = [E::from(main(0)), challenge(0), challenge(1), E::from(main(1))]
+                .into_iter()
+                .sum();
+            let assertions = vec![Assertion::Extension(expression)];
+            let index = ExpressionIndex::new(&assertions);
+            let preparation = Preparation::new(&index);
+            assert_eq!(preparation.capacity(), 1);
+            assert_eq!(preparation.fragments.len(), 1);
+            assert_eq!(preparation.fragments[0].slot, Some(0));
+            let output = emit(&assertions);
+            assert!(row(&output).contains("terms[0]"), "{output}");
+            assert!(!row(&output).contains("inputs.challenges"), "{output}");
+        });
+    }
+
+    #[test]
+    fn opposite_signed_fragments_are_not_aliased() {
+        with_native_experiment(NativeExperiment::UniformFragments, || {
+            let a = main(0);
+            let b = main(1);
+            let assertions = vec![
+                Assertion::Base([main(2), a.dup(), b.dup()].into_iter().sum()),
+                Assertion::Base([main(3), a, -b].into_iter().sum()),
+            ];
+            let index = ExpressionIndex::new(&assertions);
+            let preparation = Preparation::new(&index);
+            assert!(preparation.fragments.is_empty());
+            let _ = emit(&assertions);
+        });
     }
 
     #[test]

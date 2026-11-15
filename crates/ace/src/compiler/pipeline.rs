@@ -7,6 +7,7 @@
 //! - emit a circuit that matches verifier evaluation.
 
 use miden_core::{Felt, field::QuadFelt};
+use miden_crypto::field::PrimeCharacteristicRing;
 use miden_stark::air;
 
 use crate::{
@@ -131,11 +132,12 @@ fn reemit_air_root(
     offsets: TraceOffsets,
 ) -> (NodeId, NodeId) {
     debug_assert_eq!(source.root().index() + 1, source.nodes.len());
-    // The right operand is `Mul(q, v)` over quotient inputs, which AIR constraints cannot
-    // reference. It is therefore neither equal nor structurally related to the accumulator,
-    // so none of `DagBuilder::sub`'s simplifications can remove the final `Sub` node.
-    let NodeKind::Sub(accumulator, quotient_binding) = source.nodes[source.root().index()] else {
-        unreachable!("verifier DAGs always emit an accumulator - q*v root")
+    // AIR constraints cannot reference quotient inputs, so accumulator - q*v retains a final
+    // operation. A zero accumulator normalizes to Neg(q*v), with its zero seed compacted away.
+    let (accumulator, quotient_binding) = match source.nodes[source.root().index()] {
+        NodeKind::Sub(accumulator, quotient_binding) => (Some(accumulator), quotient_binding),
+        NodeKind::Neg(quotient_binding) => (None, quotient_binding),
+        _ => unreachable!("verifier DAGs always emit an accumulator - q*v root"),
     };
 
     let mut translated = Vec::with_capacity(source.nodes.len() - 1);
@@ -175,7 +177,11 @@ fn reemit_air_root(
         translated.push(id);
     }
 
-    (translated[accumulator.index()], translated[quotient_binding.index()])
+    let accumulator = match accumulator {
+        Some(accumulator) => translated[accumulator.index()],
+        None => builder.constant(QuadFelt::ZERO),
+    };
+    (accumulator, translated[quotient_binding.index()])
 }
 
 /// Builds one order-invariant ACE circuit for a nonempty AIR set.

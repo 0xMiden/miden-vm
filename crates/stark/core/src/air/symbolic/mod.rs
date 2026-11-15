@@ -12,7 +12,9 @@
 //!
 //! Addition and subtraction use ordered sums and negation. Binary operators retain small sum
 //! nodes so accumulation stays linear and preserves reusable or prepared intermediates. Explicit
-//! reductions collect their direct terms; use-aware flattening belongs to the compiler.
+//! reductions retain their direct terms in order. Construction removes zero terms and folds
+//! wholly constant sums; mixed literal terms and shared prefixes stay intact. Use-aware
+//! flattening belongs to the compiler.
 //!
 //! Sums, products, linear combinations, powers, signed power-of-two scaling, and boolean checks
 //! preserve useful ring operations. Each operation produces one scalar expression. Quadratic
@@ -35,6 +37,10 @@ mod input;
 #[cfg(test)]
 mod tests;
 mod traversal;
+
+#[cfg(all(feature = "std", feature = "testing"))]
+#[doc(hidden)]
+pub mod folding_experiment;
 
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::{
@@ -252,52 +258,54 @@ impl<F: Field, EF: ExtensionField<F>> RawExpr<F, EF> {
         }))
     }
 
-    /// Fold only direct terms. Retaining nested sums makes construction independent
-    /// of Arc ownership and keeps binary accumulation linear in the number of terms.
+    /// Keep direct terms and nested sums in order. Only zero identities and
+    /// wholly constant reductions fold here; consumers decide whether to flatten.
     fn sum(domain: ExpressionDomain, values: impl IntoIterator<Item = Self>) -> Self {
         let values = values.into_iter();
+        #[cfg(all(feature = "std", feature = "testing"))]
+        if let Some(policy) = folding_experiment::current()
+            && policy != folding_experiment::Policy::StrictNested
+        {
+            return Self::experiment_sum(domain, values.collect(), policy);
+        }
         let mut terms = Vec::with_capacity(values.size_hint().0);
-        let mut constant = EF::ZERO;
-        let mut degree_multiple = 0;
+        let mut constant = Some(EF::ZERO);
         for value in values {
             assert_eq!(value.domain(), domain, "invalid symbolic sum domain");
-            if let Some(value) = value.constant() {
-                constant += value;
-            } else {
-                degree_multiple = degree_multiple.max(value.degree_multiple());
-                terms.push(value);
+            match value.constant() {
+                Some(value_constant) => {
+                    if let Some(total) = &mut constant {
+                        *total += value_constant;
+                    }
+                    if !value_constant.is_zero() {
+                        terms.push(value);
+                    }
+                },
+                None => {
+                    constant = None;
+                    terms.push(value);
+                },
             }
         }
-        if !constant.is_zero() {
-            terms.push(Self::from_constant(domain, constant));
+        if let Some(value) = constant {
+            return Self::from_constant(domain, value);
         }
         match terms.len() {
             0 => Self::from_constant(domain, EF::ZERO),
             1 => terms.pop().unwrap(),
-            _ => RawExpr::Node(Arc::new(Node {
-                domain,
-                degree_multiple,
-                op: Op::Sum(terms.into_boxed_slice()),
-            })),
+            _ => {
+                let degree_multiple = terms.iter().map(Self::degree_multiple).max().unwrap();
+                RawExpr::Node(Arc::new(Node {
+                    domain,
+                    degree_multiple,
+                    op: Op::Sum(terms.into_boxed_slice()),
+                }))
+            },
         }
     }
 
     fn additive(self, rhs: Self) -> Self {
-        let domain = self.domain();
-        // Updating a two-term sum's constant tail is bounded work, even when
-        // the prefix is shared. Larger sums retain their explicit boundaries.
-        if let Some(right) = rhs.constant()
-            && let RawExpr::Node(node) = &self
-            && let Op::Sum(values) = &node.op
-            && values.len() == 2
-            && let Some(left) = values[1].constant()
-        {
-            return Self::sum(
-                domain,
-                [values[0].clone(), Self::from_constant(domain, left + right)],
-            );
-        }
-        Self::sum(domain, [self, rhs])
+        Self::sum(self.domain(), [self, rhs])
     }
 }
 fn validate_op<F: Field, EF: ExtensionField<F>>(
@@ -396,13 +404,20 @@ impl<F: Field, EF: ExtensionField<F>, D: Domain> Expr<F, EF, D> {
         }
     }
     fn binary(self, rhs: Self, kind: Binary) -> Self {
+        #[cfg(all(feature = "std", feature = "testing"))]
+        if matches!(kind, Binary::Add | Binary::Sub)
+            && let Some(policy) = folding_experiment::current()
+            && policy != folding_experiment::Policy::StrictNested
+        {
+            return Self::from_raw(self.raw.experiment_additive(
+                rhs.raw,
+                matches!(kind, Binary::Sub),
+                policy,
+            ));
+        }
         match kind {
-            Binary::Add => {
-                return Self::from_raw(self.raw.additive(rhs.raw));
-            },
-            Binary::Sub => {
-                return Self::from_raw(self.raw.additive(rhs.raw.negated()));
-            },
+            Binary::Add => return Self::from_raw(self.raw.additive(rhs.raw)),
+            Binary::Sub => return Self::from_raw(self.raw.additive(rhs.raw.negated())),
             Binary::Mul => {},
         }
         if let (Some(x), Some(y)) = (self.raw.constant(), rhs.raw.constant()) {

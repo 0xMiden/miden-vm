@@ -2774,6 +2774,7 @@ version = "1.0.0-rc.1"
 dependencies = [
  "insta",
  "miden-ace",
+ "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
  "miden-precompiles",

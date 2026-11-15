@@ -8,6 +8,9 @@ use miden_constraint_compiler::backend::{
 
 #[path = "build/current_inputs_fixture.rs"]
 mod current_inputs_fixture;
+#[cfg(feature = "symbolic-experiments")]
+#[path = "build/folding_experiments.rs"]
+mod folding_experiments;
 #[path = "build/precompiles.rs"]
 mod precompiles;
 #[path = "build/preparation_pilot.rs"]
@@ -16,6 +19,8 @@ mod preparation_pilot;
 mod symbolic_fixture;
 
 fn main() {
+    #[cfg(feature = "symbolic-experiments")]
+    folding_experiments::generate();
     precompiles::generate();
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=build/preparation_pilot.rs");

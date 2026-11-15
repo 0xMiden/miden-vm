@@ -16,10 +16,10 @@ use {
 # =================================================================================================
 
 # Number of READ variables (inputs + constants) for the constraint evaluation circuit.
-const NUM_INPUTS_CIRCUIT = 2294
+const NUM_INPUTS_CIRCUIT = 2286
 
 # Number of evaluation gates in the constraint evaluation circuit
-const NUM_EVAL_GATES_CIRCUIT = 13292
+const NUM_EVAL_GATES_CIRCUIT = 12732
 
 # Log2 of the longest periodic-column cycle.
 const MAX_CYCLE_LEN_LOG = 7
@@ -28,11 +28,11 @@ const MAX_CYCLE_LEN_LOG = 7
 const NUM_AIRS = 12
 
 # Number of 8-felt blocks in the authenticated ACE circuit stream.
-const ACE_STREAM_BLOCKS = 1835
+const ACE_STREAM_BLOCKS = 1763
 
 # Precomputed generic Felt-sequence chaining word for the fixed-length stream.
 const ACE_STREAM_INIT_CV_0 = 13503953893947607553
-const ACE_STREAM_INIT_CV_1 = 11912009168875174232
+const ACE_STREAM_INIT_CV_1 = 11912009168875173656
 const ACE_STREAM_INIT_CV_2 = 11170449401267093504
 const ACE_STREAM_INIT_CV_3 = 6620516959492505600
 
@@ -46,10 +46,10 @@ const QUOTIENT_FIRST_WEIGHT = 2704820172613542122
 
 # Eidos digest of the ACE circuit stream this relation accepts. One circuit serves
 # every proof order, so it is the advice-map key and the value the loader pins.
-const ACE_CIRCUIT_DIGEST_0 = 34074993589950291
-const ACE_CIRCUIT_DIGEST_1 = 8068991969423364390
-const ACE_CIRCUIT_DIGEST_2 = 357019277787075248
-const ACE_CIRCUIT_DIGEST_3 = 4914804246237438291
+const ACE_CIRCUIT_DIGEST_0 = 6103419866465565218
+const ACE_CIRCUIT_DIGEST_1 = 4804097773744469362
+const ACE_CIRCUIT_DIGEST_2 = 1394897345942668817
+const ACE_CIRCUIT_DIGEST_3 = 4576409482031881141
 
 # ERRORS
 # =================================================================================================

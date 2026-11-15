@@ -24,6 +24,7 @@ arbitrary = ["std", "dep:proptest"]
 std = ["miden-stark/std", "miden-core/std", "proptest?/std", "thiserror/std", "miden-precompiles/std", "miden-utils-sync/std", "ruint/std"]
 concurrent = ["miden-stark/concurrent", "std", "miden-crypto/concurrent"]
 testing = ["arbitrary"]
+symbolic-experiments = ["std", "compiler", "miden-stark/testing"]
 
 [dependencies]
 # Miden dependencies
@@ -43,8 +44,13 @@ proptest = { workspace = true, optional = true }
 thiserror.workspace = true
 
 [dev-dependencies]
+miden-constraint-compiler = { workspace = true, features = ["testing"] }
 p3-matrix.workspace = true
 insta.workspace = true
 miden-ace = { workspace = true, features = ["testing"] }
 miden-test-serialization-macros.workspace = true
 proptest.workspace = true
+
+[[example]]
+name = "symbolic_ace_sizes"
+required-features = ["symbolic-experiments"]

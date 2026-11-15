@@ -1,24 +1,31 @@
 //! Gate-count normalization for completed ACE DAGs.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use miden_crypto::field::Field;
 
-use super::{AceDag, DagBuilder, NodeId, NodeKind};
+use super::{AceDag, DagBuilder, NodeId, NodeKind, ir::DagId};
+use crate::{compiler::encode::StreamGeometry, encode::BASE_FELTS_PER_EF};
 
 /// Normalize identities that depend on final node fanout.
 ///
 /// Each rewrite consumes only single-use intermediate nodes. Common-factor extraction replaces
 /// two products and their sum or difference with one product and one sum or difference.
 /// Associative rotation is applied only when the alternate inner expression already exists, so it
-/// removes a node instead of merely changing the tree shape.
+/// removes a node instead of merely changing the tree shape. Signed rotation also handles sums
+/// and differences, for example `(a + b) - c` becomes `(a - c) + b` if `a - c` already exists.
 pub(crate) fn normalize_dag<EF: Field>(mut dag: AceDag<EF>) -> AceDag<EF> {
     loop {
         let (normalized, reduced) = normalize_once(dag);
-        if !reduced {
-            return normalized;
+        if reduced {
+            dag = normalized;
+            continue;
         }
-        dag = normalized;
+        let (shared, reduced) = share_additive_segments(normalized);
+        if !reduced {
+            return shared;
+        }
+        dag = shared;
     }
 }
 
@@ -32,86 +39,323 @@ fn normalize_once<EF: Field>(dag: AceDag<EF>) -> (AceDag<EF>, bool) {
         .enumerate()
         .map(|(index, node)| (node, index))
         .collect();
-
-    let root_index = dag.root().index();
-    let mut builder = DagBuilder::new();
-    let mut mapped = Vec::with_capacity(dag.nodes.len());
+    let mut planned = dag.nodes.clone();
     let mut changed = false;
 
     for (index, node) in dag.nodes.iter().enumerate() {
-        let id = match *node {
-            NodeKind::Input(key) => builder.input(key),
-            NodeKind::Constant(value) => builder.constant(value),
-            NodeKind::Add(a, b) => {
+        let replacement = match *node {
+            NodeKind::Add(a, b) | NodeKind::Sub(a, b) => {
+                let subtract = matches!(node, NodeKind::Sub(_, _));
                 if let Some((factor, a_other, b_other)) = common_factor(&dag, &fanout, a, b) {
-                    changed = true;
-                    let sum = builder.add(mapped[a_other.index()], mapped[b_other.index()]);
-                    builder.mul(mapped[factor.index()], sum)
-                } else if let Some((existing, remaining)) =
-                    existing_rotation(&dag, &fanout, &node_by_kind, index, a, b, AssociativeOp::Add)
+                    let inner = NodeId::in_dag(planned.len(), dag.dag_id());
+                    planned.push(if subtract {
+                        NodeKind::Sub(a_other, b_other)
+                    } else {
+                        NodeKind::Add(a_other, b_other)
+                    });
+                    NodeKind::Mul(factor, inner)
+                } else if let Some(rotation) =
+                    signed_rotation(&dag, &fanout, &node_by_kind, (a, false), (b, subtract))
                         .or_else(|| {
-                            existing_rotation(
-                                &dag,
-                                &fanout,
-                                &node_by_kind,
-                                index,
-                                b,
-                                a,
-                                AssociativeOp::Add,
-                            )
+                            signed_rotation(&dag, &fanout, &node_by_kind, (b, subtract), (a, false))
                         })
                 {
-                    changed = true;
-                    builder.add(mapped[existing], mapped[remaining])
+                    let lhs = NodeId::in_dag(rotation.lhs, dag.dag_id());
+                    let rhs = NodeId::in_dag(rotation.rhs, dag.dag_id());
+                    if rotation.subtract {
+                        NodeKind::Sub(lhs, rhs)
+                    } else {
+                        NodeKind::Add(lhs, rhs)
+                    }
                 } else {
-                    builder.add(mapped[a.index()], mapped[b.index()])
-                }
-            },
-            NodeKind::Sub(a, b) => {
-                if let Some((factor, a_other, b_other)) = common_factor(&dag, &fanout, a, b) {
-                    changed = true;
-                    let difference = builder.sub(mapped[a_other.index()], mapped[b_other.index()]);
-                    builder.mul(mapped[factor.index()], difference)
-                } else {
-                    builder.sub(mapped[a.index()], mapped[b.index()])
+                    node.clone()
                 }
             },
             NodeKind::Mul(a, b) => {
                 if let Some((existing, remaining)) =
-                    existing_rotation(&dag, &fanout, &node_by_kind, index, a, b, AssociativeOp::Mul)
-                        .or_else(|| {
-                            existing_rotation(
-                                &dag,
-                                &fanout,
-                                &node_by_kind,
-                                index,
-                                b,
-                                a,
-                                AssociativeOp::Mul,
-                            )
-                        })
+                    existing_rotation(&dag, &fanout, &node_by_kind, a, b)
+                        .or_else(|| existing_rotation(&dag, &fanout, &node_by_kind, b, a))
                 {
-                    changed = true;
-                    builder.mul(mapped[existing], mapped[remaining])
+                    NodeKind::Mul(
+                        NodeId::in_dag(existing, dag.dag_id()),
+                        NodeId::in_dag(remaining, dag.dag_id()),
+                    )
                 } else {
-                    builder.mul(mapped[a.index()], mapped[b.index()])
+                    node.clone()
                 }
             },
-            NodeKind::Neg(a) => builder.neg(mapped[a.index()]),
+            NodeKind::Input(_) | NodeKind::Constant(_) | NodeKind::Neg(_) => continue,
         };
-        mapped.push(id);
+        if replacement != *node {
+            planned[index] = replacement;
+            changed = true;
+        }
+    }
+    if !changed {
+        return (dag, false);
     }
 
-    let root = mapped[root_index];
-    let mut normalized = builder.build(root);
-    normalized.compact();
-    if changed && normalized.nodes.len() < before {
+    let normalized = rebuild(&planned, dag.root());
+    if normalized.nodes.len() < before {
         (normalized, true)
     } else {
         // Interacting rewrites can make an otherwise saved node already dead. Discard a
         // size-neutral round so normalization cannot oscillate or change the protocol for no win.
         (dag, false)
     }
+}
+
+fn rebuild<EF: Field>(planned: &[NodeKind<EF>], root: NodeId) -> AceDag<EF> {
+    // A reused pair can be discovered after its consumer. Rebuild in dependency order rather
+    // than source order. Every replacement dependency has strictly smaller fully expanded
+    // original expression-tree size than its parent: a rotation removes one positive-size term,
+    // factor extraction removes the duplicated factor, and sum fragments contain only proper parts of their owning region. This is a well-founded rank even
+    // with shared nodes, so planned rewrites cannot introduce a cycle. The iterative traversal
+    // also keeps deep constraint folds off the Rust call stack.
+    let mut builder = DagBuilder::new();
+    let mut mapped: Vec<Option<NodeId>> = vec![None; planned.len()];
+    let mut stack = vec![root.index()];
+    while let Some(index) = stack.pop() {
+        if mapped[index].is_some() {
+            continue;
+        }
+        let operands = match planned[index] {
+            NodeKind::Add(a, b) | NodeKind::Sub(a, b) | NodeKind::Mul(a, b) => {
+                [Some(a.index()), Some(b.index())]
+            },
+            NodeKind::Neg(a) => [Some(a.index()), None],
+            NodeKind::Input(_) | NodeKind::Constant(_) => [None, None],
+        };
+        if operands.into_iter().flatten().any(|operand| mapped[operand].is_none()) {
+            stack.push(index);
+            for operand in operands.into_iter().flatten().rev() {
+                if mapped[operand].is_none() {
+                    stack.push(operand);
+                }
+            }
+            continue;
+        }
+        let mapped_operand = |id: NodeId| mapped[id.index()].expect("operands were rebuilt first");
+        let id = match planned[index] {
+            NodeKind::Input(key) => builder.input(key),
+            NodeKind::Constant(value) => builder.constant(value),
+            NodeKind::Add(a, b) => builder.add(mapped_operand(a), mapped_operand(b)),
+            NodeKind::Sub(a, b) => builder.sub(mapped_operand(a), mapped_operand(b)),
+            NodeKind::Mul(a, b) => builder.mul(mapped_operand(a), mapped_operand(b)),
+            NodeKind::Neg(a) => builder.neg(mapped_operand(a)),
+        };
+        mapped[index] = Some(id);
+    }
+
+    let root = mapped[root.index()].expect("the root was rebuilt");
+    let mut normalized = builder.build(root);
+    normalized.compact();
+    normalized
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+struct SignedTerm {
+    id: NodeId,
+    negative: bool,
+}
+
+struct AdditiveRegion {
+    root: usize,
+    terms: Vec<SignedTerm>,
+    changed: bool,
+}
+
+/// Share repeated segments in maximal single-use sums without opening shared expressions.
+/// Canonical atom ordering makes the experiment independent of binary-tree association. Greedy
+/// adjacent-pair compression also finds longer segments after their first pair is materialized.
+fn share_additive_segments<EF: Field>(dag: AceDag<EF>) -> (AceDag<EF>, bool) {
+    let fanout = fanout(&dag);
+    let mut absorbed = vec![false; dag.nodes.len()];
+    for node in &dag.nodes {
+        if let NodeKind::Add(a, b) | NodeKind::Sub(a, b) = *node {
+            for child in [a, b] {
+                if fanout[child.index()] == 1
+                    && matches!(dag.nodes[child.index()], NodeKind::Add(_, _) | NodeKind::Sub(_, _))
+                {
+                    absorbed[child.index()] = true;
+                }
+            }
+        }
+    }
+    let mut regions = Vec::new();
+    for (index, node) in dag.nodes.iter().enumerate() {
+        if absorbed[index] || !matches!(node, NodeKind::Add(_, _) | NodeKind::Sub(_, _)) {
+            continue;
+        }
+        let mut terms = Vec::new();
+        let mut stack = vec![SignedTerm {
+            id: NodeId::in_dag(index, dag.dag_id()),
+            negative: false,
+        }];
+        while let Some(term) = stack.pop() {
+            if term.id.index() == index || fanout[term.id.index()] == 1 {
+                match dag.nodes[term.id.index()] {
+                    NodeKind::Add(a, b) => {
+                        stack.push(SignedTerm { id: b, negative: term.negative });
+                        stack.push(SignedTerm { id: a, negative: term.negative });
+                        continue;
+                    },
+                    NodeKind::Sub(a, b) => {
+                        stack.push(SignedTerm { id: b, negative: !term.negative });
+                        stack.push(SignedTerm { id: a, negative: term.negative });
+                        continue;
+                    },
+                    _ => {},
+                }
+            }
+            terms.push(term);
+        }
+        terms.sort_unstable();
+        regions.push(AdditiveRegion { root: index, terms, changed: false });
+    }
+
+    let mut planned = dag.nodes.clone();
+    let mut cache: HashMap<_, _> = planned
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(index, node)| (node, NodeId::in_dag(index, dag.dag_id())))
+        .collect();
+    loop {
+        let mut counts = HashMap::new();
+        for region in &regions {
+            let mut last_end = HashMap::new();
+            for (index, pair) in region.terms.windows(2).enumerate() {
+                let pair = (pair[0], pair[1]);
+                if index < *last_end.get(&pair).unwrap_or(&0) {
+                    continue;
+                }
+                *counts.entry(pair).or_insert(0usize) += 1;
+                last_end.insert(pair, index + 2);
+            }
+        }
+        let Some((pair, _)) = counts
+            .into_iter()
+            .filter(|(_, count)| *count > 1)
+            .max_by(|(a, a_count), (b, b_count)| a_count.cmp(b_count).then_with(|| b.cmp(a)))
+        else {
+            break;
+        };
+        let shared = plan_pair(pair.0, pair.1, &mut planned, &mut cache, dag.dag_id());
+        for region in &mut regions {
+            let mut read = 0;
+            let mut write = 0;
+            while read < region.terms.len() {
+                if read + 1 < region.terms.len()
+                    && (region.terms[read], region.terms[read + 1]) == pair
+                {
+                    region.terms[write] = shared;
+                    region.changed = true;
+                    read += 2;
+                } else {
+                    region.terms[write] = region.terms[read];
+                    read += 1;
+                }
+                write += 1;
+            }
+            region.terms.truncate(write);
+        }
+    }
+    if !regions.iter().any(|region| region.changed) {
+        return (dag, false);
+    }
+
+    for region in regions.iter_mut().filter(|region| region.changed) {
+        // Reduce adjacent pairs in place. Negative pairs keep their sign outside the fragment,
+        // so an arbitrary signed sum still uses one binary gate per pair.
+        while region.terms.len() > 1 {
+            let mut read = 0;
+            let mut write = 0;
+            while read < region.terms.len() {
+                let term = if read + 1 < region.terms.len() {
+                    let term = plan_pair(
+                        region.terms[read],
+                        region.terms[read + 1],
+                        &mut planned,
+                        &mut cache,
+                        dag.dag_id(),
+                    );
+                    read += 2;
+                    term
+                } else {
+                    let term = region.terms[read];
+                    read += 1;
+                    term
+                };
+                region.terms[write] = term;
+                write += 1;
+            }
+            region.terms.truncate(write);
+        }
+        let term = region.terms[0];
+        // A region contains a positive atom; pairing preserves at least one positive term.
+        assert!(!term.negative);
+        planned[region.root] = planned[term.id.index()].clone();
+    }
+
+    let normalized = rebuild(&planned, dag.root());
+    if normalized.nodes.len() < dag.nodes.len() && stream_cost(&normalized) < stream_cost(&dag) {
+        (normalized, true)
+    } else {
+        (dag, false)
+    }
+}
+
+fn plan_pair<EF: Field>(
+    a: SignedTerm,
+    b: SignedTerm,
+    planned: &mut Vec<NodeKind<EF>>,
+    cache: &mut HashMap<NodeKind<EF>, NodeId>,
+    dag_id: DagId,
+) -> SignedTerm {
+    let (node, negative) = match (a.negative, b.negative) {
+        (false, false) | (true, true) => {
+            let (lhs, rhs) = canonical_pair(a.id, b.id);
+            (NodeKind::Add(lhs, rhs), a.negative)
+        },
+        (false, true) => (NodeKind::Sub(a.id, b.id), false),
+        (true, false) => (NodeKind::Sub(b.id, a.id), false),
+    };
+    let id = *cache.entry(node.clone()).or_insert_with(|| {
+        let id = NodeId::in_dag(planned.len(), dag_id);
+        planned.push(node);
+        id
+    });
+    SignedTerm { id, negative }
+}
+
+/// Compare final aligned stream size, breaking ties by raw EVAL operations. Negation also
+/// contributes the emitter's implicit zero constant when no explicit zero is already present.
+fn stream_cost<EF: Field>(dag: &AceDag<EF>) -> (usize, usize) {
+    let mut constants = HashSet::new();
+    let mut inputs = 0;
+    let mut operations = 0;
+    for node in &dag.nodes {
+        match node {
+            NodeKind::Input(_) => inputs += 1,
+            NodeKind::Constant(value) => {
+                constants.insert(*value);
+            },
+            NodeKind::Neg(_) => {
+                constants.insert(EF::ZERO);
+                operations += 1;
+            },
+            NodeKind::Add(_, _) | NodeKind::Sub(_, _) | NodeKind::Mul(_, _) => operations += 1,
+        }
+    }
+    if operations == 0 && constants.is_empty() {
+        return (0, 0);
+    }
+    let geometry = StreamGeometry::from_counts(inputs, constants.len(), operations);
+    (
+        geometry.num_const_nodes() * BASE_FELTS_PER_EF + geometry.num_padded_ops(),
+        operations,
+    )
 }
 
 fn fanout<EF>(dag: &AceDag<EF>) -> Vec<usize> {
@@ -157,20 +401,12 @@ fn common_factor<EF>(
     None
 }
 
-#[derive(Clone, Copy)]
-enum AssociativeOp {
-    Add,
-    Mul,
-}
-
 fn existing_rotation<EF>(
     dag: &AceDag<EF>,
     fanout: &[usize],
     node_by_kind: &HashMap<NodeKind<EF>, usize>,
-    parent_index: usize,
     inner: NodeId,
     other: NodeId,
-    op: AssociativeOp,
 ) -> Option<(usize, usize)>
 where
     EF: Eq + core::hash::Hash,
@@ -178,23 +414,86 @@ where
     if fanout[inner.index()] != 1 {
         return None;
     }
-    let (x, y) = match (&dag.nodes[inner.index()], op) {
-        (NodeKind::Add(x, y), AssociativeOp::Add) | (NodeKind::Mul(x, y), AssociativeOp::Mul) => {
-            (*x, *y)
-        },
-        _ => return None,
+    let NodeKind::Mul(x, y) = dag.nodes[inner.index()] else {
+        return None;
     };
 
     for (candidate_operand, remaining) in [(x, y), (y, x)] {
         let (lhs, rhs) = canonical_pair(candidate_operand, other);
-        let candidate = match op {
-            AssociativeOp::Add => NodeKind::Add(lhs, rhs),
-            AssociativeOp::Mul => NodeKind::Mul(lhs, rhs),
-        };
+        let candidate = NodeKind::Mul(lhs, rhs);
         if let Some(&candidate_index) = node_by_kind.get(&candidate)
-            && candidate_index < parent_index
+            && candidate_index != inner.index()
         {
             return Some((candidate_index, remaining.index()));
+        }
+    }
+    None
+}
+
+struct SignedRotation {
+    lhs: usize,
+    rhs: usize,
+    subtract: bool,
+}
+
+/// Reassociate three signed terms only when one pair already exists and the discarded inner
+/// operation is unshared. Keep the result to one operation; two negative outer terms would need
+/// both an addition and a negation, so they are not candidates.
+fn signed_rotation<EF>(
+    dag: &AceDag<EF>,
+    fanout: &[usize],
+    node_by_kind: &HashMap<NodeKind<EF>, usize>,
+    inner: (NodeId, bool),
+    other: (NodeId, bool),
+) -> Option<SignedRotation>
+where
+    EF: Eq + core::hash::Hash,
+{
+    let (inner, inner_negative) = inner;
+    let (other, other_negative) = other;
+    if fanout[inner.index()] != 1 {
+        return None;
+    }
+    let terms = match dag.nodes[inner.index()] {
+        NodeKind::Add(x, y) => [(x, inner_negative), (y, inner_negative)],
+        NodeKind::Sub(x, y) => [(x, inner_negative), (y, !inner_negative)],
+        _ => return None,
+    };
+    for index in [0, 1] {
+        let (operand, operand_negative) = terms[index];
+        let (remaining, remaining_negative) = terms[1 - index];
+        let (candidate, candidate_negative) = match (operand_negative, other_negative) {
+            (false, false) | (true, true) => {
+                let (lhs, rhs) = canonical_pair(operand, other);
+                (NodeKind::Add(lhs, rhs), operand_negative)
+            },
+            (false, true) => (NodeKind::Sub(operand, other), false),
+            (true, false) => (NodeKind::Sub(other, operand), false),
+        };
+        if candidate_negative && remaining_negative {
+            continue;
+        }
+        if let Some(&existing) = node_by_kind.get(&candidate)
+            && existing != inner.index()
+        {
+            return Some(match (candidate_negative, remaining_negative) {
+                (false, false) => SignedRotation {
+                    lhs: existing,
+                    rhs: remaining.index(),
+                    subtract: false,
+                },
+                (false, true) => SignedRotation {
+                    lhs: existing,
+                    rhs: remaining.index(),
+                    subtract: true,
+                },
+                (true, false) => SignedRotation {
+                    lhs: remaining.index(),
+                    rhs: existing,
+                    subtract: true,
+                },
+                (true, true) => unreachable!(),
+            });
         }
     }
     None
@@ -206,10 +505,167 @@ fn canonical_pair(a: NodeId, b: NodeId) -> (NodeId, NodeId) {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::field::QuadFelt;
+    use miden_core::{Felt, field::QuadFelt};
 
-    use super::normalize_dag;
-    use crate::{InputKey, compiler::dag::DagBuilder};
+    use super::{normalize_dag, share_additive_segments};
+    use crate::{
+        InputCounts, InputKey, InputLayout,
+        compiler::{
+            dag::DagBuilder,
+            testing::{eval_dag, fill_inputs},
+        },
+    };
+
+    #[test]
+    fn normalizes_deterministic_dags_against_independent_field_values() {
+        let layout = InputLayout::new(InputCounts {
+            preprocessed_width: 0,
+            width: 0,
+            aux_width: 0,
+            num_aux_boundary: 0,
+            num_public: 4,
+            num_randomness: 2,
+            num_quotient_chunks: 0,
+        });
+        for seed in 0..16u64 {
+            let mut random_state = seed + 1;
+            let mut next = || {
+                random_state = random_state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                random_state
+            };
+            let mut builder = DagBuilder::<QuadFelt>::new();
+            let mut inputs = fill_inputs(&layout);
+            let mut terms = Vec::new();
+            for index in 0..4 {
+                // Keep both coordinates canonical and the extension coordinate nonzero.
+                let value = QuadFelt::new([
+                    Felt::new_unchecked(next() & 0xffff_ffff),
+                    Felt::new_unchecked((next() & 0xffff_ffff) + 1),
+                ]);
+                inputs[layout.index(InputKey::Public(index)).unwrap()] = value;
+                terms.push((builder.input(InputKey::Public(index)), value));
+            }
+            let zero = QuadFelt::from(Felt::new_unchecked(0));
+            let one = QuadFelt::from(Felt::new_unchecked(1));
+            for value in [zero, one, -one] {
+                terms.push((builder.constant(value), value));
+            }
+            let mut root = builder.constant(zero);
+            let mut expected = zero;
+            for _ in 0..128 {
+                let (lhs, x) = terms[next() as usize % terms.len()];
+                let (rhs, y) = terms[next() as usize % terms.len()];
+                let (term, value) = match next() % 12 {
+                    0..=2 => (builder.add(lhs, rhs), x + y),
+                    3..=4 => (builder.sub(lhs, rhs), x - y),
+                    5..=6 => (builder.mul(lhs, rhs), x * y),
+                    7 => (builder.neg(lhs), -x),
+                    8 => {
+                        let sum = builder.add(lhs, rhs);
+                        (builder.sub(sum, lhs), y)
+                    },
+                    9 => {
+                        let (third, _) = terms[next() as usize % terms.len()];
+                        let first = builder.add(lhs, third);
+                        let second = builder.add(rhs, third);
+                        (builder.sub(first, second), x - y)
+                    },
+                    10 => {
+                        let difference = builder.sub(lhs, rhs);
+                        (builder.neg(difference), y - x)
+                    },
+                    11 => {
+                        let neg_lhs = builder.neg(lhs);
+                        let neg_rhs = builder.neg(rhs);
+                        (builder.sub(neg_lhs, neg_rhs), y - x)
+                    },
+                    _ => unreachable!(),
+                };
+                terms.push((term, value));
+                // Give every authored result an independent nonzero weight to reduce accidental
+                // cancellation between errors in the final oracle.
+                let weight = QuadFelt::new([
+                    Felt::new_unchecked((next() & 0xffff_ffff) + 1),
+                    Felt::new_unchecked((next() & 0xffff_ffff) + 1),
+                ]);
+                let weight_id = builder.constant(weight);
+                let weighted_term = builder.mul(term, weight_id);
+                root = builder.add(root, weighted_term);
+                expected += value * weight;
+            }
+            let mut dag = builder.build(root);
+            dag.compact();
+            let before = dag.nodes.len();
+            assert_eq!(eval_dag(&dag, &inputs, &layout).unwrap(), expected, "builder seed {seed}");
+
+            let normalized = normalize_dag(dag);
+
+            assert!(normalized.nodes.len() <= before, "seed {seed}");
+            assert_eq!(
+                eval_dag(&normalized, &inputs, &layout).unwrap(),
+                expected,
+                "normalized seed {seed}"
+            );
+        }
+    }
+
+    #[test]
+    fn reuses_late_signed_and_product_nodes_without_changing_values() {
+        let layout = InputLayout::new(InputCounts {
+            preprocessed_width: 0,
+            width: 0,
+            aux_width: 0,
+            num_aux_boundary: 0,
+            num_public: 4,
+            num_randomness: 2,
+            num_quotient_chunks: 0,
+        });
+        for multiply in [false, true] {
+            let mut builder = DagBuilder::<QuadFelt>::new();
+            let a = builder.input(InputKey::Public(0));
+            let b = builder.input(InputKey::Public(1));
+            let c = builder.input(InputKey::Public(2));
+            let d = builder.input(InputKey::Public(3));
+            let root = if multiply {
+                let ab = builder.mul(a, b);
+                let cd = builder.mul(c, d);
+                let balanced = builder.mul(ab, cd);
+                let prefix = builder.mul(ab, c);
+                let keep_balanced = builder.mul(balanced, b);
+                builder.add(keep_balanced, prefix)
+            } else {
+                let inner = builder.sub(b, c);
+                let target = builder.sub(a, inner);
+                let existing = builder.sub(a, b);
+                builder.mul(target, existing)
+            };
+            let mut dag = builder.build(root);
+            dag.compact();
+            let before = dag.nodes.len();
+            let normalized = normalize_dag(dag);
+            assert_eq!(normalized.nodes.len(), before - 1, "multiply={multiply}");
+
+            for shift in [0, 1, 7] {
+                let shift = QuadFelt::from(Felt::new_unchecked(shift));
+                let inputs: Vec<_> =
+                    fill_inputs(&layout).into_iter().map(|value| value + shift).collect();
+                let a = inputs[layout.index(InputKey::Public(0)).unwrap()];
+                let b = inputs[layout.index(InputKey::Public(1)).unwrap()];
+                let c = inputs[layout.index(InputKey::Public(2)).unwrap()];
+                let d = inputs[layout.index(InputKey::Public(3)).unwrap()];
+                let expected = if multiply {
+                    (a * b) * (c * d) * b + (a * b) * c
+                } else {
+                    (a - (b - c)) * (a - b)
+                };
+                assert_eq!(
+                    eval_dag(&normalized, &inputs, &layout).unwrap(),
+                    expected,
+                    "multiply={multiply}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn factors_single_use_products() {
@@ -263,6 +719,224 @@ mod tests {
                     && fanout[index] == 2),
             "the shared product must keep both consumers"
         );
+    }
+
+    #[test]
+    fn rotates_signed_chains_toward_existing_nodes() {
+        let layout = InputLayout::new(InputCounts {
+            preprocessed_width: 0,
+            width: 0,
+            aux_width: 0,
+            num_aux_boundary: 0,
+            num_public: 3,
+            num_randomness: 2,
+            num_quotient_chunks: 0,
+        });
+        for case in 0..4 {
+            let mut builder = DagBuilder::<QuadFelt>::new();
+            let a = builder.input(InputKey::Public(0));
+            let b = builder.input(InputKey::Public(1));
+            let c = builder.input(InputKey::Public(2));
+            let (existing, target) = match case {
+                0 => {
+                    let existing = builder.sub(a, c);
+                    let inner = builder.add(a, b);
+                    (existing, builder.sub(inner, c))
+                },
+                1 => {
+                    let existing = builder.add(a, c);
+                    let inner = builder.sub(a, b);
+                    (existing, builder.add(inner, c))
+                },
+                2 => {
+                    let existing = builder.sub(a, b);
+                    let inner = builder.sub(b, c);
+                    (existing, builder.sub(a, inner))
+                },
+                3 => {
+                    let existing = builder.add(b, c);
+                    let inner = builder.sub(a, b);
+                    (existing, builder.sub(inner, c))
+                },
+                _ => unreachable!(),
+            };
+            let root = builder.mul(existing, target);
+            let mut dag = builder.build(root);
+            dag.compact();
+            let before = dag.nodes.len();
+            let normalized = normalize_dag(dag);
+            assert_eq!(normalized.nodes.len(), before - 1, "case {case}");
+
+            for shift in [0, 1, 7] {
+                let shift = QuadFelt::from(Felt::new_unchecked(shift));
+                let inputs: Vec<_> =
+                    fill_inputs(&layout).into_iter().map(|value| value + shift).collect();
+                let a = inputs[layout.index(InputKey::Public(0)).unwrap()];
+                let b = inputs[layout.index(InputKey::Public(1)).unwrap()];
+                let c = inputs[layout.index(InputKey::Public(2)).unwrap()];
+                let expected = match case {
+                    0 => (a - c) * ((a + b) - c),
+                    1 => (a + c) * ((a - b) + c),
+                    2 => (a - b) * (a - (b - c)),
+                    3 => (b + c) * ((a - b) - c),
+                    _ => unreachable!(),
+                };
+                assert_eq!(
+                    eval_dag(&normalized, &inputs, &layout).unwrap(),
+                    expected,
+                    "case {case}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn shares_repeated_signed_segments_without_changing_values() {
+        let layout = InputLayout::new(InputCounts {
+            preprocessed_width: 0,
+            width: 0,
+            aux_width: 0,
+            num_aux_boundary: 0,
+            num_public: 5,
+            num_randomness: 2,
+            num_quotient_chunks: 0,
+        });
+        for subtract in [false, true] {
+            let mut builder = DagBuilder::<QuadFelt>::new();
+            let a = builder.input(InputKey::Public(0));
+            let b = builder.input(InputKey::Public(1));
+            let c = builder.input(InputKey::Public(2));
+            let d = builder.input(InputKey::Public(3));
+            let e = builder.input(InputKey::Public(4));
+            let ab = if subtract { builder.sub(a, b) } else { builder.add(a, b) };
+            let abc = builder.add(ab, c);
+            let first = builder.add(abc, d);
+            let bc = if subtract { builder.sub(c, b) } else { builder.add(b, c) };
+            let bce = builder.add(bc, e);
+            let second = builder.add(a, bce);
+            let root = builder.mul(first, second);
+            let mut dag = builder.build(root);
+            dag.compact();
+            let before = dag.nodes.len();
+
+            let (shared, reduced) = share_additive_segments(dag);
+
+            assert!(reduced);
+            assert_eq!(shared.nodes.len(), before - 2);
+            for shift in [0, 1, 7] {
+                let shift = QuadFelt::from(Felt::new_unchecked(shift));
+                let inputs: Vec<_> =
+                    fill_inputs(&layout).into_iter().map(|value| value + shift).collect();
+                let a = inputs[layout.index(InputKey::Public(0)).unwrap()];
+                let b = inputs[layout.index(InputKey::Public(1)).unwrap()];
+                let c = inputs[layout.index(InputKey::Public(2)).unwrap()];
+                let d = inputs[layout.index(InputKey::Public(3)).unwrap()];
+                let e = inputs[layout.index(InputKey::Public(4)).unwrap()];
+                let common = if subtract { a - b + c } else { a + b + c };
+                assert_eq!(
+                    eval_dag(&shared, &inputs, &layout).unwrap(),
+                    (common + d) * (common + e)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn does_not_count_overlapping_pairs_as_multiple_uses() {
+        let mut builder = DagBuilder::<QuadFelt>::new();
+        let a = builder.input(InputKey::Public(0));
+        let aa = builder.add(a, a);
+        let root = builder.add(aa, a);
+        let mut dag = builder.build(root);
+        dag.compact();
+        let before = dag.nodes.clone();
+
+        let (shared, reduced) = share_additive_segments(dag);
+
+        assert!(!reduced);
+        assert_eq!(shared.nodes, before);
+    }
+
+    #[test]
+    fn segment_sharing_keeps_shared_sums_atomic() {
+        let mut builder = DagBuilder::<QuadFelt>::new();
+        let a = builder.input(InputKey::Public(0));
+        let b = builder.input(InputKey::Public(1));
+        let c = builder.input(InputKey::Public(2));
+        let d = builder.input(InputKey::Public(3));
+        let shared = builder.add(a, b);
+        let first = builder.add(shared, c);
+        let second = builder.add(shared, d);
+        let root = builder.mul(first, second);
+        let mut dag = builder.build(root);
+        dag.compact();
+        let before = dag.nodes.clone();
+
+        let (normalized, reduced) = share_additive_segments(dag);
+
+        assert!(!reduced);
+        assert_eq!(normalized.nodes, before);
+    }
+
+    #[test]
+    fn reuses_a_prefix_discovered_after_its_consumer() {
+        let mut builder = DagBuilder::<QuadFelt>::new();
+        let a = builder.input(InputKey::Public(0));
+        let b = builder.input(InputKey::Public(1));
+        let c = builder.input(InputKey::Public(2));
+        let d = builder.input(InputKey::Public(3));
+        let ab = builder.add(a, b);
+        let cd = builder.add(c, d);
+        let balanced = builder.add(ab, cd);
+        let prefix = builder.add(ab, c);
+        let root = builder.mul(balanced, prefix);
+        let mut dag = builder.build(root);
+        dag.compact();
+        let before = dag.nodes.len();
+
+        let normalized = normalize_dag(dag);
+
+        assert_eq!(normalized.nodes.len(), before - 1);
+        let layout = InputLayout::new(InputCounts {
+            preprocessed_width: 0,
+            width: 0,
+            aux_width: 0,
+            num_aux_boundary: 0,
+            num_public: 4,
+            num_randomness: 2,
+            num_quotient_chunks: 0,
+        });
+        for shift in [0, 1, 7] {
+            let shift = QuadFelt::from(Felt::new_unchecked(shift));
+            let inputs: Vec<_> =
+                fill_inputs(&layout).into_iter().map(|value| value + shift).collect();
+            let a = inputs[layout.index(InputKey::Public(0)).unwrap()];
+            let b = inputs[layout.index(InputKey::Public(1)).unwrap()];
+            let c = inputs[layout.index(InputKey::Public(2)).unwrap()];
+            let d = inputs[layout.index(InputKey::Public(3)).unwrap()];
+            let expected = ((a + b) + (c + d)) * ((a + b) + c);
+            assert_eq!(eval_dag(&normalized, &inputs, &layout).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn signed_rotation_preserves_an_inner_difference_with_multiple_consumers() {
+        let mut builder = DagBuilder::<QuadFelt>::new();
+        let a = builder.input(InputKey::Public(0));
+        let b = builder.input(InputKey::Public(1));
+        let c = builder.input(InputKey::Public(2));
+        let existing = builder.add(a, c);
+        let inner = builder.sub(a, b);
+        let target = builder.add(inner, c);
+        let keep_inner = builder.mul(inner, target);
+        let root = builder.mul(existing, keep_inner);
+        let mut dag = builder.build(root);
+        dag.compact();
+        let before = dag.nodes.len();
+
+        let normalized = normalize_dag(dag);
+
+        assert_eq!(normalized.nodes.len(), before);
     }
 
     #[test]

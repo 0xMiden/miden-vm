@@ -1,9 +1,11 @@
-use super::*;
 use alloc::collections::BTreeSet;
+
 use p3_field::{
     Algebra, BasedVectorSpace, Dup, PrimeCharacteristicRing, extension::BinomialExtensionField,
 };
 use p3_goldilocks::Goldilocks;
+
+use super::*;
 
 type F = Goldilocks;
 type EF = BinomialExtensionField<F, 2>;
@@ -603,20 +605,32 @@ fn addition_and_subtraction_use_ordered_sums_and_negation() {
 }
 
 #[test]
-fn sums_collect_partial_constants_and_remove_zero_terms() {
-    let expression: B =
-        [B::ZERO, x(), B::from_u64(2), y(), B::from_u64(3), B::ZERO].into_iter().sum();
-    assert!(
-        matches!(expression.view(), ExprView::Sum { values } if values.len() == 3 && matches!(values.get(2).unwrap().view(), ExprView::BaseConstant(value) if *value == F::new(5)))
-    );
-    assert_wire_roundtrip(&expression, EF::from(F::new(10)));
-    assert_same_normal_form(&[x() + F::new(3) - F::new(3), x()]);
+fn sums_preserve_mixed_literal_terms_and_remove_zero_terms() {
+    for expression in [
+        [B::ZERO, x(), B::from_u64(2), y(), B::from_u64(3), B::ZERO]
+            .into_iter()
+            .sum::<B>(),
+        [x(), B::from_u64(2), B::from_u64(3), y()].into_iter().sum::<B>(),
+    ] {
+        assert!(matches!(expression.view(), ExprView::Sum { values } if values.len() == 4));
+        assert_wire_roundtrip(&expression, EF::from(F::new(10)));
+    }
+    let expression: B = [x(), B::from_u64(2), y(), B::from_u64(3)].into_iter().sum();
+    let ExprView::Sum { values } = expression.view() else {
+        panic!("ordered sum")
+    };
+    assert!(matches!(values.get(0).unwrap().view(), ExprView::BaseInput(_)));
+    assert!(matches!(values.get(1).unwrap().view(), ExprView::BaseConstant(c) if *c == F::new(2)));
+    assert!(matches!(values.get(2).unwrap().view(), ExprView::BaseInput(_)));
+    assert!(matches!(values.get(3).unwrap().view(), ExprView::BaseConstant(c) if *c == F::new(3)));
     assert_same_normal_form(&[B::sum_array::<1>(&[x()]), x()]);
+    // Literal cancellation across a dynamic prefix is left to compiler scheduling.
+    let cancellation = x() + F::new(3) - F::new(3);
+    assert!(matches!(cancellation.view(), ExprView::Sum { .. }));
+    assert_wire_roundtrip(&cancellation, EF::from(F::new(2)));
     let extension_constant = EF::from_basis_coefficients_fn(|_| F::new(7));
-    assert_same_normal_form(&[
-        z() + extension_constant + EF::from(F::new(2)) - extension_constant,
-        z() + F::new(2),
-    ]);
+    let cancellation = z() + extension_constant + EF::from(F::new(2)) - extension_constant;
+    assert_wire_roundtrip(&cancellation, evaluate(&z()) + EF::from(F::new(2)));
 }
 
 #[test]
@@ -655,7 +669,11 @@ fn binary_sum_grouping_is_independent_of_other_live_references() {
     let consumed = (x() + y()) + B::is_first_row();
     assert_same_normal_form(&[with_reference, consumed]);
     let shared = x() + F::new(3);
-    assert_same_normal_form(&[shared.clone() + F::new(5), (x() + F::new(3)) + F::new(5)]);
+    let extended = shared.clone() + F::new(5);
+    assert!(
+        matches!(extended.view(), ExprView::Sum { values } if values.get(0).unwrap().identity() == shared.as_ref().identity())
+    );
+    assert_same_normal_form(&[extended, (x() + F::new(3)) + F::new(5)]);
     assert_eq!(evaluate(&shared), EF::from(F::new(5)));
 }
 

@@ -5,9 +5,8 @@ pub mod analyze;
 pub mod auxiliary;
 pub mod capture;
 pub mod graph;
+pub(crate) mod index;
 pub mod program;
-
-pub use program::CapturedProgram;
 
 pub use analyze::{OpCounts, op_counts};
 pub use capture::{
@@ -15,3 +14,6 @@ pub use capture::{
     capture_native_into_with, capture_program_native_with_descriptor,
 };
 pub use graph::{Class, Graph, GraphBuilder, Leaf, Node, NodeId, OpKind};
+pub use program::CapturedProgram;
+#[cfg(feature = "testing")]
+pub use program::{with_left_sum_folding, with_sum_folding};

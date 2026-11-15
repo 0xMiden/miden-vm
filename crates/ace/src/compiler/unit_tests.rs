@@ -400,11 +400,10 @@ fn ace_encoding_rejects_non_final_root() {
     );
 }
 
-/// A constant-zero left operand still produces a `Sub` when the right operand is a
-/// non-constant product. This pins the degenerate accumulator case of the root invariant
-/// documented at `reemit_air_root`.
+/// Subtracting a nonconstant product from zero must still create a final operation,
+/// including when subtraction is normalized to negation.
 #[test]
-fn sub_interns_a_real_root_for_a_constant_left_operand() {
+fn zero_minus_product_interns_a_real_negation_root() {
     let mut builder = DagBuilder::<QuadFelt>::new();
     let zero = builder.constant(QuadFelt::ZERO);
     let q = builder.input(InputKey::Public(0));
@@ -413,9 +412,10 @@ fn sub_interns_a_real_root_for_a_constant_left_operand() {
     let root = builder.sub(zero, qv);
     let dag = builder.build(root);
 
-    assert_eq!(dag.root(), root, "the subtraction must be the DAG root");
+    assert_eq!(dag.root(), root, "the negation must be the DAG root");
+    assert_eq!(root.index() + 1, dag.nodes.len(), "the root must remain final");
     assert!(
-        matches!(dag.nodes[root.index()], crate::compiler::dag::NodeKind::Sub(a, b) if a == zero && b == qv),
-        "a constant left operand must not rewrite the root away from Sub"
+        matches!(dag.nodes[root.index()], crate::compiler::dag::NodeKind::Neg(inner) if inner == qv),
+        "zero minus a product must retain a real negation operation"
     );
 }

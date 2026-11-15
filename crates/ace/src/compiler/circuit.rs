@@ -72,6 +72,16 @@ impl<EF: Field> AceCircuit<EF> {
         self.layout.total_inputs + self.constants.len() + self.operations.len()
     }
 
+    /// Number of arithmetic operations before stream padding.
+    pub fn num_operations(&self) -> usize {
+        self.operations.len()
+    }
+
+    /// Number of distinct constants before READ-row padding.
+    pub fn num_constants(&self) -> usize {
+        self.constants.len()
+    }
+
     fn node_value(&self, node: AceNode, inputs: &[EF], op_values: &[EF]) -> EF {
         match node {
             AceNode::Input(index) => inputs[index],

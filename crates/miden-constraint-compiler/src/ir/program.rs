@@ -5,7 +5,7 @@
 //! analyses. Source allocation identity only memoizes authored sharing; the
 //! graph builder independently interns structurally identical arithmetic.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{BasedVectorSpace, PrimeCharacteristicRing};
@@ -17,6 +17,42 @@ use miden_stark::air::{
 use super::{
     CapturedConstraints, Class, Graph, GraphBuilder, Leaf, Node, NodeId, OpCounts, OpKind,
 };
+
+#[cfg(feature = "testing")]
+std::thread_local! {
+    static LEFT_SUM_FOLDING: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+fn left_sum_folding() -> bool {
+    #[cfg(feature = "testing")]
+    {
+        LEFT_SUM_FOLDING.with(std::cell::Cell::get)
+    }
+    #[cfg(not(feature = "testing"))]
+    {
+        true
+    }
+}
+
+/// Override primitive left-only sum folding while constructing a capture.
+/// Native emission has its own scheduling policy and is not affected by this scope.
+#[cfg(feature = "testing")]
+pub fn with_sum_folding<R>(enabled: bool, capture: impl FnOnce() -> R) -> R {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            LEFT_SUM_FOLDING.with(|active| active.set(self.0));
+        }
+    }
+    let _restore = Restore(LEFT_SUM_FOLDING.with(|active| active.replace(enabled)));
+    capture()
+}
+
+/// Enable primitive left-only sum folding while constructing a capture.
+#[cfg(feature = "testing")]
+pub fn with_left_sum_folding<R>(capture: impl FnOnce() -> R) -> R {
+    with_sum_folding(true, capture)
+}
 
 /// One immutable authored capture and its derived arithmetic representation.
 #[derive(Debug)]
@@ -65,10 +101,16 @@ pub(crate) fn lower_assertions_into(
             Assertion::Extension(value) => count_uses(value.as_ref(), &mut uses),
         }
     }
+    let left_flattenable = if left_sum_folding() {
+        crate::ir::index::left_flattenable_sum_identities(assertions)
+    } else {
+        HashSet::new()
+    };
     let mut lower = Lowering {
         graph,
         memo: HashMap::new(),
         uses,
+        left_flattenable,
         base: OpCounts::default(),
         ext: OpCounts::default(),
     };
@@ -121,11 +163,51 @@ struct Lowering<'a> {
     // addresses therefore cannot be reused and never define structural CSE.
     memo: HashMap<usize, NodeId>,
     uses: HashMap<usize, usize>,
+    left_flattenable: HashSet<usize>,
     base: OpCounts,
     ext: OpCounts,
 }
 
 impl Lowering<'_> {
+    fn left_sum_terms<'a>(
+        &self,
+        expression: ExprRef<'a, Felt, QuadFelt>,
+    ) -> Vec<ExprRef<'a, Felt, QuadFelt>> {
+        fn sum_boundary(expression: ExprRef<'_, Felt, QuadFelt>) -> bool {
+            match expression.view() {
+                ExprView::Sum { .. } => true,
+                ExprView::Neg { x } => matches!(x.view(), ExprView::Sum { .. }),
+                _ => false,
+            }
+        }
+        fn append<'a>(
+            expression: ExprRef<'a, Felt, QuadFelt>,
+            allowed: &std::collections::HashSet<usize>,
+            root: bool,
+            out: &mut Vec<ExprRef<'a, Felt, QuadFelt>>,
+        ) {
+            if let ExprView::Sum { values } = expression.view()
+                && (root || expression.identity().is_some_and(|id| allowed.contains(&id)))
+            {
+                // Subtraction has already become Neg(Sum), so conservatively
+                // retain that original right-hand sum as well as positive RHS sums.
+                let keep_left = values.len() == 2 && sum_boundary(values.get(1).unwrap());
+                for (position, child) in values.iter().enumerate() {
+                    if position == 0 && !keep_left {
+                        append(child, allowed, false, out);
+                    } else {
+                        out.push(child);
+                    }
+                }
+            } else {
+                out.push(expression);
+            }
+        }
+        let mut out = Vec::new();
+        append(expression, &self.left_flattenable, true, &mut out);
+        out
+    }
+
     fn expression(&mut self, expression: ExprRef<'_, Felt, QuadFelt>) -> NodeId {
         let identity = expression.identity();
         if let Some(value) = identity.and_then(|identity| self.memo.get(&identity).copied()) {
@@ -174,9 +256,10 @@ impl Lowering<'_> {
                 let x = self.expression(x);
                 self.op(class, OpKind::Neg, x, None)
             },
-            ExprView::Sum { values } => {
-                let values: Vec<_> = values
-                    .iter()
+            ExprView::Sum { .. } => {
+                let source_values = self.left_sum_terms(expression);
+                let values: Vec<_> = source_values
+                    .into_iter()
                     .map(|value| {
                         // Constant negation is folded by construction. Recover its
                         // shorter signed form so x - 1 does not introduce a separate
@@ -403,6 +486,47 @@ mod tests {
         B::from(BaseInput::Main { row: RowOffset::Current, column })
     }
 
+    #[cfg(feature = "testing")]
+    #[test]
+    fn experimental_left_folding_preserves_canonical_shared_and_uniform_prefixes() {
+        let prefix = || (main(0) + main(1)) + main(2);
+        let assertions = vec![
+            Assertion::Base((prefix() + main(3)) + main(4)),
+            Assertion::Base((prefix() + main(5)) + main(6)),
+        ];
+        let eligible = crate::ir::index::left_flattenable_sum_identities(&assertions);
+        for assertion in &assertions {
+            let Assertion::Base(value) = assertion else {
+                unreachable!()
+            };
+            let ExprView::Sum { values } = value.view() else {
+                panic!("outer sum")
+            };
+            let middle = values.get(0).unwrap();
+            assert!(eligible.contains(&middle.identity().unwrap()));
+            let ExprView::Sum { values } = middle.view() else {
+                panic!("middle sum")
+            };
+            assert!(!eligible.contains(&values.get(0).unwrap().identity().unwrap()));
+        }
+        let program = super::with_left_sum_folding(|| CapturedProgram::from_assertions(assertions));
+        for seed in [0, 42, u64::MAX] {
+            assert_program_lowering(&program, seed);
+        }
+        let public: B = BaseInput::Public { index: 0 }.into();
+        let uniform = public.clone() + public;
+        let assertions = vec![Assertion::Base(uniform.clone() + main(0))];
+        let eligible = crate::ir::index::left_flattenable_sum_identities(&assertions);
+        assert!(!eligible.contains(&uniform.as_ref().identity().unwrap()));
+        assert!(super::left_sum_folding());
+        super::with_sum_folding(false, || {
+            assert!(!super::left_sum_folding());
+            super::with_sum_folding(true, || assert!(super::left_sum_folding()));
+            assert!(!super::left_sum_folding());
+        });
+        assert!(super::left_sum_folding());
+    }
+
     #[test]
     fn normalized_constant_spellings_preserve_arithmetic_lowering() {
         let a = main(0);
@@ -433,7 +557,7 @@ mod tests {
             (a.clone() - Felt::from_u64(3), OpKind::Sub, 0),
             (-a.clone() + b.clone(), OpKind::Sub, 0),
             (-a.clone() - b.clone(), OpKind::Neg, 1),
-            (a.clone() - b.clone() + c.clone() - d.clone(), OpKind::Sub, 0),
+            (a.clone() - b.clone() + c.clone() - d.clone(), OpKind::Add, 0),
             ([a.clone(), -b.clone(), c.clone(), -d.clone()].into_iter().sum(), OpKind::Add, 0),
         ] {
             let program = CapturedProgram::from_assertions(vec![Assertion::Base(expression)]);

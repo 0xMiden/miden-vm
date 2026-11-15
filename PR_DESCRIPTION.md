@@ -96,8 +96,8 @@ preserving the full `u64` magnitude for multiplication and division. Every node 
 Quadratic-extension squaring, XOR, XOR3, and ANDN use the traits' ordinary arithmetic expansions;
 there are no pair/projection nodes or dedicated bitwise nodes.
 
-Addition and subtraction retain small sum nodes during construction. Direct constants and simple
-identities fold, but nested sums are not eagerly flattened. This preserves reusable intermediates
+Addition and subtraction retain small sum nodes and literal order during construction. Zero
+identities and wholly constant sums fold; partial constant tails and nested sums stay intact. This preserves reusable intermediates
 and keeps repeated accumulation linear in the number of terms. The compiler uses actual use counts
 to flatten suitable regions while respecting sharing and preparation boundaries. Small signed
 sums emit ordinary `+`/`-`; larger regions can use bounded sums and dot products.
@@ -217,12 +217,15 @@ attribution and the [MIT](crates/stark/core/src/air/symbolic/LICENSE-MIT) and
 [Apache-2.0](crates/stark/core/src/air/symbolic/LICENSE-APACHE) license texts remain.
 :codex-annotation{index="8"}
 
-The current sum/negation representation, wire schema, and regenerated artifacts passed 173 focused
-tests covering symbolic/compiler behavior, native scalar/packed execution, ACE, preparation, wire
-validation, degrees, and proof bindings. Two existing timing tests were skipped. Three doctests
-passed, including typed-domain compile failures; two existing examples remained ignored. Clippy
-with warnings denied, host `no_std`, scoped formatting, and both artifact consistency checks passed.
+The current representation and selected optimizations pass 243 focused tests covering core AIRs,
+compiler behavior, scalar/packed source equivalence, ACE arithmetic, current proof bindings, and
+embedded verifier roots. Clippy with warnings denied, host `no_std`, formatting, and generated
+artifact consistency checks pass. The current VM/PVM proof fixtures are regenerated.
+
+Across all 16 AIRs on the performance core, the geometric mean of per-AIR row-evaluation latency
+falls 6.4% scalar and 6.3% packed, excluding preparation. Raw ACE operations fall from 6,831 to
+6,646 for VM and 13,287 to 12,728 for PVM. The [experiment report](crates/miden-constraint-compiler/docs/symbolic-optimization-results.md)
+records all folding policies, per-AIR regressions, methods, and reproduction commands.
 
 Compiler memory consumption and compilation time are not acceptance criteria for this change.
-Benchmarks remain deferred, and no measured performance improvement is claimed.
 :codex-annotation{index="5"} :codex-annotation{index="10"}

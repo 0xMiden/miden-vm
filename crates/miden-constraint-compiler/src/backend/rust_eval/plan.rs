@@ -1,8 +1,7 @@
 //! Rust-only, typed evaluation choices. The captured graph remains authoritative
 //! for ACE and constraint metadata; this plan only changes arithmetic scheduling.
 
-use super::index::ExpressionIndex;
-use crate::ir::{Class, OpKind};
+use crate::ir::{Class, OpKind, index::ExpressionIndex};
 use miden_stark::air::symbolic::ExprView;
 
 // Bound array sizes and live ranges. Longer sums retain a materialized prefix.
@@ -23,11 +22,18 @@ pub(super) enum Coefficient {
     Node(usize),
     Scalar(u64),
     One,
+    NegativeNode(usize),
+    NegativeScalar(u64),
+    NegativeOne,
 }
 
 #[derive(Debug)]
 pub(super) enum Piece {
     Node(usize),
+    Factor {
+        common: usize,
+        terms: Vec<usize>,
+    },
     Dot {
         kind: DotKind,
         pairs: Vec<(usize, Coefficient)>,
@@ -60,6 +66,7 @@ pub(super) fn join(a: Class, b: Class) -> Class {
 pub(super) struct Plan<'g, 'a> {
     graph: &'g ExpressionIndex<'a>,
     uses: Vec<usize>,
+    uniform: Vec<bool>,
 }
 
 impl<'g, 'a> Plan<'g, 'a> {
@@ -76,7 +83,12 @@ impl<'g, 'a> Plan<'g, 'a> {
         for &id in materialized {
             uses[id] = uses[id].max(2);
         }
-        Self { graph, uses }
+        let uniform = if super::native_options().left_sum_folding {
+            graph.uniform_dependencies()
+        } else {
+            Vec::new()
+        };
+        Self { graph, uses, uniform }
     }
 
     fn constant(&self, id: usize) -> Option<u64> {
@@ -116,9 +128,27 @@ impl<'g, 'a> Plan<'g, 'a> {
         if matches!(self.graph.node(id).view(), ExprView::Sum { .. })
             && self.graph.class(id) == class
             && (root || self.uses[id] == 1)
+            && (root || self.uniform.is_empty() || !self.uniform[id])
         {
-            for &child in self.graph.children(id) {
-                self.terms(child, class, false, out);
+            let children = self.graph.children(id);
+            let left_only = !self.uniform.is_empty();
+            // Match the source policy: a sum on the RHS preserves both
+            // operand boundaries, including subtraction represented as Neg(Sum).
+            let sum_rhs = left_only && children.len() == 2 && {
+                let rhs = children[1];
+                matches!(self.graph.node(rhs).view(), ExprView::Sum { .. })
+                    || (matches!(self.graph.node(rhs).view(), ExprView::Neg { .. })
+                        && matches!(
+                            self.graph.node(self.graph.children(rhs)[0]).view(),
+                            ExprView::Sum { .. }
+                        ))
+            };
+            for (position, &child) in children.iter().enumerate() {
+                if left_only && (position != 0 || sum_rhs) {
+                    out.push(child);
+                } else {
+                    self.terms(child, class, false, out);
+                }
             }
         } else {
             out.push(id);
@@ -126,6 +156,30 @@ impl<'g, 'a> Plan<'g, 'a> {
     }
 
     fn pair(&self, id: usize, class: Class, kind: DotKind) -> Option<(usize, Coefficient)> {
+        if !super::native_options().signed_dots {
+            return self.unsigned_pair(id, class, kind);
+        }
+        let (id, negative) = self.negated(id).map_or((id, false), |value| (value, true));
+        let (value, coefficient) = self.unsigned_pair(id, class, kind)?;
+        let coefficient = if negative {
+            match coefficient {
+                Coefficient::Node(id) => Coefficient::NegativeNode(id),
+                Coefficient::Scalar(value) => Coefficient::NegativeScalar(value),
+                Coefficient::One => Coefficient::NegativeOne,
+                _ => unreachable!("unsigned pair has a positive coefficient"),
+            }
+        } else {
+            coefficient
+        };
+        Some((value, coefficient))
+    }
+
+    fn unsigned_pair(
+        &self,
+        id: usize,
+        class: Class,
+        kind: DotKind,
+    ) -> Option<(usize, Coefficient)> {
         let product = self.product(id);
         match kind {
             DotKind::Scalar if class == Class::Base => {
@@ -159,13 +213,77 @@ impl<'g, 'a> Plan<'g, 'a> {
         }
     }
 
+    pub fn sum_terms(&self, id: usize) -> Vec<usize> {
+        let mut terms = Vec::new();
+        self.terms(id, self.graph.class(id), true, &mut terms);
+        terms
+    }
+
+    pub fn sum_pieces(&self, terms: &[usize], class: Class) -> Vec<Piece> {
+        self.pieces(terms, class)
+    }
+
+    // Only remove multiplications that have no separate consumer or preparation
+    // boundary. Preserve order within each contiguous run and require the native
+    // operand domains to reconstruct the original result domain.
+    fn factor_run(&self, terms: &[usize], class: Class) -> Option<(usize, Vec<usize>)> {
+        let (a, b) = self.product(*terms.first()?)?;
+        let mut best = None;
+        for common in [a, b] {
+            let residuals: Vec<_> = terms
+                .iter()
+                .take(MAX_TERMS)
+                .map_while(|&id| {
+                    let (x, y) = self.product(id)?;
+                    if x == common {
+                        Some(y)
+                    } else if y == common {
+                        Some(x)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let Some(sum_class) =
+                residuals.iter().map(|&id| self.graph.value_class(id)).reduce(join)
+            else {
+                continue;
+            };
+            if residuals.len() >= 3
+                && join(self.graph.value_class(common), sum_class) == class
+                && best.as_ref().is_none_or(|(_, previous): &(usize, Vec<usize>)| {
+                    residuals.len() > previous.len()
+                })
+            {
+                best = Some((common, residuals));
+            }
+        }
+        best
+    }
+
     fn pieces(&self, terms: &[usize], class: Class) -> Vec<Piece> {
         let mut pieces = Vec::new();
         let mut start = 0;
         while start < terms.len() {
+            let factor_runs = super::native_options().factor_runs;
+            if factor_runs
+                && let Some((common, residuals)) = self.factor_run(&terms[start..], class)
+            {
+                start += residuals.len();
+                pieces.push(Piece::Factor { common, terms: residuals });
+                continue;
+            }
+            // Do not let a larger dot consume a later common-factor run.
+            let end = if factor_runs {
+                (start + 1..terms.len())
+                    .find(|&next| self.factor_run(&terms[next..], class).is_some())
+                    .unwrap_or(terms.len())
+            } else {
+                terms.len()
+            };
             let mut selected = None;
             for kind in [DotKind::Scalar, DotKind::Mixed, DotKind::Same] {
-                let pairs: Vec<_> = terms[start..]
+                let pairs: Vec<_> = terms[start..end]
                     .iter()
                     .take(MAX_TERMS)
                     .map_while(|&id| self.pair(id, class, kind))
@@ -173,9 +291,13 @@ impl<'g, 'a> Plan<'g, 'a> {
                 // Unit terms allow beta^0*x and non-product prefixes, but a dot
                 // must consume a real, single-use multiplication to be useful.
                 if pairs.len() >= MIN_DOT_TERMS
-                    && terms[start..start + pairs.len()]
-                        .iter()
-                        .any(|&id| self.product(id).is_some())
+                    && terms[start..start + pairs.len()].iter().any(|&id| {
+                        self.product(id).is_some()
+                            || (super::native_options().signed_dots
+                                && self
+                                    .negated(id)
+                                    .is_some_and(|value| self.product(value).is_some()))
+                    })
                 {
                     selected = Some((kind, pairs));
                     break;
@@ -232,7 +354,9 @@ impl<'g, 'a> Plan<'g, 'a> {
         let mut terms = Vec::new();
         self.terms(id, class, true, &mut terms);
         let pieces = self.pieces(&terms, class);
-        if terms.len() >= 4 || pieces.iter().any(|p| matches!(p, Piece::Dot { .. })) {
+        if terms.len() >= 4
+            || pieces.iter().any(|p| matches!(p, Piece::Dot { .. } | Piece::Factor { .. }))
+        {
             Some(Rewrite::Sum(pieces))
         } else {
             None
