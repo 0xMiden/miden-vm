@@ -20,12 +20,55 @@ pub enum BindError {
     Exports { expected: usize, actual: usize },
 }
 
+/// Invalid execution allocation, distinct from an actual-height degree-analysis failure.
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+pub enum QuotientAllocationError {
+    #[error("quotient allocation {chunks} is not a positive power of two")]
+    InvalidChunks { chunks: usize },
+    #[error("constraint degree {raw_degree} has no host-representable conservative allocation")]
+    Overflow { raw_degree: usize },
+    #[error("quotient allocation {allocated} is below the conservative allocation {conservative}")]
+    BelowConservative { allocated: usize, conservative: usize },
+}
+
+/// Resolve a kernel's execution allocation without shrinking the protocol's conservative floor.
+///
+/// The default is the power-of-two ceiling of `max(1, raw_degree - 1)`. A hint may preserve or
+/// raise that allocation. This does not establish capacity at a concrete trace height: proof
+/// setup must separately call [`super::DegreeProfile::validate_capacity`] and check PCS/domain
+/// compatibility. Memory estimates may resolve allocation while allowing zero budget heights.
+pub fn resolve_quotient_chunks<K: AirKernel + ?Sized>(
+    kernel: &K,
+) -> Result<usize, QuotientAllocationError> {
+    let raw_degree = kernel.descriptor().analysis().raw_degrees().max();
+    quotient_allocation(raw_degree, kernel.quotient_chunks())
+}
+
+fn quotient_allocation(
+    raw_degree: usize,
+    hint: Option<usize>,
+) -> Result<usize, QuotientAllocationError> {
+    let conservative = raw_degree
+        .saturating_sub(1)
+        .max(1)
+        .checked_next_power_of_two()
+        .ok_or(QuotientAllocationError::Overflow { raw_degree })?;
+    let allocated = hint.unwrap_or(conservative);
+    if !allocated.is_power_of_two() {
+        return Err(QuotientAllocationError::InvalidChunks { chunks: allocated });
+    }
+    if allocated < conservative {
+        return Err(QuotientAllocationError::BelowConservative { allocated, conservative });
+    }
+    Ok(allocated)
+}
+
 /// A trusted evaluator paired with a validated descriptor.
 ///
 /// Implementations must evaluate exactly the relation identified by their descriptor, preserving
 /// assertion class, global order and input addressing. Descriptor validation checks embedded
-/// metadata, not the equivalence of arbitrary evaluator code. The configuration and descriptor
-/// must remain immutable throughout a binding.
+/// metadata, not the equivalence of arbitrary evaluator code. The configuration, descriptor
+/// and execution allocation must remain immutable while the kernel is reused.
 ///
 /// Prepared values own their expressions. They cannot borrow transient conversion buffers or
 /// the inputs passed to `prepare`; the lifetime-independent associated type makes that ownership
@@ -39,6 +82,16 @@ pub trait AirKernel: Sync {
     type Prepared<B: Algebra<Self::F>, E: Algebra<B>>;
 
     fn descriptor(&self) -> &AirDescriptor<Self::F>;
+
+    /// Optional quotient chunk allocation for execution, preserving or raising the default.
+    ///
+    /// This configuration does not change the mathematical descriptor or its fingerprint. A
+    /// caller must use [`resolve_quotient_chunks`] rather than interpreting the hint directly,
+    /// then validate the descriptor's degree profile at the actual proof height. `None` keeps
+    /// the conservative allocation derived from the descriptor's raw degree diagnostics.
+    fn quotient_chunks(&self) -> Option<usize> {
+        None
+    }
 
     /// Prepare expressions from the exact inputs retained for the complete evaluation pass.
     ///
@@ -518,5 +571,53 @@ mod tests {
         assert_eq!(sink.base, vec![Felt::ZERO]);
         assert_eq!(sink.ext, vec![QuadFelt::ZERO]);
         assert_eq!(kernel.source.fixed_builds.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn quotient_policy_preserves_floor_and_checks_host_rounding() {
+        for (degree, hint, expected) in
+            [(0, None, 1), (2, None, 1), (5, None, 4), (5, Some(4), 4), (5, Some(8), 8)]
+        {
+            assert_eq!(quotient_allocation(degree, hint).unwrap(), expected);
+        }
+        for chunks in [0, 3] {
+            assert_eq!(
+                quotient_allocation(5, Some(chunks)),
+                Err(QuotientAllocationError::InvalidChunks { chunks })
+            );
+        }
+        assert_eq!(
+            quotient_allocation(5, Some(2)),
+            Err(QuotientAllocationError::BelowConservative { allocated: 2, conservative: 4 })
+        );
+        assert_eq!(
+            quotient_allocation(usize::MAX, None),
+            Err(QuotientAllocationError::Overflow { raw_degree: usize::MAX })
+        );
+    }
+
+    #[test]
+    fn native_memory_metadata_never_prepares_or_materializes_fixed_data() {
+        let kernel = CountingKernel::new();
+        let params = crate::pcs::PcsParams::new(2, 1, 3, 0, 0, 1, 0).unwrap();
+        let model = crate::memory::ProverMemoryModel::<1>::from_kernels::<QuadFelt, _>(
+            core::slice::from_ref(&kernel),
+            &params,
+        )
+        .unwrap();
+        assert_eq!(model.prover_peak_bytes(&[0]), Some(0));
+        // 2*(160 trace + 1504 proof + 928 setup) bytes, then the one 5/4 safety ceiling.
+        assert_eq!(model.prover_peak_bytes(&[2]), Some(6480));
+        assert_eq!(kernel.direct.source.spec_reads.load(Ordering::Relaxed), 1);
+        assert_eq!(kernel.direct.source.fixed_builds.load(Ordering::Relaxed), 0);
+        assert_eq!(kernel.prepares.load(Ordering::Relaxed), 0);
+        assert_eq!(kernel.evaluations.load(Ordering::Relaxed), 0);
+        let empty =
+            crate::memory::ProverMemoryModel::<0>::from_kernels::<QuadFelt, CountingKernel>(
+                &[],
+                &params,
+            )
+            .unwrap();
+        assert_eq!(empty.prover_peak_bytes(&[]), Some(0));
     }
 }

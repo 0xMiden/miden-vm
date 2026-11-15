@@ -29,5 +29,8 @@ pub use descriptor::{
     capture_with,
 };
 pub use frame::{AirFrame, Frame, Inputs, Rows, Selectors, UniformInputs};
-pub use kernel::{AirKernel, BindError, DirectKernel, EvaluationSession};
+pub use kernel::{
+    AirKernel, BindError, DirectKernel, EvaluationSession, QuotientAllocationError,
+    resolve_quotient_chunks,
+};
 pub use spec::{AirSpec, PreprocessedSpec, SpecError};

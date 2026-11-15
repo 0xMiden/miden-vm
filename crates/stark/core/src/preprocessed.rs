@@ -76,9 +76,11 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if a preprocessed matrix's height is less than 2 or not a power of two, its presence
-    /// or log height differs from [`LiftedAir::log_preprocessed_height`], or its LDE order exceeds
-    /// the field's two-adicity. These are AIR setup errors.
+    /// Panics if a preprocessed matrix has zero width or incomplete rows, its height is less than
+    /// 2 or not a power of two, its presence or log height differs from
+    /// [`LiftedAir::log_preprocessed_height`], or its LDE order exceeds the field's two-adicity
+    /// or host indexing. These are AIR setup errors. Declared-width validation remains at the
+    /// prover-instance boundary.
     pub fn build<EF, MA, C>(statement: &Statement<F, EF, MA>, config: &C) -> Option<Self>
     where
         EF: ExtensionField<F>,
@@ -92,11 +94,8 @@ where
             .map(|(air_idx, air)| {
                 let trace = air.preprocessed_trace();
                 let log_height = trace.as_ref().map(|trace| {
-                    let height = trace.height();
-                    assert!(
-                        height >= 2 && height.is_power_of_two(),
-                        "preprocessed matrix for AIR {air_idx} must have power-of-two height at least 2, got {height}",
-                    );
+                    let height = raw_matrix_height(air_idx, trace)
+                        .expect("preprocessed matrix must have complete power-of-two rows");
                     log2_strict_u8(height)
                 });
                 assert_eq!(
@@ -127,8 +126,9 @@ where
             .into_iter()
             .map(|(air_idx, trace)| {
                 let log_h = log2_strict_u8(trace.height());
-                let coset_shift = LiftedDomain::<F>::canonical_lde_shift(log_h + log_blowup)
-                    .expect("preprocessed LDE order exceeds field two-adicity");
+                let coset_shift = LiftedDomain::<F>::try_canonical(log_h, log_blowup)
+                    .expect("preprocessed LDE order exceeds field two-adicity or host indexing")
+                    .lde_shift();
                 let width = trace.width();
                 info_span!("preprocessed LDE", air = air_idx, log_height = log_h, width).in_scope(
                     || config.dft().coset_lde_batch(trace.clone(), log_blowup.into(), coset_shift),
@@ -182,6 +182,23 @@ where
 // ============================================================================
 // Validation
 // ============================================================================
+
+/// Inspect raw storage before any matrix height accessor can divide by its width.
+fn raw_matrix_height<F: TwoAdicField>(
+    air: usize,
+    matrix: &RowMajorMatrix<F>,
+) -> Result<usize, PreprocessedValidationError> {
+    let width = matrix.width();
+    let elements = matrix.values.len();
+    if width == 0 || !elements.is_multiple_of(width) {
+        return Err(PreprocessedValidationError::RawMatrixShape { air, width, elements });
+    }
+    let height = elements / width;
+    if height < 2 || !height.is_power_of_two() {
+        return Err(PreprocessedValidationError::RawMatrixShape { air, width, elements });
+    }
+    Ok(height)
+}
 
 /// Validate a [`Preprocessed`] bundle against a prover statement and STARK config:
 /// per-AIR presence, raw matrix shape, committed LDE shape, and LMCS alignment.
@@ -257,11 +274,12 @@ where
 
         // The borrowed setup may have been built for an AIR with a different native height.
         let main = main_traces[air_idx].height();
-        if raw_preprocessed.height() != main {
+        let preprocessed_height = raw_matrix_height(air_idx, raw_preprocessed)?;
+        if preprocessed_height != main {
             return Err(PreprocessedValidationError::HeightMismatch {
                 air: air_idx,
                 main,
-                preprocessed: raw_preprocessed.height(),
+                preprocessed: preprocessed_height,
             });
         }
     }
@@ -326,6 +344,14 @@ pub enum PreprocessedValidationError {
     #[error("raw preprocessed trace count {actual} does not match AIR count {expected}")]
     RawTraceCountMismatch { expected: usize, actual: usize },
     #[error(
+        "AIR {air}: raw preprocessed storage ({elements} elements, width {width}) must contain complete power-of-two rows, at least two"
+    )]
+    RawMatrixShape {
+        air: usize,
+        width: usize,
+        elements: usize,
+    },
+    #[error(
         "AIR {air}: preprocessed trace presence mismatch: AIR declares preprocessed columns = {expected}, raw trace supplied = {actual}"
     )]
     TracePresenceMismatch { air: usize, expected: bool, actual: bool },
@@ -368,4 +394,28 @@ pub enum PreprocessedValidationError {
         expected: usize,
         actual: usize,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+    use p3_field::PrimeCharacteristicRing;
+    use p3_goldilocks::Goldilocks;
+
+    use super::*;
+
+    #[test]
+    fn raw_storage_is_checked_before_matrix_height_division() {
+        for (width, elements) in [(0, 0), (2, 3), (2, 0), (2, 2), (2, 6)] {
+            // Deliberately malformed storage at the validation boundary, not an invalid kernel.
+            let mut matrix = RowMajorMatrix::new(vec![Goldilocks::ZERO; 4], 2);
+            matrix.width = width;
+            matrix.values.resize(elements, Goldilocks::ZERO);
+            assert!(
+                matches!(raw_matrix_height(3, &matrix), Err(PreprocessedValidationError::RawMatrixShape { air: 3, width: actual_width, elements: actual_elements }) if actual_width == width && actual_elements == elements)
+            );
+        }
+        let matrix = RowMajorMatrix::new(vec![Goldilocks::ZERO; 8], 2);
+        assert_eq!(raw_matrix_height(3, &matrix).unwrap(), 4);
+    }
 }

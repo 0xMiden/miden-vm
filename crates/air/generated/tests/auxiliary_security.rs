@@ -21,6 +21,13 @@ use miden_stark::{
 };
 
 #[test]
+fn native_source_geometry_keeps_the_vm_security_shape() {
+    let native = miden_air_definitions::compiler::vm::derive_native_air_shape().unwrap();
+    assert_eq!(native, derive_air_shape());
+    assert_eq!(native, security::AIR_SHAPE);
+}
+
+#[test]
 fn auxiliary_identities_fit_the_lookup_budget() {
     let shape = derive_air_shape();
     assert_eq!(shape, security::AIR_SHAPE);

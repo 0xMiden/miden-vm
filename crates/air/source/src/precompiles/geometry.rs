@@ -1,5 +1,8 @@
 use miden_core::{Felt, field::QuadFelt};
-use miden_stark::lookup::{LookupAir, ProverLookupBuilder};
+use miden_stark::{
+    air::native::DescriptorError,
+    lookup::{LookupAir, ProverLookupBuilder, native as native_lookup},
+};
 use p3_security::budget::{AirShape, LookupShape};
 
 use crate::precompiles::{
@@ -21,6 +24,28 @@ pub fn derive_air_shape() -> AirShape {
     crate::shared::geometry::derive_air_shape(
         &airs,
         lookup_shape(),
+        crate::precompiles::ace::LMCS_ALIGNMENT,
+    )
+}
+
+/// Derive native source security geometry for tooling without changing runtime selection.
+pub fn derive_native_air_shape() -> Result<AirShape, DescriptorError> {
+    type ShapeBuilder<'a> = ProverLookupBuilder<'a, Felt, QuadFelt>;
+    let airs = ChipletAir::all();
+    let lookup = LookupShape {
+        fractions_per_row: airs
+            .iter()
+            .map(|air| {
+                <ChipletAir as native_lookup::LookupAir<ShapeBuilder<'_>>>::column_shape(air)
+                    .iter()
+                    .sum::<usize>()
+            })
+            .sum::<usize>() as u32,
+        max_message_width: MAX_MESSAGE_WIDTH as u32,
+    };
+    crate::shared::geometry::derive_native_air_shape(
+        &airs,
+        lookup,
         crate::precompiles::ace::LMCS_ALIGNMENT,
     )
 }

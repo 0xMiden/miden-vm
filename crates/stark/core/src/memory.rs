@@ -11,7 +11,10 @@
 use p3_field::{ExtensionField, Field};
 
 use crate::{
-    air::{LiftedAir, MultiAir},
+    air::{
+        LiftedAir, MultiAir,
+        native::{AirKernel, resolve_quotient_chunks},
+    },
     log_quotient_degree,
     pcs::PcsParams,
 };
@@ -40,12 +43,21 @@ where
     EF: ExtensionField<F>,
     A: LiftedAir<F, EF>,
 {
+    memory_cost_for_widths::<F, EF>(air.width(), air.aux_width(), air.preprocessed_width(), params)
+}
+
+fn memory_cost_for_widths<F: Field, EF: ExtensionField<F>>(
+    width: usize,
+    aux_width: usize,
+    preprocessed_width: usize,
+    params: &PcsParams,
+) -> Option<AirMemoryCost> {
     let field_bytes = u64::try_from(size_of::<F>()).ok()?;
     let extension_dimension = u64::try_from(EF::DIMENSION).ok()?;
     let blowup = 1u64.checked_shl(u32::from(params.log_blowup()))?;
-    let width = u64::try_from(air.width()).ok()?;
-    let aux_width = u64::try_from(air.aux_width()).ok()?;
-    let preprocessed_width = u64::try_from(air.preprocessed_width()).ok()?;
+    let width = u64::try_from(width).ok()?;
+    let aux_width = u64::try_from(aux_width).ok()?;
+    let preprocessed_width = u64::try_from(preprocessed_width).ok()?;
     let columns = width
         .checked_add(aux_width.checked_mul(extension_dimension)?)?
         .checked_add(preprocessed_width)?;
@@ -76,11 +88,19 @@ where
         has_preprocessed |= cost.has_preprocessed;
         log_degree = log_degree.max(log_quotient_degree::<F, EF, _>(air));
     }
+    let quotient_degree = 1u64.checked_shl(u32::from(log_degree))?;
+    shared_costs::<F, EF>(quotient_degree, has_preprocessed, params)
+}
+
+fn shared_costs<F: Field, EF: ExtensionField<F>>(
+    quotient_degree: u64,
+    has_preprocessed: bool,
+    params: &PcsParams,
+) -> Option<(u64, u64)> {
     let extension_bytes = u64::try_from(size_of::<F>())
         .ok()?
         .checked_mul(u64::try_from(EF::DIMENSION).ok()?)?;
     let blowup = 1u64.checked_shl(u32::from(params.log_blowup()))?;
-    let quotient_degree = 1u64.checked_shl(u32::from(log_degree))?;
     // Three proof trees coexist. Each is built separately, so charge one leaf scratch buffer.
     let proof_bytes_per_max_row = extension_bytes
         .checked_mul(quotient_degree)?
@@ -261,6 +281,50 @@ impl<const N: usize> ProverMemoryModel<N> {
         for (cost, air) in costs.iter_mut().zip(airs) {
             *cost = air_memory_cost::<F, EF, _>(air, params)?;
         }
+        Some(Self {
+            costs,
+            proof_bytes_per_max_row,
+            setup_bytes_per_preprocessed_row,
+        })
+    }
+
+    /// Derive costs from kernel metadata and its checked execution allocation.
+    ///
+    /// Returns `None` for a wrong instance count, invalid allocation policy or arithmetic
+    /// overflow. This does not validate proof heights or actual-height degree capacity: zero
+    /// heights remain valid inputs to the budget methods. No source evaluator or fixed factory
+    /// is invoked.
+    pub fn from_kernels<EF, K>(kernels: &[K], params: &PcsParams) -> Option<Self>
+    where
+        K: AirKernel,
+        EF: ExtensionField<K::F>,
+    {
+        if kernels.len() != N {
+            return None;
+        }
+        let mut costs = [AirMemoryCost::default(); N];
+        let mut quotient_chunks = 0;
+        let mut has_preprocessed = false;
+        for (cost, kernel) in costs.iter_mut().zip(kernels) {
+            let spec = kernel.descriptor().spec();
+            *cost = memory_cost_for_widths::<K::F, EF>(
+                spec.main_width,
+                spec.aux_width,
+                spec.preprocessed_width(),
+                params,
+            )?;
+            has_preprocessed |= cost.has_preprocessed;
+            quotient_chunks = quotient_chunks.max(resolve_quotient_chunks(kernel).ok()?);
+        }
+        let (proof_bytes_per_max_row, setup_bytes_per_preprocessed_row) = if N == 0 {
+            (0, 0)
+        } else {
+            shared_costs::<K::F, EF>(
+                u64::try_from(quotient_chunks).ok()?,
+                has_preprocessed,
+                params,
+            )?
+        };
         Some(Self {
             costs,
             proof_bytes_per_max_row,

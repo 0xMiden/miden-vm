@@ -39,6 +39,14 @@ pub(crate) struct TraceOrder {
     instance_indices: Vec<u8>,
 }
 
+/// Height-relevant metadata, borrowed through an indexed reader during construction only.
+#[derive(Clone, Copy)]
+struct OrderShape {
+    preprocessed_width: usize,
+    log_preprocessed_height: Option<u8>,
+    max_period: usize,
+}
+
 impl TraceOrder {
     /// Build from raw (non-log) trace heights in instance order, validated
     /// against `airs`.
@@ -91,6 +99,21 @@ impl TraceOrder {
         F: Field,
         A: LiftedAir<F, EF>,
     {
+        Self::from_log_heights_with(airs.len(), log_heights, |index| {
+            let air = &airs[index];
+            OrderShape {
+                preprocessed_width: air.preprocessed_width(),
+                log_preprocessed_height: air.log_preprocessed_height(),
+                max_period: air.max_periodic_length(),
+            }
+        })
+    }
+
+    fn from_log_heights_with(
+        air_count: usize,
+        log_heights: Vec<u8>,
+        shape_at: impl Fn(usize) -> OrderShape,
+    ) -> Result<Self, ShapeError> {
         if log_heights.is_empty() {
             return Err(ShapeError::Empty);
         }
@@ -106,15 +129,16 @@ impl TraceOrder {
                 return Err(ShapeError::LogTraceHeightTooLarge { log_h: h, max: max_log });
             }
         }
-        if airs.len() != log_heights.len() {
+        if air_count != log_heights.len() {
             return Err(ShapeError::TraceCountMismatch {
-                airs: airs.len(),
+                airs: air_count,
                 heights: log_heights.len(),
             });
         }
-        for (idx, (air, &log_h)) in airs.iter().zip(log_heights.iter()).enumerate() {
+        for (idx, &log_h) in log_heights.iter().enumerate() {
+            let shape = shape_at(idx);
             let trace_height = 1usize << log_h as usize;
-            match (air.preprocessed_width(), air.log_preprocessed_height()) {
+            match (shape.preprocessed_width, shape.log_preprocessed_height) {
                 (0, None) => {},
                 (1.., Some(log_preprocessed_height)) => {
                     if log_h != log_preprocessed_height {
@@ -133,7 +157,7 @@ impl TraceOrder {
                     });
                 },
             }
-            let max_period = air.max_periodic_length();
+            let max_period = shape.max_period;
             if trace_height < max_period {
                 return Err(ShapeError::TraceHeightBelowPeriod {
                     air: idx,
@@ -264,10 +288,17 @@ impl TraceOrder {
         F: Field,
         A: LiftedAir<F, EF>,
     {
+        self.preprocessed_air_for_trace_index_with(|index| airs[index].preprocessed_width() > 0)
+    }
+
+    fn preprocessed_air_for_trace_index_with(
+        &self,
+        has_preprocessed: impl Fn(usize) -> bool,
+    ) -> Vec<u8> {
         self.instance_indices
             .iter()
             .copied()
-            .filter(|&i| airs[i as usize].preprocessed_width() > 0)
+            .filter(|&i| has_preprocessed(i as usize))
             .collect()
     }
 
@@ -485,5 +516,76 @@ mod tests {
         let mut seen = order.instance_indices().to_vec();
         seen.sort_unstable();
         assert!(seen.iter().copied().eq(0..=u8::MAX), "indices must be a permutation of 0..=255");
+    }
+
+    #[test]
+    fn checked_native_metadata_uses_the_same_order_and_fixed_subset() {
+        use crate::air::native::{self, AirSpec, PreprocessedSpec};
+        use alloc::borrow::Cow;
+        use p3_field::PrimeCharacteristicRing;
+        let specs = [
+            AirSpec {
+                main_width: 1,
+                aux_width: 1,
+                num_public_values: 0,
+                num_challenges: 0,
+                num_exports: 0,
+                preprocessed: None,
+                periodic_columns: Cow::Owned(vec![vec![TF::ZERO; 8]]),
+            },
+            AirSpec {
+                main_width: 1,
+                aux_width: 1,
+                num_public_values: 0,
+                num_challenges: 0,
+                num_exports: 0,
+                preprocessed: Some(PreprocessedSpec { width: 1, log_height: 2 }),
+                periodic_columns: Cow::Borrowed(&[]),
+            },
+            AirSpec {
+                main_width: 1,
+                aux_width: 1,
+                num_public_values: 0,
+                num_challenges: 0,
+                num_exports: 0,
+                preprocessed: None,
+                periodic_columns: Cow::Borrowed(&[]),
+            },
+        ];
+        let captured =
+            specs.map(|spec| native::capture_from_spec::<TF, TF>(spec, |_, _, _| {}).unwrap());
+        let shape_at = |index: usize| {
+            let spec = captured[index].descriptor.spec();
+            OrderShape {
+                preprocessed_width: spec.preprocessed_width(),
+                log_preprocessed_height: spec.preprocessed.map(|fixed| fixed.log_height),
+                max_period: spec.max_periodic_length(),
+            }
+        };
+        let order = TraceOrder::from_log_heights_with(3, vec![3, 2, 3], shape_at).unwrap();
+        assert_eq!(order.instance_indices(), &[1, 0, 2]);
+        assert_eq!(
+            order.preprocessed_air_for_trace_index_with(|index| captured[index]
+                .descriptor
+                .spec()
+                .preprocessed
+                .is_some()),
+            vec![1]
+        );
+        assert!(matches!(
+            TraceOrder::from_log_heights_with(3, vec![2, 2, 3], shape_at),
+            Err(ShapeError::TraceHeightBelowPeriod { air: 0, .. })
+        ));
+        assert!(matches!(
+            TraceOrder::from_log_heights_with(3, vec![3, 3, 3], shape_at),
+            Err(ShapeError::PreprocessedHeightMismatch { air: 1, .. })
+        ));
+        // Untrusted height checks still precede count mismatch and any metadata reader access.
+        assert!(matches!(
+            TraceOrder::from_log_heights_with(3, vec![0], |_| panic!(
+                "metadata read before height validation"
+            )),
+            Err(ShapeError::TraceHeightTooSmall { air: 0 })
+        ));
     }
 }

@@ -22,6 +22,13 @@ use miden_stark::{
 
 type Symbolic = SymbolicAirBuilder<Felt, QuadFelt>;
 
+#[test]
+fn native_source_geometry_keeps_the_precompile_security_shape() {
+    let native = miden_air_definitions::precompiles::geometry::derive_native_air_shape().unwrap();
+    assert_eq!(native, derive_air_shape());
+    assert_eq!(native, miden_air::precompiles::protocol::PROTOCOL.air_shape);
+}
+
 fn degree<A>(air: &A) -> Result<usize, &'static str>
 where
     A: LiftedAir<Felt, QuadFelt> + for<'a> LookupAir<ConstraintLookupBuilder<'a, Symbolic>>,
