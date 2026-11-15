@@ -110,22 +110,124 @@ proptest! {
     }
 
     #[test]
-    fn word_string_conversion_roundtrip(words in prop::array::uniform2(any::<Word>())) {
-        // Preserve both former properties' random-case budget, including PROPTEST_CASES overrides.
-        for word in words {
-            let string: String = word.into();
-            let round_trip: Word = string.try_into().unwrap();
-            prop_assert_eq!(word, round_trip);
-
-            let string: String = (&word).into();
-            let round_trip: Word = (&string).try_into().unwrap();
-            prop_assert_eq!(word, round_trip);
-        }
-    }
-
-    #[test]
     fn word_reversed_roundtrip(word in any::<Word>()) {
         prop_assert_eq!(word, word.reversed().reversed());
+    }
+}
+
+fn assert_word_string_roundtrip(word: Word) -> proptest::test_runner::TestCaseResult {
+    let string: String = word.into();
+    let round_trip: Word = string.try_into().unwrap();
+    prop_assert_eq!(word, round_trip);
+
+    let string: String = (&word).into();
+    let round_trip: Word = (&string).try_into().unwrap();
+    prop_assert_eq!(word, round_trip);
+    Ok(())
+}
+
+#[test]
+fn word_string_conversion_roundtrip() {
+    // Every run checks correlated values and noncanonical representations through the same oracle.
+    for element in [
+        Felt::ZERO,
+        Felt::ONE,
+        Felt::MAX,
+        Felt::new_unchecked(Felt::ORDER),
+        Felt::new_unchecked(u64::MAX),
+    ] {
+        assert_word_string_roundtrip(Word::new([element; Word::NUM_ELEMENTS])).unwrap();
+    }
+    for index in 0..Word::NUM_ELEMENTS {
+        for element in [Felt::ONE, Felt::MAX] {
+            let mut elements = [Felt::ZERO; Word::NUM_ELEMENTS];
+            elements[index] = element;
+            assert_word_string_roundtrip(Word::new(elements)).unwrap();
+        }
+    }
+    assert_word_string_roundtrip(Word::new([
+        Felt::ZERO,
+        Felt::ONE,
+        Felt::MAX,
+        Felt::new_unchecked(Felt::ORDER),
+    ]))
+    .unwrap();
+
+    // Two words per case preserve the original combined budget under PROPTEST_CASES overrides.
+    proptest!(ProptestConfig::with_source_file(file!()), |(words in prop::array::uniform2(any::<Word>()))| {
+        for word in words {
+            assert_word_string_roundtrip(word)?;
+        }
+    });
+}
+
+#[test]
+fn word_strategy_reaches_correlated_classes_and_shrinks() {
+    extern crate std;
+    use proptest::{
+        strategy::ValueTree,
+        test_runner::{RngAlgorithm, RngSeed, TestRunner},
+    };
+
+    let strategy = any::<Word>();
+    for seed in [0, 1, 2] {
+        let mut runner = TestRunner::new(ProptestConfig {
+            rng_algorithm: RngAlgorithm::ChaCha,
+            rng_seed: RngSeed::Fixed(seed),
+            failure_persistence: None,
+            ..ProptestConfig::default()
+        });
+        let samples = 10_000;
+        let mut splats = [0usize; 4]; // Zero, one, maximum, and other equal-limb words.
+        let mut single_limb = [0usize; Word::NUM_ELEMENTS];
+        let mut varied = 0;
+        let mut shrinks = 0;
+        for sample in 0..samples {
+            let mut tree = strategy.new_tree(&mut runner).unwrap();
+            let elements = tree.current().into_elements();
+            if elements.iter().all(|element| *element == elements[0]) {
+                let class = if elements[0] == Felt::ZERO {
+                    0
+                } else if elements[0] == Felt::ONE {
+                    1
+                } else if elements[0] == Felt::MAX {
+                    2
+                } else {
+                    3
+                };
+                splats[class] += 1;
+            } else {
+                varied += 1;
+            }
+            for index in 0..Word::NUM_ELEMENTS {
+                if elements[index] != Felt::ZERO
+                    && elements
+                        .iter()
+                        .enumerate()
+                        .all(|(i, element)| i == index || *element == Felt::ZERO)
+                {
+                    single_limb[index] += 1;
+                }
+            }
+            if sample < 16 {
+                for _ in 0..64 {
+                    if !tree.simplify() {
+                        break;
+                    }
+                    shrinks += 1;
+                    assert_word_string_roundtrip(tree.current()).unwrap();
+                    tree.complicate();
+                    assert_word_string_roundtrip(tree.current()).unwrap();
+                }
+            }
+        }
+        std::println!(
+            "Word strategy seed={seed} samples={samples} splats={splats:?} single_limb={single_limb:?} varied={varied} shrinks={shrinks}\n{runner}"
+        );
+        assert!(splats.iter().all(|hits| *hits >= 200), "seed={seed}: {splats:?}");
+        assert!(single_limb.iter().all(|hits| *hits >= 100), "seed={seed}: {single_limb:?}");
+        assert!(varied >= 2_000, "seed={seed}: {varied}");
+        assert!(shrinks > 0, "seed={seed}: strategy did not shrink");
     }
 }
 

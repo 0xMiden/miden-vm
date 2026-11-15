@@ -31,3 +31,4 @@ book/
 .constraint-tooling/
 scripts/__pycache__/
 scripts/tests/__pycache__/
+scripts/test_consolidation_tests/__pycache__/
