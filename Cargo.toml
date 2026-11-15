@@ -53,6 +53,7 @@ members = [
     "tools/release-policy",
     "verifier",
 ]
+exclude = ["vendor/p3-security"]
 resolver = "3"
 
 [workspace.package]
@@ -231,6 +232,10 @@ wasmi = { version = "1.1", default-features = false }
 # wasm_section_walk_differential fuzz target hunts for drift between the two.
 wasmparser = { version = "0.239.0", default-features = false }
 wat = { version = "1.0" }
+
+[patch.crates-io]
+# Pinned upstream security arithmetic with its unused AIR adapter disabled for this workspace.
+p3-security = { path = "vendor/p3-security" }
 
 [workspace.lints.rust]
 unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }

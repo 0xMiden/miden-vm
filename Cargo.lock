@@ -4015,19 +4015,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "p3-air"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be7a317aa82ba3d758229db6dd1e2baa75f9aa6f1179d98b3b1e0c2c6b930d59"
-dependencies = [
- "p3-field",
- "p3-matrix",
- "serde",
- "thiserror 2.0.19",
- "tracing",
-]
-
-[[package]]
 name = "p3-blake3"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4250,12 +4237,8 @@ dependencies = [
 [[package]]
 name = "p3-security"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c20542aa9e2a1249996d4cb0a461a236a58d2cf61fae712cec63c04b3765c03"
 dependencies = [
  "libm",
- "p3-air",
- "p3-commit",
  "p3-field",
  "serde",
  "thiserror 2.0.19",

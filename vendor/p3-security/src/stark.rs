@@ -1,0 +1,1378 @@
+//! Composite STARK soundness: AIR composition + DEEP-ALI + LDT, evaluated
+//! once per proximity regime (UDR and best-`m` LDR). Generic over the LDT
+//! via plain function arguments — `fri.rs`, `whir.rs`, and downstream
+//! drop-in LDTs all compose with the same orchestrator.
+//!
+//! The conjectured counterpart ([`conjectured_security_report`]) composes the
+//! same sources in the single random-words regime, where the list size is 1.
+//! [`legacy_security_report`] instead uses the LDT's legacy heuristic while
+//! retaining the same non-LDT terms.
+//!
+//! Extra protocol-specific error terms (lookup arguments, custom DEEP
+//! variants, batched openings, …) are passed through `extras: &[ErrorBits]`
+//! at every entry point and folded into the same round-by-round min.
+//! Pass `&[]` when only the baseline AIR + DEEP + LDT terms apply.
+
+use alloc::vec::Vec;
+use core::cmp::Ordering;
+
+use crate::assumption::SecurityAssumption;
+use crate::error::ErrorBits;
+use crate::grinding::{GrindingSites, boost};
+use crate::ldt::LowDegreeTest;
+use crate::proximity::{list_size_conjectured, list_size_ldr_m, list_size_udr};
+use crate::report::{
+    ALI_LABEL, BATCH_LABEL, COLLISION_LABEL, DEEP_LABEL, LDT_LABEL, LDT_QUERY_LABEL, Regime,
+    RegimeReport, SecurityReport, SecurityTerm,
+};
+use crate::shape::{InstanceShape, StarkAirParams};
+use crate::{air, deep};
+
+/// Bits attained in a single proximity regime, given the LDT-only error,
+/// the regime's list size, and any extra protocol-specific error terms.
+///
+/// `ldt_error` is the round-by-round min over the LDT's commit and query
+/// phases (see e.g. [`crate::fri::proven_error_udr`]). `list_size` is the
+/// regime's L⁺. `extras` lets the caller fold in additional independent
+/// error sources (lookup, custom DEEP, …) without dropping the orchestrator.
+///
+/// The result is capped at `shape.collision_resistance`: a collision in the
+/// commitment hash forges the proof regardless of the algebraic bound, so
+/// real security is `min(algebraic soundness, hash collision resistance)`.
+pub fn proven_security_regime(
+    air: &StarkAirParams,
+    shape: &InstanceShape,
+    list_size: f64,
+    ldt_error: ErrorBits,
+    extras: &[ErrorBits],
+) -> ErrorBits {
+    let ali = air::composition_error(air.num_constraints, list_size, shape.modulus_bits);
+    let deep = deep::deep_ali_error(air, shape, list_size);
+    let mut all: Vec<ErrorBits> = Vec::with_capacity(3 + extras.len());
+    all.push(ali);
+    all.push(deep);
+    all.push(ldt_error);
+    all.extend_from_slice(extras);
+    let algebraic = ErrorBits::min(&all);
+    ErrorBits::from_log2(algebraic.bits().min(shape.collision_resistance as f64))
+}
+
+/// Composite STARK bits in the UDR regime, with optional `extras`.
+pub fn proven_security_udr(
+    air: &StarkAirParams,
+    shape: &InstanceShape,
+    ldt_error: ErrorBits,
+    extras: &[ErrorBits],
+) -> ErrorBits {
+    proven_security_regime(air, shape, list_size_udr(), ldt_error, extras)
+}
+
+/// Composite STARK bits in the LDR regime with explicit `m`, with
+/// optional `extras`.
+pub fn proven_security_ldr_m(
+    air: &StarkAirParams,
+    shape: &InstanceShape,
+    log_blowup: usize,
+    m: usize,
+    ldt_error: ErrorBits,
+    extras: &[ErrorBits],
+) -> ErrorBits {
+    proven_security_regime(
+        air,
+        shape,
+        list_size_ldr_m(log_blowup, m),
+        ldt_error,
+        extras,
+    )
+}
+
+/// Best of UDR and a precomputed best-`m` LDR, with optional `extras`
+/// applied to both regimes. Each regime is an independent valid lower
+/// bound, so the max is itself a valid (and tighter) bound on
+/// round-by-round soundness.
+pub fn proven_security(
+    air: &StarkAirParams,
+    shape: &InstanceShape,
+    log_blowup: usize,
+    udr_ldt_error: ErrorBits,
+    ldr_best_m: usize,
+    ldr_ldt_error: ErrorBits,
+    extras: &[ErrorBits],
+) -> ErrorBits {
+    let udr = proven_security_udr(air, shape, udr_ldt_error, extras);
+    let ldr = proven_security_ldr_m(air, shape, log_blowup, ldr_best_m, ldr_ldt_error, extras);
+    ErrorBits::from_log2(udr.bits().max(ldr.bits()))
+}
+
+/// Proximity-gap error of the initial random linear combination that batches
+/// `shape.num_batched_functions` committed codewords into a single LDT
+/// instance, evaluated in `assumption`'s regime (UD in the unique-decoding
+/// regime, JB in the list-decoding regime). Returns `None` when nothing is
+/// batched (fewer than two functions).
+///
+/// `ldr_m` is the proximity parameter the surrounding [`Regime::ListDecoding`]
+/// actually decodes at (e.g. FRI's `best_m`); `None` for the unique-decoding
+/// regime, where it does not apply. The batch RLC must be δ-close at the
+/// same radius the rest of the regime's terms (ALI/DEEP/LDT) are evaluated
+/// at, so the Johnson-bound branch is computed at `ldr_m` rather than the
+/// fixed `m = 10` WHIR safety choice.
+///
+/// `pow_bits` is [`GrindingSites::batch_combination`]: the grinding sited
+/// immediately before the batching challenge, which boosts this round and no
+/// other.
+fn batching_term(
+    assumption: SecurityAssumption,
+    shape: &InstanceShape,
+    log_blowup: usize,
+    ldr_m: Option<usize>,
+    pow_bits: usize,
+) -> Option<SecurityTerm> {
+    let num_functions = shape.num_batched_functions;
+    if num_functions < 2 {
+        return None;
+    }
+    let bits = match (assumption, ldr_m) {
+        (SecurityAssumption::JohnsonBound, Some(m)) => SecurityAssumption::prox_gaps_error_jb_at_m(
+            shape.log_trace_length,
+            log_blowup,
+            shape.modulus_bits,
+            num_functions,
+            m,
+        ),
+        _ => assumption.prox_gaps_error(
+            shape.log_trace_length,
+            log_blowup,
+            shape.modulus_bits,
+            num_functions,
+        ),
+    };
+    Some(SecurityTerm::new(
+        BATCH_LABEL,
+        boost(ErrorBits::from_log2(bits.max(0.0)), pow_bits),
+    ))
+}
+
+/// Proximity-gap error of the opening-batching random linear combination in
+/// the conjectured regime, or `None` when fewer than two codewords are
+/// batched and the protocol samples no such challenge.
+///
+/// Uses [`SecurityAssumption::UniqueDecoding`]'s `(k − 1)·n / |F|` branch,
+/// which is the [BCI+20] Theorem 1.2 bound at list size 1 — the list size the
+/// conjectured regime assumes ([`list_size_conjectured`]). See
+/// [`conjectured_security_report`] for why this round is charged rather than
+/// omitted.
+///
+/// `pow_bits` is [`GrindingSites::batch_combination`], the grinding sited
+/// immediately before the batching challenge. It boosts this round in the
+/// conjectured regime for the same reason it boosts it in the proven one: the
+/// prover pays `2^pow_bits` per candidate challenge either way, and which
+/// proximity regime the analysis grades the round in does not change what the
+/// prover had to compute.
+fn conjectured_batching_term(
+    shape: &InstanceShape,
+    log_blowup: usize,
+    pow_bits: usize,
+) -> Option<SecurityTerm> {
+    batching_term(
+        SecurityAssumption::UniqueDecoding,
+        shape,
+        log_blowup,
+        None,
+        pow_bits,
+    )
+}
+
+/// Labeled term list for one proximity regime: ALI, DEEP, LDT, the optional
+/// batch-combination term, `extras`, and the commitment-collision cap.
+/// Attained security is the min over these (see
+/// [`RegimeReport::security_bits`]), matching [`proven_security_regime`] plus
+/// the batching term.
+///
+/// `grinding.out_of_domain` boosts the DEEP term and
+/// `grinding.batch_combination` the batch term (applied by the caller, which
+/// builds `batch`); the low-degree test's own sites are already folded into
+/// `ldt_term` by the [`LowDegreeTest`] impl.
+fn regime_report(
+    regime: Regime,
+    air: &StarkAirParams,
+    shape: &InstanceShape,
+    list_size: f64,
+    ldt_term: SecurityTerm,
+    batch: Option<SecurityTerm>,
+    extras: &[SecurityTerm],
+    grinding: &GrindingSites,
+) -> RegimeReport {
+    let ali = air::composition_error(air.num_constraints, list_size, shape.modulus_bits);
+    let deep = boost(
+        deep::deep_ali_error(air, shape, list_size),
+        grinding.out_of_domain,
+    );
+    let mut terms = Vec::with_capacity(5 + extras.len());
+    terms.push(SecurityTerm::new(ALI_LABEL, ali));
+    terms.push(SecurityTerm::new(DEEP_LABEL, deep));
+    terms.push(ldt_term);
+    terms.extend(batch);
+    terms.extend_from_slice(extras);
+    terms.push(SecurityTerm::new(
+        COLLISION_LABEL,
+        ErrorBits::from_log2(shape.collision_resistance as f64),
+    ));
+    RegimeReport::new(regime, terms)
+}
+
+/// Composite proven-security report, generic over the low-degree test.
+///
+/// Evaluates the UDR and best-`m` LDR regimes via `ldt`, composes each with
+/// the ALI, DEEP, `extras`, and commitment-collision terms, and returns the
+/// full labeled breakdown. `extras` fold protocol-specific error sources
+/// (lookup arguments, custom DEEP variants, batched openings, …) into every
+/// regime; pass `&[]` for the baseline AIR + DEEP + LDT composite.
+///
+/// [`SecurityReport::security_bits`] matches [`proven_security`] when `shape.num_batched_functions
+/// < 2`, i.e. when there is no batching term to make the two regimes' choice of `m` diverge (see
+/// [`LowDegreeTest::ldr_candidates`]); more generally it is at least as tight, since this report
+/// picks `m` from the same full composite it reports rather than from the LDT alone. The report
+/// additionally exposes which term binds in each regime.
+///
+/// `grinding` sites the protocol's proof-of-work per error source; pass
+/// [`GrindingSites::NONE`] when the low-degree test carries all of it.
+pub fn proven_security_report<L: LowDegreeTest>(
+    ldt: &L,
+    air: &StarkAirParams,
+    shape: &InstanceShape,
+    extras: &[SecurityTerm],
+    grinding: &GrindingSites,
+) -> SecurityReport {
+    let log_blowup = ldt.log_blowup();
+
+    let udr_ldt = ldt.proven_error_udr(air, shape);
+    let udr = regime_report(
+        Regime::UniqueDecoding,
+        air,
+        shape,
+        list_size_udr(),
+        SecurityTerm::new(LDT_LABEL, udr_ldt),
+        batching_term(
+            SecurityAssumption::UniqueDecoding,
+            shape,
+            log_blowup,
+            None,
+            grinding.batch_combination,
+        ),
+        extras,
+        grinding,
+    );
+
+    // Pick `m` by the composite rather than by the low-degree test alone. The
+    // batching term grows as `(m + 1/2)^3`, so the LDT's own optimum can be far
+    // from the composite's; see `LowDegreeTest::ldr_candidates`.
+    let ldr = ldt
+        .ldr_candidates(air, shape)
+        .into_iter()
+        .map(|(m, ldr_ldt)| {
+            let list_size = list_size_ldr_m(log_blowup, m);
+            regime_report(
+                Regime::ListDecoding { m },
+                air,
+                shape,
+                list_size,
+                SecurityTerm::new(LDT_LABEL, ldr_ldt),
+                batching_term(
+                    SecurityAssumption::JohnsonBound,
+                    shape,
+                    log_blowup,
+                    Some(m),
+                    grinding.batch_combination,
+                ),
+                extras,
+                grinding,
+            )
+        })
+        .max_by(|a, b| {
+            a.security_bits()
+                .partial_cmp(&b.security_bits())
+                .unwrap_or(Ordering::Equal)
+        });
+
+    SecurityReport { udr, ldr }
+}
+
+/// Composite conjectured bits: the min over the AIR-composition, DEEP-ALI,
+/// low-degree-test, and `extras` terms, capped at the commitment-collision
+/// resistance. Scalar mirror of [`conjectured_security_report`], standing to
+/// it exactly as [`proven_security_regime`] stands to the report path.
+///
+/// The low-degree test's terms are taken from [`LowDegreeTest::conjectured_terms`]
+/// rather than passed in. Unlike the proven scalar path — where the caller has
+/// already resolved a per-regime error via [`crate::fri::proven_error_udr`] or
+/// [`crate::fri::best_ldr_m`] — the conjectured regime has no such search, so an
+/// `ErrorBits` parameter here would silently accept
+/// [`crate::fri::conjectured_error`] alone and drop the commit-phase round,
+/// overstating security for a large LDE domain over a small field. Taking the
+/// test itself makes that unrepresentable.
+///
+/// The ALI and DEEP terms are evaluated at [`list_size_conjectured`] — see
+/// [`conjectured_security_report`] for why the proven path's L⁺ multiplier is
+/// absent here.
+///
+/// `grinding.out_of_domain` boosts the DEEP term, exactly as in
+/// [`conjectured_security_report`]; the low-degree test's own sites are
+/// already folded into `ldt.conjectured_terms`'s output by the
+/// [`LowDegreeTest`] impl.
+pub fn conjectured_security<L: LowDegreeTest>(
+    ldt: &L,
+    air: &StarkAirParams,
+    shape: &InstanceShape,
+    extras: &[ErrorBits],
+    grinding: &GrindingSites,
+) -> ErrorBits {
+    let list_size = list_size_conjectured();
+    let ali = air::composition_error(air.num_constraints, list_size, shape.modulus_bits);
+    let deep = boost(
+        deep::deep_ali_error(air, shape, list_size),
+        grinding.out_of_domain,
+    );
+    let ldt_terms = ldt.conjectured_terms(shape);
+    let batch = conjectured_batching_term(shape, ldt.log_blowup(), grinding.batch_combination);
+    let mut all: Vec<ErrorBits> = Vec::with_capacity(3 + ldt_terms.len() + extras.len());
+    all.push(ali);
+    all.push(deep);
+    all.extend(ldt_terms.iter().map(|t| t.bits));
+    all.extend(batch.map(|t| t.bits));
+    all.extend_from_slice(extras);
+    let algebraic = ErrorBits::min(&all);
+    ErrorBits::from_log2(algebraic.bits().min(shape.collision_resistance as f64))
+}
+
+/// Composite conjectured-security report, generic over the low-degree test.
+///
+/// Composes the LDT's conjectured terms ([`LowDegreeTest::conjectured_terms`],
+/// which for FRI splits the query phase from the commit-phase folding rounds)
+/// with the ALI, DEEP-ALI, `extras`, and commitment-collision terms and
+/// returns the labeled breakdown. Attained security is the min over the terms,
+/// exactly as in [`proven_security_report`], so the binding term stays
+/// inspectable — which is the point: for an AIR with lookups the LogUp
+/// fingerprint error grows linearly in the trace length and can bind well
+/// below the query-phase term, an overstatement an LDT-only conjectured number
+/// cannot express.
+///
+/// # Why one regime, and why no L⁺
+///
+/// The conjectured regime is a single proximity regime, so the result is one
+/// [`RegimeReport`] rather than a [`SecurityReport`]: the latter's job is to
+/// maximize over the two independent proven regimes (UDR and best-`m` LDR),
+/// and there is nothing to maximize over here.
+///
+/// Within it, the random-words heuristic of
+/// [2025/2010](https://eprint.iacr.org/2025/2010) §1.5 conjectures correlated
+/// agreement up to list-decoding capacity at list size 1
+/// ([`list_size_conjectured`]). ALI is then `ε ≤ num_constraints / |F|` and
+/// DEEP-ALI is `ε ≤ (max_deg·(k + max_combo − 1) + (k − 1)) / |F|`, neither
+/// carrying the `L⁺` factor the proven path's Johnson-bound list size forces
+/// ([2024/1553](https://eprint.iacr.org/2024/1553) Theorem 2). Both drop out
+/// of [`air::composition_error`] and [`deep::deep_ali_error`] at `list_size =
+/// 1`, since `log2(1) = 0`.
+///
+/// # The batched-openings round
+///
+/// The random-linear-combination that batches `shape.num_batched_functions`
+/// committed codewords into the single LDT instance is charged here, under the
+/// same conjecture the rest of this regime rests on: the [BCI+20] Theorem 1.2
+/// proximity-gap error `(k − 1)·n / |F|` assumed to hold up to list-decoding
+/// capacity at list size 1. That is [`SecurityAssumption::UniqueDecoding`]'s
+/// branch of [`SecurityAssumption::prox_gaps_error`], evaluated at the
+/// conjectured list size rather than a Johnson-bound one.
+///
+/// Charging it is what keeps this regime consistent with itself. The folding
+/// random-linear-combination of the low-degree test is the same kind of round,
+/// and [`crate::fri::conjectured_commit_phase_error`] already charges it at the
+/// same bound it uses in the proven regime, for the reason spelled out there:
+/// the conjecture removes the list-size multiplier, it does not assert that a
+/// bad combination challenge cannot exist. Dropping the opening RLC while
+/// keeping the folding RLC would overstate security for an instance that
+/// batches many codewords, which is every real STARK — a width-`w` AIR batches
+/// on the order of `2w` functions, not one.
+///
+/// A caller who prefers the more conservative capacity-bound form of the same
+/// round ([`SecurityAssumption::CapacityBound`], as WHIR and STIR grade it)
+/// passes it via `extras`; the minimum makes the tighter of the two bind.
+pub fn conjectured_security_report<L: LowDegreeTest>(
+    ldt: &L,
+    air: &StarkAirParams,
+    shape: &InstanceShape,
+    extras: &[SecurityTerm],
+    grinding: &GrindingSites,
+) -> RegimeReport {
+    let list_size = list_size_conjectured();
+    let ali = air::composition_error(air.num_constraints, list_size, shape.modulus_bits);
+    let deep = boost(
+        deep::deep_ali_error(air, shape, list_size),
+        grinding.out_of_domain,
+    );
+
+    let ldt_terms = ldt.conjectured_terms(shape);
+    let batch = conjectured_batching_term(shape, ldt.log_blowup(), grinding.batch_combination);
+    let mut terms = Vec::with_capacity(4 + ldt_terms.len() + extras.len());
+    terms.push(SecurityTerm::new(ALI_LABEL, ali));
+    terms.push(SecurityTerm::new(DEEP_LABEL, deep));
+    terms.extend(ldt_terms);
+    terms.extend(batch);
+    terms.extend_from_slice(extras);
+    terms.push(SecurityTerm::new(
+        COLLISION_LABEL,
+        ErrorBits::from_log2(shape.collision_resistance as f64),
+    ));
+    RegimeReport::new(Regime::Conjectured, terms)
+}
+
+/// Composite legacy conjectured bits. Scalar mirror of
+/// [`legacy_security_report`], with the same terms and grinding sites.
+/// Returns `None` when the low-degree test does not support the legacy regime.
+pub fn legacy_security<L: LowDegreeTest>(
+    ldt: &L,
+    air: &StarkAirParams,
+    shape: &InstanceShape,
+    extras: &[ErrorBits],
+    grinding: &GrindingSites,
+) -> Option<ErrorBits> {
+    let ldt_error = ldt.legacy_conjectured_error(shape)?;
+    let list_size = list_size_conjectured();
+    let ali = air::composition_error(air.num_constraints, list_size, shape.modulus_bits);
+    let deep = boost(
+        deep::deep_ali_error(air, shape, list_size),
+        grinding.out_of_domain,
+    );
+    let batch = conjectured_batching_term(shape, ldt.log_blowup(), grinding.batch_combination);
+    let mut all = Vec::with_capacity(4 + extras.len());
+    all.push(ali);
+    all.push(deep);
+    all.push(ldt_error);
+    all.extend(batch.map(|t| t.bits));
+    all.extend_from_slice(extras);
+    let algebraic = ErrorBits::min(&all);
+    Some(ErrorBits::from_log2(
+        algebraic.bits().min(shape.collision_resistance as f64),
+    ))
+}
+
+/// Composite report using the historical legacy LDT estimate.
+///
+/// Uses [`LowDegreeTest::legacy_conjectured_error`] under [`Regime::Legacy`].
+/// For FRI this is `num_queries * log_blowup + query_pow_bits`, without the
+/// random-words correction or the commit-phase folding term. This is an
+/// opt-in historical heuristic, not a soundness bound or a guide to deployment
+/// parameters. It may exceed the conjectured report; shared caps can make them equal.
+///
+/// The FRI term reproduces ethSTARK §5.10.1's query error `eps_1`, boosted by
+/// grinding. This composite uses the round-by-round minimum convention of
+/// [2024/1553](https://eprint.iacr.org/2024/1553) §2, not ethSTARK's total-error
+/// `lambda`: Eq. (18) adds the pre-query and boosted query errors, and Eq. (19)
+/// includes the resulting union-bound loss of one bit. No such `-1` is applied here.
+///
+/// Only the LDT bound changes: ALI and DEEP-ALI still use list size 1, and
+/// batching, `extras`, grinding outside the LDT, and the commitment-collision
+/// cap are composed as in [`conjectured_security_report`]. ALI and DEEP charge the
+/// actual constraint count and identity degree through [`air::composition_error`]
+/// and [`deep::deep_ali_error`], rather than ethSTARK's flat `log2|K|` pre-query cap.
+/// Returns `None` when the LDT does not support the legacy regime.
+pub fn legacy_security_report<L: LowDegreeTest>(
+    ldt: &L,
+    air: &StarkAirParams,
+    shape: &InstanceShape,
+    extras: &[SecurityTerm],
+    grinding: &GrindingSites,
+) -> Option<RegimeReport> {
+    let ldt_error = ldt.legacy_conjectured_error(shape)?;
+    Some(regime_report(
+        Regime::Legacy,
+        air,
+        shape,
+        list_size_conjectured(),
+        SecurityTerm::new(LDT_QUERY_LABEL, ldt_error),
+        conjectured_batching_term(shape, ldt.log_blowup(), grinding.batch_combination),
+        extras,
+        grinding,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+
+    use super::*;
+
+    fn shape() -> InstanceShape {
+        InstanceShape {
+            log_trace_length: 20,
+            modulus_bits: 252,
+            collision_resistance: 128,
+            num_batched_functions: 1,
+        }
+    }
+
+    fn air() -> StarkAirParams {
+        StarkAirParams {
+            num_constraints: 1,
+            max_constraint_degree: 2,
+            num_quotient_chunks: 1,
+            max_combo: 2,
+        }
+    }
+
+    /// An instance that batches many codewords, over a field small enough to
+    /// keep the batching term in range of the other rounds rather than clamped
+    /// at the collision cap.
+    fn batched_shape() -> InstanceShape {
+        InstanceShape {
+            modulus_bits: 100,
+            num_batched_functions: 1 << 10,
+            ..shape()
+        }
+    }
+
+    /// Extras tighten (never loosen) the regime's bound, and a tight enough
+    /// extra dominates ALI/DEEP/LDT.
+    #[test]
+    fn extras_tighten_proven_security_regime() {
+        let air = air();
+        let shape = shape();
+        let ldt = ErrorBits::from_log2(80.0);
+
+        let baseline = proven_security_regime(&air, &shape, 1.0, ldt, &[]);
+        let with_loose =
+            proven_security_regime(&air, &shape, 1.0, ldt, &[ErrorBits::from_log2(200.0)]);
+        let with_tight =
+            proven_security_regime(&air, &shape, 1.0, ldt, &[ErrorBits::from_log2(40.0)]);
+
+        // A loose extra (200 bits) sits above every other term — bound unchanged.
+        assert!((baseline.bits() - with_loose.bits()).abs() < 1e-12);
+        // A tight extra (40 bits) becomes the binding term.
+        assert!((with_tight.bits() - 40.0).abs() < 1e-12);
+        // Monotone: extras can only tighten, never loosen.
+        assert!(with_tight.bits() <= baseline.bits());
+    }
+
+    /// A regime report's attained bits equal the scalar `proven_security_regime`
+    /// for the same list size, LDT error, and extras.
+    #[test]
+    fn regime_report_matches_proven_security_regime() {
+        let air = air();
+        let shape = shape();
+        let ldt = ErrorBits::from_log2(80.0);
+        let list_size = 1.0;
+
+        let extra = ErrorBits::from_log2(40.0);
+        let expected = proven_security_regime(&air, &shape, list_size, ldt, &[extra]);
+        let report = regime_report(
+            Regime::UniqueDecoding,
+            &air,
+            &shape,
+            list_size,
+            SecurityTerm::new(LDT_LABEL, ldt),
+            None,
+            &[SecurityTerm::new("extra", extra)],
+            &GrindingSites::NONE,
+        );
+
+        assert!((report.security_bits() - expected.bits()).abs() < 1e-12);
+        // The tight extra (40 bits) is the binding term.
+        assert_eq!(report.binding().label, "extra");
+    }
+
+    /// The report path reproduces the scalar composite for the FRI benchmark
+    /// vector and reports the low-degree test as the binding term.
+    #[test]
+    fn proven_security_report_matches_scalar_composite() {
+        use crate::fri::{FriRegime, best_ldr_m, proven_error_udr};
+
+        let regime = FriRegime {
+            log_blowup: 1,
+            num_queries: 100,
+            log_final_poly_len: 0,
+            max_log_arity: 3,
+            commit_pow_bits: 0,
+            query_pow_bits: 16,
+        };
+        let air = air();
+        let shape = shape();
+
+        let report = proven_security_report(&regime, &air, &shape, &[], &GrindingSites::NONE);
+
+        // Same per-regime and combined numbers as ProvenSecurity / proven_security.
+        assert_eq!(report.udr.security_bits().floor() as usize, 57);
+        let ldr = report
+            .ldr
+            .as_ref()
+            .expect("benchmark has a valid LDR regime");
+        assert_eq!(ldr.security_bits().floor() as usize, 65);
+        assert_eq!(report.security_bits().floor() as usize, 65);
+
+        // The LDR regime wins and the low-degree test binds it.
+        let (regime_kind, binding) = report.binding();
+        assert!(matches!(regime_kind, Regime::ListDecoding { .. }));
+        assert_eq!(binding.label, LDT_LABEL);
+
+        // Cross-check against the untyped composite.
+        let udr_ldt = proven_error_udr(&regime, &air, &shape);
+        let (best_m, ldr_ldt) = best_ldr_m(&regime, &air, &shape).unwrap();
+        let scalar = proven_security(
+            &air,
+            &shape,
+            regime.log_blowup,
+            udr_ldt,
+            best_m,
+            ldr_ldt,
+            &[],
+        );
+        assert_eq!(
+            report.security_bits().floor() as usize,
+            scalar.bits().floor() as usize
+        );
+    }
+
+    /// `FriRegime`'s `LowDegreeTest` methods delegate to the free functions.
+    #[test]
+    fn fri_regime_ldt_impl_delegates() {
+        use crate::fri::{FriRegime, conjectured_error, proven_error_udr};
+        use crate::ldt::LowDegreeTest;
+
+        let regime = FriRegime {
+            log_blowup: 1,
+            num_queries: 100,
+            log_final_poly_len: 0,
+            max_log_arity: 3,
+            commit_pow_bits: 0,
+            query_pow_bits: 16,
+        };
+        let air = air();
+        let shape = shape();
+
+        assert_eq!(LowDegreeTest::log_blowup(&regime), regime.log_blowup);
+        assert_eq!(
+            LowDegreeTest::proven_error_udr(&regime, &air, &shape).bits(),
+            proven_error_udr(&regime, &air, &shape).bits()
+        );
+        assert_eq!(
+            LowDegreeTest::conjectured_error(&regime, &shape).bits(),
+            conjectured_error(&regime, &shape).bits()
+        );
+    }
+
+    fn benchmark_regime() -> crate::fri::FriRegime {
+        crate::fri::FriRegime {
+            log_blowup: 1,
+            num_queries: 100,
+            log_final_poly_len: 0,
+            max_log_arity: 3,
+            commit_pow_bits: 0,
+            query_pow_bits: 16,
+        }
+    }
+
+    /// A single committed function is not batched, so no batch-combination
+    /// term is emitted in either regime.
+    #[test]
+    fn no_batch_term_for_single_function() {
+        let report = proven_security_report(
+            &benchmark_regime(),
+            &air(),
+            &shape(),
+            &[],
+            &GrindingSites::NONE,
+        );
+        assert!(report.udr.terms().iter().all(|t| t.label != BATCH_LABEL));
+        if let Some(ldr) = &report.ldr {
+            assert!(ldr.terms().iter().all(|t| t.label != BATCH_LABEL));
+        }
+    }
+
+    /// Batching many functions over a small field only tightens the bound and,
+    /// once large enough, becomes the binding term.
+    #[test]
+    fn batching_lowers_security_when_binding() {
+        let regime = benchmark_regime();
+        let air = air();
+        let base = InstanceShape {
+            log_trace_length: 20,
+            modulus_bits: 64,
+            collision_resistance: 128,
+            num_batched_functions: 1,
+        };
+        let batched = InstanceShape {
+            num_batched_functions: 1 << 20,
+            ..base
+        };
+
+        let no_batch = proven_security_report(&regime, &air, &base, &[], &GrindingSites::NONE);
+        let with_batch = proven_security_report(&regime, &air, &batched, &[], &GrindingSites::NONE);
+
+        // Batching is an extra independent error source: it can only tighten.
+        assert!(with_batch.security_bits() <= no_batch.security_bits());
+        // With 2^20 batched functions over a 64-bit field, the batch term binds.
+        let (_, binding) = with_batch.binding();
+        assert_eq!(binding.label, BATCH_LABEL);
+    }
+
+    /// The LDR batch term is evaluated at the same `m` the surrounding
+    /// `ListDecoding` regime reports (`best_m`), not the fixed `m = 10`
+    /// WHIR safety choice — at the benchmark shape `best_m` is far from 10,
+    /// so this pins the two diverging.
+    #[test]
+    fn ldr_batch_term_uses_regime_m_not_fixed_ten() {
+        let regime = benchmark_regime();
+        let air = air();
+        let shape = InstanceShape {
+            num_batched_functions: 2,
+            ..shape()
+        };
+
+        let report = proven_security_report(&regime, &air, &shape, &[], &GrindingSites::NONE);
+        let ldr = report
+            .ldr
+            .as_ref()
+            .expect("benchmark has a valid LDR regime");
+        let Regime::ListDecoding { m } = ldr.regime else {
+            panic!("expected a list-decoding regime");
+        };
+        assert_ne!(m, 10, "test only pins the m != 10 path if best_m != 10");
+
+        let batch_term = ldr
+            .terms()
+            .iter()
+            .find(|t| t.label == BATCH_LABEL)
+            .expect("batching two functions emits a batch-combination term");
+
+        let expected_bits = SecurityAssumption::prox_gaps_error_jb_at_m(
+            shape.log_trace_length,
+            regime.log_blowup,
+            shape.modulus_bits,
+            shape.num_batched_functions,
+            m,
+        )
+        .max(0.0);
+        assert!((batch_term.bits.bits() - expected_bits).abs() < 1e-9);
+
+        // The fixed m = 10 WHIR default would report a tighter (larger)
+        // batch error here, since (m + 1/2)^3 grows with m.
+        let fixed_m_bits = SecurityAssumption::JohnsonBound
+            .prox_gaps_error(
+                shape.log_trace_length,
+                regime.log_blowup,
+                shape.modulus_bits,
+                shape.num_batched_functions,
+            )
+            .max(0.0);
+        assert!(batch_term.bits.bits() < fixed_m_bits);
+    }
+
+    /// A low-degree test that forwards to a [`crate::fri::FriRegime`] but
+    /// leaves [`LowDegreeTest::ldr_candidates`] at its default, so the
+    /// composite sees only the LDT's own optimum — the behaviour before that
+    /// hook existed.
+    struct LdtOnlyChoice(crate::fri::FriRegime);
+
+    impl LowDegreeTest for LdtOnlyChoice {
+        fn log_blowup(&self) -> usize {
+            self.0.log_blowup()
+        }
+
+        fn proven_error_udr(&self, air: &StarkAirParams, shape: &InstanceShape) -> ErrorBits {
+            self.0.proven_error_udr(air, shape)
+        }
+
+        fn best_ldr(
+            &self,
+            air: &StarkAirParams,
+            shape: &InstanceShape,
+        ) -> Option<(usize, ErrorBits)> {
+            self.0.best_ldr(air, shape)
+        }
+
+        fn conjectured_error(&self, shape: &InstanceShape) -> ErrorBits {
+            self.0.conjectured_error(shape)
+        }
+    }
+
+    /// A regime whose low-degree test can be pushed to a large proximity
+    /// parameter by grinding, which is what exposes the batching term's
+    /// `(m + 1/2)^3` growth.
+    fn grindable_regime(commit_pow_bits: usize) -> crate::fri::FriRegime {
+        crate::fri::FriRegime {
+            log_blowup: 1,
+            num_queries: 64,
+            log_final_poly_len: 0,
+            max_log_arity: 2,
+            commit_pow_bits,
+            query_pow_bits: 20,
+        }
+    }
+
+    /// Choosing `m` by the composite is never worse than choosing it by the
+    /// low-degree test alone, and is strictly better once the batching term
+    /// binds: the LDT's optimum trades that term away for a gain worth less.
+    #[test]
+    fn proven_report_picks_m_by_the_composite_not_the_low_degree_test() {
+        let air = air();
+        let shape = batched_shape();
+
+        for commit_pow_bits in [0, 8, 16, 20, 24] {
+            let regime = grindable_regime(commit_pow_bits);
+            let composite =
+                proven_security_report(&regime, &air, &shape, &[], &GrindingSites::NONE);
+            let ldt_only = proven_security_report(
+                &LdtOnlyChoice(regime),
+                &air,
+                &shape,
+                &[],
+                &GrindingSites::NONE,
+            );
+
+            assert!(
+                composite.security_bits() >= ldt_only.security_bits() - 1e-9,
+                "composite choice lost to the LDT-only choice at commit_pow_bits {commit_pow_bits}: \
+                 {} < {}",
+                composite.security_bits(),
+                ldt_only.security_bits()
+            );
+        }
+
+        // The two genuinely differ here: the LDT-only choice takes a much
+        // larger `m` and the batching term collapses under it.
+        let regime = grindable_regime(0);
+        let composite = proven_security_report(&regime, &air, &shape, &[], &GrindingSites::NONE);
+        let ldt_only = proven_security_report(
+            &LdtOnlyChoice(regime),
+            &air,
+            &shape,
+            &[],
+            &GrindingSites::NONE,
+        );
+        assert!(
+            composite.security_bits() > ldt_only.security_bits(),
+            "expected the composite choice to beat the LDT-only choice"
+        );
+    }
+
+    /// Commit-phase grinding must never lower the reported proven level.
+    ///
+    /// While `m` was chosen by the low-degree test alone it could: grinding
+    /// let the LDT tolerate a far larger `m`, and the batching term fell away
+    /// faster than the LDT term rose.
+    #[test]
+    fn commit_grinding_never_lowers_the_proven_level_when_openings_are_batched() {
+        let air = air();
+        let shape = batched_shape();
+
+        let mut previous = f64::NEG_INFINITY;
+        for commit_pow_bits in [0, 4, 8, 12, 16, 20, 24, 28] {
+            let regime = grindable_regime(commit_pow_bits);
+            let level = proven_security_report(&regime, &air, &shape, &[], &GrindingSites::NONE)
+                .security_bits();
+            assert!(
+                level >= previous - 1e-9,
+                "grinding {commit_pow_bits} bits lowered the level: {previous} -> {level}"
+            );
+            previous = level;
+        }
+    }
+
+    /// Grinding before the batching challenge is credited to the batch term,
+    /// bit for bit, in both proven regimes — and to no other term. The
+    /// "no other term" half is the point: the boost is applied where the
+    /// batching term is built, so wiring it to the wrong round would show up
+    /// as a neighbouring term moving instead.
+    #[test]
+    fn batch_grinding_lifts_only_the_batch_term() {
+        let regime = benchmark_regime();
+        let air = air();
+        // A small field keeps every term in range of the others, so a
+        // misdirected boost would be visible rather than clamped away.
+        let shape = InstanceShape {
+            modulus_bits: 100,
+            num_batched_functions: 1 << 10,
+            ..shape()
+        };
+        let ground = GrindingSites {
+            batch_combination: 12,
+            ..GrindingSites::NONE
+        };
+
+        let b0 = proven_security_report(&regime, &air, &shape, &[], &GrindingSites::NONE);
+        let b12 = proven_security_report(&regime, &air, &shape, &[], &ground);
+
+        for (before, after) in
+            core::iter::once((&b0.udr, &b12.udr)).chain(b0.ldr.iter().zip(b12.ldr.iter()))
+        {
+            // Grinding can change which list-decoding radius maximises the
+            // composite, and every term carrying the regime's list size moves
+            // with it. The two reports are then not comparable term by term;
+            // what must still hold is that the level did not fall. The
+            // unique-decoding regime has no such freedom, so it always takes
+            // the strict branch below and pins where the boost was applied.
+            if before.regime != after.regime {
+                assert!(
+                    after.security_bits() >= before.security_bits() - 1e-12,
+                    "grinding lowered the level by moving the regime: {} -> {}",
+                    before.security_bits(),
+                    after.security_bits()
+                );
+                continue;
+            }
+
+            for (t0, t12) in before.terms().iter().zip(after.terms()) {
+                assert_eq!(t0.label, t12.label, "term order changed");
+                let expected = if t0.label == BATCH_LABEL {
+                    t0.bits.bits() + 12.0
+                } else {
+                    t0.bits.bits()
+                };
+                assert!(
+                    (t12.bits.bits() - expected).abs() < 1e-12,
+                    "{} moved to {} (expected {expected})",
+                    t0.label,
+                    t12.bits.bits()
+                );
+            }
+        }
+    }
+
+    /// With fewer than two functions there is no batching round to protect, so
+    /// grinding before a challenge the protocol never samples must buy nothing
+    /// rather than being credited to whatever term happens to bind.
+    #[test]
+    fn batch_grinding_buys_nothing_when_nothing_is_batched() {
+        let regime = benchmark_regime();
+        let air = air();
+        let shape = InstanceShape {
+            modulus_bits: 100,
+            num_batched_functions: 1,
+            ..shape()
+        };
+
+        let b0 = proven_security_report(&regime, &air, &shape, &[], &GrindingSites::NONE);
+        let b32 = proven_security_report(
+            &regime,
+            &air,
+            &shape,
+            &[],
+            &GrindingSites {
+                batch_combination: 32,
+                ..GrindingSites::NONE
+            },
+        );
+
+        assert!((b32.security_bits() - b0.security_bits()).abs() < 1e-12);
+        assert!(b32.udr.terms().iter().all(|t| t.label != BATCH_LABEL));
+    }
+
+    /// Legacy reporting retains the ethSTARK query formula without adding
+    /// the random-words correction or the FRI folding round.
+    #[test]
+    fn legacy_report_uses_ethstark_query_bound() {
+        let regime = benchmark_regime();
+        let report =
+            legacy_security_report(&regime, &air(), &shape(), &[], &GrindingSites::NONE).unwrap();
+
+        assert_eq!(report.regime, Regime::Legacy);
+        assert_eq!(report.security_bits(), 116.0);
+        assert_eq!(report.binding().label, LDT_QUERY_LABEL);
+        assert_eq!(report.terms().len(), 4);
+        assert_eq!(
+            legacy_security(&regime, &air(), &shape(), &[], &GrindingSites::NONE)
+                .unwrap()
+                .bits(),
+            116.0,
+        );
+
+        // Over this smaller field the modern folding term would bind below
+        // DEEP-ALI. Legacy omits it, leaving DEEP at 96 - log2(3 * 2^20 + 1).
+        let small_shape = InstanceShape {
+            modulus_bits: 96,
+            ..shape()
+        };
+        let small =
+            legacy_security_report(&regime, &air(), &small_shape, &[], &GrindingSites::NONE)
+                .unwrap();
+        assert_eq!(small.binding().label, DEEP_LABEL);
+        assert_eq!(small.security_bits() as usize, 74);
+        assert_eq!(
+            legacy_security(&regime, &air(), &small_shape, &[], &GrindingSites::NONE)
+                .unwrap()
+                .bits(),
+            small.security_bits(),
+        );
+    }
+
+    #[test]
+    fn legacy_report_preserves_composite_caps_and_grinding() {
+        let regime = benchmark_regime();
+        let air = air();
+        let shape = InstanceShape {
+            modulus_bits: 100,
+            num_batched_functions: 1025,
+            ..shape()
+        };
+        let cases = [
+            (GrindingSites::NONE, 128, None, BATCH_LABEL, 69),
+            (
+                GrindingSites {
+                    batch_combination: 8,
+                    ..GrindingSites::NONE
+                },
+                128,
+                None,
+                BATCH_LABEL,
+                77,
+            ),
+            (
+                GrindingSites {
+                    batch_combination: 20,
+                    out_of_domain: 8,
+                    ..GrindingSites::NONE
+                },
+                128,
+                None,
+                DEEP_LABEL,
+                86,
+            ),
+            (GrindingSites::NONE, 64, None, COLLISION_LABEL, 64),
+            (GrindingSites::NONE, 128, Some(40.0), "extra", 40),
+        ];
+        for (grinding, collision_resistance, extra, label, bits) in cases {
+            let shape = InstanceShape {
+                collision_resistance,
+                ..shape
+            };
+            let extras: Vec<_> = extra.into_iter().map(ErrorBits::from_log2).collect();
+            let terms: Vec<_> = extras
+                .iter()
+                .map(|&bits| SecurityTerm::new("extra", bits))
+                .collect();
+            let report = legacy_security_report(&regime, &air, &shape, &terms, &grinding).unwrap();
+            let scalar = legacy_security(&regime, &air, &shape, &extras, &grinding).unwrap();
+            assert_eq!(report.binding().label, label);
+            assert_eq!(report.security_bits() as usize, bits);
+            assert_eq!(scalar.bits(), report.security_bits());
+        }
+    }
+
+    #[test]
+    fn legacy_report_requires_explicit_ldt_support() {
+        let ldt = LdtOnlyChoice(benchmark_regime());
+        assert!(
+            legacy_security_report(&ldt, &air(), &shape(), &[], &GrindingSites::NONE).is_none()
+        );
+        assert!(legacy_security(&ldt, &air(), &shape(), &[], &GrindingSites::NONE).is_none());
+    }
+
+    proptest! {
+        /// Legacy stays above both modern reports, including degenerate inputs.
+        /// The random-words estimate can be more conservative than the proven bound
+        /// over tiny fields, so the three-way order is asserted for fields of at least
+        /// 32 bits; every generated LDE fits within 28 bits.
+        #[test]
+        fn fri_legacy_report_stays_above_modern_reports(
+            fri in (0usize..=4, 0usize..=64, 0usize..=32, 0usize..=4, 0usize..=24, 0usize..=24),
+            instance in (0usize..=24, 0usize..=256, 0usize..=160, 0usize..=64),
+            air_shape in (0usize..=64, 0usize..=16, 0usize..=4),
+            grinding in (0usize..=24, 0usize..=24),
+            extra in proptest::option::of(0usize..=160),
+        ) {
+            let (log_blowup, num_queries, log_final_poly_len, max_log_arity, commit_pow_bits, query_pow_bits) = fri;
+            let regime = crate::fri::FriRegime {
+                log_blowup,
+                num_queries,
+                log_final_poly_len,
+                max_log_arity,
+                commit_pow_bits,
+                query_pow_bits,
+            };
+            let (log_trace_length, modulus_bits, collision_resistance, num_batched_functions) = instance;
+            let shape = InstanceShape {
+                log_trace_length,
+                modulus_bits,
+                collision_resistance,
+                num_batched_functions,
+            };
+            let (num_constraints, max_constraint_degree, max_combo) = air_shape;
+            let air = StarkAirParams {
+                num_constraints,
+                max_constraint_degree,
+                max_combo,
+                num_quotient_chunks: (max_constraint_degree.max(2) - 1).next_power_of_two(),
+            };
+            let grinding = GrindingSites {
+                out_of_domain: grinding.0,
+                batch_combination: grinding.1,
+                ..GrindingSites::NONE
+            };
+            let extras: Vec<_> = extra.into_iter()
+                .map(|bits| SecurityTerm::new("extra", ErrorBits::from_log2(bits as f64)))
+                .collect();
+
+            let legacy = legacy_security_report(&regime, &air, &shape, &extras, &grinding)
+                .unwrap().security_bits();
+            let conjectured = conjectured_security_report(&regime, &air, &shape, &extras, &grinding)
+                .security_bits();
+            let proven = proven_security_report(&regime, &air, &shape, &extras, &grinding)
+                .security_bits();
+            prop_assert!(legacy >= conjectured);
+            prop_assert!(legacy >= proven);
+            if modulus_bits >= 32 {
+                prop_assert!(conjectured >= proven);
+            }
+        }
+    }
+
+    /// The conjectured report's attained bits equal the scalar
+    /// `conjectured_security` for the same LDT, shape, and extras, and it is
+    /// tagged as the conjectured regime.
+    ///
+    /// Checked with and without `extras`: a binding extra would mask a
+    /// divergence between the two paths' LDT term sets, which is exactly what
+    /// went unnoticed while the scalar path took a caller-supplied
+    /// `ErrorBits` and the report path composed `conjectured_terms`.
+    #[test]
+    fn conjectured_report_matches_scalar_composite() {
+        let regime = benchmark_regime();
+        let air = air();
+        let shape = shape();
+        let extra = ErrorBits::from_log2(40.0);
+
+        // Without extras, the LDT terms are what the two paths must agree on.
+        let bare_report =
+            conjectured_security_report(&regime, &air, &shape, &[], &GrindingSites::NONE);
+        let bare_scalar = conjectured_security(&regime, &air, &shape, &[], &GrindingSites::NONE);
+        assert!((bare_report.security_bits() - bare_scalar.bits()).abs() < 1e-12);
+
+        let report = conjectured_security_report(
+            &regime,
+            &air,
+            &shape,
+            &[SecurityTerm::new("extra", extra)],
+            &GrindingSites::NONE,
+        );
+        let scalar = conjectured_security(&regime, &air, &shape, &[extra], &GrindingSites::NONE);
+
+        assert_eq!(report.regime, Regime::Conjectured);
+        assert!((report.security_bits() - scalar.bits()).abs() < 1e-12);
+        assert_eq!(report.binding().label, "extra");
+
+        // And at a nonzero grinding site — the axis the two paths could only
+        // diverge on before `conjectured_security` modeled `GrindingSites`
+        // itself, since it had no way to express the DEEP-term boost that
+        // `conjectured_security_report` applies.
+        let ground = GrindingSites {
+            out_of_domain: 24,
+            ..GrindingSites::NONE
+        };
+        let ground_report = conjectured_security_report(&regime, &air, &shape, &[], &ground);
+        let ground_scalar = conjectured_security(&regime, &air, &shape, &[], &ground);
+        assert!((ground_report.security_bits() - ground_scalar.bits()).abs() < 1e-12);
+
+        // And with more than one batched codeword — the axis the two paths
+        // would diverge on if only one of them composed the batching round.
+        let batched = batched_shape();
+        let batched_report =
+            conjectured_security_report(&regime, &air, &batched, &[], &GrindingSites::NONE);
+        let batched_scalar =
+            conjectured_security(&regime, &air, &batched, &[], &GrindingSites::NONE);
+        assert!((batched_report.security_bits() - batched_scalar.bits()).abs() < 1e-12);
+    }
+
+    /// The opening-batching round is charged in the conjectured regime, and
+    /// only when the protocol samples such a challenge at all.
+    ///
+    /// Charging it is what keeps the regime consistent with its own low-degree
+    /// test: `fri::conjectured_commit_phase_error` already charges the folding
+    /// random linear combination, which is the same kind of round under the
+    /// same conjecture.
+    #[test]
+    fn conjectured_report_charges_the_batching_round() {
+        let regime = benchmark_regime();
+        let air = air();
+        let batched = batched_shape();
+        let unbatched = InstanceShape {
+            num_batched_functions: 1,
+            ..batched
+        };
+
+        let with_batch =
+            conjectured_security_report(&regime, &air, &batched, &[], &GrindingSites::NONE);
+        let without =
+            conjectured_security_report(&regime, &air, &unbatched, &[], &GrindingSites::NONE);
+
+        assert!(
+            with_batch.terms().iter().any(|t| t.label == BATCH_LABEL),
+            "batched openings must be charged"
+        );
+        assert!(
+            !without.terms().iter().any(|t| t.label == BATCH_LABEL),
+            "a protocol that batches nothing samples no such challenge"
+        );
+        assert!(
+            with_batch.security_bits() < without.security_bits(),
+            "the batching round must constrain the conjectured level: {} vs {}",
+            with_batch.security_bits(),
+            without.security_bits()
+        );
+    }
+
+    /// The conjectured level stays at or above the proven one for the same
+    /// instance, batching included: the conjecture drops the list-size
+    /// multiplier the proven regime pays, it does not add error.
+    #[test]
+    fn conjectured_stays_above_proven_when_openings_are_batched() {
+        let regime = benchmark_regime();
+        let air = air();
+        let shape = batched_shape();
+
+        let conjectured =
+            conjectured_security_report(&regime, &air, &shape, &[], &GrindingSites::NONE);
+        let proven = proven_security_report(&regime, &air, &shape, &[], &GrindingSites::NONE);
+
+        assert!(
+            conjectured.security_bits() >= proven.security_bits(),
+            "conjectured {} fell below proven {}",
+            conjectured.security_bits(),
+            proven.security_bits()
+        );
+    }
+
+    /// Conjectured mode decodes at list size 1, so ALI and DEEP carry no
+    /// `L⁺` multiplier: both match the proven UDR terms (also `L⁺ = 1`) and
+    /// are strictly looser than the proven LDR terms, whose Johnson-bound
+    /// list size costs `log2(L⁺)` bits.
+    #[test]
+    fn conjectured_ali_and_deep_carry_no_list_size() {
+        let regime = benchmark_regime();
+        let air = air();
+        let shape = shape();
+
+        let conjectured =
+            conjectured_security_report(&regime, &air, &shape, &[], &GrindingSites::NONE);
+        let proven = proven_security_report(&regime, &air, &shape, &[], &GrindingSites::NONE);
+        let ldr = proven
+            .ldr
+            .as_ref()
+            .expect("benchmark has a valid LDR regime");
+
+        for label in [ALI_LABEL, DEEP_LABEL] {
+            let find = |r: &RegimeReport| {
+                r.terms()
+                    .iter()
+                    .find(|t| t.label == label)
+                    .expect("every regime carries the ALI and DEEP terms")
+                    .bits
+                    .bits()
+            };
+            assert!((find(&conjectured) - find(&proven.udr)).abs() < 1e-12);
+            assert!(find(&conjectured) > find(ldr));
+        }
+    }
+
+    /// The gap this composite closes: at a large trace the LogUp fingerprint
+    /// error binds well below the LDT's conjectured query-phase term, so an
+    /// LDT-only conjectured number overstates security.
+    #[test]
+    fn conjectured_logup_extra_binds_below_the_ldt_term() {
+        use crate::logup::{LOGUP_LABEL, LogUpAir, security_term};
+
+        // Queries chosen so the LDT term sits between the DEEP term above it
+        // and the lookup term below it, isolating what binds.
+        let regime = crate::fri::FriRegime {
+            num_queries: 80,
+            ..benchmark_regime()
+        };
+        let air = air();
+        let shape = InstanceShape {
+            log_trace_length: 28,
+            modulus_bits: 128,
+            collision_resistance: 128,
+            num_batched_functions: 1,
+        };
+        let logup = LogUpAir {
+            num_interactions: 64,
+            max_message_width: 8,
+        };
+
+        let term = security_term(&logup, &shape, &GrindingSites::NONE).expect("has interactions");
+        let ldt_only =
+            conjectured_security_report(&regime, &air, &shape, &[], &GrindingSites::NONE);
+        let with_logup =
+            conjectured_security_report(&regime, &air, &shape, &[term], &GrindingSites::NONE);
+
+        // Without the lookup term the low-degree test's query phase is what binds.
+        assert_eq!(ldt_only.binding().label, LDT_QUERY_LABEL);
+        // With it, the lookup term binds strictly lower — the overstatement.
+        assert_eq!(with_logup.binding().label, LOGUP_LABEL);
+        assert!(with_logup.security_bits() < ldt_only.security_bits());
+    }
+
+    /// More constraints can only tighten (never loosen) the conjectured
+    /// bound, via the AIR-composition term.
+    #[test]
+    fn conjectured_more_constraints_is_not_more_security() {
+        let regime = benchmark_regime();
+        let shape = shape();
+        let few = StarkAirParams {
+            num_constraints: 1,
+            ..air()
+        };
+        let many = StarkAirParams {
+            num_constraints: 1 << 20,
+            ..air()
+        };
+
+        let b_few = conjectured_security_report(&regime, &few, &shape, &[], &GrindingSites::NONE);
+        let b_many = conjectured_security_report(&regime, &many, &shape, &[], &GrindingSites::NONE);
+        assert!(b_many.security_bits() <= b_few.security_bits());
+    }
+
+    /// Grinding before the out-of-domain challenge can only loosen (never
+    /// tighten) the DEEP term, so security is non-decreasing in it — and the
+    /// neutral default reproduces the ungrounded report exactly.
+    #[test]
+    fn conjectured_more_grinding_is_not_less_security() {
+        let regime = benchmark_regime();
+        let air = air();
+        // A small field puts DEEP in range of the other terms, so the grind
+        // is observable rather than masked by the collision cap.
+        let shape = InstanceShape {
+            modulus_bits: 100,
+            ..shape()
+        };
+        let ground = GrindingSites {
+            out_of_domain: 24,
+            ..GrindingSites::NONE
+        };
+
+        let b0 = conjectured_security_report(&regime, &air, &shape, &[], &GrindingSites::NONE);
+        let b24 = conjectured_security_report(&regime, &air, &shape, &[], &ground);
+        assert!(b24.security_bits() >= b0.security_bits());
+
+        let default_sites =
+            conjectured_security_report(&regime, &air, &shape, &[], &GrindingSites::default());
+        assert!((default_sites.security_bits() - b0.security_bits()).abs() < 1e-12);
+    }
+
+    /// The same monotonicity holds on the proven path, in both regimes.
+    #[test]
+    fn proven_more_grinding_is_not_less_security() {
+        let regime = benchmark_regime();
+        let air = air();
+        let shape = InstanceShape {
+            modulus_bits: 100,
+            ..shape()
+        };
+        let ground = GrindingSites {
+            out_of_domain: 24,
+            ..GrindingSites::NONE
+        };
+
+        let b0 = proven_security_report(&regime, &air, &shape, &[], &GrindingSites::NONE);
+        let b24 = proven_security_report(&regime, &air, &shape, &[], &ground);
+        assert!(b24.udr.security_bits() >= b0.udr.security_bits());
+        assert!(b24.security_bits() >= b0.security_bits());
+    }
+}

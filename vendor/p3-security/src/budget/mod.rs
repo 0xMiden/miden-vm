@@ -1,0 +1,650 @@
+//! Conjectured round budget for a lifted (multi-AIR) STARK protocol, in fixed point.
+//!
+//! Fiat-Shamir security of the compiled argument is the minimum, over the protocol's rounds, of
+//! that round's soundness error plus the grinding sited immediately before its challenge. This
+//! module bounds each round and composes them, using [`crate::fixed`] throughout so the result is
+//! reproducible bit-for-bit by a recursive verifier.
+//!
+//! "Conjectured" here is the standard proximity-gaps conjecture regime: list sizes are taken as
+//! one up to capacity, so the algebraic rounds pay a plain Schwartz-Zippel error with no list-size
+//! multiplier, and the FRI query phase pays the random-words rate of
+//! [2025/2010](https://eprint.iacr.org/2025/2010) section 1.5 (see [`crate::fixed::bits_per_query`]).
+//! Proven bounds for this parameter class are far lower and are not modeled here; anything
+//! published from this module must be labeled conjectured.
+//!
+//! Every bound is stated as `error ≤ coefficient · size / |E|`, which in bits is
+//! `log2|E| − log2(coefficient) − log2(size)`. Coefficients round up and the field size rounds
+//! down, so each round is understated rather than overstated. The out-of-domain round is the one
+//! exception to that framing: part of its size is additive rather than a multiple of the trace
+//! height, so it takes the logarithm of the whole product at once. It states the same bound as
+//! [`crate::deep::deep_ali_error`], the `f64` mirror of the same equation, and the two are meant
+//! to be read together.
+//!
+//! # Folding accounting
+//!
+//! The folding round below sums a doubled per-round coefficient rather than searching for the
+//! single worst round: `error ≤ (arity − 1) · (n + 1) / |E|` per round, worst at the first round
+//! where the LDE domain `n` is largest, and doubling the coefficient absorbs the `+ 1`. This is
+//! more conservative than reporting only the worst round's tight bound — by less than one bit,
+//! since `2n ≥ n + 1` for `n ≥ 1` — in exchange for a coefficient that does not depend on how many
+//! folding rounds actually occur.
+//!
+//! # DEEP-quotient batching
+//!
+//! [`shape::AirShape::num_deep_terms`] is `Option`: a protocol that batches its DEEP quotient
+//! across every committed column via further α/β powers supplies it and gets an eighth accounted
+//! round; a protocol that performs no such column-batching reduction passes `None` and the round
+//! contributes no constraint on security (reported at the cap, the same convention
+//! [`shape::AirShape::lookup`] uses for "no such argument"). The out-of-domain round above is
+//! charged unconditionally either way — it is not what `None` waives.
+//!
+//! The batched quotient is a random linear combination of words handed to the low-degree test,
+//! so the round is graded like folding, over the LDE domain, rather than as a Schwartz-Zippel
+//! identity. It charges the same proximity-gap bound as the opening-batching term of
+//! [`crate::stark::conjectured_security_report`], with `k` in place of `k − 1`, and loses a bit for
+//! every doubling of the trace height.
+
+pub mod report;
+pub mod shape;
+
+use report::{
+    COLLISION_LABEL, COMPOSITION_LABEL, DEEP_COMPOSITION_LABEL, FOLDING_LABEL, LOOKUP_LABEL,
+    OUT_OF_DOMAIN_LABEL, QUERY_LABEL,
+};
+pub use report::{SecurityReport, SecurityTerm};
+pub use shape::{AirShape, InstanceShape, LookupShape, ProtocolParams};
+
+use crate::fixed;
+
+/// Grades a proof configuration, returning the per-round breakdown.
+///
+/// The attained level is [`SecurityReport::security_level`]; the round that binds is
+/// [`SecurityReport::binding_term`].
+pub const fn security_report(
+    params: &ProtocolParams,
+    instance: &InstanceShape,
+    air: &AirShape,
+) -> SecurityReport {
+    let cap = instance.cap();
+    // In particular, reject malformed public field-size encodings before any
+    // arithmetic or grinding credit. A zero collision cap also needs no grading.
+    if cap == 0 {
+        return SecurityReport::new([
+            SecurityTerm::new(LOOKUP_LABEL, 0),
+            SecurityTerm::new(COMPOSITION_LABEL, 0),
+            SecurityTerm::new(OUT_OF_DOMAIN_LABEL, 0),
+            SecurityTerm::new(DEEP_COMPOSITION_LABEL, 0),
+            SecurityTerm::new(FOLDING_LABEL, 0),
+            SecurityTerm::new(QUERY_LABEL, 0),
+            SecurityTerm::new(COLLISION_LABEL, 0),
+        ]);
+    }
+
+    // The lookup challenges are sampled once, right after the main-trace commitment, and shared
+    // by every bus. Each bus denominator is affine in the first challenge with total degree at
+    // most `max_message_width` in the two challenges jointly. If the bus multiset is unbalanced,
+    // the balance function `Φ = Σ mₖ/Dₖ` is a nonzero rational function of the challenges, and the
+    // cheat succeeds on either of two events.
+    //
+    // Each denominator `Dₖ = α + (bus + 1)·β^W + Σ_{j<W} β^j·payloadⱼ` has individual degree 1 in
+    // `α` and `W` in `β`, so the cleared numerator `Σₖ mₖ·Π_{l≠k} D_l` over `M` denominators has
+    // individual degrees `M − 1` and `W(M − 1)`. Sampling the two challenges independently and
+    // uniformly, the per-variable Schwartz-Zippel union bounds a numerator root by
+    // `(W + 1)(M − 1)/|E|`.
+    //
+    // Separately, a vanishing denominator degenerates the batched transition constraint: with
+    // `Dⱼ = 0` the identity collapses to `mⱼ·Π_{s≠j} D_s = 0`, forcing `mⱼ = 0` and letting the
+    // adversary drop message `j` from the bus for free. Each `Dₖ` is *monic* in `α`, so for any
+    // `β` exactly one `α` annihilates it: that event costs only `M/|E|`, not `M·W/|E|`.
+    //
+    // Together `ε ≤ (W + 1)(M − 1)/|E| + M/|E| ≤ (W + 2)·M/|E|`.
+    //
+    // `M` is taken as `fractions_per_row · 2^log_max_height`, charging every AIR the maximum
+    // height.
+    let lookup = round(
+        LOOKUP_LABEL,
+        instance,
+        match air.lookup {
+            Some(lookup) => {
+                Some((lookup.max_message_width as u64 + 2) * lookup.fractions_per_row as u64)
+            }
+            None => None,
+        },
+        instance.log_max_height,
+        params.lookup_pow_bits,
+        cap,
+    );
+
+    // Constraints are batched by powers of one challenge and the AIRs by a second, so a violated
+    // constraint survives only on a root of the resulting univariate of degree below the total
+    // number of batched slots. Independent of trace length.
+    let composition = round(
+        COMPOSITION_LABEL,
+        instance,
+        Some(air.num_composed_constraints as u64),
+        0,
+        0,
+        cap,
+    );
+
+    // The out-of-domain point is rejection-sampled outside the trace and LDE domains. A violated
+    // constraint leaves the DEEP-ALI identity a nonzero polynomial in that point of degree at most
+    // the larger of `max_constraint_degree · (height + max_combo − 1) + (height − 1)` (clearing the
+    // shared denominator lifts each of a constraint's degree-many trace factors by one per
+    // out-of-domain point referenced, and the quotient side contributes the rest) and
+    // `(c + 1) · height + max_combo − 1` (the degree Plonky3's own power-of-two quotient chunking
+    // induces, binding whenever `c` exceeds `max_constraint_degree`). Lifting evaluates the
+    // shorter AIRs at powers of the same point, so all of them pay the maximum height.
+    let out_of_domain = out_of_domain_round(
+        instance,
+        air.max_constraint_degree,
+        air.num_quotient_chunks,
+        air.max_combo,
+        params.ood_pow_bits,
+        cap,
+    );
+
+    // The DEEP quotient batches every committed column and out-of-domain point by powers of two
+    // further challenges into the one word the low-degree test runs on. That is a random linear
+    // combination of words over the LDE domain, the same kind of round as folding, so it pays the
+    // proximity-gap error `(k − 1) · n / |E|` over the `k` batched terms: the conjecture removes
+    // the list-size multiplier, not the domain size. `k` stands in for `k − 1`, which keeps the
+    // coefficient nonzero and costs less than one bit.
+    let deep_composition = round(
+        DEEP_COMPOSITION_LABEL,
+        instance,
+        match air.num_deep_terms {
+            Some(n) => Some(n as u64),
+            None => None,
+        },
+        instance.log_max_height.saturating_add(params.log_blowup),
+        params.deep_pow_bits,
+        cap,
+    );
+
+    // Per folding round the error is at most `(arity − 1) · (n + 1) / |E|`, worst at the first
+    // round where the domain is largest. Doubling the coefficient absorbs the `+ 1`.
+    let folding = match folding_coefficient(params.log_folding_arity) {
+        Some(coefficient) => round(
+            FOLDING_LABEL,
+            instance,
+            Some(coefficient),
+            instance.log_max_height.saturating_add(params.log_blowup),
+            params.folding_pow_bits,
+            cap,
+        ),
+        None => SecurityTerm::new(FOLDING_LABEL, 0),
+    };
+
+    // Query sampling is the only round whose error is not a Schwartz-Zippel bound: it is the
+    // random-words rate compounded over independent queries.
+    let query_bits = (params.num_queries as u64)
+        .saturating_mul(fixed::bits_per_query(
+            params.log_blowup,
+            instance.field_bits,
+        ))
+        .saturating_add(fixed::from_bits(params.query_pow_bits));
+    let query = SecurityTerm::new(QUERY_LABEL, min(query_bits, cap));
+
+    SecurityReport::new([
+        lookup,
+        composition,
+        out_of_domain,
+        deep_composition,
+        folding,
+        query,
+        SecurityTerm::new(COLLISION_LABEL, cap),
+    ])
+}
+
+/// Coefficient `2 · (2^log_folding_arity − 1)` of the folding round, or `None` when the arity is
+/// too large to compute it without wrapping.
+///
+/// `2^63` is the last shift that does not itself overflow `u64`, and `2 · (2^63 − 1) = 2^64 − 2`
+/// still fits, so `log_folding_arity = 63` could be computed exactly; the cutoff at `63` is one
+/// notch more conservative than the arithmetic strictly requires, refusing the input a step early
+/// rather than relying on that margin. Larger exponents must never wrap to a smaller arity;
+/// reporting zero bits refuses these unrepresentable configurations.
+const fn folding_coefficient(log_folding_arity: u32) -> Option<u64> {
+    if log_folding_arity >= u64::BITS - 1 {
+        return None;
+    }
+    Some(2 * ((1u64 << log_folding_arity) - 1))
+}
+
+/// Bounds one round whose error is `coefficient · 2^log_size / |E|`, crediting the grinding sited
+/// before its challenge and capping at the transcript's own ceiling.
+///
+/// Presence is explicit: only `None` waives a round. A present coefficient must validate as
+/// nonzero before entering the arithmetic; malformed present rounds report zero security.
+const fn round(
+    label: &'static str,
+    instance: &InstanceShape,
+    coefficient: Option<u64>,
+    log_size: u32,
+    pow_bits: u32,
+    cap: u64,
+) -> SecurityTerm {
+    let coefficient = match coefficient {
+        None => return SecurityTerm::new(label, cap),
+        Some(coefficient) => match core::num::NonZeroU64::new(coefficient) {
+            Some(coefficient) => coefficient,
+            None => return SecurityTerm::new(label, 0),
+        },
+    };
+
+    let error = fixed::ceil_log2(coefficient.get()) + fixed::from_bits(log_size);
+    let bits = if error >= instance.field_bits {
+        fixed::from_bits(pow_bits)
+    } else {
+        instance.field_bits - error + fixed::from_bits(pow_bits)
+    };
+
+    SecurityTerm::new(label, min(bits, cap))
+}
+
+/// Bounds the out-of-domain round: error `max(d · (H + combo − 1) + (H − 1), (c + 1) · H + combo
+/// − 1) / |E|`, with `H` the trace height, `d` the maximum constraint degree, `combo` the number
+/// of out-of-domain points referenced per column, and `c` the exact number of committed
+/// quotient chunks, including ZK degree padding and doubling.
+///
+/// Checking the DEEP-ALI identity at the sampled point clears the common denominator
+/// `Π_i (x − z_i)`, which lifts each of a constraint's `d` trace factors from degree `≤ H − 1` to
+/// degree `≤ H + combo − 1`, and the quotient side adds a further `H − 1`:
+///
+/// ```text
+/// d · (H + combo − 1)     from the d lifted factors
+///           + (H − 1)     from the quotient side
+/// ```
+///
+/// That is ethSTARK's `X^i · h_i(X^d)` split. Plonky3 instead commits the quotient as `c`
+/// power-of-two chunks reconstructed with degree-`(c − 1) · H` coset selectors, giving identity
+/// degree `(c + 1) · H + combo − 1`; this exceeds the first term whenever `c > d`, which is why
+/// the two are combined by a maximum rather than the first alone.
+///
+/// [`crate::deep::deep_ali_error`] states the same bound in `f64`. Unlike [`round`], both terms
+/// are additive rather than a multiple of `H`, so the whole product is folded into the size
+/// directly instead of decomposed into a coefficient and a log-size. This round is always charged
+/// — there is no "no such round" case to special-case at zero.
+///
+/// `pow_bits` is the grinding sited immediately before the point is sampled, credited exactly as
+/// [`round`] credits its own: a prover hunting for a favourable point pays `2^pow_bits` per
+/// candidate. It is the only lever this round has, since both the degree and the height are fixed
+/// by the statement being proved.
+///
+/// A degenerate degree or point count clamps to one, which keeps `size ≥ 1` and so keeps
+/// [`fixed::ceil_log2`]'s zero-assert unreachable. A size too large to take the logarithm of is
+/// reported at zero bits rather than wrapped, since truncating it would understate the error; the
+/// grind is dropped with it rather than credited against an error this round could not bound.
+const fn out_of_domain_round(
+    instance: &InstanceShape,
+    max_constraint_degree: u32,
+    num_quotient_chunks: u32,
+    max_combo: u32,
+    pow_bits: u32,
+    cap: u64,
+) -> SecurityTerm {
+    if instance.log_max_height >= u64::BITS || !num_quotient_chunks.is_power_of_two() {
+        return SecurityTerm::new(OUT_OF_DOMAIN_LABEL, 0);
+    }
+
+    let d = if max_constraint_degree == 0 {
+        1
+    } else {
+        max_constraint_degree as u128
+    };
+    let combo = if max_combo == 0 { 1 } else { max_combo as u128 };
+    let height = 1u128 << instance.log_max_height;
+    let ethstark = d * (height + combo - 1) + (height - 1);
+
+    let chunks = num_quotient_chunks as u128;
+    let chunked = (chunks + 1) * height + combo - 1;
+
+    let size = if ethstark > chunked {
+        ethstark
+    } else {
+        chunked
+    };
+    if size > u64::MAX as u128 {
+        return SecurityTerm::new(OUT_OF_DOMAIN_LABEL, 0);
+    }
+
+    let error = fixed::ceil_log2(size as u64);
+    let bits = instance.field_bits.saturating_sub(error) + fixed::from_bits(pow_bits);
+
+    SecurityTerm::new(OUT_OF_DOMAIN_LABEL, min(bits, cap))
+}
+
+const fn min(a: u64, b: u64) -> u64 {
+    if a < b { a } else { b }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::budget::shape::LookupShape;
+
+    const FIELD_BITS: u64 = 8_388_607;
+
+    fn params() -> ProtocolParams {
+        ProtocolParams {
+            log_blowup: 3,
+            log_folding_arity: 2,
+            num_queries: 27,
+            query_pow_bits: 17,
+            ood_pow_bits: 0,
+            deep_pow_bits: 12,
+            folding_pow_bits: 4,
+            lookup_pow_bits: 0,
+        }
+    }
+
+    fn instance(log_max_height: u32) -> InstanceShape {
+        InstanceShape {
+            log_max_height,
+            field_bits: FIELD_BITS,
+            collision_resistance: 128,
+        }
+    }
+
+    fn air() -> AirShape {
+        AirShape {
+            num_composed_constraints: 531,
+            max_constraint_degree: 9,
+            num_quotient_chunks: 8,
+            max_combo: 2,
+            num_deep_terms: Some(130),
+            lookup: Some(LookupShape {
+                fractions_per_row: 27,
+                max_message_width: 16,
+            }),
+        }
+    }
+
+    #[test]
+    fn malformed_field_bits_report_zero_security_without_panicking() {
+        for field_bits in [
+            0,
+            18_446_744_073_709_391_531,
+            u64::MAX,
+            fixed::from_bits(u32::MAX) + 1,
+        ] {
+            let instance = InstanceShape {
+                field_bits,
+                ..instance(20)
+            };
+            let params = ProtocolParams {
+                log_blowup: 1,
+                // Grinding must not rescue an invalid field-size encoding.
+                query_pow_bits: u32::MAX,
+                ..params()
+            };
+            assert_eq!(
+                security_report(&params, &instance, &air()).security_level(),
+                0
+            );
+        }
+        let supported = InstanceShape {
+            field_bits: fixed::from_bits(u32::MAX),
+            ..instance(20)
+        };
+        assert!(security_report(&params(), &supported, &air()).security_level() > 0);
+    }
+
+    #[test]
+    fn present_zero_coefficient_rounds_cannot_claim_the_cap() {
+        for kind in [
+            LOOKUP_LABEL,
+            COMPOSITION_LABEL,
+            DEEP_COMPOSITION_LABEL,
+            FOLDING_LABEL,
+        ] {
+            let mut air = air();
+            let mut params = params();
+            match kind {
+                LOOKUP_LABEL => air.lookup.as_mut().unwrap().fractions_per_row = 0,
+                COMPOSITION_LABEL => air.num_composed_constraints = 0,
+                DEEP_COMPOSITION_LABEL => air.num_deep_terms = Some(0),
+                FOLDING_LABEL => params.log_folding_arity = 0,
+                _ => unreachable!(),
+            }
+            let report = security_report(&params, &instance(20), &air);
+            let term = report
+                .terms()
+                .iter()
+                .find(|term| term.label == kind)
+                .unwrap();
+            assert_eq!(term.bits, 0, "malformed present round {kind}");
+        }
+    }
+
+    /// At moderate trace heights the query phase is what limits the configuration.
+    #[test]
+    fn query_phase_binds_at_moderate_heights() {
+        let report = security_report(&params(), &instance(20), &air());
+        assert_eq!(report.binding_term().label, QUERY_LABEL);
+        assert_eq!(report.security_level(), 96);
+    }
+
+    /// The lookup round's error grows linearly in trace length while every other round is flat or
+    /// grows only logarithmically, so past some height it becomes the bottleneck.
+    #[test]
+    fn lookup_round_binds_at_large_heights() {
+        let report = security_report(&params(), &instance(29), &air());
+        assert_eq!(report.binding_term().label, LOOKUP_LABEL);
+        assert!(
+            report.security_level() < 96,
+            "lookup round should fall below the query-phase level at maximum trace height, got {}",
+            report.security_level()
+        );
+    }
+
+    /// Grinding before the lookup challenges is the direct remedy for the round above, and must
+    /// be credited to it bit for bit.
+    #[test]
+    fn lookup_grinding_lifts_the_lookup_round() {
+        let ungrounded = security_report(&params(), &instance(29), &air());
+        let grinding = ProtocolParams {
+            lookup_pow_bits: 8,
+            ..params()
+        };
+        let ground = security_report(&grinding, &instance(29), &air());
+
+        let before = ungrounded.terms()[0];
+        let after = ground.terms()[0];
+        assert_eq!(before.label, LOOKUP_LABEL);
+        assert_eq!(after.bits, before.bits + fixed::from_bits(8));
+    }
+
+    /// A folding arity too large to compute the round's coefficient must be reported at zero
+    /// bits, not silently dropped. The wrapped shift would leave the coefficient at zero, which
+    /// [`round`] reads as "no such round" and reports at the cap — and unlike debug, a release
+    /// build does not panic on the way there, so the round would simply disappear.
+    #[test]
+    fn absurd_folding_arity_reports_no_security_rather_than_the_cap() {
+        assert_eq!(folding_coefficient(2), Some(6));
+        assert_eq!(folding_coefficient(62), Some(u64::MAX - (1 << 63) - 1));
+        assert_eq!(folding_coefficient(63), None);
+        assert_eq!(folding_coefficient(u32::MAX), None);
+
+        let absurd = ProtocolParams {
+            log_folding_arity: 64,
+            ..params()
+        };
+        let report = security_report(&absurd, &instance(20), &air());
+        let folding = report
+            .terms()
+            .iter()
+            .find(|t| t.label == FOLDING_LABEL)
+            .expect("folding term is always present");
+
+        assert_eq!(folding.bits, 0, "folding round vanished into the cap");
+        assert_eq!(report.security_level(), 0);
+    }
+
+    /// Grinding before the out-of-domain point is credited to that round bit for bit, and to no
+    /// other. The "no other" half is the point: the round shares its `max_constraint_degree` and
+    /// `max_combo` inputs with nothing else, so a boost wired to the wrong term would surface as
+    /// a neighbouring round moving instead.
+    #[test]
+    fn ood_grinding_lifts_only_the_out_of_domain_round() {
+        let ungrounded = security_report(&params(), &instance(29), &air());
+        let grinding = ProtocolParams {
+            ood_pow_bits: 8,
+            ..params()
+        };
+        let ground = security_report(&grinding, &instance(29), &air());
+
+        for (before, after) in ungrounded.terms().iter().zip(ground.terms()) {
+            assert_eq!(before.label, after.label, "term order changed");
+            let expected = if before.label == OUT_OF_DOMAIN_LABEL {
+                before.bits + fixed::from_bits(8)
+            } else {
+                before.bits
+            };
+            assert_eq!(after.bits, expected, "{} moved", before.label);
+        }
+    }
+
+    /// The DEEP quotient is a random linear combination of codewords over the LDE domain, so its
+    /// round pays one bit for every doubling of that domain, whether the trace height or the
+    /// blowup doubles it.
+    #[test]
+    fn deep_composition_round_pays_the_lde_domain_size() {
+        let deep_bits = |params: &ProtocolParams, log_max_height: u32| {
+            security_report(params, &instance(log_max_height), &air())
+                .terms()
+                .iter()
+                .find(|t| t.label == DEEP_COMPOSITION_LABEL)
+                .expect("term present")
+                .bits
+        };
+        let base = deep_bits(&params(), 20);
+        assert!(
+            base < instance(20).cap(),
+            "the round must not sit at the cap"
+        );
+
+        assert_eq!(deep_bits(&params(), 21), base - fixed::ONE);
+        let wider = ProtocolParams {
+            log_blowup: params().log_blowup + 1,
+            ..params()
+        };
+        assert_eq!(deep_bits(&wider, 20), base - fixed::ONE);
+    }
+
+    /// No round may be reported above the transcript's own ceiling.
+    #[test]
+    fn every_round_is_capped_by_collision_resistance() {
+        let instance = InstanceShape {
+            collision_resistance: 96,
+            ..instance(20)
+        };
+        let report = security_report(&params(), &instance, &air());
+        for term in report.terms() {
+            assert!(
+                term.bits <= fixed::from_bits(96),
+                "{} exceeds the cap",
+                term.label
+            );
+        }
+        assert_eq!(report.security_level(), 96);
+    }
+
+    /// Taller traces can never be more secure than shorter ones under the same parameters.
+    #[test]
+    fn security_is_monotone_in_trace_height() {
+        let mut previous = u32::MAX;
+        for log_height in 6..=30u32 {
+            let level = security_report(&params(), &instance(log_height), &air()).security_level();
+            assert!(level <= previous, "level rose at log height {log_height}");
+            previous = level;
+        }
+    }
+
+    /// Stronger than the level above, which is a minimum over rounds and therefore hides a round
+    /// that gains bits with height behind whichever round binds. Each round on its own must be
+    /// non-increasing, across the whole range the shape's `u32` height admits.
+    #[test]
+    fn every_round_is_monotone_in_trace_height() {
+        let mut previous = [u64::MAX; report::NUM_TERMS];
+        for log_height in 0..=64u32 {
+            let report = security_report(&params(), &instance(log_height), &air());
+            for (term, prev) in report.terms().iter().zip(previous.iter_mut()) {
+                assert!(
+                    term.bits <= *prev,
+                    "{} rose at log height {log_height}",
+                    term.label
+                );
+                *prev = term.bits;
+            }
+        }
+    }
+
+    /// Opening more out-of-domain points raises the degree the DEEP-ALI identity is tested at, so
+    /// it can only cost the out-of-domain round bits.
+    #[test]
+    fn security_is_monotone_in_max_combo() {
+        let mut previous = u64::MAX;
+        for max_combo in 1..=16u32 {
+            let air = AirShape { max_combo, ..air() };
+            let term = security_report(&params(), &instance(6), &air).terms()[2];
+            assert_eq!(term.label, OUT_OF_DOMAIN_LABEL);
+            assert!(
+                term.bits <= previous,
+                "out-of-domain rose at max_combo {max_combo}"
+            );
+            previous = term.bits;
+        }
+    }
+
+    /// A bigger or higher-degree AIR can never be more secure under the same parameters.
+    #[test]
+    fn security_is_monotone_in_air_size() {
+        let small = security_report(&params(), &instance(24), &air());
+        let large = AirShape {
+            num_composed_constraints: 4096,
+            max_constraint_degree: 9,
+            num_quotient_chunks: 8,
+            max_combo: 2,
+            num_deep_terms: Some(1024),
+            lookup: Some(LookupShape {
+                fractions_per_row: 64,
+                max_message_width: 16,
+            }),
+        };
+        let large = security_report(&params(), &instance(24), &large);
+        assert!(large.security_level() <= small.security_level());
+    }
+
+    /// An AIR with no lookups pays no lookup round rather than being rejected or silently graded
+    /// against a zero-message bus.
+    #[test]
+    fn absent_lookup_argument_contributes_no_round() {
+        let air = AirShape {
+            lookup: None,
+            ..air()
+        };
+        let report = security_report(&params(), &instance(29), &air);
+        assert_eq!(report.terms()[0].bits, instance(29).cap());
+        assert_ne!(report.binding_term().label, LOOKUP_LABEL);
+    }
+
+    /// A protocol that does not batch its DEEP quotient this way pays no such round, and the
+    /// grind that would have sited it is simply unread.
+    #[test]
+    fn absent_deep_composition_contributes_no_round() {
+        let air = AirShape {
+            num_deep_terms: None,
+            ..air()
+        };
+        let report = security_report(&params(), &instance(20), &air);
+        let deep_term = report
+            .terms()
+            .iter()
+            .find(|t| t.label == DEEP_COMPOSITION_LABEL)
+            .expect("term present");
+        assert_eq!(deep_term.bits, instance(20).cap());
+        assert_ne!(report.binding_term().label, DEEP_COMPOSITION_LABEL);
+    }
+}
