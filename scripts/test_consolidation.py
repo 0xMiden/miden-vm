@@ -312,7 +312,7 @@ def main():
     comparison = commands.add_parser("compare", help="Reject any lost production coverage or mappings")
     comparison.add_argument("before", type=Path)
     comparison.add_argument("after", type=Path)
-    commands.add_parser("check-controls", help="Run coverage-gate acceptance and rejection controls")
+    commands.add_parser("check-controls", help="Run coverage and mutation gate controls")
     args = parser.parse_args()
     try:
         if args.command == "collect":
@@ -324,8 +324,8 @@ def main():
             print(json.dumps(result, indent=2))
             return 0 if result["accepted"] else 1
         else:
-            suite = unittest.defaultTestLoader.discover(str(Path(__file__).parent / "tests"),
-                                                        pattern="test_test_consolidation.py")
+            suite = unittest.defaultTestLoader.discover(
+                str(Path(__file__).parent / "test_consolidation_tests"))
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
         print(str(error), file=sys.stderr)
