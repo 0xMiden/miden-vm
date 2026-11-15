@@ -6,6 +6,8 @@
 
 #### Changes
 
+- Increased in-memory SMT insert benchmark batches to 4,096 and 16,384 entries and fixed the SMT CodSpeed job at eight Rayon threads ([#4220](https://github.com/0xMiden/miden-vm/pull/4220)).
+
 #### Fixes
 
 ## v1.0.0-rc.1 (2026-11-14)
