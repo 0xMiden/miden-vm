@@ -10,10 +10,12 @@ has been performed while introducing this contract.
 
 ## Frozen data usage
 
-`reference.txt`, `coverage.txt` and `PROVENANCE.md` are byte-for-byte supplied
-handoff data. Their producer/observer revisions are attribution only, not
-permission to inspect those objects. The transfer manifest verifies copied
-bytes, not historical reproducibility or base equivalence.
+`reference.txt` and `coverage.txt` are byte-for-byte supplied handoff data.
+`PROVENANCE.md` retains the supplied attribution with an authored31 interface-adapter note;
+README.md records original and current provenance-file hashes separately. Historical
+producer/observer revisions are attribution only, not permission to inspect those objects.
+The original transfer manifest verifies supplied bytes, not historical reproducibility or
+base equivalence.
 
 Read-only comparisons use these explicit fields from `reference.txt`:
 
@@ -40,9 +42,10 @@ fields unchanged; do not regenerate them from reconstructed code.
 
 1. Iterate authored VM `AIRS`, then authored `ChipletAir::all()`. Section names
    are `vm/<file_token>` then `pvm/<file_token>`. No proof-order sorting occurs.
-2. Capture each source through the allowed-base compiler `ir::capture`. Record
-   raw degrees with `testing::constraint_degrees`. Merge per-class roots and
-   degrees by their global emission ordinals, requiring exactly the dense range
+2. The first observer captures each source through the allowed-base compiler `ir::capture`.
+   The current native interface adapter uses `ir::capture_native`; this changes the API entrypoint,
+   not the defined observation recipe. Record raw degrees with `testing::constraint_degrees`.
+   Merge per-class roots and degrees by their global emission ordinals, requiring exactly the dense range
    `0..base_count+ext_count`. Keep repeated and zero-gated roots. Global class is
    0 for base and 1 for extension. No optimization/generated evaluator supplies
    the observation.
@@ -108,7 +111,8 @@ one LF terminator; one blank line precedes each section.
 The observer is read-only: it has no fixture overwrite or environment-controlled
 regeneration mode. The ignored recording target prints the newly framed report;
 it never writes an expected result. A reproducible baseline must be captured
-from the first observer commit, whose production sources remain at the fixed
+from the first independently authored observer commit
+`881521641a737e7f656a156ebd6dff440aaf81c4`, whose production sources remain at the fixed
 base, only after explicit execution authorization and required power checks.
 Record that exact commit ID, toolchain and lock hash alongside the snapshot.
 Do not capture an expected baseline from later equation/kernel changes.

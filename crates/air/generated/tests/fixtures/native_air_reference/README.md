@@ -5,16 +5,22 @@
 comparisons. It uses authored sources and compiler entrypoints; generated
 constraint evaluators and embedded ACE instruction streams are not its oracle.
 
-The three supplied files are preserved unchanged:
+The two frozen data files are preserved unchanged:
 
 | File | SHA-256 |
 |---|---|
 | `reference.txt` | `2ffa5cda0fec36c05d4e1e5a6ba88df3533043065d2bf0bce739d0aae90f7581` |
 | `coverage.txt` | `d9c6a8d6fdc71857ec9a43a0009e8f4bb4e4fa1cd7136251c74437a1c67d4e96` |
-| `PROVENANCE.md` | `c1aea0c8a7490f263c28ae62481b7bdbf7cc8ed68010c371fc17ea950380f38e` |
 
-Historical producer/observer/lock labels in those files describe the handoff's
-attribution. Their source objects were not opened. The frozen digest framing,
+`PROVENANCE.md` retains the supplied attribution and includes an authored retirement-adapter
+note. Its original supplied SHA-256 is
+`c1aea0c8a7490f263c28ae62481b7bdbf7cc8ed68010c371fc17ea950380f38e`;
+its current annotated-file SHA-256 is
+`bdf1b8ce4f0a813a804125ab17530dd99180f1c53aafb3b594cc5545a87ea1c5`.
+The original supplied copy remains in the untracked handoff.
+
+Historical producer/observer/lock labels describe the handoff's attribution. Their source objects
+were not opened. The frozen digest framing,
 complete historical auxiliary inputs and synthetic coverage body are not
 provided, so opaque hashes, historical Horner samples, auxiliary outputs and
 coverage records are explicitly excluded from claimed comparisons. See the
@@ -29,8 +35,9 @@ It does not establish Fiat-Shamir call order or all polynomial/witness behavior.
 No test, observer or benchmark has been executed during authoring. No new
 numerical baseline has been captured. The ignored print-only observer has no
 file-writing or environment-controlled regeneration mode. Its eventual baseline
-must come from the first observer commit, before any production equation/API
-migration, with the exact commit/toolchain/lock hash recorded. Execution requires
+must come from the first independently authored observer commit
+`881521641a737e7f656a156ebd6dff440aaf81c4`, before any production equation/API
+migration, with that exact commit, toolchain and lock hash recorded. Execution requires
 separate authorization and the user's power guards; the standing no-tests
 request remains active. Never regenerate expectations from a later migrated
 implementation to make comparisons pass.
