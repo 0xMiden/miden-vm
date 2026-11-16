@@ -30,3 +30,6 @@ panic-handler = []
 [dependencies]
 miden-event-handler-abi = { workspace = true, features = ["guest"] }
 miden-event-handler-macros.workspace = true
+
+[lints]
+workspace = true

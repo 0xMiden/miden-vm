@@ -61,3 +61,6 @@ toml = { workspace = true, features = ["parse", "serde"] }
 [dev-dependencies]
 miden-assembly = { workspace = true, features = ["std"] }
 tempfile.workspace = true
+
+[lints]
+workspace = true

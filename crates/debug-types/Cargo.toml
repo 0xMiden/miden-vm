@@ -52,3 +52,6 @@ zerocopy.workspace = true
 miden-test-serialization-macros.workspace = true
 proptest.workspace = true
 serde_json.workspace = true
+
+[lints]
+workspace = true

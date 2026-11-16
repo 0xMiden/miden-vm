@@ -79,3 +79,6 @@ tracing = { workspace = true, features = ["std"] }
 name = "pvm-constants-regen"
 path = "src/bin/pvm_constants_regen.rs"
 required-features = ["constants-tools"]
+
+[lints]
+workspace = true

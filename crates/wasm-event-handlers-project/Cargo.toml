@@ -34,3 +34,6 @@ miden-assembly = { workspace = true, features = ["std", "testing"] }
 miden-processor = { workspace = true, features = ["std"] }
 tempfile = { workspace = true, features = ["getrandom"] }
 wat.workspace = true
+
+[lints]
+workspace = true

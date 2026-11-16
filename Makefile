@@ -76,9 +76,10 @@ FEATURES_verifier        :=
 
 # -- linting --------------------------------------------------------------------------------------
 
-# Deny warnings locally so `make clippy`/`make lint` fail on the same warnings as CI,
-# which runs `make clippy` with RUSTFLAGS=-D warnings (see .github/workflows/lint.yml).
-DENY_WARNINGS := RUSTFLAGS="$(RUSTFLAGS) -D warnings"
+# Deny Cargo and rustc lints in the all-targets checks used locally and in CI.
+# Cargo's dependency lint can flag valid bench-only dependencies when tests omit benches,
+# so keep enforcement here rather than in manifests that also govern test builds.
+DENY_WARNINGS := CARGO_BUILD_WARNINGS=deny RUSTFLAGS="$(RUSTFLAGS) -D warnings"
 
 # The clippy lint set is defined once, in the `xclippy` cargo alias in
 # .cargo/config.toml, and extracted here so the check and fix paths cannot
@@ -266,7 +267,7 @@ test-loom: ## Runs all loom-based tests
 
 .PHONY: check
 check: ## Checks all targets and features for errors without code generation
-	$(BUILDDOCS) cargo check --all-targets ${ALL_FEATURES}
+	$(BUILDDOCS) CARGO_BUILD_WARNINGS=deny cargo check --all-targets ${ALL_FEATURES}
 
 .PHONY: check-features
 check-features: ## Checks all feature combinations compile without warnings using cargo-hack

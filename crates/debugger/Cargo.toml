@@ -63,27 +63,36 @@ flamegraph = ["std", "dep:inferno"]
 tui = ["std", "dep:crossterm", "dep:futures-util", "dep:ratatui", "dep:signal-hook", "dep:syntect", "dep:tokio", "dep:tokio-util", "dep:tui-input"]
 script = ["std"]
 repl = ["script", "dep:rustyline"]
-dap = ["std", "miden-debug-engine/dap"]
+dap = ["std", "dep:miden-package-registry", "dep:miden-project", "miden-debug-engine/dap"]
 python = ["script", "dep:pyo3", "dep:pyo3-build-config"]
-std = ["dep:env_logger", "clap/std", "clap/env", "compact_str/std", "miden-assembly-syntax/std", "miden-debug-engine/std"]
+std = [
+    "dep:clap",
+    "dep:env_logger",
+    "dep:miden-assembly",
+    "clap/std",
+    "clap/env",
+    "compact_str/std",
+    "miden-assembly-syntax/std",
+    "miden-debug-engine/std",
+]
 proptest = ["miden-debug-engine/proptest"]
 
 [dependencies]
-clap = { workspace = true, features = ["env"] }
+clap = { workspace = true, features = ["env"], optional = true }
 crossterm = { version = "0.29.0", optional = true, features = ["event-stream"] }
 compact_str = { version = "0.9", optional = true, default-features = false }
 miden-debug-engine.workspace = true
 env_logger = { workspace = true, optional = true }
 inferno = { version = "0.12", optional = true, default-features = false }
 log.workspace = true
-miden-assembly = { workspace = true, features = ["std"] }
+miden-assembly = { workspace = true, features = ["std"], optional = true }
 miden-assembly-syntax.workspace = true
 miden-core.workspace = true
 miden-debug-types.workspace = true
 miden-mast-package.workspace = true
-miden-package-registry = { workspace = true, features = ["resolver"] }
+miden-package-registry = { workspace = true, features = ["resolver"], optional = true }
 miden-processor.workspace = true
-miden-project.workspace = true
+miden-project = { workspace = true, optional = true }
 pyo3 = { version = "0.30.1", optional = true, features = ["auto-initialize"] }
 ratatui = { version = "0.30.0", optional = true }
 signal-hook = { version = "0.3", optional = true, default-features = false }
@@ -105,3 +114,6 @@ tempfile.workspace = true
 
 [build-dependencies]
 pyo3-build-config = { version = "0.30.1", optional = true, features = ["resolve-config"] }
+
+[lints]
+workspace = true
