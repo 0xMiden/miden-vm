@@ -221,7 +221,7 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
     /// The string, file and error code indices are rebuilt before the builder next uses them, so
     /// changes made through the returned reference (e.g. [DebugInfo::trim_file_paths]) are
     /// respected.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn debug_info_mut(&mut self) -> &mut DebugInfo<Exec, Src> {
         self.indices_stale = true;
         &mut self.debug_info
@@ -304,7 +304,7 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
 impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
     /// Gets the [DebugFileIdx] for a source file whose URI is `uri`, if it is recorded in the
     /// debug info built so far.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn get_file_index_by_uri(&self, uri: &Uri) -> Option<DebugFileIdx> {
         self.debug_info.get_file_index_by_uri(uri)
     }

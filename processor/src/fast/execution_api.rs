@@ -1644,7 +1644,7 @@ impl FastProcessor {
     /// Async variant of [`Self::execute_mut_sync`].
     #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) async fn execute_mut(
         &mut self,
         program: &Program,

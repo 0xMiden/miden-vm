@@ -1,7 +1,9 @@
+#[cfg(any(feature = "dap", test, feature = "tui", feature = "script"))]
+use std::collections::BTreeSet;
 use std::{
     borrow::ToOwned,
     boxed::Box,
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeMap, VecDeque},
     path::{Path, PathBuf},
     string::{String, ToString},
     sync::Arc,
@@ -10,7 +12,9 @@ use std::{
 
 use miden_assembly::{DefaultSourceManager, SourceManager};
 use miden_assembly_syntax::diagnostics::Report;
-use miden_debug_engine::{DebugQuery, ReturnTarget, normalize_source_path};
+#[cfg(any(test, feature = "tui", feature = "script"))]
+use miden_debug_engine::DebugQuery;
+use miden_debug_engine::{ReturnTarget, normalize_source_path};
 use miden_debug_types::{Location, SourceManagerExt, SourceSpan};
 use miden_mast_package::Package;
 use miden_processor::{
@@ -18,11 +22,12 @@ use miden_processor::{
     advice::{AdviceInputs, AdviceMutation},
 };
 
+#[cfg(any(test, feature = "tui", feature = "script"))]
+use crate::debug::OperationMatcher;
 use crate::{
     config::DebuggerConfig,
     debug::{
-        Breakpoint, BreakpointType, InvocationId, OperationMatcher, ReadMemoryExpr,
-        ResolvedLocation, TypedProcedure,
+        Breakpoint, BreakpointType, InvocationId, ReadMemoryExpr, ResolvedLocation, TypedProcedure,
     },
     exec::{DebugExecutor, ExecutionConfig, Executor},
 };
@@ -48,7 +53,7 @@ fn clone_event_replay_queue(event_replay: &[Vec<AdviceMutation>]) -> VecDeque<Ve
 pub struct State {
     pub source_manager: Arc<dyn SourceManager>,
     pub config: Box<DebuggerConfig>,
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(feature = "tui")]
     pub(crate) input_mode: InputMode,
     pub breakpoints: Vec<Breakpoint>,
     pub(crate) breakpoints_hit: Vec<Breakpoint>,
@@ -60,13 +65,14 @@ pub struct State {
     session: SessionState,
 }
 
+#[cfg(feature = "tui")]
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub enum InputMode {
     #[default]
     Normal,
-    #[allow(dead_code)]
+    #[cfg(all(test, feature = "tui"))]
     Insert,
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(feature = "tui")]
     Command,
 }
 
@@ -299,6 +305,7 @@ impl State {
         Self {
             source_manager,
             config,
+            #[cfg(feature = "tui")]
             input_mode: InputMode::Normal,
             breakpoints: vec![],
             breakpoints_hit: vec![],
@@ -418,7 +425,7 @@ impl State {
     }
 
     /// Resume local execution until the VM terminates, errors, or a breakpoint is hit.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(any(test, feature = "tui", feature = "script"))]
     pub(crate) fn run_until_stopped(&mut self) {
         // Breakpoints can be deleted between resumes. Keep invocation ownership tied to the
         // original breakpoint, including its creation cycle when an identifier is reused.
@@ -745,12 +752,12 @@ impl State {
         Ok(())
     }
 
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(feature = "script")]
     pub(crate) fn reset_stack_selection(&mut self) {
         self.selected_stack_frame = 0;
     }
 
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(any(test, feature = "tui"))]
     pub(crate) fn select_older_stack_frame(&mut self) {
         let last = self.logical_stack_frames().len().saturating_sub(1);
         self.selected_stack_frame = self.selected_stack_frame.saturating_add(1).min(last);
@@ -775,7 +782,7 @@ impl State {
     /// makes it suitable for matching source-level (line/file) breakpoints: a
     /// statement that calls into `::intrinsics::*` helpers mid-line still reads
     /// as a single visit to that line.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(any(test, feature = "tui", feature = "script"))]
     fn current_user_source_location(&self) -> Option<ResolvedLocation> {
         for frame in self.executor().callstack.frames().iter().rev() {
             for detail in frame.recent().iter().rev() {
@@ -801,13 +808,13 @@ impl State {
     /// statement calling into helpers reads as a single visit to its line; this accessor is the
     /// counterpart that lets breakpoints explicitly targeting internal sources keep firing —
     /// compiler intrinsics remain debuggable like any other MASM.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(any(test, feature = "tui", feature = "script"))]
     fn current_internal_source_location(&self) -> Option<ResolvedLocation> {
         self.current_location()
             .filter(|loc| crate::debug::is_internal_source_uri(loc.source_file.uri()))
     }
 
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(any(test, feature = "tui", feature = "script"))]
     pub(crate) fn is_next_source_line(
         start_proc: Option<&str>,
         start_loc: Option<&ResolvedLocation>,
@@ -844,7 +851,7 @@ impl State {
         }
     }
 
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(any(test, feature = "tui", feature = "script"))]
     fn minimum_source_line_for_proc(&self, procedure: &str, source_path: &str) -> Option<u32> {
         let executor = self.executor();
         let ctx = executor.resume_ctx()?;
@@ -942,7 +949,7 @@ impl State {
         None
     }
 
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(any(test, feature = "tui", feature = "script"))]
     pub(crate) fn should_defer_called_breakpoint(
         &self,
         proc: &str,
@@ -991,7 +998,7 @@ impl State {
             .map_err(|err| format!("failed to decode program result: {err}"))
     }
 
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(any(test, feature = "tui", feature = "script"))]
     pub(crate) fn set_execution_failed(&mut self, error: miden_processor::ExecutionError) {
         match &mut self.session {
             SessionState::Local(local) => local.execution_failed = Some(error),
@@ -1291,7 +1298,7 @@ impl State {
     }
 }
 
-#[allow(dead_code)] // retained for test/feature-gated users
+#[cfg(any(test, feature = "tui", feature = "script"))]
 fn is_internal_procedure(proc: &str) -> bool {
     proc.contains("::intrinsics::")
 }
@@ -1380,6 +1387,7 @@ impl State {
         Ok(Self {
             source_manager,
             config: Box::default(),
+            #[cfg(feature = "tui")]
             input_mode: InputMode::Normal,
             breakpoints: vec![],
             breakpoints_hit: vec![],

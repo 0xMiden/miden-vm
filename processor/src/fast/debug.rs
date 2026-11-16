@@ -58,7 +58,7 @@ impl DebugCallFrame {
     pub fn origin(&self) -> DebugFrameOrigin {
         self.origin
     }
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn is_inferred(&self) -> bool {
         self.origin != DebugFrameOrigin::Source
     }

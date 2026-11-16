@@ -135,7 +135,7 @@ impl SourceManagerError {
         Self::Custom { error_msg: message.into(), source: None }
     }
 
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(feature = "std")]
     pub(crate) fn custom_with_source(
         message: String,
         source: impl Error + Send + Sync + 'static,

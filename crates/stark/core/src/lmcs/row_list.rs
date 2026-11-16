@@ -74,7 +74,7 @@ impl<T> RowList<T> {
 
     /// Number of rows.
     #[inline]
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn num_rows(&self) -> usize {
         self.widths.len()
     }
@@ -114,7 +114,7 @@ impl<T: Copy + Default> RowList<T> {
 
 impl<T: Default + Clone> RowList<T> {
     /// Build a `RowList` from an iterator of row-like items, padding each to `alignment`.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn from_rows_aligned<R: AsRef<[T]>>(
         rows: impl IntoIterator<Item = R>,
         alignment: usize,

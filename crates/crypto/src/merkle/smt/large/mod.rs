@@ -364,7 +364,7 @@ impl<S: SmtStorageReader> LargeSmt<S> {
     pub const EMPTY_ROOT: Word = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
 
     /// Subtree depths for the subtrees stored in storage.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(feature = "rocksdb")]
     pub(crate) const SUBTREE_DEPTHS: [u8; 6] = [56, 48, 40, 32, 24, 16];
 
     // PUBLIC ACCESSORS

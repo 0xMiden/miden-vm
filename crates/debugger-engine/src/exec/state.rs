@@ -49,9 +49,6 @@ pub struct DebugExecutor {
     pub stack_outputs: StackOutputs,
     /// The set of contexts allocated during execution so far
     pub contexts: BTreeSet<ContextId>,
-    /// The root context
-    #[allow(dead_code)] // retained for test/feature-gated users
-    pub(crate) root_context: ContextId,
     /// The current context: the one after the last cycle a step completed without error, which
     /// after a limit trip is the cycle before `cycle`
     pub current_context: ContextId,
@@ -139,7 +136,6 @@ impl DebugExecutor {
             current_asmop: None,
             stack_outputs: Default::default(),
             contexts: Default::default(),
-            root_context,
             current_context: root_context,
             callstack: CallStack::new(events),
             current_proc: None,
@@ -213,7 +209,7 @@ impl DebugExecutor {
     /// step after a panic that unwound through a step, which only a caller that catches panics
     /// can make, returns the stepper's error once and `Ok(None)` after that. Otherwise like
     /// [`Self::step`].
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn step_with(
         &mut self,
         on_cycle: impl FnOnce(&CycleInfo<'_>),

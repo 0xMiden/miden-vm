@@ -146,7 +146,7 @@ impl Profile {
     }
 
     /// Enable trimmming of file paths in debug info under this profile
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(feature = "serde")]
     pub(crate) fn enable_trim_paths(&mut self, yes: bool) -> &mut Self {
         self.trim_paths = yes;
         self

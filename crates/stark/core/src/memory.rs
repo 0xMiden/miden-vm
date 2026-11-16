@@ -155,7 +155,7 @@ where
 
 /// Largest single-AIR height that can fit the budget, choosing the cheapest AIR while holding
 /// the other heights at zero. This permissive cap never rejects a shape the estimator accepts.
-#[allow(dead_code)] // retained for test/feature-gated users
+#[cfg(test)]
 pub(crate) fn max_any_height_for_budget<F, EF, MA>(
     multi_air: &MA,
     budget_bytes: u64,

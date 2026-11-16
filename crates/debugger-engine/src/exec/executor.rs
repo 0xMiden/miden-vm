@@ -116,7 +116,7 @@ impl Executor {
     ///
     /// Mutations are only recorded for live event handling; nothing is recorded while an event
     /// replay queue is being consumed.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn with_event_advice_mutations_recording(&mut self) -> &mut Self {
         self.record_event_mutations = true;
         self

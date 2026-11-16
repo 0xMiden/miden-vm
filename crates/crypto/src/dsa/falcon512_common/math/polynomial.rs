@@ -9,7 +9,9 @@ use core::{
 
 use num::{One, Zero};
 
-use super::{Inverse, MODULUS, N, field::FalconFelt};
+use super::{Inverse, field::FalconFelt};
+#[cfg(test)]
+use super::{MODULUS, N};
 use crate::{Felt, utils::zeroize::Zeroize};
 
 /// Represents a polynomial with coefficients of type F.
@@ -640,7 +642,7 @@ impl Polynomial<FalconFelt> {
     /// than the Miden prime.
     ///
     /// Note that this multiplication is not over Z_p\[x\]/(phi).
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn mul_modulo_p(a: &Self, b: &Self) -> [u64; 1024] {
         let mut c = [0; 2 * N];
         for i in 0..N {
@@ -654,7 +656,7 @@ impl Polynomial<FalconFelt> {
 
     /// Reduces a polynomial, that is the product of two polynomials over Z_p\[x\], modulo
     /// the irreducible polynomial phi. This results in an element in Z_p\[x\]/(phi).
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn reduce_negacyclic(a: &[u64; 1024]) -> Self {
         let mut c = [FalconFelt::zero(); N];
         let modulus = MODULUS as u16;

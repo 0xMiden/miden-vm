@@ -312,7 +312,8 @@ impl SmtStorage for MemoryStorage {
         let StorageUpdateParts {
             leaf_updates,
             subtree_updates,
-            leaf_count_delta: _,
+            #[cfg(any(feature = "rocksdb", feature = "persistent-forest"))]
+                leaf_count_delta: _,
             entry_count_delta: _,
         } = updates.into_parts();
 

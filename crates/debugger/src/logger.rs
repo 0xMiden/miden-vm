@@ -1,10 +1,11 @@
+#[cfg(test)]
+use std::vec::Vec;
 use std::{
     borrow::Cow,
     boxed::Box,
     collections::VecDeque,
     string::String,
     sync::{Arc, LazyLock, Mutex},
-    vec::Vec,
 };
 
 use compact_str::CompactString;
@@ -113,7 +114,7 @@ impl DebugLogger {
     }
 
     /// Clones all of the log entries in the buffer which match `predicate`.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn select_matching<F>(&self, mut predicate: F) -> Vec<LogEntry>
     where
         F: FnMut(&LogEntry) -> bool,

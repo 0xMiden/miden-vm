@@ -201,6 +201,7 @@ impl RecoveredCallStack {
                 name: Arc::from(demangle(name)),
                 kind: LogicalFrameKind::Physical,
                 location,
+                #[cfg(test)]
                 physical_index: None,
                 origin: Some(frame.identity.origin()),
                 invocation: Some(frame.invocation),
@@ -217,6 +218,7 @@ impl RecoveredCallStack {
                     name: Arc::from(inline.display.display_name()),
                     kind: LogicalFrameKind::Inline,
                     location: location.map(LogicalFrameLocation::Assembly),
+                    #[cfg(test)]
                     physical_index: None,
                     origin: None,
                     invocation: None,

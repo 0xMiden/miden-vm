@@ -120,7 +120,7 @@ impl Eidos {
     ///
     /// The interpretation of `param0` is defined by the registered domain.
     #[inline]
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn init_packed_chaining_word<D: EidosDomain>(
         _: D,
         param0: u32,
@@ -248,8 +248,8 @@ impl Eidos {
     }
 
     /// Hash packed pairs of words as generic eight-Felt sequences.
+    #[cfg(test)]
     #[inline]
-    #[allow(dead_code)] // retained for test/feature-gated users
     pub(crate) fn hash_double_word_packed(values: &[PackedDigest; 2]) -> PackedDigest {
         let cv = Self::init_packed_chaining_word(GENERIC_FELT_SEQUENCE, BLOCK_LEN as u32);
         compress_packed_digest_pair(values, &cv)
@@ -289,7 +289,7 @@ fn compress_digest_pair(values: &[Word; 2], cv: [u32; 8]) -> Word {
 }
 
 #[inline]
-#[allow(dead_code)] // retained for test/feature-gated users
+#[cfg(test)]
 fn compress_packed_digest_pair(
     values: &[PackedDigest; 2],
     cv: &PackedChainingValue,

@@ -108,7 +108,7 @@ impl<H: HashFunction> HashPrecompile<H> {
     ///
     /// Returns `Ok(None)` when `node` belongs to another precompile. Owned nodes return their
     /// structural join child digests directly from the payload.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn decode_assert_node(
         node: &Node,
     ) -> Result<Option<HashAssertNode>, PrecompileError> {

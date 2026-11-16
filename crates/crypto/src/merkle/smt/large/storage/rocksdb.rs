@@ -1304,7 +1304,7 @@ impl RocksDbConfig {
     /// [`RocksDbStorage::open`] for one DB and its column families. It is not a process-wide
     /// budget across multiple RocksDB instances.
     #[must_use]
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn with_memory_budget(mut self, memory_budget: RocksDbMemoryBudget) -> Self {
         let RocksDbMemoryBudget { block_cache_size, write_buffer_manager } = memory_budget;
         self.cache_size = block_cache_size;

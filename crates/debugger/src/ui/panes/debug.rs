@@ -64,6 +64,7 @@ impl Pane for DebugPane {
                 };
                 Ok(Some(response))
             },
+            #[cfg(test)]
             InputMode::Insert => Ok(Some(EventResponse::Stop(Action::Noop))),
             InputMode::Command => Ok(Some(EventResponse::Stop(Action::Noop))),
         }
