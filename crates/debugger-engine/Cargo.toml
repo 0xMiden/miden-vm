@@ -13,7 +13,7 @@ license = "MIT"
 edition.workspace = true
 
 [lib]
-doctest = false
+doctest = true
 
 [features]
 default = ["std"]

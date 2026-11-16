@@ -106,6 +106,10 @@ impl BaseHost for StandaloneDapHost {
 }
 
 impl Host for StandaloneDapHost {
+    fn forest_loader(&self) -> Option<&dyn miden_processor::AsyncForestLoader> {
+        Host::forest_loader(&self.inner)
+    }
+
     fn get_mast_forest(
         &self,
         node_digest: &Word,

@@ -27,8 +27,9 @@ use miden_mast_package::{
     debug_info::{DebugFileIdx, PackageDebugInfo},
 };
 use miden_processor::{
-    BaseHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, FutureMaybeSend,
-    Host, LoadedMastForest, ProcessorState, ResumeContext, StackInputs, StackOutputs,
+    AsyncForestLoader, BaseHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
+    FutureMaybeSend, Host, LoadedMastForest, ProcessorState, ResumeContext, StackInputs,
+    StackOutputs,
     advice::{AdviceInputs, AdviceMutation},
     event::{EventError, TraceError},
     trace::RowIndex,
@@ -227,6 +228,10 @@ impl<H: Host> BaseHost for DapHostWrapper<'_, H> {
 }
 
 impl<H: Host> Host for DapHostWrapper<'_, H> {
+    fn forest_loader(&self) -> Option<&dyn AsyncForestLoader> {
+        self.inner.forest_loader()
+    }
+
     fn get_mast_forest(
         &self,
         node_digest: &Word,

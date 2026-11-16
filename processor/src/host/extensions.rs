@@ -1,7 +1,9 @@
-use alloc::boxed::Box;
-use core::error::Error;
+//! Prototype: optional forest-loading capabilities discovered through the host.
 
-use super::{FutureMaybeSend, Host, LoadedMastForest, SyncHost};
+use alloc::boxed::Box;
+use core::{error::Error, pin::Pin};
+
+use super::{FutureMaybeSend, LoadedMastForest};
 use crate::Word;
 
 /// A source error returned when a host cannot load a MAST forest.
@@ -10,126 +12,103 @@ pub type MastForestLoadError = Box<dyn Error + Send + Sync + 'static>;
 /// A forest, a genuine absence, or a loading failure.
 pub type MastForestLoadResult = Result<Option<LoadedMastForest>, MastForestLoadError>;
 
-/// Fallible MAST forest loading used by [`crate::FastProcessor::execute_fallible`].
+/// Erased asynchronous lookup, with the same native/Wasm Send rules as host callbacks.
+pub type MastForestLoadFuture<'a> = Pin<Box<dyn FutureMaybeSend<MastForestLoadResult> + 'a>>;
+
+/// Optional asynchronous forest loading advertised by [`super::Host::forest_loader`].
 ///
-/// Existing [`Host`] implementations and execution methods remain unchanged. Implement this trait
-/// and call a fallible execution method to report loading errors.
+/// Returning an extension opts all execution paths into fallible loading. An error is propagated
+/// without retrying the legacy lookup. The extension can borrow a separate store owned by the host.
+/// Only extension lookups box their futures; legacy callbacks retain their concrete futures.
+///
+/// Dropping a lookup must leave host and store state valid. Completed host effects are not rolled
+/// back when execution is cancelled.
+#[doc = include_str!("idet_example.md")]
+pub trait AsyncForestLoader {
+    fn load<'a>(&'a self, root: &'a Word) -> MastForestLoadFuture<'a>;
+}
+
+/// Optional synchronous forest loading advertised by [`super::SyncHost::forest_loader`].
+///
+/// The asynchronous supertrait allows the blanket synchronous-to-asynchronous host adapter to
+/// forward this capability through trait upcasting. Implementing this trait supplies that adapter
+/// automatically, so a synchronous loader only implements `load_sync`.
 ///
 /// # Example
 ///
-/// Given an existing `DatabaseHost: Host`, expose its asynchronous `read_forest` method through
-/// [`FallibleHost`]. The method returns `io::Result<Option<LoadedMastForest>>`. In this
-/// example, the database call fails, and execution preserves the I/O error as its source.
+/// The same host reports storage errors through synchronous and asynchronous execution.
 ///
 /// ```
-/// use std::io;
-/// use miden_processor::{
-///     ExecutionError, FastProcessor, FallibleHost, MastForestLoadError, MastForestLoadResult,
-///     StackInputs, Word,
-/// };
-/// # use std::sync::Arc;
-/// # use miden_debug_types::{Location, SourceFile, SourceSpan};
-/// # use miden_processor::{BaseHost, FutureMaybeSend, Host, LoadedMastForest, ProcessorState};
-/// # use miden_processor::{advice::AdviceMutation, event::EventError};
-/// # struct DatabaseHost;
-/// # impl DatabaseHost {
-/// #     async fn read_forest(&self, _: &Word) -> io::Result<Option<LoadedMastForest>> {
-/// #         tokio::task::yield_now().await;
-/// #         Err(io::Error::other("database unavailable"))
-/// #     }
-/// # }
-/// # impl BaseHost for DatabaseHost {
-/// #     fn get_label_and_source_file(&self, _: &Location) -> (SourceSpan, Option<Arc<SourceFile>>) {
-/// #         (SourceSpan::UNKNOWN, None)
-/// #     }
-/// # }
-/// # impl Host for DatabaseHost {
-/// #     fn get_mast_forest(&self, _: &Word) -> impl FutureMaybeSend<Option<LoadedMastForest>> {
-/// #         async { unreachable!("use fallible execution for database lookups") }
-/// #     }
-/// #     fn on_event(&mut self, _: &ProcessorState<'_>)
-/// #         -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
-/// #         async { Ok(Vec::new()) }
-/// #     }
-/// # }
+/// use std::sync::Arc;
 ///
-/// impl FallibleHost for DatabaseHost {
-///     async fn try_get_mast_forest(&self, root: &Word) -> MastForestLoadResult {
-///         self.read_forest(root).await.map_err(|error| Box::new(error) as MastForestLoadError)
+/// use miden_assembly::Assembler;
+/// use miden_debug_types::{Location, SourceFile, SourceSpan};
+/// use miden_processor::{
+///     BaseHost, ExecutionError, FastProcessor, LoadedMastForest, MastForestLoadResult,
+///     ProcessorState, StackInputs, SyncForestLoader, SyncHost, Word, advice::AdviceMutation,
+///     event::EventError,
+/// };
+///
+/// struct DatabaseHost;
+///
+/// impl BaseHost for DatabaseHost {
+///     fn get_label_and_source_file(&self, _: &Location) -> (SourceSpan, Option<Arc<SourceFile>>) {
+///         (SourceSpan::UNKNOWN, None)
+///     }
+/// }
+///
+/// impl SyncHost for DatabaseHost {
+///     fn forest_loader(&self) -> Option<&dyn SyncForestLoader> {
+///         Some(self)
+///     }
+///
+///     fn get_mast_forest(&self, _: &Word) -> Option<LoadedMastForest> {
+///         unreachable!("this host advertises a fallible loader")
+///     }
+///
+///     fn on_event(&mut self, _: &ProcessorState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
+///         Ok(Vec::new())
+///     }
+/// }
+///
+/// impl SyncForestLoader for DatabaseHost {
+///     fn load_sync(&self, _: &Word) -> MastForestLoadResult {
+///         Err(std::io::Error::other("database unavailable").into())
 ///     }
 /// }
 ///
 /// # #[tokio::main(flavor = "current_thread")]
 /// # async fn main() {
-/// # let program = miden_assembly::Assembler::default()
-/// #     .assemble_program("program", "begin dynexec end").unwrap().unwrap_program();
+/// let program = Assembler::default()
+///     .assemble_program("program", "begin dynexec end")
+///     .unwrap()
+///     .unwrap_program();
 /// let mut host = DatabaseHost;
-/// let error = FastProcessor::new(StackInputs::default())
-///     .execute_fallible(&program, &mut host)
+/// let sync_error = FastProcessor::new(StackInputs::default())
+///     .execute_sync(&program, &mut host)
+///     .unwrap_err();
+/// let async_error = FastProcessor::new(StackInputs::default())
+///     .execute(&program, &mut host)
 ///     .await
 ///     .unwrap_err();
-///
-/// let ExecutionError::MastForestError { root_digest, error, .. } = error else {
-///     panic!("expected the database error");
-/// };
-/// assert_eq!(root_digest, Word::default());
-/// assert!(error.downcast_ref::<io::Error>().is_some());
-/// assert_eq!(error.to_string(), "database unavailable");
+/// for error in [sync_error, async_error] {
+///     let ExecutionError::MastForestError { error, .. } = error else {
+///         panic!("expected the database error");
+///     };
+///     assert_eq!(
+///         error.downcast_ref::<std::io::Error>().unwrap().to_string(),
+///         "database unavailable"
+///     );
+/// }
 /// # }
 /// ```
-pub trait FallibleHost: Host {
-    /// Loads a forest, returning `Ok(None)` only when the requested procedure is absent.
-    ///
-    /// # Cancellation safety
-    ///
-    /// Dropping a pending lookup must leave shared host and datastore state valid and permit
-    /// another lookup without losing stored forests. Implementations must arrange any required
-    /// cleanup before affected resources are reused.
-    fn try_get_mast_forest(&self, root: &Word) -> impl FutureMaybeSend<MastForestLoadResult>;
+pub trait SyncForestLoader: AsyncForestLoader {
+    fn load_sync(&self, root: &Word) -> MastForestLoadResult;
 }
 
-/// Synchronous counterpart of [`FallibleHost`], used by
-/// [`crate::FastProcessor::execute_fallible_sync`].
-///
-/// Follow the [`FallibleHost`] example with a method returning [`MastForestLoadResult`] directly.
-pub trait FallibleSyncHost: SyncHost {
-    /// Loads a forest, returning `Ok(None)` only when the requested procedure is absent.
-    fn try_get_mast_forest(&self, root: &Word) -> MastForestLoadResult;
-}
-
-// Static lookup strategies let existing execution methods retain their original host bounds.
-pub(crate) struct LegacyForestLoader;
-pub(crate) struct FallibleForestLoader;
-
-pub(crate) trait AsyncForestLookup<H: Host> {
-    fn load(host: &H, root: &Word) -> impl FutureMaybeSend<MastForestLoadResult>;
-}
-
-pub(crate) trait SyncForestLookup<H: SyncHost> {
-    fn load(host: &H, root: &Word) -> MastForestLoadResult;
-}
-
-impl<H: Host> AsyncForestLookup<H> for LegacyForestLoader {
-    fn load(host: &H, root: &Word) -> impl FutureMaybeSend<MastForestLoadResult> {
-        let future = host.get_mast_forest(root);
-        async move { Ok(future.await) }
-    }
-}
-
-impl<H: FallibleHost> AsyncForestLookup<H> for FallibleForestLoader {
-    fn load(host: &H, root: &Word) -> impl FutureMaybeSend<MastForestLoadResult> {
-        host.try_get_mast_forest(root)
-    }
-}
-
-impl<H: SyncHost> SyncForestLookup<H> for LegacyForestLoader {
-    fn load(host: &H, root: &Word) -> MastForestLoadResult {
-        Ok(host.get_mast_forest(root))
-    }
-}
-
-impl<H: FallibleSyncHost> SyncForestLookup<H> for FallibleForestLoader {
-    fn load(host: &H, root: &Word) -> MastForestLoadResult {
-        host.try_get_mast_forest(root)
+impl<T: SyncForestLoader + ?Sized> AsyncForestLoader for T {
+    fn load<'a>(&'a self, root: &'a Word) -> MastForestLoadFuture<'a> {
+        let result = self.load_sync(root);
+        Box::pin(async move { result })
     }
 }
