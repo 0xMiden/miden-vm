@@ -332,7 +332,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        air::native::{ConstraintMeta, PreprocessedSpec, Rows, Selectors},
+        air::{ConstraintMeta, PreprocessedSpec, Rows, Selectors},
         testing::configs::{Felt, QuadFelt},
     };
 

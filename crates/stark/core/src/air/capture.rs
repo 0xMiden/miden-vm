@@ -164,7 +164,7 @@ mod tests {
     use p3_matrix::dense::RowMajorMatrix;
 
     use super::*;
-    use crate::air::native::{Frame, Inputs, PreprocessedSpec};
+    use crate::air::{Frame, Inputs, PreprocessedSpec};
 
     struct Source {
         spec_calls: AtomicUsize,

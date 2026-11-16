@@ -1,7 +1,7 @@
 //! PVM lookup namespace for the shared 32-row Eidos compression core.
 
 use miden_core::Felt;
-use miden_stark::lookup::native::LookupBuilder;
+use miden_stark::lookup::LookupBuilder;
 
 use super::layout::AUX_COLS;
 use crate::{

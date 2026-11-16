@@ -22,8 +22,8 @@
 //!
 //! All trace heights must satisfy the protocol's shape checks. An AIR's main trace must also match
 //! the fixed native height of its preprocessed trace, when present, as declared by
-//! [`PreprocessedSpec::log_height`](crate::air::native::PreprocessedSpec::log_height)
-//! in the source's [`AirSpec`](crate::air::native::AirSpec).
+//! [`PreprocessedSpec::log_height`](crate::air::PreprocessedSpec::log_height)
+//! in the source's [`AirSpec`](crate::air::AirSpec).
 //!
 //! Applications that additionally require a specific trace size must check
 //! [`StarkProofData::log_trace_heights`] against that requirement alongside successful
@@ -57,11 +57,8 @@ use periodic::PeriodicPolys;
 use thiserror::Error;
 
 use crate::{
-    StarkConfig,
-    air::{
-        MultiAir, ReductionError, Statement,
-        native::{self, AirKernel},
-    },
+    StarkConfig, air,
+    air::{AirKernel, MultiAir, ReductionError, Statement},
     domain::Coset,
     lmcs::Lmcs,
     pcs::verifier::{CommitmentGroup, PcsError, verify_aligned},
@@ -451,15 +448,15 @@ where
         let fixed_current =
             preprocessed.map(|matrix| matrix.row_slice(0).expect("fixed current row"));
         let fixed_next = preprocessed.map(|matrix| matrix.row_slice(1).expect("fixed next row"));
-        let frame = native::AirFrame {
-            main: native::Rows { current: &main_current, next: &main_next },
-            preprocessed: native::Rows {
+        let frame = air::AirFrame {
+            main: air::Rows { current: &main_current, next: &main_next },
+            preprocessed: air::Rows {
                 current: fixed_current.as_deref().unwrap_or(&[]),
                 next: fixed_next.as_deref().unwrap_or(&[]),
             },
-            aux: native::Rows { current: &aux_local, next: &aux_next },
+            aux: air::Rows { current: &aux_local, next: &aux_next },
             periodic: &periodic_values,
-            selectors: native::Selectors {
+            selectors: air::Selectors {
                 first: selectors.is_first_row,
                 last: selectors.is_last_row,
                 transition: selectors.is_transition,
@@ -468,7 +465,7 @@ where
         let public_values: Vec<EF> =
             air_inputs[instance_idx].iter().copied().map(EF::from).collect();
         let session = air
-            .bind(native::UniformInputs {
+            .bind(air::UniformInputs {
                 public_values: &public_values,
                 challenges: &randomness[..num_rand],
                 exports: aux_values_j,

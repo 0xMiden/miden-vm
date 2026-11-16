@@ -89,13 +89,10 @@ use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
 };
-use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::native,
-    lookup::{
-        Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage,
-        native as native_lookup,
-    },
+    air,
+    air::LiftedAirBuilder as _,
+    lookup::{self, Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage},
 };
 use miden_utils_sync::LazyLock;
 use p3_field::Dup;
@@ -356,9 +353,9 @@ static PERIODIC_COLUMNS: LazyLock<Vec<Vec<Felt>>> = LazyLock::new(|| {
 // LOOKUP AIR
 // ================================================================================================
 
-impl<LB> native_lookup::LookupAir<LB> for UintMulAir
+impl<LB> lookup::LookupAir<LB> for UintMulAir
 where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -372,7 +369,7 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         let local: &[LB::Expr; NUM_MAIN_COLS] =
             frame.main.current[..NUM_MAIN_COLS].try_into().expect("uint lookup row band");
 
@@ -465,9 +462,9 @@ where
             .chunks(2)
             .map(
                 <[(
-                    <LB as native_lookup::LookupBuilder>::Expr,
-                    <LB as native_lookup::LookupBuilder>::Expr,
-                    [<LB as native_lookup::LookupBuilder>::Expr; 16],
+                    <LB as lookup::LookupBuilder>::Expr,
+                    <LB as lookup::LookupBuilder>::Expr,
+                    [<LB as lookup::LookupBuilder>::Expr; 16],
                 )]>::to_vec,
             )
             .collect::<Vec<_>>()
@@ -536,7 +533,7 @@ where
             (0..NUM_CELLS).map(|cell| (cell_gate(cell) * act.clone(), cell)).collect();
         for group in cell_specs
             .chunks(2)
-            .map(<[(<LB as native_lookup::LookupBuilder>::Expr, usize)]>::to_vec)
+            .map(<[(<LB as lookup::LookupBuilder>::Expr, usize)]>::to_vec)
             .collect::<Vec<_>>()
         {
             builder.next_column(
@@ -641,10 +638,10 @@ where
     }
 }
 
-impl native::LiftedAir for UintMulAir {
+impl air::LiftedAir for UintMulAir {
     type F = Felt;
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: AUX_WIDTH,
             num_public_values: 0,
@@ -654,10 +651,10 @@ impl native::LiftedAir for UintMulAir {
             periodic_columns: Cow::Borrowed(PERIODIC_COLUMNS.as_slice()),
         }
     }
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let local: &[AB::Expr; NUM_MAIN_COLS] =
@@ -827,16 +824,16 @@ impl native::LiftedAir for UintMulAir {
 
         // Phase 2: LogUp — the UintMul provide + Range16 + the
         // operand consumes.
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for UintMulAir {
-    type Error = native_lookup::LookupError;
+impl air::ProverAir<QuadFelt> for UintMulAir {
+    type Error = lookup::LookupError;
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
         aux::build_aux(inputs)
     }
 }

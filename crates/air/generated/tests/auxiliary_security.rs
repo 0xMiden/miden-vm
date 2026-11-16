@@ -16,7 +16,7 @@ use miden_air_definitions::{
 use miden_constraint_compiler::ir::{
     GraphBuilder, auxiliary, capture_native_into, capture_native_into_with,
 };
-use miden_stark::{air::native::LiftedAir, lookup::native};
+use miden_stark::{air::LiftedAir, lookup};
 
 #[test]
 fn native_source_geometry_keeps_the_vm_security_shape() {
@@ -35,7 +35,7 @@ fn auxiliary_identities_fit_the_lookup_budget() {
         let mut builder = GraphBuilder::new();
         let (full, _) = capture_native_into(&air, &mut builder).unwrap();
         let (lookup, _) = capture_native_into_with(&air, &mut builder, |frame, inputs, sink| {
-            native::eval_lookup(&air, frame, inputs, sink);
+            lookup::eval_lookup(&air, frame, inputs, sink);
         })
         .unwrap();
         let degree = auxiliary::beta_degree_bound(

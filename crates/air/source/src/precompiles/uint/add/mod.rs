@@ -91,11 +91,8 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
 };
 use miden_stark::{
-    air::native,
-    lookup::{
-        Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage,
-        native as native_lookup,
-    },
+    air,
+    lookup::{self, Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage},
 };
 use miden_utils_sync::LazyLock;
 use p3_field::Dup;
@@ -297,7 +294,7 @@ fn consume_column<LB>(
     consumes: Vec<(LB::Expr, LB::Expr, [LB::Expr; 8], Deg)>,
     col_deg: Deg,
 ) where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     builder.next_column(
         |col| {
@@ -331,9 +328,9 @@ fn consume_column<LB>(
     );
 }
 
-impl<LB> native_lookup::LookupAir<LB> for UintAddAir
+impl<LB> lookup::LookupAir<LB> for UintAddAir
 where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -347,7 +344,7 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         let local: &[LB::Expr; NUM_MAIN_COLS] =
             frame.main.current[..NUM_MAIN_COLS].try_into().expect("uint lookup row band");
 
@@ -447,10 +444,10 @@ where
     }
 }
 
-impl native::LiftedAir for UintAddAir {
+impl air::LiftedAir for UintAddAir {
     type F = Felt;
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: AUX_WIDTH,
             num_public_values: 0,
@@ -460,10 +457,10 @@ impl native::LiftedAir for UintAddAir {
             periodic_columns: Cow::Borrowed(PERIODIC_COLUMNS.as_slice()),
         }
     }
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let local: &[AB::Expr; NUM_MAIN_COLS] =
@@ -608,16 +605,16 @@ impl native::LiftedAir for UintAddAir {
         }
 
         // Phase 2: LogUp — UintVal consumes + the UintAdd provide.
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for UintAddAir {
-    type Error = native_lookup::LookupError;
+impl air::ProverAir<QuadFelt> for UintAddAir {
+    type Error = lookup::LookupError;
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        native_lookup::build_logup_aux_trace(self, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }

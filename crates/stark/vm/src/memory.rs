@@ -35,8 +35,7 @@ pub fn default_budget() -> ProvingBudget<MIDEN_AIR_COUNT> {
 mod tests {
     use miden_air::vm::{AIRS, MidenAir, config::pcs_params};
     use miden_air_definitions::vm::trace::and8_lookup::AND8_LOOKUP_TRACE_HEIGHT;
-    use miden_stark::air::native::AirKernel;
-    use miden_stark::log_quotient_degree;
+    use miden_stark::{air::AirKernel, log_quotient_degree};
 
     use super::*;
 

@@ -27,8 +27,8 @@ use miden_processor::{
     trace::{VmTrace, chiplets::build_external_eidos_compression_traces},
 };
 use miden_stark::{
-    air::native::LiftedAir,
-    lookup::{Challenges, LookupMessage, native::build_lookup_fractions},
+    air::LiftedAir,
+    lookup::{Challenges, LookupMessage, build_lookup_fractions},
 };
 
 use crate::repro_harness::{ReproTrace, core_row_mut};

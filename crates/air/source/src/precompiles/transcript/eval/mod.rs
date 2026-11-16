@@ -59,6 +59,7 @@
 use alloc::borrow::Cow;
 use core::array;
 
+use air::LiftedAirBuilder as _;
 use miden_core::{
     Felt,
     deferred::DEFERRED_AND_DOMAIN,
@@ -66,10 +67,9 @@ use miden_core::{
 };
 use miden_precompiles::{CurveId, CurvePrecompile, UintDomain, UintPrecompile};
 use miden_stark::{
-    air::native,
-    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, native as native_lookup},
+    air,
+    lookup::{self, Deg, LookupBatch, LookupColumn, LookupGroup},
 };
-use native::LiftedAirBuilder as _;
 use p3_field::Dup;
 
 use crate::precompiles::{
@@ -385,11 +385,11 @@ pub struct TranscriptEvalAir;
 // LIFTED AIR — local constraints
 // ================================================================================================
 
-impl native::LiftedAir for TranscriptEvalAir {
+impl air::LiftedAir for TranscriptEvalAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: NUM_AUX_COLS,
             num_public_values: NUM_PUBLIC_VALUES,
@@ -400,10 +400,10 @@ impl native::LiftedAir for TranscriptEvalAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let local: &[AB::Expr; NUM_MAIN_COLS] = frame.main.current[..NUM_MAIN_COLS]
@@ -681,27 +681,27 @@ impl native::LiftedAir for TranscriptEvalAir {
             .assert_zero(continues * (group_next_const - group_local));
 
         // Evaluate this AIR's LogUp relations through the shared adapter.
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for TranscriptEvalAir {
-    type Error = native_lookup::LookupError;
+impl air::ProverAir<QuadFelt> for TranscriptEvalAir {
+    type Error = lookup::LookupError;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        native_lookup::build_logup_aux_trace(self, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
 // LOOKUP AIR — bus interactions
 // ================================================================================================
 
-impl<LB> native_lookup::LookupAir<LB> for TranscriptEvalAir
+impl<LB> lookup::LookupAir<LB> for TranscriptEvalAir
 where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -715,7 +715,7 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         let local: &[LB::Expr; NUM_MAIN_COLS] = frame.main.current[..NUM_MAIN_COLS]
             .try_into()
             .expect("transcript eval lookup main row");

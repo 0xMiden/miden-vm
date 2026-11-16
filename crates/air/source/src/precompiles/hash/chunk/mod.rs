@@ -19,10 +19,10 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::native,
-    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, native as native_lookup},
+    air,
+    air::LiftedAirBuilder as _,
+    lookup::{self, Deg, LookupBatch, LookupColumn, LookupGroup},
 };
 use p3_field::Dup;
 
@@ -102,11 +102,11 @@ pub struct ChunkAir;
 // LIFTED AIR
 // ================================================================================================
 
-impl native::LiftedAir for ChunkAir {
+impl air::LiftedAir for ChunkAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: NUM_AUX_COLS,
             num_public_values: 0,
@@ -117,10 +117,10 @@ impl native::LiftedAir for ChunkAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         // Phase 1: local row constraints.
@@ -170,27 +170,27 @@ impl native::LiftedAir for ChunkAir {
         builder.assert_zero(is_head * (AB::Expr::ONE - act));
 
         // Phase 2: LogUp argument via the LogUp adapter.
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for ChunkAir {
-    type Error = native_lookup::LookupError;
+impl air::ProverAir<QuadFelt> for ChunkAir {
+    type Error = lookup::LookupError;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        native_lookup::build_logup_aux_trace(self, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
 // LOOKUP AIR
 // ================================================================================================
 
-impl<LB> native_lookup::LookupAir<LB> for ChunkAir
+impl<LB> lookup::LookupAir<LB> for ChunkAir
 where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -204,7 +204,7 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         let local = frame.main.current;
 
         let chunk_seq_id: LB::Expr = local[COL_CHUNK_SEQ_ID].dup();

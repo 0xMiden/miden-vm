@@ -45,7 +45,7 @@ fn io_index(block: usize, lane: usize, column: usize) -> usize {
 
 #[test]
 fn sha256_trace_meets_per_block_memory_budget() {
-    use miden_stark::air::native::{AuxTraceInputs, ProverAir};
+    use miden_stark::air::{AuxTraceInputs, ProverAir};
 
     let (compression, io) = requirements(&[55]);
     let main = generate_trace(compression, io, &mut BytePairLutRequires::new());

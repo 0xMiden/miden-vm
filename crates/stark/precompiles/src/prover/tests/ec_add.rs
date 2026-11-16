@@ -626,8 +626,8 @@ fn inactive_block_cannot_provide_ecgroupadd() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    assert_eq!(miden_stark::air::native::LiftedAir::spec(&EcGroupAddAir).main_width, 21);
-    assert_eq!(miden_stark::air::native::LiftedAir::spec(&EcGroupAddAir).aux_width, 8);
+    assert_eq!(miden_stark::air::LiftedAir::spec(&EcGroupAddAir).main_width, 21);
+    assert_eq!(miden_stark::air::LiftedAir::spec(&EcGroupAddAir).aux_width, 8);
     // Three selector groups and five pairs keep closing constraints at degree three. Dividing by
     // the trace vanishing polynomial leaves two quotient chunks, so log_quotient_degree = 1.
     assert_eq!(crate::prover::tests::log_quotient_degree(&EcGroupAddAir), 1);

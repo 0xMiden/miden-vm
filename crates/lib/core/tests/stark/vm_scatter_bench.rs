@@ -8,7 +8,7 @@ use miden_core::{
     crypto::hash::Eidos,
     field::{BasedVectorSpace, QuadFelt},
 };
-use miden_stark::air::native::AirKernel;
+use miden_stark::air::AirKernel;
 
 use super::vm_sigma_scatter::{heights_for_order, permutations};
 use crate::helpers::{read_memory_felt, stark_constant};

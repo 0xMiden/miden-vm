@@ -18,15 +18,15 @@
 
 use alloc::borrow::Cow;
 
+use air::LiftedAirBuilder as _;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_stark::{
-    air::native,
-    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, native as native_lookup},
+    air,
+    lookup::{self, Deg, LookupBatch, LookupColumn, LookupGroup},
 };
-use native::LiftedAirBuilder as _;
 use p3_field::Dup;
 
 use crate::precompiles::{
@@ -70,11 +70,11 @@ pub(crate) const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1];
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EcGroupsAir;
 
-impl native::LiftedAir for EcGroupsAir {
+impl air::LiftedAir for EcGroupsAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: AUX_WIDTH,
             num_public_values: 0,
@@ -85,32 +85,32 @@ impl native::LiftedAir for EcGroupsAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         eval_main(frame, builder, 0);
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for EcGroupsAir {
-    type Error = native_lookup::LookupError;
+impl air::ProverAir<QuadFelt> for EcGroupsAir {
+    type Error = lookup::LookupError;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        native_lookup::build_logup_aux_trace(self, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
 /// Evaluate this component's base constraints in a main-trace column band.
-pub(crate) fn eval_main<AB>(frame: &native::Frame<'_, AB>, builder: &mut AB, main_col_offset: usize)
+pub(crate) fn eval_main<AB>(frame: &air::Frame<'_, AB>, builder: &mut AB, main_col_offset: usize)
 where
-    AB: native::LiftedAirBuilder<F = Felt>,
+    AB: air::LiftedAirBuilder<F = Felt>,
 {
     let local: &[AB::Expr; NUM_MAIN_COLS] = frame.main.current
         [main_col_offset..main_col_offset + NUM_MAIN_COLS]
@@ -137,9 +137,9 @@ where
 // LOOKUP AIR
 // ================================================================================================
 
-impl<LB> native_lookup::LookupAir<LB> for EcGroupsAir
+impl<LB> lookup::LookupAir<LB> for EcGroupsAir
 where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -153,18 +153,18 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         eval_lookups(frame, builder, 0);
     }
 }
 
 /// Evaluate this component's LogUp columns in a main-trace column band.
 pub(crate) fn eval_lookups<LB>(
-    frame: &native_lookup::LookupFrame<'_, LB::Expr>,
+    frame: &lookup::LookupFrame<'_, LB::Expr>,
     builder: &mut LB,
     main_col_offset: usize,
 ) where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     let local: &[LB::Expr; NUM_MAIN_COLS] = frame.main.current
         [main_col_offset..main_col_offset + NUM_MAIN_COLS]

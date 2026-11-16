@@ -4,17 +4,17 @@ use std::borrow::Cow;
 
 use miden_core::{Felt, utils::RowMajorMatrix};
 use miden_crypto::field::PrimeCharacteristicRing;
-use miden_stark::air::native;
+use miden_stark::air;
 use p3_field::Dup;
 
 #[derive(Debug)]
 pub struct PreparationFixture(pub bool);
 
-impl native::LiftedAir for PreparationFixture {
+impl air::LiftedAir for PreparationFixture {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: 1,
             aux_width: 1,
             num_public_values: 0,
@@ -25,10 +25,10 @@ impl native::LiftedAir for PreparationFixture {
         }
     }
 
-    fn eval<B: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<B: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, B>,
-        inputs: native::Inputs<'_, B>,
+        frame: &air::Frame<'_, B>,
+        inputs: air::Inputs<'_, B>,
         sink: &mut B,
     ) {
         let main = frame.main.current[0].dup();
@@ -48,17 +48,17 @@ impl native::LiftedAir for PreparationFixture {
 /// It is not registered as a production AIR and has no concrete witness algorithm.
 pub struct NativeRendererFixture;
 
-impl native::LiftedAir for NativeRendererFixture {
+impl air::LiftedAir for NativeRendererFixture {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: 2,
             aux_width: 2,
             num_public_values: 1,
             num_challenges: 2,
             num_exports: 1,
-            preprocessed: Some(native::PreprocessedSpec { width: 1, log_height: 2 }),
+            preprocessed: Some(air::PreprocessedSpec { width: 1, log_height: 2 }),
             periodic_columns: Cow::Owned(vec![vec![Felt::ONE, Felt::TWO, Felt::ZERO, Felt::ONE]]),
         }
     }
@@ -67,13 +67,13 @@ impl native::LiftedAir for NativeRendererFixture {
         panic!("renderer code generation must not materialize fixed tables")
     }
 
-    fn eval<B: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<B: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, B>,
-        inputs: native::Inputs<'_, B>,
+        frame: &air::Frame<'_, B>,
+        inputs: air::Inputs<'_, B>,
         sink: &mut B,
     ) {
-        use native::LiftedAirBuilder as _;
+        use air::LiftedAirBuilder as _;
 
         let current = frame.main.current[0].dup();
         let next = frame.main.next[1].dup();

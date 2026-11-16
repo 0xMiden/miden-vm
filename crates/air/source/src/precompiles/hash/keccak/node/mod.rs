@@ -40,10 +40,10 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
 };
 use miden_precompiles::Keccak256Precompile;
-use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::native,
-    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, native as native_lookup},
+    air,
+    air::LiftedAirBuilder as _,
+    lookup::{self, Deg, LookupBatch, LookupColumn, LookupGroup},
 };
 use p3_field::Dup;
 
@@ -209,7 +209,7 @@ pub(crate) fn eval_chunk_count<AB>(
     n_chunks_inv: AB::Expr,
     remainder: AB::Expr,
 ) where
-    AB: native::LiftedAirBuilder<F = Felt>,
+    AB: air::LiftedAirBuilder<F = Felt>,
 {
     let is_empty =
         (n_chunks.clone() - AB::Expr::ONE) * Felt::from_u8(32) + remainder.clone() + AB::Expr::ONE
@@ -221,11 +221,11 @@ pub(crate) fn eval_chunk_count<AB>(
     builder.assert_zero(act * (n_chunks * n_chunks_inv - AB::Expr::ONE));
 }
 
-impl native::LiftedAir for KeccakNodeAir {
+impl air::LiftedAir for KeccakNodeAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: NUM_AUX_COLS,
             num_public_values: 0,
@@ -236,10 +236,10 @@ impl native::LiftedAir for KeccakNodeAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let local = frame.main.current;
@@ -314,18 +314,18 @@ impl native::LiftedAir for KeccakNodeAir {
         // for the matching shared-namespace argument.
 
         // Phase 2: LogUp argument via the LogUp adapter.
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for KeccakNodeAir {
-    type Error = native_lookup::LookupError;
+impl air::ProverAir<QuadFelt> for KeccakNodeAir {
+    type Error = lookup::LookupError;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        native_lookup::build_logup_aux_trace(self, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
@@ -359,9 +359,9 @@ pub(crate) fn sponge_perm_count_messages<E: Algebra<Felt>>(
     ]
 }
 
-impl<LB> native_lookup::LookupAir<LB> for KeccakNodeAir
+impl<LB> lookup::LookupAir<LB> for KeccakNodeAir
 where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -375,7 +375,7 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         let local = frame.main.current;
 
         let act: LB::Expr = local[COL_ACT].dup();

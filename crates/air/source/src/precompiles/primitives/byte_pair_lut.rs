@@ -36,13 +36,9 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_stark::{
-    air::native,
-    lookup::{
-        Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage,
-        native as native_lookup,
-    },
+    air,
+    lookup::{self, Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage},
 };
-
 use p3_field::Dup;
 
 use self::eidos::{Relation as EidosRelation, Rotation as EidosRotation};
@@ -269,9 +265,9 @@ pub struct BytePairLutAir;
 /// remaining columns are degree three.
 const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2];
 
-impl<LB> native_lookup::LookupAir<LB> for BytePairLutAir
+impl<LB> lookup::LookupAir<LB> for BytePairLutAir
 where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -285,7 +281,7 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         let preprocessed = frame.preprocessed.current;
         let main = frame.main.current;
 
@@ -393,16 +389,16 @@ where
 // PROVER
 // ================================================================================================
 
-impl native::LiftedAir for BytePairLutAir {
+impl air::LiftedAir for BytePairLutAir {
     type F = Felt;
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: NUM_AUX_COLS,
             num_public_values: 0,
             num_challenges: NUM_RANDOMNESS,
             num_exports: NUM_LOGUP_VALUES,
-            preprocessed: Some(native::PreprocessedSpec {
+            preprocessed: Some(air::PreprocessedSpec {
                 width: NUM_PREPROCESSED_COLS,
                 log_height: LOG_TRACE_HEIGHT,
             }),
@@ -412,23 +408,23 @@ impl native::LiftedAir for BytePairLutAir {
     fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
         Some(preprocessed_table())
     }
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for BytePairLutAir {
-    type Error = native_lookup::LookupError;
+impl air::ProverAir<QuadFelt> for BytePairLutAir {
+    type Error = lookup::LookupError;
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        native_lookup::build_logup_aux_trace(self, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
@@ -510,18 +506,18 @@ mod tests {
             NUM_MAIN_COLS,
         );
         let challenges = [QuadFelt::new([Felt::from_u32(7), Felt::ONE]), QuadFelt::from_u32(13)];
-        let inputs = native::AuxTraceInputs {
+        let inputs = air::AuxTraceInputs {
             main: &main,
             preprocessed: Some(&preprocessed),
             public_values: &[],
             statement: &[],
             challenges: &challenges,
         };
-        let borrowed = native::ProverAir::build_aux_trace(&air, inputs).unwrap();
+        let borrowed = air::ProverAir::build_aux_trace(&air, inputs).unwrap();
         let encoding =
             Challenges::new(challenges[0], challenges[1], MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
         let fractions =
-            native_lookup::build_lookup_fractions(&air, &main, Some(&preprocessed), &[], &encoding);
+            lookup::build_lookup_fractions(&air, &main, Some(&preprocessed), &[], &encoding);
         let (expected, sigma) = miden_stark::lookup::accumulate_slow(&fractions);
         let (rows, remainder) = borrowed.columns.values.as_chunks::<NUM_AUX_COLS>();
         assert!(remainder.is_empty());
@@ -531,7 +527,7 @@ mod tests {
             }
         }
         assert_eq!(borrowed.exports, [sigma]);
-        let dispatched = native::ProverAir::build_aux_trace(
+        let dispatched = air::ProverAir::build_aux_trace(
             &crate::precompiles::air::ChipletAir::BytePairLut,
             inputs,
         )
@@ -539,9 +535,9 @@ mod tests {
         assert_eq!(dispatched.columns.values, borrowed.columns.values);
         assert_eq!(dispatched.exports, borrowed.exports);
         assert!(
-            native::ProverAir::build_aux_trace(
+            air::ProverAir::build_aux_trace(
                 &crate::precompiles::air::ChipletAir::BytePairLut,
-                native::AuxTraceInputs { preprocessed: None, ..inputs }
+                air::AuxTraceInputs { preprocessed: None, ..inputs }
             )
             .is_err(),
             "chiplet dispatch must reach the borrowed hook's setup validation"

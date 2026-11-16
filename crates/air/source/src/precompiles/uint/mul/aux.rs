@@ -7,8 +7,8 @@ use miden_core::{
     utils::Matrix,
 };
 use miden_stark::{
-    air::native::{AuxTrace, AuxTraceInputs},
-    lookup::native::{LookupError, build_logup_aux_trace},
+    air::{AuxTrace, AuxTraceInputs},
+    lookup::{LookupError, build_logup_aux_trace},
 };
 
 use super::{

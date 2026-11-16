@@ -6,14 +6,14 @@ use miden_core::{
 };
 /// Numerical immutable input context for helpers with a separate native assertion sink.
 pub(in crate::vm::constraints) struct ConstraintEvalContext {
-    selectors: miden_stark::air::native::Selectors<Felt>,
+    selectors: miden_stark::air::Selectors<Felt>,
     periodic_values: Vec<Felt>,
 }
 
 impl ConstraintEvalContext {
     pub(in crate::vm::constraints) fn new() -> Self {
         Self {
-            selectors: miden_stark::air::native::Selectors {
+            selectors: miden_stark::air::Selectors {
                 first: Felt::ZERO,
                 last: Felt::ZERO,
                 transition: Felt::ONE,
@@ -28,7 +28,7 @@ impl ConstraintEvalContext {
         last: bool,
         transition: bool,
     ) -> Self {
-        self.selectors = miden_stark::air::native::Selectors {
+        self.selectors = miden_stark::air::Selectors {
             first: Felt::from_bool(first),
             last: Felt::from_bool(last),
             transition: Felt::from_bool(transition),
@@ -45,7 +45,7 @@ impl ConstraintEvalContext {
         &'a self,
         local: &'a super::columns::CoreCols<Felt>,
         next: &'a super::columns::CoreCols<Felt>,
-    ) -> miden_stark::air::native::AirFrame<'a, Felt, QuadFelt> {
+    ) -> miden_stark::air::AirFrame<'a, Felt, QuadFelt> {
         self.frame_rows(local.as_slice(), next.as_slice())
     }
 
@@ -53,8 +53,8 @@ impl ConstraintEvalContext {
         &'a self,
         local: &'a [Felt],
         next: &'a [Felt],
-    ) -> miden_stark::air::native::AirFrame<'a, Felt, QuadFelt> {
-        use miden_stark::air::native::{AirFrame, Rows};
+    ) -> miden_stark::air::AirFrame<'a, Felt, QuadFelt> {
+        use miden_stark::air::{AirFrame, Rows};
         AirFrame {
             main: Rows { current: local, next },
             preprocessed: Rows { current: &[], next: &[] },
@@ -71,16 +71,16 @@ pub(in crate::vm::constraints) struct NativeConstraintEvalBuilder {
     pub(in crate::vm::constraints) evaluations: Vec<QuadFelt>,
 }
 
-impl miden_stark::air::native::LiftedAirBuilder for NativeConstraintEvalBuilder {
+impl miden_stark::air::LiftedAirBuilder for NativeConstraintEvalBuilder {
     type F = Felt;
     type Expr = Felt;
     type ExtExpr = QuadFelt;
 
-    fn emit_base(&mut self, value: Felt, _: miden_stark::air::native::ConstraintMeta<'_>) {
+    fn emit_base(&mut self, value: Felt, _: miden_stark::air::ConstraintMeta<'_>) {
         self.evaluations.push(value.into());
     }
 
-    fn emit_ext(&mut self, value: QuadFelt, _: miden_stark::air::native::ConstraintMeta<'_>) {
+    fn emit_ext(&mut self, value: QuadFelt, _: miden_stark::air::ConstraintMeta<'_>) {
         self.evaluations.push(value);
     }
 }

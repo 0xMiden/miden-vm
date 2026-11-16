@@ -8,7 +8,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_stark::{air::native::LiftedAir, lookup::Challenges};
+use miden_stark::{air::LiftedAir, lookup::Challenges};
 
 use crate::prover::{
     hash::sha512::{

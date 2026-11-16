@@ -86,11 +86,8 @@ use thiserror::Error;
 use tracing::{info_span, instrument};
 
 use crate::{
-    StarkConfig,
-    air::{
-        MultiAir, ProverStatement, ReductionError, Statement, log2_strict_u8,
-        native::{self, AirKernel},
-    },
+    StarkConfig, air,
+    air::{AirKernel, MultiAir, ProverStatement, ReductionError, Statement, log2_strict_u8},
     domain::Coset,
     lmcs::Lmcs,
     pcs::prover::open_with_channel,
@@ -192,7 +189,7 @@ where
         challenger: SC::Challenger,
     ) -> Result<(StarkOutput<F, EF, SC>, Statement<F, EF, MA>), ProverError>
     where
-        MA::Air: native::ProverAir<EF> + native::LiftedAir<F = F>,
+        MA::Air: air::ProverAir<EF> + air::LiftedAir<F = F>,
         <MA::Air as AirKernel>::Prepared<F::Packing, EF::ExtensionPacking>: PackedPreparation,
     {
         prove(self, challenger)
@@ -274,7 +271,7 @@ where
     EF: ExtensionField<F>,
     SC: StarkConfig<F, EF>,
     MA: MultiAir<F, EF>,
-    MA::Air: native::ProverAir<EF> + native::LiftedAir<F = F>,
+    MA::Air: air::ProverAir<EF> + air::LiftedAir<F = F>,
     <MA::Air as AirKernel>::Prepared<F::Packing, EF::ExtensionPacking>: PackedPreparation,
 {
     let ProverInstance {
@@ -378,9 +375,9 @@ where
             .enumerate()
             .map(|(air_index, (air, main))| {
                 let spec = air.descriptor().spec();
-                let auxiliary = native::ProverAir::build_aux_trace(
+                let auxiliary = air::ProverAir::build_aux_trace(
                     air,
-                    native::AuxTraceInputs {
+                    air::AuxTraceInputs {
                         main,
                         preprocessed: preprocessed_traces
                             .and_then(|traces| traces[air_index].as_ref()),

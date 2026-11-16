@@ -10,11 +10,16 @@ use core::{borrow::Borrow, ops::Range};
 
 use miden_crypto::field::{ExtensionField, Field};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use thiserror::Error;
 
 use super::{
-    Challenges, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupFractions, LookupGroup,
-    LookupMessage,
+    Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupFractions,
+    LookupFrame, LookupGroup, LookupMessage,
+    aux_builder::{
+        ACCUMULATE_ROWS_PER_CHUNK, accumulate_fraction_chunk, write_centered_accumulator,
+    },
 };
+use crate::air::{AuxTrace, AuxTraceInputs, LiftedAir, SpecError};
 
 // PROVER LOOKUP BUILDER
 // ================================================================================================
@@ -69,7 +74,7 @@ where
 }
 
 /// Shared chunk scheduling and ordered concatenation, independent of declaration syntax.
-pub(super) fn collect_lookup_chunks<F, EF>(
+fn collect_lookup_chunks<F, EF>(
     shape: &[usize],
     num_rows: usize,
     process_chunk: impl Fn(Range<usize>) -> LookupFractions<F, EF> + Sync,
@@ -170,14 +175,14 @@ fn split_by_lengths_mut<T>(
 }
 
 /// Read cyclic row pairs and periodic values for native lookup collection.
-pub(super) fn build_lookup_fraction_chunk_with<F, EF>(
+fn build_lookup_fraction_chunk_with<F, EF>(
     main_trace: &RowMajorMatrix<F>,
     preprocessed_trace: Option<&RowMajorMatrix<F>>,
     periodic_columns: &[Vec<F>],
     challenges: &Challenges<EF>,
     shape: &[usize],
     rows: Range<usize>,
-    eval: impl Fn(&super::native::LookupFrame<'_, F>, &mut ProverLookupBuilder<'_, F, EF>),
+    eval: impl Fn(&super::LookupFrame<'_, F>, &mut ProverLookupBuilder<'_, F, EF>),
 ) -> LookupFractions<F, EF>
 where
     F: Field,
@@ -213,9 +218,9 @@ where
         for (i, col) in periodic_columns.iter().enumerate() {
             periodic_row[i] = col[r % col.len()];
         }
-        let frame = super::native::LookupFrame {
-            main: crate::air::native::Rows { current: curr, next },
-            preprocessed: crate::air::native::Rows {
+        let frame = super::LookupFrame {
+            main: crate::air::Rows { current: curr, next },
+            preprocessed: crate::air::Rows {
                 current: preprocessed_current,
                 next: preprocessed_next,
             },
@@ -494,8 +499,191 @@ where
     }
 }
 
-// TESTS
+// LOOKUP WITNESS CONSTRUCTION
 // ================================================================================================
+
+/// Recoverable source metadata and witness-input shape failures.
+/// Lookup denominators and the normalization divisor are assumed nonzero.
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+pub enum LookupError {
+    #[error(transparent)]
+    Spec(#[from] SpecError),
+    #[error("main trace width {actual} differs from declared width {expected}")]
+    MainWidth { expected: usize, actual: usize },
+    #[error("main trace must have positive, complete rows")]
+    MainShape,
+    #[error("preprocessed trace presence or shape differs from its declaration and main height")]
+    PreprocessedShape,
+    #[error("public input count {actual} differs from declared count {expected}")]
+    PublicValues { expected: usize, actual: usize },
+    #[error("challenge count {actual} differs from declared count {expected}, or is below two")]
+    Challenges { expected: usize, actual: usize },
+    #[error("a lookup must declare columns, message slots, bus IDs and at least one export")]
+    LookupShape,
+    #[error("auxiliary width {width} cannot hold {columns} lookup columns")]
+    AuxiliaryWidth { width: usize, columns: usize },
+    #[error("lookup witness storage overflows host indexing")]
+    Overflow,
+}
+
+/// Collect a complete trace through the native declaration surface.
+///
+/// This low-level collector retains the existing fraction layout and trusted shape contracts.
+/// It does no inversion. Witness construction should normally use [`build_logup_aux_trace`],
+/// which validates caller dimensions before constructing the witness.
+pub fn build_lookup_fractions<A, F, EF>(
+    air: &A,
+    main: &RowMajorMatrix<F>,
+    preprocessed: Option<&RowMajorMatrix<F>>,
+    periodic: &[Vec<F>],
+    challenges: &Challenges<EF>,
+) -> LookupFractions<F, EF>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    A: Sync,
+    for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
+{
+    collect_lookup_chunks(air.column_shape(), main.height(), |rows| {
+        collect_chunk(air, main, preprocessed, periodic, challenges, rows)
+    })
+}
+
+fn collect_chunk<A, F, EF>(
+    air: &A,
+    main: &RowMajorMatrix<F>,
+    preprocessed: Option<&RowMajorMatrix<F>>,
+    periodic: &[Vec<F>],
+    challenges: &Challenges<EF>,
+    rows: Range<usize>,
+) -> LookupFractions<F, EF>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
+{
+    build_lookup_fraction_chunk_with(
+        main,
+        preprocessed,
+        periodic,
+        challenges,
+        air.column_shape(),
+        rows,
+        |frame: &LookupFrame<'_, F>, builder| air.eval(frame, builder),
+    )
+}
+
+/// Build the normalized cyclic LogUp witness without rebuilding any fixed matrices.
+///
+/// Columns occupy the declared lookup prefix. The returned matrix has the source's full auxiliary
+/// width with any suffix zero-initialized; the source witness fills its own additional registers.
+/// Exactly one export, `sigma / height`, is initialized here. A source with further exports must
+/// append them in its own declared order before returning its complete `ProverAir` result.
+///
+/// Chunk collection, inversion and centering share the prover callback arithmetic.
+/// All active lookup denominators and the trace-length divisor are assumed nonzero.
+pub fn build_logup_aux_trace<A, F, EF>(
+    air: &A,
+    inputs: AuxTraceInputs<'_, F, EF>,
+) -> Result<AuxTrace<EF>, LookupError>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    A: LiftedAir<F = F>,
+    for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
+{
+    let spec = air.spec();
+    spec.validate()?;
+    if inputs.main.width() != spec.main_width {
+        return Err(LookupError::MainWidth {
+            expected: spec.main_width,
+            actual: inputs.main.width(),
+        });
+    }
+    if !inputs.main.values.len().is_multiple_of(spec.main_width) || inputs.main.values.is_empty() {
+        return Err(LookupError::MainShape);
+    }
+    let height = inputs.main.height();
+    match (spec.preprocessed, inputs.preprocessed) {
+        (None, None) => {},
+        (Some(shape), Some(matrix))
+            if matrix.width() == shape.width
+                && matrix.values.len() == shape.width * (1usize << shape.log_height)
+                && matrix.height() == height => {},
+        _ => return Err(LookupError::PreprocessedShape),
+    }
+    if inputs.public_values.len() != spec.num_public_values {
+        return Err(LookupError::PublicValues {
+            expected: spec.num_public_values,
+            actual: inputs.public_values.len(),
+        });
+    }
+    if inputs.challenges.len() != spec.num_challenges || inputs.challenges.len() < 2 {
+        return Err(LookupError::Challenges {
+            expected: spec.num_challenges,
+            actual: inputs.challenges.len(),
+        });
+    }
+    let shape = air.column_shape();
+    let columns = shape.len();
+    if columns == 0
+        || air.max_message_width() == 0
+        || air.num_bus_ids() == 0
+        || air.num_bus_ids() > u32::MAX as usize
+        || spec.num_exports == 0
+    {
+        return Err(LookupError::LookupShape);
+    }
+    if spec.aux_width < columns {
+        return Err(LookupError::AuxiliaryWidth { width: spec.aux_width, columns });
+    }
+    // Collection reserves height*sum(shape) fractions and height*columns count slots.
+    shape
+        .iter()
+        .try_fold(0usize, |sum, &count| sum.checked_add(count))
+        .and_then(|sum| sum.checked_mul(height))
+        .ok_or(LookupError::Overflow)?;
+    let cells = height.checked_mul(spec.aux_width).ok_or(LookupError::Overflow)?;
+    let rows_per_chunk = ACCUMULATE_ROWS_PER_CHUNK.min(height);
+    let challenges = Challenges::new(
+        inputs.challenges[0],
+        inputs.challenges[1],
+        air.max_message_width(),
+        air.num_bus_ids(),
+    );
+    let mut output = EF::zero_vec(cells);
+    let mut row_totals = EF::zero_vec(height);
+
+    use miden_crypto::parallel::*;
+    output
+        .par_chunks_mut(rows_per_chunk * spec.aux_width)
+        .zip(row_totals.par_chunks_mut(rows_per_chunk))
+        .enumerate()
+        .for_each(|(chunk_index, (out, totals))| {
+            let row_lo = chunk_index * rows_per_chunk;
+            let chunk = collect_chunk(
+                air,
+                inputs.main,
+                inputs.preprocessed,
+                &spec.periodic_columns,
+                &challenges,
+                row_lo..row_lo + totals.len(),
+            );
+            accumulate_fraction_chunk(
+                chunk.fractions(),
+                chunk.counts(),
+                columns,
+                spec.aux_width,
+                out,
+                totals,
+            );
+        });
+    let mean = write_centered_accumulator(&row_totals, &mut output, spec.aux_width);
+    Ok(AuxTrace {
+        columns: RowMajorMatrix::new(output, spec.aux_width),
+        exports: vec![mean],
+    })
+}
 
 #[cfg(test)]
 mod tests {
@@ -511,8 +699,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        air::native,
-        lookup::{Deg, accumulate_slow, message::LookupMessage, native as native_lookup},
+        air, lookup,
+        lookup::{Deg, accumulate_slow, message::LookupMessage},
     };
 
     type QuadFelt = BinomialExtensionField<Felt, 2>;
@@ -539,9 +727,9 @@ mod tests {
 
     const SMOKE_SHAPE: [usize; 2] = [2, 1];
 
-    impl<LB> native_lookup::LookupAir<LB> for SmokeAir
+    impl<LB> lookup::LookupAir<LB> for SmokeAir
     where
-        LB: native_lookup::LookupBuilder<F = Felt, Expr = Felt, ExprEF = QuadFelt>,
+        LB: lookup::LookupBuilder<F = Felt, Expr = Felt, ExprEF = QuadFelt>,
     {
         fn column_shape(&self) -> &[usize] {
             &SMOKE_SHAPE
@@ -552,7 +740,7 @@ mod tests {
         fn num_bus_ids(&self) -> usize {
             1
         }
-        fn eval(&self, _frame: &native_lookup::LookupFrame<'_, Felt>, builder: &mut LB) {
+        fn eval(&self, _frame: &lookup::LookupFrame<'_, Felt>, builder: &mut LB) {
             builder.next_column(
                 |col| {
                     col.group(
@@ -624,7 +812,7 @@ mod tests {
         // SmokeAir reads no frame fields. One unread zero column represents the same eight
         // inert rows for the native collector; a zero-width matrix cannot carry a row count.
         let main = RowMajorMatrix::new(vec![Felt::ZERO; NUM_ROWS], 1);
-        let fractions = native_lookup::build_lookup_fractions(&air, &main, None, &[], &challenges);
+        let fractions = lookup::build_lookup_fractions(&air, &main, None, &[], &challenges);
 
         // Two columns, counts buffer has num_rows * num_cols entries.
         assert_eq!(fractions.num_columns(), 2);
@@ -678,9 +866,9 @@ mod tests {
 
     const ROW_TAGGED_SHAPE: [usize; 1] = [1];
 
-    impl<LB> native_lookup::LookupAir<LB> for RowTaggedAir
+    impl<LB> lookup::LookupAir<LB> for RowTaggedAir
     where
-        LB: native_lookup::LookupBuilder<F = Felt, Expr = Felt, ExprEF = QuadFelt>,
+        LB: lookup::LookupBuilder<F = Felt, Expr = Felt, ExprEF = QuadFelt>,
     {
         fn column_shape(&self) -> &[usize] {
             &ROW_TAGGED_SHAPE
@@ -694,7 +882,7 @@ mod tests {
             1
         }
 
-        fn eval(&self, frame: &native_lookup::LookupFrame<'_, Felt>, builder: &mut LB) {
+        fn eval(&self, frame: &lookup::LookupFrame<'_, Felt>, builder: &mut LB) {
             let row_tag = frame.main.current[0];
             let active = frame.main.current[1];
             builder.next_column(
@@ -741,9 +929,9 @@ mod tests {
         }
     }
 
-    impl<F: Field, LB> crate::lookup::native::LookupAir<LB> for WindowAir<F>
+    impl<F: Field, LB> crate::lookup::LookupAir<LB> for WindowAir<F>
     where
-        LB: crate::lookup::native::LookupBuilder<F = F>,
+        LB: crate::lookup::LookupBuilder<F = F>,
     {
         fn column_shape(&self) -> &[usize] {
             &[1]
@@ -757,7 +945,7 @@ mod tests {
             1
         }
 
-        fn eval(&self, frame: &crate::lookup::native::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        fn eval(&self, frame: &crate::lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
             let value =
                 frame.main.current[0].dup() + frame.main.next[0].double() + frame.periodic[0].dup();
             let encoded_value = value.dup();
@@ -803,11 +991,11 @@ mod tests {
         }
     }
 
-    impl<F: Field> native::LiftedAir for WindowAir<F> {
+    impl<F: Field> air::LiftedAir for WindowAir<F> {
         type F = F;
 
-        fn spec(&self) -> native::AirSpec<'_, F> {
-            native::AirSpec {
+        fn spec(&self) -> air::AirSpec<'_, F> {
+            air::AirSpec {
                 main_width: 1,
                 aux_width: 1,
                 num_public_values: 0,
@@ -818,24 +1006,24 @@ mod tests {
             }
         }
 
-        fn eval<AB: native::LiftedAirBuilder<F = F>>(
+        fn eval<AB: air::LiftedAirBuilder<F = F>>(
             &self,
-            frame: &native::Frame<'_, AB>,
-            inputs: native::Inputs<'_, AB>,
+            frame: &air::Frame<'_, AB>,
+            inputs: air::Inputs<'_, AB>,
             builder: &mut AB,
         ) {
-            crate::lookup::native::eval_lookup(self, frame, inputs, builder);
+            crate::lookup::eval_lookup(self, frame, inputs, builder);
         }
     }
 
-    impl<F: Field, EF: ExtensionField<F>> native::ProverAir<EF> for WindowAir<F> {
-        type Error = crate::lookup::native::LookupError;
+    impl<F: Field, EF: ExtensionField<F>> air::ProverAir<EF> for WindowAir<F> {
+        type Error = crate::lookup::LookupError;
 
         fn build_aux_trace(
             &self,
-            inputs: native::AuxTraceInputs<'_, F, EF>,
-        ) -> Result<native::AuxTrace<EF>, Self::Error> {
-            crate::lookup::native::build_logup_aux_trace(self, inputs)
+            inputs: air::AuxTraceInputs<'_, F, EF>,
+        ) -> Result<air::AuxTrace<EF>, Self::Error> {
+            crate::lookup::build_logup_aux_trace(self, inputs)
         }
     }
 
@@ -852,7 +1040,7 @@ mod tests {
         let air = WindowAir::<TestFelt>::new();
         let trace = RowMajorMatrix::new(vec![TestFelt::ONE; 8], 1);
         let statement = Statement::new(
-            TestMultiAir::new(vec![native::DirectKernel::new(air.clone()).unwrap()]),
+            TestMultiAir::new(vec![air::DirectKernel::new(air.clone()).unwrap()]),
             vec![],
             vec![],
         )
@@ -860,7 +1048,7 @@ mod tests {
         let statement = ProverStatement::new(statement, vec![trace.clone()]).unwrap();
         crate::check_constraints(&statement, None, test_challenger());
         // Exercise the same authored source through checked capture and both proof folders.
-        let _degree = native::capture_with::<_, TestQuadFelt>(&air)
+        let _degree = air::capture_with::<_, TestQuadFelt>(&air)
             .unwrap()
             .descriptor
             .analysis()
@@ -870,24 +1058,24 @@ mod tests {
         #[cfg(feature = "std")]
         crate::lookup::debug::validation::validate_native(
             &WindowAir::<Felt>::new(),
-            &native::LiftedAir::spec(&WindowAir::<Felt>::new()),
+            &air::LiftedAir::spec(&WindowAir::<Felt>::new()),
         )
         .unwrap();
     }
 
     fn native_window_direct_pilot<F: Field, EF: ExtensionField<F>>() {
-        use native::AirKernel;
+        use crate::air::AirKernel;
 
         let source = WindowAir::<F>::new();
-        let expected = native::capture_with::<_, EF>(&source).unwrap();
+        let expected = air::capture_with::<_, EF>(&source).unwrap();
         assert!(expected.descriptor.analysis().layout().base_indices().is_empty());
         assert_eq!(expected.descriptor.analysis().layout().ext_indices(), &[0, 1]);
-        let kernel = native::DirectKernel::new(source).unwrap();
+        let kernel = air::DirectKernel::new(source).unwrap();
         let main = RowMajorMatrix::new(vec![F::ONE; 8], 1);
         let challenges = [EF::from_u32(7), EF::from_u32(13)];
-        let auxiliary = native::ProverAir::build_aux_trace(
+        let auxiliary = air::ProverAir::build_aux_trace(
             &kernel,
-            native::AuxTraceInputs {
+            air::AuxTraceInputs {
                 main: &main,
                 preprocessed: None,
                 public_values: &[],
@@ -906,9 +1094,9 @@ mod tests {
         };
         let mean = (fraction(3) + fraction(4)) * EF::from_u32(2).inverse();
         assert_eq!(auxiliary.exports, vec![mean]);
-        assert!(native::LiftedAir::build_preprocessed_trace(&kernel).is_none());
+        assert!(air::LiftedAir::build_preprocessed_trace(&kernel).is_none());
 
-        let observed = native::capture_from_spec::<F, EF>(
+        let observed = air::capture_from_spec::<F, EF>(
             kernel.descriptor().spec().as_borrowed(),
             |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
         )
@@ -929,8 +1117,8 @@ mod tests {
         {
             // The validator intentionally supports the production Felt/QuadFelt pair only.
             let source = WindowAir::<Felt>::new();
-            let spec = native::LiftedAir::spec(&source);
-            crate::lookup::native::validate_native(&source, &spec)
+            let spec = air::LiftedAir::spec(&source);
+            crate::lookup::validate_native(&source, &spec)
                 .expect("native canonical and encoded window descriptions agree");
         }
     }
@@ -948,7 +1136,7 @@ mod tests {
         // Start inside the trace and include the last-to-first edge.
         let rows = period / 2 - 1..num_rows;
         let air = WindowAir::<Felt>::new();
-        let shape = <WindowAir<Felt> as native_lookup::LookupAir<
+        let shape = <WindowAir<Felt> as lookup::LookupAir<
             ProverLookupBuilder<'_, Felt, QuadFelt>,
         >>::column_shape(&air);
         let actual = build_lookup_fraction_chunk_with(
@@ -958,7 +1146,7 @@ mod tests {
             &challenges,
             shape,
             rows.clone(),
-            |frame, builder| native_lookup::LookupAir::eval(&air, frame, builder),
+            |frame, builder| lookup::LookupAir::eval(&air, frame, builder),
         );
         let expected: Vec<_> = rows
             .map(|row| {
@@ -997,7 +1185,7 @@ mod tests {
         );
 
         let fractions =
-            native_lookup::build_lookup_fractions(&RowTaggedAir, &trace, None, &[], &challenges);
+            lookup::build_lookup_fractions(&RowTaggedAir, &trace, None, &[], &challenges);
 
         assert_eq!(fractions.counts(), expected_counts);
         assert_eq!(fractions.fractions().len(), expected_tags.len());
@@ -1007,5 +1195,201 @@ mod tests {
             assert_eq!(multiplicity, Felt::ONE);
             assert_eq!(denominator, SmokeMsg { value: row_tag }.encode(&challenges));
         }
+    }
+}
+
+#[cfg(test)]
+mod witness_tests {
+    use alloc::borrow::Cow;
+
+    use miden_core::{Felt, field::QuadFelt};
+    use p3_field::{Algebra, Dup, PrimeCharacteristicRing};
+
+    use super::*;
+    use crate::{
+        air::{AirSpec, Frame, Inputs, LiftedAirBuilder, ProverAir},
+        lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage},
+    };
+
+    #[derive(Debug)]
+    struct RowMessage<E>(E);
+
+    impl<E: PrimeCharacteristicRing, EE: Algebra<E>> LookupMessage<E, EE> for RowMessage<E> {
+        fn encode(&self, challenges: &Challenges<EE>) -> EE {
+            challenges.bus_prefix[0].dup() + challenges.beta_powers[0].dup() * self.0.dup()
+        }
+    }
+
+    struct Fixture {
+        active: bool,
+        aux_width: usize,
+        periodic: Vec<Vec<Felt>>,
+    }
+
+    impl Fixture {
+        fn new(active: bool) -> Self {
+            Self {
+                active,
+                aux_width: 3,
+                periodic: vec![vec![Felt::ZERO; 2]],
+            }
+        }
+    }
+
+    impl<LB: super::super::LookupBuilder<F = Felt>> LookupAir<LB> for Fixture {
+        fn column_shape(&self) -> &[usize] {
+            &[1, 2]
+        }
+        fn max_message_width(&self) -> usize {
+            1
+        }
+        fn num_bus_ids(&self) -> usize {
+            1
+        }
+
+        fn eval(&self, frame: &LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+            let value = frame.main.current[0].dup() + frame.periodic[0].dup();
+            let flag = if self.active { LB::Expr::ONE } else { LB::Expr::ZERO };
+            let single = if self.active {
+                Deg { v: 0, u: 1 }
+            } else {
+                Deg { v: 0, u: 0 }
+            };
+            builder.next_column(
+                |column| {
+                    column.group(
+                        "one",
+                        |group| {
+                            group.add("row", flag.dup(), || RowMessage(value.dup()), single);
+                        },
+                        single,
+                    );
+                },
+                single,
+            );
+            let batch = if self.active {
+                Deg { v: 1, u: 2 }
+            } else {
+                Deg { v: 0, u: 0 }
+            };
+            builder.next_column(
+                |column| {
+                    column.group(
+                        "two",
+                        |group| {
+                            group.batch(
+                                "pair",
+                                flag,
+                                |batch| {
+                                    batch.add(
+                                        "first",
+                                        RowMessage(value.dup() + LB::Expr::ONE),
+                                        Deg { v: 0, u: 1 },
+                                    );
+                                    batch.add(
+                                        "second",
+                                        RowMessage(value + LB::Expr::TWO),
+                                        Deg { v: 0, u: 1 },
+                                    );
+                                },
+                                batch,
+                            );
+                        },
+                        batch,
+                    );
+                },
+                batch,
+            );
+        }
+    }
+
+    impl LiftedAir for Fixture {
+        type F = Felt;
+
+        fn spec(&self) -> AirSpec<'_, Felt> {
+            AirSpec {
+                main_width: 1,
+                aux_width: self.aux_width,
+                num_public_values: 0,
+                num_challenges: 2,
+                num_exports: 1,
+                preprocessed: None,
+                periodic_columns: Cow::Borrowed(&self.periodic),
+            }
+        }
+
+        fn eval<B: LiftedAirBuilder<F = Felt>>(
+            &self,
+            frame: &Frame<'_, B>,
+            inputs: Inputs<'_, B>,
+            sink: &mut B,
+        ) {
+            super::super::eval_lookup(self, frame, inputs, sink);
+        }
+    }
+
+    impl ProverAir<QuadFelt> for Fixture {
+        type Error = LookupError;
+        fn build_aux_trace(
+            &self,
+            inputs: AuxTraceInputs<'_, Felt, QuadFelt>,
+        ) -> Result<AuxTrace<QuadFelt>, LookupError> {
+            build_logup_aux_trace(self, inputs)
+        }
+    }
+
+    fn inputs<'a>(
+        main: &'a RowMajorMatrix<Felt>,
+        challenges: &'a [QuadFelt],
+    ) -> AuxTraceInputs<'a, Felt, QuadFelt> {
+        AuxTraceInputs {
+            main,
+            preprocessed: None,
+            public_values: &[],
+            statement: &[],
+            challenges,
+        }
+    }
+
+    #[test]
+    fn native_witness_matches_independent_slow_accumulation_and_preserves_suffix() {
+        let source = Fixture::new(true);
+        let main = RowMajorMatrix::new((0..1025).map(Felt::from_usize).collect(), 1);
+        let values = [QuadFelt::from_u64(7), QuadFelt::ZERO];
+        let witness = source.build_aux_trace(inputs(&main, &values)).unwrap();
+        let challenges = Challenges::new(values[0], values[1], 1, 1);
+        let fractions = build_lookup_fractions(&source, &main, None, &source.periodic, &challenges);
+        let (expected, mean) = crate::lookup::accumulate_slow(&fractions);
+        assert_eq!(witness.exports, vec![mean]);
+        assert_eq!(witness.columns.width(), 3);
+        assert_eq!(witness.columns.height(), main.height());
+        let (rows, remainder) = witness.columns.values.as_chunks::<3>();
+        assert!(remainder.is_empty());
+        for ((&accumulator, &fraction), row) in expected[0].iter().zip(&expected[1]).zip(rows) {
+            assert_eq!(row[0], accumulator);
+            assert_eq!(row[1], fraction);
+            assert_eq!(row[2], QuadFelt::ZERO);
+        }
+        let _captured = crate::air::capture(&source).unwrap();
+    }
+
+    #[test]
+    fn inactive_interactions_and_invalid_trace_shapes() {
+        let source = Fixture::new(false);
+        let main = RowMajorMatrix::new(vec![Felt::ONE; 4], 1);
+        let values = [QuadFelt::from_u64(7), QuadFelt::ZERO];
+        let witness = source.build_aux_trace(inputs(&main, &values)).unwrap();
+        assert!(witness.columns.values.iter().all(Field::is_zero));
+        assert_eq!(witness.exports, vec![QuadFelt::ZERO]);
+        let undersized = Fixture { aux_width: 1, ..Fixture::new(false) };
+        assert_eq!(
+            undersized.build_aux_trace(inputs(&main, &values)).unwrap_err(),
+            LookupError::AuxiliaryWidth { width: 1, columns: 2 }
+        );
+        let empty = RowMajorMatrix::new(vec![], 1);
+        assert_eq!(
+            source.build_aux_trace(inputs(&empty, &values)).unwrap_err(),
+            LookupError::MainShape
+        );
     }
 }

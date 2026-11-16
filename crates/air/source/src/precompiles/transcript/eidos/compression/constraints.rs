@@ -1,7 +1,7 @@
 //! PVM interface constraints around the shared 32-row Eidos compression core.
 
 use miden_core::Felt;
-use miden_stark::air::native::{Frame, LiftedAirBuilder};
+use miden_stark::air::{Frame, LiftedAirBuilder};
 use p3_field::Dup;
 
 use super::layout::footer_digest_col;

@@ -7,7 +7,7 @@
 //! - emit a circuit that matches verifier evaluation.
 
 use miden_core::{Felt, field::QuadFelt};
-use miden_stark::air::native;
+use miden_stark::air;
 
 use crate::{
     AceError, EXT_DEGREE,
@@ -63,7 +63,7 @@ pub fn build_ace_circuit_for_air<A>(
     config: AceConfig,
 ) -> Result<AceCircuit<QuadFelt>, AceError>
 where
-    A: native::LiftedAir<F = Felt>,
+    A: air::LiftedAir<F = Felt>,
 {
     let artifacts = build_ace_dag_for_air(air, config)?;
     emit_circuit(&artifacts.dag, artifacts.layout)
@@ -77,7 +77,7 @@ pub fn build_ace_dag_for_air<A>(
     config: AceConfig,
 ) -> Result<AceArtifacts<QuadFelt>, AceError>
 where
-    A: native::LiftedAir<F = Felt>,
+    A: air::LiftedAir<F = Felt>,
 {
     let air = CapturedAir::new_native(air)?;
     let shared_period = air.max_periodic_length.max(1);
@@ -191,7 +191,7 @@ pub fn build_canonical_multi_air_ace_circuit<A>(
     trace_width_alignment: usize,
 ) -> Result<AceCircuit<QuadFelt>, AceError>
 where
-    A: native::LiftedAir<F = Felt>,
+    A: air::LiftedAir<F = Felt>,
 {
     let captured = airs.iter().map(CapturedAir::new_native).collect::<Result<Vec<_>, _>>()?;
     let captured = captured.iter().collect::<Vec<_>>();

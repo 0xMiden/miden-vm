@@ -12,8 +12,8 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_stark::{
-    air::native::{ConstraintDegrees, LiftedAir},
-    lookup::{LookupFractions, native::build_lookup_fractions},
+    air::{ConstraintDegrees, LiftedAir},
+    lookup::{LookupFractions, build_lookup_fractions},
 };
 use proptest::prelude::*;
 
@@ -225,11 +225,8 @@ fn keccak_round_shape_and_degree_match_design() {
     assert_eq!(crate::prover::tests::raw_degrees(&air), ConstraintDegrees { base: 2, ext: 5 });
     assert_eq!(crate::prover::tests::log_quotient_degree(&air), 2);
 
-    miden_stark::lookup::native::validate_native(
-        &air,
-        &miden_stark::air::native::LiftedAir::spec(&air),
-    )
-    .unwrap_or_else(|err| panic!("KeccakRoundAir lookup validation failed: {err}"));
+    miden_stark::lookup::validate_native(&air, &miden_stark::air::LiftedAir::spec(&air))
+        .unwrap_or_else(|err| panic!("KeccakRoundAir lookup validation failed: {err}"));
 }
 
 #[test]

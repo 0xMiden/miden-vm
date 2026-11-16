@@ -2,8 +2,8 @@
 
 use miden_core::{Felt, field::ExtensionField, utils::RowMajorMatrix};
 use miden_stark::{
-    air::{ReductionError, native},
-    lookup::{BoundaryBuilder, Challenges, native as native_lookup},
+    air::{self, ReductionError},
+    lookup::{self, BoundaryBuilder, Challenges},
 };
 
 use crate::vm::{
@@ -28,8 +28,8 @@ pub use eidos_compression::EidosCompressionAir;
 // ================================================================================================
 
 /// Assertion sink over Miden expressions for helpers with separate immutable inputs.
-pub trait NativeMidenAirBuilder: miden_stark::air::native::LiftedAirBuilder<F = Felt> {}
-impl<T: miden_stark::air::native::LiftedAirBuilder<F = Felt>> NativeMidenAirBuilder for T {}
+pub trait NativeMidenAirBuilder: miden_stark::air::LiftedAirBuilder<F = Felt> {}
+impl<T: miden_stark::air::LiftedAirBuilder<F = Felt>> NativeMidenAirBuilder for T {}
 
 // MIDEN AIR
 // ================================================================================================
@@ -70,60 +70,57 @@ macro_rules! with_source {
     };
 }
 
-impl native::LiftedAir for MidenAir {
+impl air::LiftedAir for MidenAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        with_source!(self, |air| native::LiftedAir::spec(air))
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        with_source!(self, |air| air::LiftedAir::spec(air))
     }
 
     fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
-        with_source!(self, |air| native::LiftedAir::build_preprocessed_trace(air))
+        with_source!(self, |air| air::LiftedAir::build_preprocessed_trace(air))
     }
 
-    fn eval<B: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<B: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, B>,
-        inputs: native::Inputs<'_, B>,
+        frame: &air::Frame<'_, B>,
+        inputs: air::Inputs<'_, B>,
         sink: &mut B,
     ) {
-        with_source!(self, |air| native::LiftedAir::eval(air, frame, inputs, sink));
+        with_source!(self, |air| air::LiftedAir::eval(air, frame, inputs, sink));
     }
 }
 
-impl<EF: ExtensionField<Felt>> native::ProverAir<EF> for MidenAir {
+impl<EF: ExtensionField<Felt>> air::ProverAir<EF> for MidenAir {
     type Error = crate::shared::WitnessError;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, EF>,
-    ) -> Result<native::AuxTrace<EF>, Self::Error> {
-        with_source!(self, |air| native::ProverAir::build_aux_trace(air, inputs)
-            .map_err(Into::into))
+        inputs: air::AuxTraceInputs<'_, Felt, EF>,
+    ) -> Result<air::AuxTrace<EF>, Self::Error> {
+        with_source!(self, |air| air::ProverAir::build_aux_trace(air, inputs).map_err(Into::into))
     }
 }
 
-impl<LB: NativeMainLookupBuilder + NativeChipletLookupBuilder> native_lookup::LookupAir<LB>
-    for MidenAir
-{
+impl<LB: NativeMainLookupBuilder + NativeChipletLookupBuilder> lookup::LookupAir<LB> for MidenAir {
     fn column_shape(&self) -> &[usize] {
-        with_source!(self, |air| native_lookup::LookupAir::<LB>::column_shape(air))
+        with_source!(self, |air| lookup::LookupAir::<LB>::column_shape(air))
     }
 
     fn max_message_width(&self) -> usize {
-        with_source!(self, |air| native_lookup::LookupAir::<LB>::max_message_width(air))
+        with_source!(self, |air| lookup::LookupAir::<LB>::max_message_width(air))
     }
 
     fn num_bus_ids(&self) -> usize {
-        with_source!(self, |air| native_lookup::LookupAir::<LB>::num_bus_ids(air))
+        with_source!(self, |air| lookup::LookupAir::<LB>::num_bus_ids(air))
     }
 
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
-        with_source!(self, |air| native_lookup::LookupAir::<LB>::eval(air, frame, builder));
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        with_source!(self, |air| lookup::LookupAir::<LB>::eval(air, frame, builder));
     }
 
     fn eval_boundary<B: BoundaryBuilder<F = Felt>>(&self, boundary: &mut B) {
-        with_source!(self, |air| native_lookup::LookupAir::<LB>::eval_boundary(air, boundary));
+        with_source!(self, |air| lookup::LookupAir::<LB>::eval_boundary(air, boundary));
     }
 }
 

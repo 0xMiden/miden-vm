@@ -32,7 +32,7 @@ Proving additionally requires authored `LiftedAir` and `ProverAir<EF>` capabilit
 `ProverAir::build_aux_trace` receives borrowed main/setup matrices, public and statement
 inputs, and its challenge prefix; its `Result` contains owned auxiliary columns and ordered
 exports. A kernel session borrows uniform inputs and prepares state once per evaluation pass.
-See [native AIR and setup ownership](../../README.md#native-air-api).
+See [AIR and setup ownership](../../README.md#air-api).
 
 A `Statement` wraps a `MultiAir` with per-AIR `air_inputs` and optional `aux_inputs`.
 `Statement::new` accepts `(AIR instance index, public inputs)` entries, validates each

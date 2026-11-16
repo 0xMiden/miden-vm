@@ -5,10 +5,9 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::Matrix,
 };
-
 use miden_stark::{
-    air::native::{AuxTrace, AuxTraceInputs},
-    lookup::native::LookupError,
+    air::{AuxTrace, AuxTraceInputs},
+    lookup::LookupError,
 };
 
 use super::{
@@ -26,7 +25,7 @@ pub(crate) fn build_aux(
 ) -> Result<AuxTrace<QuadFelt>, LookupError> {
     let main = inputs.main;
     let challenges = inputs.challenges;
-    let witness = miden_stark::lookup::native::build_logup_aux_trace(&UintStoreMulAir, inputs)?;
+    let witness = miden_stark::lookup::build_logup_aux_trace(&UintStoreMulAir, inputs)?;
     let mut aux = witness.columns;
     let sigma = witness.exports;
     assert_eq!(aux.width(), AUX_WIDTH);

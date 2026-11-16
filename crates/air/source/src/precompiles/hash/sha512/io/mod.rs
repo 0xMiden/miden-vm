@@ -17,10 +17,10 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
 };
 use miden_precompiles::Sha512Precompile;
-use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::native,
-    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, native as native_lookup},
+    air,
+    air::LiftedAirBuilder as _,
+    lookup::{self, Deg, LookupBatch, LookupColumn, LookupGroup},
 };
 use miden_utils_sync::LazyLock;
 use p3_field::Dup;
@@ -89,11 +89,11 @@ pub struct Sha512IoAir;
 
 static PERIODIC_COLUMNS: LazyLock<[Vec<Felt>; NUM_PERIODIC_COLS]> = LazyLock::new(io_program);
 
-impl native::LiftedAir for Sha512IoAir {
+impl air::LiftedAir for Sha512IoAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: NUM_AUX_COLS,
             num_public_values: 0,
@@ -104,25 +104,25 @@ impl native::LiftedAir for Sha512IoAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         eval_main(frame, builder, 0, 0);
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for Sha512IoAir {
-    type Error = native_lookup::LookupError;
+impl air::ProverAir<QuadFelt> for Sha512IoAir {
+    type Error = lookup::LookupError;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        native_lookup::build_logup_aux_trace(self, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
@@ -130,8 +130,8 @@ impl native::ProverAir<QuadFelt> for Sha512IoAir {
 /// Active rows form whole sixty-four-row blocks. Invocation boundaries reset the message counters;
 /// all other block boundaries continue them. The composite AIR enforces these same boundaries
 /// using its compression controller and continuation lookup instead of adjacent IO blocks.
-pub fn eval_main<AB: native::LiftedAirBuilder<F = Felt>>(
-    frame: &native::Frame<'_, AB>,
+pub fn eval_main<AB: air::LiftedAirBuilder<F = Felt>>(
+    frame: &air::Frame<'_, AB>,
     builder: &mut AB,
     main_col_offset: usize,
     periodic_col_offset: usize,
@@ -198,8 +198,8 @@ pub fn eval_main<AB: native::LiftedAirBuilder<F = Felt>>(
 /// In the standalone AIR, `owned = 1` even on inactive IO padding rows. In the composite AIR,
 /// `owned = act`, and `act` is zero outside the IO window. Only `carry`-gated equations transport
 /// invocation state across a block boundary; the other transitions stop at their row/chunk limits.
-pub(super) fn eval_main_rows<AB: native::LiftedAirBuilder<F = Felt>>(
-    frame: &native::Frame<'_, AB>,
+pub(super) fn eval_main_rows<AB: air::LiftedAirBuilder<F = Felt>>(
+    frame: &air::Frame<'_, AB>,
     builder: &mut AB,
     local: &[AB::Expr; NUM_MAIN_COLS],
     next: &[AB::Expr; NUM_MAIN_COLS],
@@ -878,8 +878,8 @@ fn eval_term<B>(
     }
 }
 
-pub fn eval_lookups<LB: native_lookup::LookupBuilder<F = Felt>>(
-    frame: &native_lookup::LookupFrame<'_, LB::Expr>,
+pub fn eval_lookups<LB: lookup::LookupBuilder<F = Felt>>(
+    frame: &lookup::LookupFrame<'_, LB::Expr>,
     builder: &mut LB,
     main_col_offset: usize,
     periodic_col_offset: usize,
@@ -914,7 +914,7 @@ pub fn eval_lookups<LB: native_lookup::LookupBuilder<F = Felt>>(
     }
 }
 
-impl<LB: native_lookup::LookupBuilder<F = Felt>> native_lookup::LookupAir<LB> for Sha512IoAir {
+impl<LB: lookup::LookupBuilder<F = Felt>> lookup::LookupAir<LB> for Sha512IoAir {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
@@ -924,7 +924,7 @@ impl<LB: native_lookup::LookupBuilder<F = Felt>> native_lookup::LookupAir<LB> fo
     fn num_bus_ids(&self) -> usize {
         NUM_BUS_IDS
     }
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         eval_lookups(frame, builder, 0, 0);
     }
 }

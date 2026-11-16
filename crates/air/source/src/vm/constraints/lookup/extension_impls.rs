@@ -1,5 +1,5 @@
 //! Miden-side extension-trait impls pinning the generic
-//! [`native_lookup::ConstraintLookupBuilder`] and [`ProverLookupBuilder`] adapters to the
+//! [`lookup::ConstraintLookupBuilder`] and [`ProverLookupBuilder`] adapters to the
 //! Miden lookup-builder extension traits.
 //!
 //! These traits require `LookupBuilder<F = Felt>`, so the impls live here
@@ -18,8 +18,8 @@
 
 use miden_core::field::ExtensionField;
 use miden_stark::{
-    air::native,
-    lookup::{ProverLookupBuilder, native as native_lookup},
+    air,
+    lookup::{self, ProverLookupBuilder},
 };
 
 use super::{
@@ -28,8 +28,8 @@ use super::{
 };
 use crate::vm::{CoreCols, Felt};
 
-impl<B: native::LiftedAirBuilder<F = Felt>> NativeMainLookupBuilder
-    for native_lookup::ConstraintLookupBuilder<'_, '_, B>
+impl<B: air::LiftedAirBuilder<F = Felt>> NativeMainLookupBuilder
+    for lookup::ConstraintLookupBuilder<'_, '_, B>
 {
 }
 
@@ -40,14 +40,14 @@ impl<EF: ExtensionField<Felt>> NativeMainLookupBuilder for ProverLookupBuilder<'
 }
 
 #[cfg(feature = "std")]
-impl NativeMainLookupBuilder for native_lookup::NativeValidationBuilder<'_> {}
+impl NativeMainLookupBuilder for lookup::NativeValidationBuilder<'_> {}
 
-impl<B: native::LiftedAirBuilder<F = Felt>> NativeChipletLookupBuilder
-    for native_lookup::ConstraintLookupBuilder<'_, '_, B>
+impl<B: air::LiftedAirBuilder<F = Felt>> NativeChipletLookupBuilder
+    for lookup::ConstraintLookupBuilder<'_, '_, B>
 {
 }
 
 impl<EF: ExtensionField<Felt>> NativeChipletLookupBuilder for ProverLookupBuilder<'_, Felt, EF> {}
 
 #[cfg(feature = "std")]
-impl NativeChipletLookupBuilder for native_lookup::NativeValidationBuilder<'_> {}
+impl NativeChipletLookupBuilder for lookup::NativeValidationBuilder<'_> {}

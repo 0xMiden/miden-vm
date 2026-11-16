@@ -10,8 +10,8 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
 };
 use miden_stark::{
-    air::native,
-    lookup::{Deg, LookupColumn, LookupMessage, native as native_lookup},
+    air,
+    lookup::{self, Deg, LookupColumn, LookupMessage},
 };
 use miden_utils_sync::LazyLock;
 use p3_field::Dup;
@@ -83,11 +83,11 @@ static PERIODIC_COLUMNS: LazyLock<Vec<Vec<Felt>>> = LazyLock::new(|| {
     columns
 });
 
-impl native::LiftedAir for Sha256Air {
+impl air::LiftedAir for Sha256Air {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: NUM_AUX_COLS,
             num_public_values: 0,
@@ -98,10 +98,10 @@ impl native::LiftedAir for Sha256Air {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let local = frame.main.current;
@@ -125,22 +125,22 @@ impl native::LiftedAir for Sha256Air {
         let carry = io_act.dup() * (AB::Expr::ONE - io_periods[io::program::P_LAST].dup());
         io::eval_main_rows(frame, builder, &io_local, &io_next, io_periods, io_act, carry);
 
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for Sha256Air {
-    type Error = native_lookup::LookupError;
+impl air::ProverAir<QuadFelt> for Sha256Air {
+    type Error = lookup::LookupError;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        native_lookup::build_logup_aux_trace(self, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
-impl<LB: native_lookup::LookupBuilder<F = Felt>> native_lookup::LookupAir<LB> for Sha256Air {
+impl<LB: lookup::LookupBuilder<F = Felt>> lookup::LookupAir<LB> for Sha256Air {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
@@ -150,7 +150,7 @@ impl<LB: native_lookup::LookupBuilder<F = Felt>> native_lookup::LookupAir<LB> fo
     fn num_bus_ids(&self) -> usize {
         NUM_BUS_IDS
     }
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         let local = frame.main.current;
         let comp_local: &[LB::Expr; compression::NUM_MAIN_COLS] = local
             [..compression::NUM_MAIN_COLS]
@@ -213,17 +213,17 @@ mod tests {
         field::{PrimeCharacteristicRing, QuadFelt},
     };
     use miden_stark::{
-        air::native::{self, AirKernel},
-        lookup::native as native_lookup,
+        air::{self, AirKernel},
+        lookup,
     };
 
     fn native_geometry<A>(air: A, main_width: usize, periodic_columns: usize, base_count: usize)
     where
-        A: native::ProverAir<QuadFelt, F = Felt, Error = native_lookup::LookupError>,
+        A: air::ProverAir<QuadFelt, F = Felt, Error = lookup::LookupError>,
     {
         // The expected relation comes from the authored source, instantiated with non-Copy trees.
         // Direct execution is the comparison subject, rather than a source of expected metadata.
-        let captured = native::capture_with::<_, QuadFelt>(&air).unwrap();
+        let captured = air::capture_with::<_, QuadFelt>(&air).unwrap();
         let descriptor = &captured.descriptor;
         let spec = descriptor.spec();
         assert_eq!((spec.main_width, spec.aux_width), (main_width, 4));
@@ -233,7 +233,7 @@ mod tests {
         assert_eq!(spec.max_periodic_length(), if main_width == 28 { 32 } else { 128 });
         assert_eq!(
             descriptor.analysis().counts(),
-            native::ConstraintCounts { base: base_count, ext: 5 }
+            air::ConstraintCounts { base: base_count, ext: 5 }
         );
         assert_eq!(
             descriptor.analysis().layout().base_indices(),
@@ -250,9 +250,9 @@ mod tests {
             main_width - 1,
         );
         let challenges = [QuadFelt::from_u8(17), QuadFelt::from_u8(31)];
-        let error = native::ProverAir::build_aux_trace(
+        let error = air::ProverAir::build_aux_trace(
             &air,
-            native::AuxTraceInputs {
+            air::AuxTraceInputs {
                 main: &main,
                 preprocessed: None,
                 public_values: &[],
@@ -263,18 +263,18 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             error,
-            native_lookup::LookupError::MainWidth {
+            lookup::LookupError::MainWidth {
                 expected: main_width,
                 actual: main_width - 1,
             }
         );
 
-        let kernel = native::DirectKernel::new(air).unwrap();
-        let direct = native::capture_from_spec::<Felt, QuadFelt>(
-            spec.as_borrowed(),
-            |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
-        )
-        .unwrap();
+        let kernel = air::DirectKernel::new(air).unwrap();
+        let direct =
+            air::capture_from_spec::<Felt, QuadFelt>(spec.as_borrowed(), |frame, inputs, sink| {
+                kernel.bind(inputs).unwrap().eval(frame, sink)
+            })
+            .unwrap();
         assert_eq!(direct.descriptor.fingerprint(), descriptor.fingerprint());
     }
 
@@ -296,20 +296,19 @@ mod tests {
     #[test]
     fn native_sha256_lookup_degrees_match_annotations() {
         let compression = super::compression::Sha256CompressionAir;
-        native_lookup::validate_native(&compression, &native::LiftedAir::spec(&compression))
-            .unwrap();
+        lookup::validate_native(&compression, &air::LiftedAir::spec(&compression)).unwrap();
         let io = super::io::Sha256IoAir;
-        native_lookup::validate_native(&io, &native::LiftedAir::spec(&io)).unwrap();
+        lookup::validate_native(&io, &air::LiftedAir::spec(&io)).unwrap();
         let composed = super::Sha256Air;
-        native_lookup::validate_native(&composed, &native::LiftedAir::spec(&composed)).unwrap();
+        lookup::validate_native(&composed, &air::LiftedAir::spec(&composed)).unwrap();
     }
 
     fn validate_degrees<A>(air: A)
     where
-        A: native::LiftedAir<F = Felt>,
-        for<'a> A: native_lookup::LookupAir<native_lookup::NativeValidationBuilder<'a>>,
+        A: air::LiftedAir<F = Felt>,
+        for<'a> A: lookup::LookupAir<lookup::NativeValidationBuilder<'a>>,
     {
-        native_lookup::validate_native(&air, &native::LiftedAir::spec(&air))
+        lookup::validate_native(&air, &air::LiftedAir::spec(&air))
             .expect("SHA-256 lookup degree annotations must match their symbolic expressions");
     }
 
@@ -333,19 +332,19 @@ mod tests {
         // Pin the deployed degree independently of the AIRs being measured.
         let bound = 5;
         let degrees = [
-            native::capture(&super::compression::Sha256CompressionAir)
+            air::capture(&super::compression::Sha256CompressionAir)
                 .unwrap()
                 .descriptor
                 .analysis()
                 .raw_degrees()
                 .max(),
-            native::capture(&super::io::Sha256IoAir)
+            air::capture(&super::io::Sha256IoAir)
                 .unwrap()
                 .descriptor
                 .analysis()
                 .raw_degrees()
                 .max(),
-            native::capture(&super::Sha256Air)
+            air::capture(&super::Sha256Air)
                 .unwrap()
                 .descriptor
                 .analysis()

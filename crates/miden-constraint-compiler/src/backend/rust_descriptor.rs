@@ -8,7 +8,7 @@
 use std::fmt::Write as _;
 
 use miden_core::Felt;
-use miden_stark::air::native::{AirDescriptor, DegreeOp};
+use miden_stark::air::{AirDescriptor, DegreeOp};
 
 /// One source descriptor to emit alongside its generated evaluator.
 pub struct AirDescriptorEmitter<'a> {
@@ -33,7 +33,7 @@ pub fn emit_module(header: &str, descriptors: &[AirDescriptorEmitter<'_>]) -> St
 extern crate alloc;
 
 use miden_core::Felt;
-use miden_stark::air::native::{
+use miden_stark::air::{
     AirAnalysis, AirDescriptor, AirSpec, ConstraintDegrees, ConstraintLayout,
     DegreeOp, DegreeProfile, DescriptorParts, KernelGeometry,
 };
@@ -47,7 +47,7 @@ use miden_stark::air::native::{
         let degrees = analysis.raw_degrees();
         let preprocessed = match spec.preprocessed {
             Some(fixed) => format!(
-                "Some(miden_stark::air::native::PreprocessedSpec {{ width: {}, log_height: {} }})",
+                "Some(miden_stark::air::PreprocessedSpec {{ width: {}, log_height: {} }})",
                 fixed.width, fixed.log_height,
             ),
             None => "None".to_string(),

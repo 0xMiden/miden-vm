@@ -100,11 +100,8 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
 };
 use miden_stark::{
-    air::native,
-    lookup::{
-        Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage,
-        native as native_lookup,
-    },
+    air,
+    lookup::{self, Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage},
 };
 use miden_utils_sync::LazyLock;
 use p3_field::Dup;
@@ -278,11 +275,11 @@ static PERIODIC_COLUMNS: LazyLock<[Vec<Felt>; NUM_PERIODIC]> = LazyLock::new(|| 
     })
 });
 
-impl native::LiftedAir for EcGroupAddAir {
+impl air::LiftedAir for EcGroupAddAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: AUX_WIDTH,
             num_public_values: 0,
@@ -293,10 +290,10 @@ impl native::LiftedAir for EcGroupAddAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let local: &[AB::Expr; NUM_MAIN_COLS] = frame.main.current[..NUM_MAIN_COLS]
@@ -393,27 +390,27 @@ impl native::LiftedAir for EcGroupAddAir {
         }
 
         // Phase 2: LogUp.
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for EcGroupAddAir {
-    type Error = native_lookup::LookupError;
+impl air::ProverAir<QuadFelt> for EcGroupAddAir {
+    type Error = lookup::LookupError;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        native_lookup::build_logup_aux_trace(self, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
 // LOOKUP AIR
 // ================================================================================================
 
-impl<LB> native_lookup::LookupAir<LB> for EcGroupAddAir
+impl<LB> lookup::LookupAir<LB> for EcGroupAddAir
 where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -427,7 +424,7 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         let local: &[LB::Expr; NUM_MAIN_COLS] = frame.main.current[..NUM_MAIN_COLS]
             .try_into()
             .expect("EC addition lookup current main row");

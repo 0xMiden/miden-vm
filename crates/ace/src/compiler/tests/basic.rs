@@ -2,12 +2,11 @@ use std::borrow::Cow;
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::PrimeCharacteristicRing;
-use miden_stark::air::native::{self, LiftedAir as _, LiftedAirBuilder as _};
+use miden_stark::air::{self, LiftedAir as _, LiftedAirBuilder as _};
 use p3_field::Dup;
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::common::{eval_dag, eval_periodic_values, eval_quotient};
-use crate::compiler::testing::eval_native_constraints;
 use crate::{
     InputKey, InputLayout,
     compiler::{
@@ -15,6 +14,7 @@ use crate::{
         circuit::emit_circuit,
         dag::NodeKind,
         pipeline::{build_ace_dag_for_air, build_canonical_multi_air_ace_circuit},
+        testing::eval_native_constraints,
     },
 };
 
@@ -57,10 +57,10 @@ impl TestAir {
     }
 }
 
-impl native::LiftedAir for TestAir {
+impl air::LiftedAir for TestAir {
     type F = F;
 
-    fn spec(&self) -> native::AirSpec<'_, F> {
+    fn spec(&self) -> air::AirSpec<'_, F> {
         let periodic_columns: Cow<'_, [Vec<F>]> = if self.period == 0 {
             Cow::Borrowed(&[][..])
         } else {
@@ -68,14 +68,14 @@ impl native::LiftedAir for TestAir {
             column[1] = F::ONE;
             Cow::Owned(vec![column])
         };
-        native::AirSpec {
+        air::AirSpec {
             main_width: self.main,
             aux_width: self.aux,
             num_public_values: self.public,
             num_challenges: 2,
             num_exports: self.boundaries,
             preprocessed: (self.preprocessed > 0)
-                .then_some(native::PreprocessedSpec { width: self.preprocessed, log_height: 2 }),
+                .then_some(air::PreprocessedSpec { width: self.preprocessed, log_height: 2 }),
             periodic_columns,
         }
     }
@@ -86,10 +86,10 @@ impl native::LiftedAir for TestAir {
             .then(|| RowMajorMatrix::new(vec![F::ZERO; 4 * self.preprocessed], self.preprocessed))
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = F>>(
+    fn eval<AB: air::LiftedAirBuilder<F = F>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let mut expression = frame.main.current[self.main - 1].dup();
@@ -118,11 +118,11 @@ impl native::LiftedAir for TestAir {
     }
 }
 
-impl native::LiftedAir for MockAir {
+impl air::LiftedAir for MockAir {
     type F = F;
 
-    fn spec(&self) -> native::AirSpec<'_, F> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, F> {
+        air::AirSpec {
             main_width: 1,
             aux_width: 1,
             num_public_values: 1,
@@ -133,10 +133,10 @@ impl native::LiftedAir for MockAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = F>>(
+    fn eval<AB: air::LiftedAirBuilder<F = F>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let a = frame.main.current[0].dup();
@@ -152,17 +152,17 @@ impl native::LiftedAir for MockAir {
 
 struct MockPreprocessedAir;
 
-impl native::LiftedAir for MockPreprocessedAir {
+impl air::LiftedAir for MockPreprocessedAir {
     type F = F;
 
-    fn spec(&self) -> native::AirSpec<'_, F> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, F> {
+        air::AirSpec {
             main_width: 1,
             aux_width: 1,
             num_public_values: 0,
             num_challenges: 2,
             num_exports: 0,
-            preprocessed: Some(native::PreprocessedSpec { width: 1, log_height: 2 }),
+            preprocessed: Some(air::PreprocessedSpec { width: 1, log_height: 2 }),
             periodic_columns: Cow::Borrowed(&[]),
         }
     }
@@ -171,10 +171,10 @@ impl native::LiftedAir for MockPreprocessedAir {
         Some(RowMajorMatrix::new(vec![F::ZERO; 4], 1))
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = F>>(
+    fn eval<AB: air::LiftedAirBuilder<F = F>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        _inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        _inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         builder.assert_zero(frame.preprocessed.current[0].dup() + frame.preprocessed.next[0].dup());
@@ -183,17 +183,17 @@ impl native::LiftedAir for MockPreprocessedAir {
 
 struct MockPeriodicAir;
 
-impl native::LiftedAir for MockPeriodicAir {
+impl air::LiftedAir for MockPeriodicAir {
     type F = F;
 
-    fn spec(&self) -> native::AirSpec<'_, F> {
+    fn spec(&self) -> air::AirSpec<'_, F> {
         // Preserve sparse period128 and dense period8 data and their lowering choices.
         let mut sparse_col = vec![F::ZERO; 128];
         sparse_col[0] = F::new_unchecked(7);
         sparse_col[50] = F::new_unchecked(11);
         sparse_col[100] = F::new_unchecked(13);
         let dense_col = [2u64, 3, 5, 7, 11, 13, 17, 19].into_iter().map(F::new_unchecked).collect();
-        native::AirSpec {
+        air::AirSpec {
             main_width: 1,
             aux_width: 1,
             num_public_values: 1,
@@ -204,10 +204,10 @@ impl native::LiftedAir for MockPeriodicAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = F>>(
+    fn eval<AB: air::LiftedAirBuilder<F = F>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         builder.assert_zero(frame.main.current[0].dup() + inputs.public(0));
@@ -244,11 +244,11 @@ fn shared_basis_columns() -> Vec<Vec<F>> {
     columns
 }
 
-impl native::LiftedAir for MockSharedBasisAir {
+impl air::LiftedAir for MockSharedBasisAir {
     type F = F;
 
-    fn spec(&self) -> native::AirSpec<'_, F> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, F> {
+        air::AirSpec {
             main_width: 1,
             aux_width: 1,
             num_public_values: 1,
@@ -259,10 +259,10 @@ impl native::LiftedAir for MockSharedBasisAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = F>>(
+    fn eval<AB: air::LiftedAirBuilder<F = F>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let a = frame.main.current[0].dup();
@@ -820,7 +820,7 @@ fn compiled_relation_reuses_capture_and_pads_each_air_row() {
 
 #[test]
 fn captured_degrees_match_symbolic_selector_and_extension_semantics() {
-    use miden_stark::air::native::ConstraintDegrees;
+    use miden_stark::air::ConstraintDegrees;
 
     use crate::compiler::CapturedAir;
     for selector in [Selector::None, Selector::First, Selector::Last, Selector::Transition] {
@@ -870,11 +870,11 @@ struct CountedCubicAir {
     eval_count: std::sync::atomic::AtomicUsize,
 }
 
-impl native::LiftedAir for CountedCubicAir {
+impl air::LiftedAir for CountedCubicAir {
     type F = F;
 
-    fn spec(&self) -> native::AirSpec<'_, F> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, F> {
+        air::AirSpec {
             main_width: 1,
             aux_width: 0,
             num_public_values: 0,
@@ -885,10 +885,10 @@ impl native::LiftedAir for CountedCubicAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = F>>(
+    fn eval<AB: air::LiftedAirBuilder<F = F>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        _inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        _inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         self.eval_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

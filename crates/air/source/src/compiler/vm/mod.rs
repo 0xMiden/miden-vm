@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use miden_ace::AceError;
 pub use miden_ace::compiler::{CapturedAir, CompiledRelation, LayoutKind};
 use miden_stark::{
-    air::native::DescriptorError,
+    air::DescriptorError,
     security::{AirShape, LookupShape},
 };
 

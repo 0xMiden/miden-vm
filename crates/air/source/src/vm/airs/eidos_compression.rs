@@ -5,8 +5,8 @@ use core::borrow::Borrow;
 
 use miden_core::{Felt, field::ExtensionField};
 use miden_stark::{
-    air::{ReductionError, native},
-    lookup::{Challenges, native as native_lookup},
+    air::{self, ReductionError},
+    lookup::{self, Challenges},
 };
 
 use crate::vm::{
@@ -52,11 +52,11 @@ impl EidosCompressionAir {
     }
 }
 
-impl native::LiftedAir for EidosCompressionAir {
+impl air::LiftedAir for EidosCompressionAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_EIDOS_COMPRESSION_COLS,
             aux_width: AUX_COLS,
             num_public_values: 0,
@@ -67,10 +67,10 @@ impl native::LiftedAir for EidosCompressionAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let local = frame.main.current;
@@ -86,24 +86,22 @@ impl native::LiftedAir for EidosCompressionAir {
             builder,
             AUX_REGISTER_COL,
         );
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl<EF: ExtensionField<Felt>> native::ProverAir<EF> for EidosCompressionAir {
+impl<EF: ExtensionField<Felt>> air::ProverAir<EF> for EidosCompressionAir {
     type Error = crate::shared::eidos::EidosWitnessError;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, EF>,
-    ) -> Result<native::AuxTrace<EF>, Self::Error> {
+        inputs: air::AuxTraceInputs<'_, Felt, EF>,
+    ) -> Result<air::AuxTrace<EF>, Self::Error> {
         crate::shared::eidos::build_aux_trace(self, inputs, AUX_REGISTER_COL)
     }
 }
 
-impl<LB: native_lookup::LookupBuilder<F = Felt>> native_lookup::LookupAir<LB>
-    for EidosCompressionAir
-{
+impl<LB: lookup::LookupBuilder<F = Felt>> lookup::LookupAir<LB> for EidosCompressionAir {
     fn column_shape(&self) -> &[usize] {
         &EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE
     }
@@ -113,7 +111,7 @@ impl<LB: native_lookup::LookupBuilder<F = Felt>> native_lookup::LookupAir<LB>
     fn num_bus_ids(&self) -> usize {
         BusId::COUNT
     }
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         let local: &EidosCompressionCols<_> = frame.main.current.borrow();
         let next: &EidosCompressionCols<_> = frame.main.next.borrow();
         let selectors = EidosCompressionSelectors::new(frame.periodic, 0);

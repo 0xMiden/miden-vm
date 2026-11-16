@@ -10,7 +10,7 @@ pub mod ops;
 pub mod overflow;
 pub mod stack_arith;
 
-use miden_stark::air::native::Frame;
+use miden_stark::air::Frame;
 
 use crate::vm::{CoreCols, NativeMidenAirBuilder, constraints::op_flags::OpFlags};
 
@@ -40,7 +40,7 @@ mod tests {
     use core::borrow::Borrow;
 
     use miden_core::{Felt, field::QuadFelt};
-    use miden_stark::air::native::{
+    use miden_stark::air::{
         AirSpec, Assertion, capture_from_spec,
         symbolic::{BaseInput, BaseLeaf, RowOffset, SymbolicExpr},
     };

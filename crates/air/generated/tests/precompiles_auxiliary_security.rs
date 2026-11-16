@@ -18,11 +18,11 @@ use miden_constraint_compiler::ir::{
 };
 use miden_core::{Felt, field::QuadFelt};
 use miden_stark::{
-    air::native::{self, LiftedAir},
-    lookup::native as native_lookup,
+    air::{self, LiftedAir},
+    lookup,
 };
 
-type Symbolic = native::SymbolicSink<Felt, QuadFelt>;
+type Symbolic = air::SymbolicSink<Felt, QuadFelt>;
 
 #[test]
 fn native_source_geometry_keeps_the_precompile_security_shape() {
@@ -33,14 +33,12 @@ fn native_source_geometry_keeps_the_precompile_security_shape() {
 fn degree<A>(air: &A) -> Result<usize, &'static str>
 where
     A: LiftedAir<F = Felt>
-        + for<'r, 's> native_lookup::LookupAir<
-            native_lookup::ConstraintLookupBuilder<'r, 's, Symbolic>,
-        >,
+        + for<'r, 's> lookup::LookupAir<lookup::ConstraintLookupBuilder<'r, 's, Symbolic>>,
 {
     let mut builder = GraphBuilder::new();
     let (full, _) = capture_native_into(air, &mut builder).map_err(|_| "native source capture")?;
     let (lookup, _) = capture_native_into_with(air, &mut builder, |frame, inputs, sink| {
-        native_lookup::eval_lookup(air, frame, inputs, sink);
+        lookup::eval_lookup(air, frame, inputs, sink);
     })
     .map_err(|_| "native lookup capture")?;
     auxiliary::beta_degree_bound(

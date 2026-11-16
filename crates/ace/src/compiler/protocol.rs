@@ -2,7 +2,7 @@
 
 use miden_constraint_compiler::ir::{CapturedConstraints, Graph, capture_native};
 use miden_core::{Felt, field::QuadFelt};
-use miden_stark::air::native::{self, ConstraintCounts, ConstraintDegrees};
+use miden_stark::air::{self, ConstraintCounts, ConstraintDegrees};
 
 use crate::{
     AceError, EXT_DEGREE, InputCounts, InputKey, InputLayout, MAX_ORDER_AIRS,
@@ -24,7 +24,7 @@ pub struct CapturedAir {
     pub(crate) periodic_columns: Vec<Vec<Felt>>,
     /// Minimum trace height imposed by periodic columns, or zero when absent.
     pub(crate) max_periodic_length: usize,
-    descriptor: native::AirDescriptor<Felt>,
+    descriptor: air::AirDescriptor<Felt>,
 }
 
 impl CapturedAir {
@@ -34,7 +34,7 @@ impl CapturedAir {
     /// degree diagnostics retain height-independent artifact geometry; setup must separately
     /// check the descriptor's actual-height capacity before execution. No fixed-table factory
     /// or witness construction is invoked, and no prover capability is required.
-    pub fn new_native<A: native::LiftedAir<F = Felt>>(air: &A) -> Result<Self, AceError> {
+    pub fn new_native<A: air::LiftedAir<F = Felt>>(air: &A) -> Result<Self, AceError> {
         let (graph, constraints, descriptor) = capture_native(air)
             .map_err(|error| invalid(format!("native AIR capture failed: {error}")))?;
         let spec = descriptor.spec();
@@ -68,7 +68,7 @@ impl CapturedAir {
     }
 
     /// The checked descriptor owned by this canonical authored capture.
-    pub fn descriptor(&self) -> &native::AirDescriptor<Felt> {
+    pub fn descriptor(&self) -> &air::AirDescriptor<Felt> {
         &self.descriptor
     }
 
@@ -421,9 +421,9 @@ mod tests {
         sync::atomic::{AtomicUsize, Ordering},
     };
 
+    use air::LiftedAirBuilder as _;
     use miden_core::utils::RowMajorMatrix;
     use miden_crypto::field::PrimeCharacteristicRing;
-    use native::LiftedAirBuilder as _;
     use p3_field::Dup;
 
     use super::*;
@@ -452,18 +452,18 @@ mod tests {
         }
     }
 
-    impl native::LiftedAir for PairedAir {
+    impl air::LiftedAir for PairedAir {
         type F = Felt;
 
-        fn spec(&self) -> native::AirSpec<'_, Felt> {
+        fn spec(&self) -> air::AirSpec<'_, Felt> {
             self.spec_reads.fetch_add(1, Ordering::Relaxed);
-            native::AirSpec {
+            air::AirSpec {
                 main_width: self.main_width,
                 aux_width: 2,
                 num_public_values: 2,
                 num_challenges: self.challenges,
                 num_exports: 1,
-                preprocessed: Some(native::PreprocessedSpec { width: 1, log_height: 3 }),
+                preprocessed: Some(air::PreprocessedSpec { width: 1, log_height: 3 }),
                 periodic_columns: Cow::Borrowed(&self.periodic),
             }
         }
@@ -473,10 +473,10 @@ mod tests {
             Some(RowMajorMatrix::new(vec![Felt::ONE; 8], 1))
         }
 
-        fn eval<B: native::LiftedAirBuilder<F = Felt>>(
+        fn eval<B: air::LiftedAirBuilder<F = Felt>>(
             &self,
-            frame: &native::Frame<'_, B>,
-            inputs: native::Inputs<'_, B>,
+            frame: &air::Frame<'_, B>,
+            inputs: air::Inputs<'_, B>,
             sink: &mut B,
         ) {
             self.evaluations.fetch_add(1, Ordering::Relaxed);

@@ -1,15 +1,14 @@
 //! Tests LMCS alignment with padding for multi-trace proving/verification.
 
 use alloc::{borrow::Cow, vec, vec::Vec};
-
 use core::convert::Infallible;
 
 use p3_field::{Dup, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
-use crate::air::native::LiftedAirBuilder as _;
 use crate::{
-    air::{MultiAir, ProverStatement, Statement, native},
+    air,
+    air::{LiftedAirBuilder as _, MultiAir, ProverStatement, Statement},
     lmcs::Lmcs,
     testing::configs::goldilocks_poseidon2::{
         Felt, QuadFelt, prove_and_verify_statement, test_config,
@@ -30,11 +29,11 @@ impl PaddingAir {
     }
 }
 
-impl native::LiftedAir for PaddingAir {
+impl air::LiftedAir for PaddingAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: self.width,
             aux_width: self.aux_width,
             num_public_values: 1,
@@ -45,10 +44,10 @@ impl native::LiftedAir for PaddingAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let local = frame.main.current;
@@ -65,13 +64,13 @@ impl native::LiftedAir for PaddingAir {
     }
 }
 
-impl native::ProverAir<QuadFelt> for PaddingAir {
+impl air::ProverAir<QuadFelt> for PaddingAir {
     type Error = Infallible;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
         // Column 0 holds the challenge; all remaining auxiliary columns are padding.
         let challenge = inputs.challenges[0];
         let mut values = Vec::with_capacity(inputs.main.height() * self.aux_width);
@@ -79,7 +78,7 @@ impl native::ProverAir<QuadFelt> for PaddingAir {
             values.push(challenge);
             values.extend(core::iter::repeat_n(QuadFelt::ZERO, self.aux_width - 1));
         }
-        Ok(native::AuxTrace {
+        Ok(air::AuxTrace {
             columns: RowMajorMatrix::new(values, self.aux_width),
             exports: vec![],
         })
@@ -87,11 +86,11 @@ impl native::ProverAir<QuadFelt> for PaddingAir {
 }
 
 struct PaddingMultiAir {
-    airs: Vec<native::DirectKernel<PaddingAir>>,
+    airs: Vec<air::DirectKernel<PaddingAir>>,
 }
 
 impl MultiAir<Felt, QuadFelt> for PaddingMultiAir {
-    type Air = native::DirectKernel<PaddingAir>;
+    type Air = air::DirectKernel<PaddingAir>;
 
     fn airs(&self) -> &[Self::Air] {
         &self.airs
@@ -118,8 +117,8 @@ fn padding_prover_statement(
     let statement = Statement::new(
         PaddingMultiAir {
             airs: vec![
-                native::DirectKernel::new(air.clone()).unwrap(),
-                native::DirectKernel::new(air).unwrap(),
+                air::DirectKernel::new(air.clone()).unwrap(),
+                air::DirectKernel::new(air).unwrap(),
             ],
         },
         vec![(0, vec![start]), (1, vec![start])],
@@ -144,20 +143,20 @@ fn multi_trace_with_aux_padding() {
 
 #[test]
 fn native_padding_source_preserves_declared_aux_width_and_direct_symbolic_order() {
-    use native::AirKernel;
+    use crate::air::AirKernel;
 
     let source = PaddingAir::new(3, 2);
-    let expected = native::capture_with::<_, QuadFelt>(&source).unwrap();
+    let expected = air::capture_with::<_, QuadFelt>(&source).unwrap();
     assert_eq!(expected.descriptor.analysis().layout().base_indices(), &[0, 1]);
     assert_eq!(expected.descriptor.analysis().layout().ext_indices(), &[2, 3]);
 
-    let kernel = native::DirectKernel::new(source).unwrap();
+    let kernel = air::DirectKernel::new(source).unwrap();
     let main = generate_trace(Felt::from_u64(2), 4, 3);
     let public = [Felt::from_u64(2)];
     let challenges = [QuadFelt::from_u64(7)];
-    let aux = native::ProverAir::build_aux_trace(
+    let aux = air::ProverAir::build_aux_trace(
         &kernel,
-        native::AuxTraceInputs {
+        air::AuxTraceInputs {
             main: &main,
             preprocessed: None,
             public_values: &public,
@@ -170,7 +169,7 @@ fn native_padding_source_preserves_declared_aux_width_and_direct_symbolic_order(
     assert_eq!(aux.columns.values, [QuadFelt::from_u64(7), QuadFelt::ZERO].repeat(4),);
     assert!(aux.exports.is_empty());
 
-    let observed = native::capture_from_spec::<Felt, QuadFelt>(
+    let observed = air::capture_from_spec::<Felt, QuadFelt>(
         kernel.descriptor().spec().as_borrowed(),
         |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
     )

@@ -69,7 +69,7 @@ mod views_tests;
 #[doc(hidden)]
 pub mod testing {
     use miden_core::Felt;
-    use miden_stark::air::native::{Frame, LiftedAirBuilder};
+    use miden_stark::air::{Frame, LiftedAirBuilder};
 
     pub use super::{periodic::get_periodic_column_values, selectors::EidosCompressionSelectors};
 

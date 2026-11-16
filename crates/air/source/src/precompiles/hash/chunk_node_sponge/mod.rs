@@ -6,7 +6,7 @@
 use alloc::{borrow::Cow, vec::Vec};
 
 use miden_core::{Felt, field::QuadFelt};
-use miden_stark::{air::native, lookup::native as native_lookup};
+use miden_stark::{air, lookup};
 use miden_utils_sync::LazyLock;
 
 use crate::precompiles::{
@@ -49,11 +49,11 @@ static PERIODIC_COLUMNS: LazyLock<Vec<Vec<Felt>>> = LazyLock::new(|| {
     columns
 });
 
-impl native::LiftedAir for ChunkNodeSpongeAir {
+impl air::LiftedAir for ChunkNodeSpongeAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: NUM_AUX_COLS,
             num_public_values: 0,
@@ -64,33 +64,33 @@ impl native::LiftedAir for ChunkNodeSpongeAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         chunk_node::eval_main(frame, builder);
         sponge::eval_main_with_shared_capacity(frame, builder, SPONGE_COL_OFFSET);
 
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for ChunkNodeSpongeAir {
-    type Error = native_lookup::LookupError;
+impl air::ProverAir<QuadFelt> for ChunkNodeSpongeAir {
+    type Error = lookup::LookupError;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        native_lookup::build_logup_aux_trace(self, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
-impl<LB> native_lookup::LookupAir<LB> for ChunkNodeSpongeAir
+impl<LB> lookup::LookupAir<LB> for ChunkNodeSpongeAir
 where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -104,7 +104,7 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         chunk_node::eval_lookups(frame, builder);
         sponge::eval_lookups(frame, builder, SPONGE_COL_OFFSET);
     }
@@ -115,7 +115,7 @@ mod tests {
     use alloc::{vec, vec::Vec};
 
     use miden_core::{Felt, field::QuadFelt};
-    use miden_stark::air::native::{
+    use miden_stark::air::{
         self,
         symbolic::{BaseInput, BaseLeaf, RowOffset, SymbolicExpr},
     };
@@ -127,24 +127,17 @@ mod tests {
     fn native_components_and_composite_keep_shape_and_assertion_order() {
         // Capturing every component instantiates the borrowed helpers with non-Copy expressions.
         for (captured, main, aux, periodic, base, ext) in [
-            (native::capture_with::<_, QuadFelt>(&ChunkAir).unwrap(), 12, 4, 0, 7, 5),
-            (native::capture_with::<_, QuadFelt>(&KeccakNodeAir).unwrap(), 32, 10, 0, 11, 11),
+            (air::capture_with::<_, QuadFelt>(&ChunkAir).unwrap(), 12, 4, 0, 7, 5),
+            (air::capture_with::<_, QuadFelt>(&KeccakNodeAir).unwrap(), 32, 10, 0, 11, 11),
             (
-                native::capture_with::<_, QuadFelt>(&sponge::KeccakSpongeAir).unwrap(),
+                air::capture_with::<_, QuadFelt>(&sponge::KeccakSpongeAir).unwrap(),
                 40,
                 5,
                 11,
                 55,
                 6,
             ),
-            (
-                native::capture_with::<_, QuadFelt>(&ChunkNodeSpongeAir).unwrap(),
-                47,
-                7,
-                21,
-                84,
-                8,
-            ),
+            (air::capture_with::<_, QuadFelt>(&ChunkNodeSpongeAir).unwrap(), 47, 7, 21, 84, 8),
         ] {
             let spec = captured.descriptor.spec();
             assert_eq!((spec.main_width, spec.aux_width), (main, aux));
@@ -157,20 +150,18 @@ mod tests {
             assert_eq!(layout.base_indices(), (0..base).collect::<Vec<_>>().as_slice());
             assert_eq!(layout.ext_indices(), (base..base + ext).collect::<Vec<_>>().as_slice());
             assert!(
-                captured.assertions[..base]
-                    .iter()
-                    .all(|a| matches!(a, native::Assertion::Base(_)))
+                captured.assertions[..base].iter().all(|a| matches!(a, air::Assertion::Base(_)))
             );
             assert!(
                 captured.assertions[base..]
                     .iter()
-                    .all(|a| matches!(a, native::Assertion::Extension(_)))
+                    .all(|a| matches!(a, air::Assertion::Extension(_)))
             );
         }
         #[cfg(feature = "std")]
         {
-            use miden_stark::lookup::native::validate_native;
-            use native::LiftedAir as _;
+            use air::LiftedAir as _;
+            use miden_stark::lookup::validate_native;
             validate_native(&ChunkAir, &ChunkAir.spec()).unwrap();
             validate_native(&KeccakNodeAir, &KeccakNodeAir.spec()).unwrap();
             validate_native(&sponge::KeccakSpongeAir, &sponge::KeccakSpongeAir.spec()).unwrap();
@@ -181,16 +172,16 @@ mod tests {
     #[derive(Default)]
     struct BaseValues(Vec<Felt>);
 
-    impl native::LiftedAirBuilder for BaseValues {
+    impl air::LiftedAirBuilder for BaseValues {
         type F = Felt;
         type Expr = Felt;
         type ExtExpr = QuadFelt;
 
-        fn emit_base(&mut self, value: Felt, _meta: native::ConstraintMeta<'_>) {
+        fn emit_base(&mut self, value: Felt, _meta: air::ConstraintMeta<'_>) {
             self.0.push(value);
         }
 
-        fn emit_ext(&mut self, _value: QuadFelt, _meta: native::ConstraintMeta<'_>) {
+        fn emit_ext(&mut self, _value: QuadFelt, _meta: air::ConstraintMeta<'_>) {
             panic!("ordinary sponge helper emitted an extension assertion");
         }
     }
@@ -205,12 +196,12 @@ mod tests {
         for slot in [24, 26] {
             let periodic: [Felt; sponge::NUM_PERIODIC_COLS] =
                 core::array::from_fn(|i| program[i][slot]);
-            let frame = native::AirFrame {
-                main: native::Rows { current: &local, next: &local },
-                preprocessed: native::Rows { current: &[], next: &[] },
-                aux: native::Rows { current: &[], next: &[] },
+            let frame = air::AirFrame {
+                main: air::Rows { current: &local, next: &local },
+                preprocessed: air::Rows { current: &[], next: &[] },
+                aux: air::Rows { current: &[], next: &[] },
                 periodic: &periodic,
-                selectors: native::Selectors {
+                selectors: air::Selectors {
                     first: Felt::ZERO,
                     last: Felt::ZERO,
                     transition: Felt::ONE,
@@ -235,10 +226,7 @@ mod tests {
         }
     }
 
-    fn input_addresses(
-        expr: &native::symbolic::SymbolicExpression<Felt>,
-        out: &mut Vec<BaseInput>,
-    ) {
+    fn input_addresses(expr: &air::symbolic::SymbolicExpression<Felt>, out: &mut Vec<BaseInput>) {
         match expr {
             SymbolicExpr::Leaf(BaseLeaf::Input(input)) => out.push(*input),
             SymbolicExpr::Leaf(_) => {},
@@ -254,7 +242,7 @@ mod tests {
 
     #[test]
     fn composite_preserves_periodic_concatenation_and_physical_chunk_head_cells() {
-        let captured = native::capture_with::<_, QuadFelt>(&ChunkNodeSpongeAir).unwrap();
+        let captured = air::capture_with::<_, QuadFelt>(&ChunkNodeSpongeAir).unwrap();
         let periodic = &captured.descriptor.spec().periodic_columns;
         assert_eq!(&periodic[..11], sponge::sponge_program().as_slice());
         assert_eq!(&periodic[11..], chunk_node::periodic_columns());
@@ -276,7 +264,7 @@ mod tests {
                 ],
             ),
         ] {
-            let native::Assertion::Base(expr) = &captured.assertions[ordinal] else {
+            let air::Assertion::Base(expr) = &captured.assertions[ordinal] else {
                 panic!("chunk/node ordinary assertion changed class");
             };
             let mut addresses = Vec::new();

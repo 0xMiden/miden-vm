@@ -9,7 +9,7 @@ pub mod flags;
 
 use flags::ControllerFlags;
 use miden_core::field::PrimeCharacteristicRing;
-use miden_stark::air::native::{Frame, LiftedAirBuilder};
+use miden_stark::air::{Frame, LiftedAirBuilder};
 use p3_field::Dup;
 
 use crate::vm::{

@@ -2,7 +2,7 @@
 
 use miden_constraint_compiler::ir::Graph;
 use miden_core::{Felt, field::QuadFelt};
-use miden_stark::air::native;
+use miden_stark::air;
 use p3_field::{Algebra, PrimeCharacteristicRing};
 
 #[path = "../build/preparation_fixture.rs"]
@@ -25,7 +25,7 @@ enum Prepared<E> {
 
 struct CompiledFixture {
     cached: bool,
-    descriptor: native::AirDescriptor<Felt>,
+    descriptor: air::AirDescriptor<Felt>,
 }
 
 impl CompiledFixture {
@@ -39,17 +39,17 @@ impl CompiledFixture {
     }
 }
 
-impl native::AirKernel for CompiledFixture {
+impl air::AirKernel for CompiledFixture {
     type F = Felt;
     type Prepared<B: Algebra<Felt>, E: Algebra<B>> = Prepared<E>;
 
-    fn descriptor(&self) -> &native::AirDescriptor<Felt> {
+    fn descriptor(&self) -> &air::AirDescriptor<Felt> {
         &self.descriptor
     }
 
     fn prepare<B: Algebra<Felt>, E: Algebra<B>>(
         &self,
-        inputs: native::UniformInputs<'_, B, E>,
+        inputs: air::UniformInputs<'_, B, E>,
     ) -> Prepared<E> {
         if self.cached {
             Prepared::Cached(native_evaluators::precompute_cached(inputs))
@@ -58,10 +58,10 @@ impl native::AirKernel for CompiledFixture {
         }
     }
 
-    fn eval_row<B: native::LiftedAirBuilder<F = Felt>>(
+    fn eval_row<B: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, B>,
-        inputs: native::Inputs<'_, B>,
+        frame: &air::Frame<'_, B>,
+        inputs: air::Inputs<'_, B>,
         prepared: &Prepared<B::ExtExpr>,
         sink: &mut B,
     ) {
@@ -88,15 +88,15 @@ struct Collector {
     values: Vec<Value>,
 }
 
-impl native::LiftedAirBuilder for Collector {
+impl air::LiftedAirBuilder for Collector {
     type F = Felt;
     type Expr = Felt;
     type ExtExpr = QuadFelt;
 
-    fn emit_base(&mut self, value: Felt, _meta: native::ConstraintMeta<'_>) {
+    fn emit_base(&mut self, value: Felt, _meta: air::ConstraintMeta<'_>) {
         self.values.push(Value::Base(value));
     }
-    fn emit_ext(&mut self, value: QuadFelt, _meta: native::ConstraintMeta<'_>) {
+    fn emit_ext(&mut self, value: QuadFelt, _meta: air::ConstraintMeta<'_>) {
         self.values.push(Value::Extension(value));
     }
 }
@@ -120,8 +120,8 @@ fn native_pilot_uses_exact_schedule_capacity_without_row_challenge_recomputation
 
 #[test]
 fn compiled_native_descriptor_and_non_copy_symbolic_kernel_match_the_simple_source() {
+    use air::AirKernel;
     use miden_constraint_compiler::ir::{capture_kernel_native_into, capture_native_into};
-    use native::AirKernel;
 
     for cached in [false, true] {
         let source = PreparationFixture(cached);
@@ -143,7 +143,7 @@ fn compiled_native_descriptor_and_non_copy_symbolic_kernel_match_the_simple_sour
 
 #[test]
 fn compiled_native_sessions_preserve_known_scalar_values_and_assertion_classes() {
-    use native::AirKernel;
+    use air::AirKernel;
 
     let challenges = [
         QuadFelt::new([Felt::from_u32(7), Felt::from_u32(11)]),
@@ -152,7 +152,7 @@ fn compiled_native_sessions_preserve_known_scalar_values_and_assertion_classes()
     for cached in [false, true] {
         let source = PreparationFixture(cached);
         let kernel = CompiledFixture::new(cached);
-        let inputs = native::UniformInputs {
+        let inputs = air::UniformInputs {
             public_values: &[],
             challenges: &challenges,
             exports: &[],
@@ -161,19 +161,19 @@ fn compiled_native_sessions_preserve_known_scalar_values_and_assertion_classes()
         for value in [Felt::ZERO, Felt::from_u32(13)] {
             let main = [value];
             let auxiliary = [QuadFelt::ZERO];
-            let frame = native::AirFrame {
-                main: native::Rows { current: &main, next: &main },
-                preprocessed: native::Rows { current: &[], next: &[] },
-                aux: native::Rows { current: &auxiliary, next: &auxiliary },
+            let frame = air::AirFrame {
+                main: air::Rows { current: &main, next: &main },
+                preprocessed: air::Rows { current: &[], next: &[] },
+                aux: air::Rows { current: &auxiliary, next: &auxiliary },
                 periodic: &[],
-                selectors: native::Selectors {
+                selectors: air::Selectors {
                     first: Felt::ONE,
                     last: Felt::ZERO,
                     transition: Felt::ONE,
                 },
             };
             let mut authored = Collector::default();
-            native::LiftedAir::eval(&source, &frame, inputs, &mut authored);
+            air::LiftedAir::eval(&source, &frame, inputs, &mut authored);
             let mut generated = Collector::default();
             session.eval(&frame, &mut generated);
             let expected = if cached {

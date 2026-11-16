@@ -584,7 +584,7 @@ mod tests {
     use p3_goldilocks::Goldilocks as F;
 
     use super::*;
-    use crate::air::native::{PreprocessedSpec, symbolic::RowOffset};
+    use crate::air::{PreprocessedSpec, symbolic::RowOffset};
 
     fn spec() -> AirSpec<'static, F> {
         AirSpec {

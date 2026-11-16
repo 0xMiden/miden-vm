@@ -1,8 +1,8 @@
 use miden_core::{Felt, field::QuadFelt};
-use miden_stark::security::{AirShape, LookupShape};
 use miden_stark::{
-    air::native::DescriptorError,
-    lookup::{ProverLookupBuilder, native::LookupAir},
+    air::DescriptorError,
+    lookup::{LookupAir, ProverLookupBuilder},
+    security::{AirShape, LookupShape},
 };
 
 use crate::precompiles::{ChipletAir, relations::MAX_MESSAGE_WIDTH};

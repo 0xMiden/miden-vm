@@ -22,8 +22,8 @@ use miden_air_definitions::vm::{
 };
 use miden_core::{field::QuadFelt, utils::RowMajorMatrix};
 use miden_stark::{
-    air::native::LiftedAir,
-    lookup::{Challenges, LookupFractions, LookupMessage, native::build_lookup_fractions},
+    air::LiftedAir,
+    lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions},
 };
 
 use super::{Felt, VmTrace};

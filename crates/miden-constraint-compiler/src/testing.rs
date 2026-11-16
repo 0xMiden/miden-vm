@@ -4,20 +4,20 @@ use std::collections::HashMap;
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{Algebra, BasedVectorSpace, PrimeCharacteristicRing};
-use miden_stark::air::native::{self, AirKernel};
+use miden_stark::air::{self, AirKernel};
 use p3_field::{PackedField, PackedValue};
 
 use crate::ir::{Class, Graph, Leaf, Node, OpKind};
 
 /// Degree of every assertion in each class, preserving its local order. This
 /// uses the builder's symbolic degree rules independently of the optimizer IR.
-pub fn constraint_degrees<A: native::LiftedAir<F = Felt>>(air: &A) -> [Vec<usize>; 2] {
-    assertion_degrees(native::capture_with::<_, QuadFelt>(air).expect("authored source capture"))
+pub fn constraint_degrees<A: air::LiftedAir<F = Felt>>(air: &A) -> [Vec<usize>; 2] {
+    assertion_degrees(air::capture_with::<_, QuadFelt>(air).expect("authored source capture"))
 }
 
 /// Degree observations of actual prepared execution, used only as a comparison subject.
 pub fn kernel_constraint_degrees<K: AirKernel<F = Felt>>(kernel: &K) -> [Vec<usize>; 2] {
-    let captured = native::capture_from_spec::<Felt, QuadFelt>(
+    let captured = air::capture_from_spec::<Felt, QuadFelt>(
         kernel.descriptor().spec().as_borrowed(),
         |frame, inputs, sink| {
             kernel
@@ -30,14 +30,12 @@ pub fn kernel_constraint_degrees<K: AirKernel<F = Felt>>(kernel: &K) -> [Vec<usi
     assertion_degrees(captured)
 }
 
-fn assertion_degrees(captured: native::Capture<Felt, QuadFelt>) -> [Vec<usize>; 2] {
+fn assertion_degrees(captured: air::Capture<Felt, QuadFelt>) -> [Vec<usize>; 2] {
     let mut classes = [Vec::new(), Vec::new()];
     for assertion in captured.assertions {
         match assertion {
-            native::Assertion::Base(expression) => classes[0].push(expression.degree_multiple()),
-            native::Assertion::Extension(expression) => {
-                classes[1].push(expression.degree_multiple())
-            },
+            air::Assertion::Base(expression) => classes[0].push(expression.degree_multiple()),
+            air::Assertion::Extension(expression) => classes[1].push(expression.degree_multiple()),
         }
     }
     classes
@@ -165,7 +163,7 @@ where
     P: PackedField<Scalar = Felt>,
     PE: Algebra<P> + Algebra<QuadFelt> + BasedVectorSpace<P> + Copy + Send + Sync,
 {
-    pub fn new(spec: &native::AirSpec<'_, Felt>, seed: u64) -> Self {
+    pub fn new(spec: &air::AirSpec<'_, Felt>, seed: u64) -> Self {
         let base = |leaf| {
             P::from_fn(|lane| {
                 leaf_value(seed.wrapping_add(lane as u64), leaf).as_basis_coefficients_slice()[0]
@@ -207,22 +205,22 @@ where
         }
     }
 
-    fn frame(&self) -> native::AirFrame<'_, P, PE> {
-        native::AirFrame {
-            main: native::Rows {
+    fn frame(&self) -> air::AirFrame<'_, P, PE> {
+        air::AirFrame {
+            main: air::Rows {
                 current: &self.main[0],
                 next: &self.main[1],
             },
-            preprocessed: native::Rows {
+            preprocessed: air::Rows {
                 current: &self.preprocessed[0],
                 next: &self.preprocessed[1],
             },
-            aux: native::Rows {
+            aux: air::Rows {
                 current: &self.aux[0],
                 next: &self.aux[1],
             },
             periodic: &self.periodic,
-            selectors: native::Selectors {
+            selectors: air::Selectors {
                 first: self.selectors[0],
                 last: self.selectors[1],
                 transition: self.selectors[2],
@@ -230,8 +228,8 @@ where
         }
     }
 
-    fn uniforms(&self) -> native::UniformInputs<'_, P, PE> {
-        native::UniformInputs {
+    fn uniforms(&self) -> air::UniformInputs<'_, P, PE> {
+        air::UniformInputs {
             public_values: &self.public,
             challenges: &self.challenges,
             exports: &self.values,
@@ -266,7 +264,7 @@ impl<P, PE> EvaluationBuilder<P, PE> {
     }
 }
 
-impl<P, PE> native::LiftedAirBuilder for EvaluationBuilder<P, PE>
+impl<P, PE> air::LiftedAirBuilder for EvaluationBuilder<P, PE>
 where
     P: PackedField<Scalar = Felt>,
     PE: Algebra<P>,
@@ -275,12 +273,12 @@ where
     type Expr = P;
     type ExtExpr = PE;
 
-    fn emit_base(&mut self, value: P, _meta: native::ConstraintMeta<'_>) {
+    fn emit_base(&mut self, value: P, _meta: air::ConstraintMeta<'_>) {
         self.base_indices.push(self.base_constraints.len() + self.ext_constraints.len());
         self.base_constraints.push(value);
     }
 
-    fn emit_ext(&mut self, value: PE, _meta: native::ConstraintMeta<'_>) {
+    fn emit_ext(&mut self, value: PE, _meta: air::ConstraintMeta<'_>) {
         self.ext_indices.push(self.base_constraints.len() + self.ext_constraints.len());
         self.ext_constraints.push(value);
     }

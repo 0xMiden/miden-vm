@@ -18,7 +18,7 @@
 
 use core::borrow::Borrow;
 
-use miden_stark::lookup::native;
+use miden_stark::lookup;
 
 use super::{
     BusId,
@@ -39,7 +39,7 @@ use crate::vm::{CoreCols, Felt, constraints::columns::NUM_CORE_COLS};
 ///
 /// Implement adapters explicitly: a blanket implementation would prevent the concrete prover
 /// adapter from selecting its boolean opcode fast path.
-pub(crate) trait NativeMainLookupBuilder: native::LookupBuilder<F = Felt> {
+pub(crate) trait NativeMainLookupBuilder: lookup::LookupBuilder<F = Felt> {
     fn build_op_flags(
         &self,
         local: &CoreCols<Self::Expr>,
@@ -90,7 +90,7 @@ pub(crate) const MAIN_COLUMN_SHAPE: [usize; 4] = [
     stack_overflow::MAX_INTERACTIONS_PER_ROW,
 ];
 
-impl<LB> native::LookupAir<LB> for MainLookupAir
+impl<LB> lookup::LookupAir<LB> for MainLookupAir
 where
     LB: NativeMainLookupBuilder,
 {
@@ -111,7 +111,7 @@ where
         BusId::COUNT
     }
 
-    fn eval(&self, frame: &native::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         // Combined-trace readers may supply wider rows; Core owns its leading columns.
         let local: &CoreCols<_> = frame.main.current[..NUM_CORE_COLS].borrow();
         let next: &CoreCols<_> = frame.main.next[..NUM_CORE_COLS].borrow();
@@ -135,8 +135,8 @@ mod tests {
         operations::opcodes,
     };
     use miden_stark::{
-        air::native::Rows,
-        lookup::{Challenges, Deg, LookupFractions, ProverLookupBuilder, native as native_lookup},
+        air::Rows,
+        lookup::{self, Challenges, Deg, LookupFractions, ProverLookupBuilder},
     };
 
     use super::{MAIN_COLUMN_SHAPE, MainLookupAir, NativeMainLookupBuilder};
@@ -155,12 +155,12 @@ mod tests {
         calls: Cell<usize>,
     }
 
-    impl<'a> native_lookup::LookupBuilder for HookProbe<'a> {
+    impl<'a> lookup::LookupBuilder for HookProbe<'a> {
         type F = Felt;
         type Expr = Felt;
         type ExprEF = QuadFelt;
         type Column<'b>
-            = <ProverLookupBuilder<'a, Felt, QuadFelt> as native_lookup::LookupBuilder>::Column<'b>
+            = <ProverLookupBuilder<'a, Felt, QuadFelt> as lookup::LookupBuilder>::Column<'b>
         where
             Self: 'b;
 
@@ -169,7 +169,7 @@ mod tests {
             f: impl FnOnce(&mut Self::Column<'b>) -> R,
             deg: Deg,
         ) -> R {
-            native_lookup::LookupBuilder::next_column(&mut self.inner, f, deg)
+            lookup::LookupBuilder::next_column(&mut self.inner, f, deg)
         }
     }
 
@@ -210,14 +210,14 @@ mod tests {
         );
         let mut fractions = LookupFractions::from_shape(MAIN_COLUMN_SHAPE.to_vec(), 1);
         {
-            let frame = native_lookup::LookupFrame {
+            let frame = lookup::LookupFrame {
                 main: Rows { current: &current, next: &following },
                 preprocessed: Rows { current: &[], next: &[] },
                 periodic: &[],
             };
             let inner = ProverLookupBuilder::new(&challenges, &MAIN_COLUMN_SHAPE, &mut fractions);
             let mut builder = HookProbe { inner, calls: Cell::new(0) };
-            native_lookup::LookupAir::eval(&MainLookupAir, &frame, &mut builder);
+            lookup::LookupAir::eval(&MainLookupAir, &frame, &mut builder);
             assert_eq!(builder.calls.get(), 1);
         }
         assert_eq!(fractions.counts().len(), MAIN_COLUMN_SHAPE.len());

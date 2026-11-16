@@ -5,11 +5,11 @@
 //!
 //! - `column_shape().len()` declared vs observed (the walker counts `next_column` calls).
 //! - Per-group and per-column `Deg { v, u }` declared vs observed (via
-//!   [`native::symbolic::SymbolicExpression::degree_multiple`] on the running `(V, U)`).
+//!   [`air::symbolic::SymbolicExpression::degree_multiple`] on the running `(V, U)`).
 //! - Cached-encoding canonical vs encoded `(V, U)` equivalence, checked by evaluating the symbolic
 //!   difference `U_c·V_e − U_e·V_c` at a random row.
-//! - Group scope: no illegal [`LookupGroup::insert_encoded`] outside the `encoded` closure.
-//!   Encoded entries in [`LookupBatch`] retain their existing policy.
+//! - Group scope: no illegal [`LookupGroup::insert_encoded`] outside the `encoded` closure. Encoded
+//!   entries in [`LookupBatch`] retain their existing policy.
 //!
 //! The global max-degree budget is **not** checked here — the STARK prover's
 //! quotient validation already enforces it, and duplicating that check would
@@ -25,12 +25,11 @@ use miden_crypto::{
 use rand::RngExt;
 
 use super::super::{Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage};
-use crate::air::native;
-use crate::lookup::native as native_lookup;
+use crate::{air, lookup};
 
 type QuadFelt = BinomialExtensionField<Felt, 2>;
-type NativeExpr = native::symbolic::SymbolicExpression<Felt>;
-type NativeExprEF = native::symbolic::SymbolicExpressionExt<Felt, QuadFelt>;
+type NativeExpr = air::symbolic::SymbolicExpression<Felt>;
+type NativeExprEF = air::symbolic::SymbolicExpressionExt<Felt, QuadFelt>;
 
 // VALIDATION ERROR
 // ================================================================================================
@@ -40,11 +39,11 @@ type NativeExprEF = native::symbolic::SymbolicExpressionExt<Felt, QuadFelt>;
 #[derive(Clone, Debug)]
 pub enum ValidationError {
     /// Invalid native schema, rejected before allocating symbolic rows or sampling a valuation.
-    Spec(native::SpecError),
+    Spec(air::SpecError),
     /// Lookup challenge encoding requires the alpha/beta prefix.
     Challenges { declared: usize },
-    /// [`native_lookup::LookupAir::column_shape`] disagreed with the number of `next_column` calls issued by
-    /// `eval`.
+    /// [`lookup::LookupAir::column_shape`] disagreed with the number of `next_column` calls issued
+    /// by `eval`.
     NumColumnsMismatch { declared: usize, observed: usize },
     /// A column's declared `Deg` differs from the observed symbolic degree of
     /// its accumulated `(V, U)`. Declared degrees are authoritative and must
@@ -129,15 +128,15 @@ impl fmt::Display for ValidationError {
 /// coverage. The borrowed schema is checked before symbolic allocation or
 /// random sampling. Every cached description within this walk uses one shared concrete valuation.
 /// Public, auxiliary and export leaves are outside the lookup frame and remain invalid inputs.
-pub fn validate_native<A>(air: &A, spec: &native::AirSpec<'_, Felt>) -> Result<(), ValidationError>
+pub fn validate_native<A>(air: &A, spec: &air::AirSpec<'_, Felt>) -> Result<(), ValidationError>
 where
-    for<'r> A: native_lookup::LookupAir<NativeValidationBuilder<'r>>,
+    for<'r> A: lookup::LookupAir<NativeValidationBuilder<'r>>,
 {
     spec.validate().map_err(ValidationError::Spec)?;
     if spec.num_challenges < 2 {
         return Err(ValidationError::Challenges { declared: spec.num_challenges });
     }
-    use native::symbolic::{BaseInput, RowOffset};
+    use crate::air::symbolic::{BaseInput, RowOffset};
     let offsets = [RowOffset::Current, RowOffset::Next];
     let main: [Vec<_>; 2] = offsets.map(|offset| {
         (0..spec.main_width)
@@ -153,16 +152,16 @@ where
         .map(|index| NativeExpr::input(BaseInput::Periodic(index)))
         .collect();
     let sampled = SampledRow::new(spec.main_width, spec.preprocessed_width(), periodic.len());
-    let frame = native_lookup::LookupFrame {
-        main: native::Rows { current: &main[0], next: &main[1] },
-        preprocessed: native::Rows {
+    let frame = lookup::LookupFrame {
+        main: air::Rows { current: &main[0], next: &main[1] },
+        preprocessed: air::Rows {
             current: &preprocessed[0],
             next: &preprocessed[1],
         },
         periodic: &periodic,
     };
     let mut builder = NativeValidationBuilder::new(air, sampled.valuation());
-    native_lookup::LookupAir::eval(air, &frame, &mut builder);
+    lookup::LookupAir::eval(air, &frame, &mut builder);
     match builder.take_error() {
         Some(error) => Err(error),
         None => Ok(()),
@@ -184,9 +183,9 @@ pub struct NativeValidationBuilder<'r> {
 impl<'r> NativeValidationBuilder<'r> {
     fn new<A>(air: &A, row_valuation: RowValuation<'r>) -> Self
     where
-        A: native_lookup::LookupAir<Self>,
+        A: lookup::LookupAir<Self>,
     {
-        use native::symbolic::AuxInput;
+        use crate::air::symbolic::AuxInput;
         Self {
             sym_challenges: Challenges::new(
                 NativeExprEF::input(AuxInput::Challenge(0)),
@@ -206,7 +205,7 @@ impl<'r> NativeValidationBuilder<'r> {
     }
 }
 
-impl<'r> native_lookup::LookupBuilder for NativeValidationBuilder<'r> {
+impl<'r> lookup::LookupBuilder for NativeValidationBuilder<'r> {
     type F = Felt;
     type Expr = NativeExpr;
     type ExprEF = NativeExprEF;
@@ -288,7 +287,7 @@ struct RowValuation<'r> {
 
 impl RowValuation<'_> {
     fn eval_native_base(&self, expression: &NativeExpr) -> Felt {
-        use native::symbolic::{BaseInput, BaseLeaf, SymbolicExpr};
+        use crate::air::symbolic::{BaseInput, BaseLeaf, SymbolicExpr};
         match expression {
             SymbolicExpr::Leaf(leaf) => match leaf {
                 BaseLeaf::Constant(value) => *value,
@@ -314,7 +313,7 @@ impl RowValuation<'_> {
     }
 
     fn eval_native_ext(&self, expression: &NativeExprEF) -> QuadFelt {
-        use native::symbolic::{AuxInput, ExtLeaf, SymbolicExpr};
+        use crate::air::symbolic::{AuxInput, ExtLeaf, SymbolicExpr};
         match expression {
             SymbolicExpr::Leaf(leaf) => match leaf {
                 ExtLeaf::Base(inner) => self.eval_native_base(inner).into(),
@@ -761,7 +760,7 @@ mod tests {
         );
     }
 
-    impl<LB: native_lookup::LookupBuilder<F = Felt>> native_lookup::LookupAir<LB> for Probe {
+    impl<LB: lookup::LookupBuilder<F = Felt>> lookup::LookupAir<LB> for Probe {
         fn column_shape(&self) -> &[usize] {
             self.shape()
         }
@@ -772,7 +771,7 @@ mod tests {
             1
         }
 
-        fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
             self.calls.set(self.calls.get() + 1);
             let value = frame.main.current[0].dup()
                 + frame.main.next[0].dup() * LB::Expr::from_u32(2)
@@ -842,14 +841,14 @@ mod tests {
         }
     }
 
-    fn spec() -> native::AirSpec<'static, Felt> {
-        native::AirSpec {
+    fn spec() -> air::AirSpec<'static, Felt> {
+        air::AirSpec {
             main_width: 1,
             aux_width: 3,
             num_public_values: 0,
             num_challenges: 2,
             num_exports: 1,
-            preprocessed: Some(native::PreprocessedSpec { width: 1, log_height: 1 }),
+            preprocessed: Some(air::PreprocessedSpec { width: 1, log_height: 1 }),
             periodic_columns: Cow::Owned(vec![vec![Felt::ONE; 2]]),
         }
     }
@@ -917,7 +916,7 @@ mod tests {
         invalid.aux_width = usize::MAX;
         assert!(matches!(
             validate_native(&probe, &invalid),
-            Err(ValidationError::Spec(native::SpecError::EmptyMain))
+            Err(ValidationError::Spec(air::SpecError::EmptyMain))
         ));
         let mut invalid = spec();
         invalid.num_challenges = 1;
@@ -930,7 +929,7 @@ mod tests {
 
     #[test]
     fn native_visitor_uses_explicit_namespaced_assignment() {
-        use native::symbolic::{AuxInput, BaseInput, RowOffset};
+        use crate::air::symbolic::{AuxInput, BaseInput, RowOffset};
 
         let current = [Felt::from_u32(1)];
         let next = [Felt::from_u32(2)];
@@ -972,7 +971,7 @@ mod tests {
         let sampled = SampledRow::new(1, 1, 1);
         sampled
             .valuation()
-            .eval_native_base(&NativeExpr::input(native::symbolic::BaseInput::Public(0)));
+            .eval_native_base(&NativeExpr::input(air::symbolic::BaseInput::Public(0)));
     }
 
     #[test]
@@ -981,6 +980,6 @@ mod tests {
         let sampled = SampledRow::new(1, 1, 1);
         let _ = sampled
             .valuation()
-            .eval_native_ext(&NativeExprEF::input(native::symbolic::AuxInput::Export(0)));
+            .eval_native_ext(&NativeExprEF::input(air::symbolic::AuxInput::Export(0)));
     }
 }

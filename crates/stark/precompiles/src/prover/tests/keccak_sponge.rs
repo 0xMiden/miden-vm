@@ -13,7 +13,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_crypto::hash::keccak::Keccak256;
-use miden_stark::air::native::{ConstraintDegrees, LiftedAir};
+use miden_stark::air::{ConstraintDegrees, LiftedAir};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::prover::{
@@ -157,11 +157,8 @@ fn lifted_air_validates_and_layout_matches_spec() {
     assert_eq!(crate::prover::tests::lookup_column_shape(&air), &[3, 3, 4, 4, 2]);
 
     assert_eq!(crate::prover::tests::raw_degrees(&air), ConstraintDegrees { base: 5, ext: 5 },);
-    miden_stark::lookup::native::validate_native(
-        &air,
-        &miden_stark::air::native::LiftedAir::spec(&air),
-    )
-    .unwrap_or_else(|err| panic!("KeccakSpongeAir lookup validation failed: {err}"));
+    miden_stark::lookup::validate_native(&air, &miden_stark::air::LiftedAir::spec(&air))
+        .unwrap_or_else(|err| panic!("KeccakSpongeAir lookup validation failed: {err}"));
 }
 
 #[test]
@@ -446,38 +443,38 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
     // Perturbing the built accumulator instead directly exercises the centered recurrence.
     // The wrapper keeps the same relation and perturbs only the constructed auxiliary witness.
     use miden_core::field::PrimeCharacteristicRing;
-    use miden_stark::{air::native, lookup::native as native_lookup};
+    use miden_stark::{air, lookup};
 
     use crate::prover::hash::keccak::sponge::NUM_AUX_COLS;
 
     #[derive(Debug, Clone, Copy)]
     struct AuxCorruptAir;
 
-    impl native::LiftedAir for AuxCorruptAir {
+    impl air::LiftedAir for AuxCorruptAir {
         type F = Felt;
 
-        fn spec(&self) -> native::AirSpec<'_, Felt> {
-            native::LiftedAir::spec(&KeccakSpongeAir)
+        fn spec(&self) -> air::AirSpec<'_, Felt> {
+            air::LiftedAir::spec(&KeccakSpongeAir)
         }
 
-        fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+        fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
             &self,
-            frame: &native::Frame<'_, AB>,
-            inputs: native::Inputs<'_, AB>,
+            frame: &air::Frame<'_, AB>,
+            inputs: air::Inputs<'_, AB>,
             builder: &mut AB,
         ) {
-            native::LiftedAir::eval(&KeccakSpongeAir, frame, inputs, builder);
+            air::LiftedAir::eval(&KeccakSpongeAir, frame, inputs, builder);
         }
     }
 
-    impl native::ProverAir<QuadFelt> for AuxCorruptAir {
-        type Error = native_lookup::LookupError;
+    impl air::ProverAir<QuadFelt> for AuxCorruptAir {
+        type Error = lookup::LookupError;
 
         fn build_aux_trace(
             &self,
-            inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-        ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-            let mut auxiliary = native::ProverAir::build_aux_trace(&KeccakSpongeAir, inputs)?;
+            inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+        ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+            let mut auxiliary = air::ProverAir::build_aux_trace(&KeccakSpongeAir, inputs)?;
             // Preserve the existing negative witness: row1, column0 alone is changed.
             auxiliary.columns.values[NUM_AUX_COLS] += QuadFelt::ONE;
             Ok(auxiliary)

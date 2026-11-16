@@ -14,11 +14,11 @@ use std::{collections::HashMap, sync::Arc};
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::BasedVectorSpace;
-use miden_stark::air::native::{
+use miden_stark::air::{
     self, AirDescriptor, AirKernel, DescriptorError,
     symbolic::{
-        AuxInput, BaseInput, BaseLeaf as NativeBaseLeaf, ExtLeaf as NativeExtLeaf,
-        SymbolicExpression as NativeExpression, SymbolicExpressionExt as NativeExpressionExt,
+        AuxInput, BaseInput, BaseLeaf as AirBaseLeaf, ExtLeaf as AirExtLeaf,
+        SymbolicExpression as AirExpression, SymbolicExpressionExt as AirExpressionExt,
     },
 };
 
@@ -57,7 +57,7 @@ pub fn capture_native<A>(
     air: &A,
 ) -> Result<(Graph, CapturedConstraints, AirDescriptor<Felt>), DescriptorError>
 where
-    A: native::LiftedAir<F = Felt>,
+    A: air::LiftedAir<F = Felt>,
 {
     let mut builder = GraphBuilder::new();
     let (captured, descriptor) = capture_native_into(air, &mut builder)?;
@@ -70,9 +70,9 @@ pub fn capture_native_into<A>(
     builder: &mut GraphBuilder,
 ) -> Result<(CapturedConstraints, AirDescriptor<Felt>), DescriptorError>
 where
-    A: native::LiftedAir<F = Felt>,
+    A: air::LiftedAir<F = Felt>,
 {
-    let captured = native::capture_with::<A, EF>(air)?;
+    let captured = air::capture_with::<A, EF>(air)?;
     Ok(lower_native(captured, builder))
 }
 
@@ -84,15 +84,15 @@ pub fn capture_native_into_with<A>(
     air: &A,
     builder: &mut GraphBuilder,
     eval: impl FnOnce(
-        &native::Frame<'_, native::SymbolicSink<Felt, EF>>,
-        native::Inputs<'_, native::SymbolicSink<Felt, EF>>,
-        &mut native::SymbolicSink<Felt, EF>,
+        &air::Frame<'_, air::SymbolicSink<Felt, EF>>,
+        air::Inputs<'_, air::SymbolicSink<Felt, EF>>,
+        &mut air::SymbolicSink<Felt, EF>,
     ),
 ) -> Result<(CapturedConstraints, AirDescriptor<Felt>), DescriptorError>
 where
-    A: native::LiftedAir<F = Felt>,
+    A: air::LiftedAir<F = Felt>,
 {
-    let captured = native::capture_from_spec::<Felt, EF>(air.spec(), eval)?;
+    let captured = air::capture_from_spec::<Felt, EF>(air.spec(), eval)?;
     Ok(lower_native(captured, builder))
 }
 
@@ -109,7 +109,7 @@ pub fn capture_kernel_native_into<K>(
 where
     K: AirKernel<F = Felt>,
 {
-    let captured = native::capture_from_spec::<Felt, EF>(
+    let captured = air::capture_from_spec::<Felt, EF>(
         kernel.descriptor().spec().as_borrowed(),
         |frame, inputs, sink| {
             let session = kernel.bind(inputs).expect("symbolic inputs match the kernel descriptor");
@@ -120,10 +120,10 @@ where
 }
 
 fn lower_native(
-    captured: native::Capture<Felt, EF>,
+    captured: air::Capture<Felt, EF>,
     builder: &mut GraphBuilder,
 ) -> (CapturedConstraints, AirDescriptor<Felt>) {
-    let native::Capture { descriptor, assertions } = captured;
+    let air::Capture { descriptor, assertions } = captured;
     let layout = descriptor.analysis().layout();
     let mut walker = Walker::new(builder);
     // Preserve the legacy graph's discovery convention separately from assertion emission order.
@@ -132,7 +132,7 @@ fn lower_native(
         .base_indices()
         .iter()
         .map(|&index| {
-            let native::Assertion::Base(expression) = &assertions[index] else {
+            let air::Assertion::Base(expression) = &assertions[index] else {
                 unreachable!("validated capture class/layout mismatch")
             };
             walker.native_base_node(expression)
@@ -142,7 +142,7 @@ fn lower_native(
         .ext_indices()
         .iter()
         .map(|&index| {
-            let native::Assertion::Extension(expression) = &assertions[index] else {
+            let air::Assertion::Extension(expression) = &assertions[index] else {
                 unreachable!("validated capture class/layout mismatch")
             };
             walker.native_ext_node(expression)
@@ -188,7 +188,7 @@ impl<'a> Walker<'a> {
         self.builder.op(class, op, x, y).0
     }
 
-    fn native_base_child(&mut self, expression: &Arc<NativeExpression<Felt>>) -> NodeId {
+    fn native_base_child(&mut self, expression: &Arc<AirExpression<Felt>>) -> NodeId {
         let pointer = Arc::as_ptr(expression) as usize;
         if let Some(&id) = self.base_memo.get(&pointer) {
             return id;
@@ -198,11 +198,11 @@ impl<'a> Walker<'a> {
         id
     }
 
-    fn native_base_node(&mut self, expression: &NativeExpression<Felt>) -> NodeId {
+    fn native_base_node(&mut self, expression: &AirExpression<Felt>) -> NodeId {
         match expression {
-            NativeExpression::Leaf(leaf) => {
+            AirExpression::Leaf(leaf) => {
                 let leaf = match leaf {
-                    NativeBaseLeaf::Input(input) => match *input {
+                    AirBaseLeaf::Input(input) => match *input {
                         BaseInput::Main { offset, index } => {
                             Leaf::Main { offset: offset.index(), index }
                         },
@@ -212,33 +212,33 @@ impl<'a> Walker<'a> {
                         BaseInput::Public(index) => Leaf::Public(index),
                         BaseInput::Periodic(index) => Leaf::Periodic(index),
                     },
-                    NativeBaseLeaf::IsFirstRow => Leaf::IsFirst,
-                    NativeBaseLeaf::IsLastRow => Leaf::IsLast,
-                    NativeBaseLeaf::IsTransition => Leaf::IsTransition,
-                    NativeBaseLeaf::Constant(value) => Leaf::BaseConst(value.as_canonical_u64()),
+                    AirBaseLeaf::IsFirstRow => Leaf::IsFirst,
+                    AirBaseLeaf::IsLastRow => Leaf::IsLast,
+                    AirBaseLeaf::IsTransition => Leaf::IsTransition,
+                    AirBaseLeaf::Constant(value) => Leaf::BaseConst(value.as_canonical_u64()),
                 };
                 self.builder.leaf(leaf)
             },
-            NativeExpression::Add { x, y, .. } => {
+            AirExpression::Add { x, y, .. } => {
                 let (left, right) = (self.native_base_child(x), self.native_base_child(y));
                 self.op(Class::Base, OpKind::Add, left, Some(right))
             },
-            NativeExpression::Sub { x, y, .. } => {
+            AirExpression::Sub { x, y, .. } => {
                 let (left, right) = (self.native_base_child(x), self.native_base_child(y));
                 self.op(Class::Base, OpKind::Sub, left, Some(right))
             },
-            NativeExpression::Mul { x, y, .. } => {
+            AirExpression::Mul { x, y, .. } => {
                 let (left, right) = (self.native_base_child(x), self.native_base_child(y));
                 self.op(Class::Base, OpKind::Mul, left, Some(right))
             },
-            NativeExpression::Neg { x, .. } => {
+            AirExpression::Neg { x, .. } => {
                 let inner = self.native_base_child(x);
                 self.op(Class::Base, OpKind::Neg, inner, None)
             },
         }
     }
 
-    fn native_ext_child(&mut self, expression: &Arc<NativeExpressionExt<Felt, EF>>) -> NodeId {
+    fn native_ext_child(&mut self, expression: &Arc<AirExpressionExt<Felt, EF>>) -> NodeId {
         let pointer = Arc::as_ptr(expression) as usize;
         if let Some(&id) = self.ext_memo.get(&pointer) {
             return id;
@@ -248,14 +248,14 @@ impl<'a> Walker<'a> {
         id
     }
 
-    fn native_ext_node(&mut self, expression: &NativeExpressionExt<Felt, EF>) -> NodeId {
+    fn native_ext_node(&mut self, expression: &AirExpressionExt<Felt, EF>) -> NodeId {
         match expression {
-            NativeExpressionExt::Leaf(leaf) => match leaf {
-                NativeExtLeaf::Base(base) => {
+            AirExpressionExt::Leaf(leaf) => match leaf {
+                AirExtLeaf::Base(base) => {
                     let id = self.native_base_node(base);
                     self.builder.leaf(Leaf::ExtBase(id))
                 },
-                NativeExtLeaf::Input(input) => {
+                AirExtLeaf::Input(input) => {
                     let leaf = match *input {
                         AuxInput::Trace { offset, index } => {
                             Leaf::Aux { offset: offset.index(), index }
@@ -265,7 +265,7 @@ impl<'a> Walker<'a> {
                     };
                     self.builder.leaf(leaf)
                 },
-                NativeExtLeaf::ExtConstant(value) => {
+                AirExtLeaf::ExtConstant(value) => {
                     let coefficients: &[Felt] = value.as_basis_coefficients_slice();
                     self.builder.leaf(Leaf::ExtConst([
                         coefficients[0].as_canonical_u64(),
@@ -273,19 +273,19 @@ impl<'a> Walker<'a> {
                     ]))
                 },
             },
-            NativeExpressionExt::Add { x, y, .. } => {
+            AirExpressionExt::Add { x, y, .. } => {
                 let (left, right) = (self.native_ext_child(x), self.native_ext_child(y));
                 self.op(Class::Ext, OpKind::Add, left, Some(right))
             },
-            NativeExpressionExt::Sub { x, y, .. } => {
+            AirExpressionExt::Sub { x, y, .. } => {
                 let (left, right) = (self.native_ext_child(x), self.native_ext_child(y));
                 self.op(Class::Ext, OpKind::Sub, left, Some(right))
             },
-            NativeExpressionExt::Mul { x, y, .. } => {
+            AirExpressionExt::Mul { x, y, .. } => {
                 let (left, right) = (self.native_ext_child(x), self.native_ext_child(y));
                 self.op(Class::Ext, OpKind::Mul, left, Some(right))
             },
-            NativeExpressionExt::Neg { x, .. } => {
+            AirExpressionExt::Neg { x, .. } => {
                 let inner = self.native_ext_child(x);
                 self.op(Class::Ext, OpKind::Neg, inner, None)
             },
@@ -299,7 +299,7 @@ mod tests {
 
     use miden_core::utils::RowMajorMatrix;
     use miden_crypto::field::PrimeCharacteristicRing;
-    use miden_stark::air::native::LiftedAirBuilder as _;
+    use miden_stark::air::LiftedAirBuilder as _;
     use p3_field::{Algebra, Dup};
 
     use super::*;
@@ -307,9 +307,9 @@ mod tests {
     struct Source;
 
     /// One authored body supplies source and direct-kernel observations.
-    fn relation<S: native::LiftedAirBuilder<F = Felt>>(
-        frame: &native::Frame<'_, S>,
-        inputs: native::Inputs<'_, S>,
+    fn relation<S: air::LiftedAirBuilder<F = Felt>>(
+        frame: &air::Frame<'_, S>,
+        inputs: air::Inputs<'_, S>,
         sink: &mut S,
     ) {
         let base = (frame.main.current[0].dup() + frame.main.next[1].dup())
@@ -328,17 +328,17 @@ mod tests {
         sink.assert_zero(base);
     }
 
-    impl native::LiftedAir for Source {
+    impl air::LiftedAir for Source {
         type F = Felt;
 
-        fn spec(&self) -> native::AirSpec<'_, Felt> {
-            native::AirSpec {
+        fn spec(&self) -> air::AirSpec<'_, Felt> {
+            air::AirSpec {
                 main_width: 2,
                 aux_width: 1,
                 num_public_values: 1,
                 num_challenges: 2,
                 num_exports: 1,
-                preprocessed: Some(native::PreprocessedSpec { width: 1, log_height: 2 }),
+                preprocessed: Some(air::PreprocessedSpec { width: 1, log_height: 2 }),
                 periodic_columns: Cow::Owned(vec![vec![Felt::ONE, Felt::TWO]]),
             }
         }
@@ -347,10 +347,10 @@ mod tests {
             panic!("compiler capture must not build fixed matrices")
         }
 
-        fn eval<S: native::LiftedAirBuilder<F = Felt>>(
+        fn eval<S: air::LiftedAirBuilder<F = Felt>>(
             &self,
-            frame: &native::Frame<'_, S>,
-            inputs: native::Inputs<'_, S>,
+            frame: &air::Frame<'_, S>,
+            inputs: air::Inputs<'_, S>,
             sink: &mut S,
         ) {
             relation(frame, inputs, sink);
@@ -409,17 +409,17 @@ mod tests {
     fn kernel_capture_prepares_and_evaluates_without_source_forwarding() {
         struct Kernel(AirDescriptor<Felt>);
 
-        impl native::LiftedAir for Kernel {
+        impl air::LiftedAir for Kernel {
             type F = Felt;
 
-            fn spec(&self) -> native::AirSpec<'_, Felt> {
+            fn spec(&self) -> air::AirSpec<'_, Felt> {
                 self.0.spec().as_borrowed()
             }
 
-            fn eval<S: native::LiftedAirBuilder<F = Felt>>(
+            fn eval<S: air::LiftedAirBuilder<F = Felt>>(
                 &self,
-                _frame: &native::Frame<'_, S>,
-                _inputs: native::Inputs<'_, S>,
+                _frame: &air::Frame<'_, S>,
+                _inputs: air::Inputs<'_, S>,
                 _sink: &mut S,
             ) {
                 panic!("kernel comparison must not capture the source forwarding method")
@@ -436,15 +436,15 @@ mod tests {
 
             fn prepare<B: Algebra<Felt>, E: Algebra<B>>(
                 &self,
-                _inputs: native::UniformInputs<'_, B, E>,
+                _inputs: air::UniformInputs<'_, B, E>,
             ) -> bool {
                 true
             }
 
-            fn eval_row<S: native::LiftedAirBuilder<F = Felt>>(
+            fn eval_row<S: air::LiftedAirBuilder<F = Felt>>(
                 &self,
-                frame: &native::Frame<'_, S>,
-                inputs: native::Inputs<'_, S>,
+                frame: &air::Frame<'_, S>,
+                inputs: air::Inputs<'_, S>,
                 prepared: &bool,
                 sink: &mut S,
             ) {
@@ -453,7 +453,7 @@ mod tests {
             }
         }
 
-        let kernel = Kernel(native::capture_with::<_, EF>(&Source).unwrap().descriptor);
+        let kernel = Kernel(air::capture_with::<_, EF>(&Source).unwrap().descriptor);
         let mut builder = GraphBuilder::new();
         let (source, source_descriptor) = capture_native_into(&Source, &mut builder).unwrap();
         let (prepared, observed_descriptor) =
@@ -469,9 +469,9 @@ mod tests {
         let mut builder = GraphBuilder::new();
         let (selected, descriptor) =
             capture_native_into_with(&Source, &mut builder, |_, _, sink| {
-                native::LiftedAirBuilder::assert_zero_ext(
+                air::LiftedAirBuilder::assert_zero_ext(
                     sink,
-                    NativeExpressionExt::<Felt, EF>::from(value),
+                    AirExpressionExt::<Felt, EF>::from(value),
                 );
             })
             .unwrap();

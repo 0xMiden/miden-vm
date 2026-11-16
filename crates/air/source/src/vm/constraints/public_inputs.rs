@@ -4,7 +4,7 @@
 //! - First row: stack[0..16] == stack_inputs[0..16]
 //! - Last row:  stack[0..16] == stack_outputs[0..16]
 
-use miden_stark::air::native::{Frame, Inputs, LiftedAirBuilder};
+use miden_stark::air::{Frame, Inputs, LiftedAirBuilder};
 use p3_field::Dup;
 
 use crate::vm::{CoreCols, NativeMidenAirBuilder};
@@ -62,7 +62,7 @@ mod tests {
         Felt,
         field::{PrimeCharacteristicRing, QuadFelt},
     };
-    use miden_stark::air::native::{
+    use miden_stark::air::{
         AirSpec, Assertion, UniformInputs, capture_from_spec,
         symbolic::{BaseInput, BaseLeaf, RowOffset, SymbolicExpr},
     };

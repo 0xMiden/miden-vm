@@ -32,7 +32,7 @@ use p3_util::reverse_slice_index_bits;
 use thiserror::Error;
 
 use crate::{
-    air::native::{AirKernel, QuotientAllocationError, resolve_quotient_chunks},
+    air::{AirKernel, QuotientAllocationError, resolve_quotient_chunks},
     selectors::Selectors,
     transcript::Channel,
 };

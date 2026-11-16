@@ -11,7 +11,7 @@ use miden_core::{
     program::{KernelDescriptor, NUM_CLAIM_ELEMENTS},
 };
 use miden_stark::{
-    air::{ReductionError, native::LiftedAir},
+    air::{LiftedAir, ReductionError},
     lookup::Challenges,
 };
 use p3_challenger::CanObserve;

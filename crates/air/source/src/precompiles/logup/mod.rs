@@ -50,12 +50,9 @@ macro_rules! frac_col {
 }
 pub(crate) use frac_col;
 pub use miden_stark::lookup::{
-    BoundaryBuilder, Challenges, Deg, LookupBatch, LookupColumn, LookupFractions, LookupGroup,
-    LookupMessage, ProverLookupBuilder, accumulate,
-    native::{
-        ConstraintLookupBuilder, LookupAir, LookupBuilder, build_logup_aux_trace,
-        build_lookup_fractions,
-    },
+    BoundaryBuilder, Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch,
+    LookupBuilder, LookupColumn, LookupFractions, LookupGroup, LookupMessage, ProverLookupBuilder,
+    accumulate, build_logup_aux_trace, build_lookup_fractions,
 };
 
 // CHALLENGES

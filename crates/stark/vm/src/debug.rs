@@ -4,7 +4,7 @@ use alloc::{vec, vec::Vec};
 use miden_air::vm::{MidenMultiAir, config};
 use miden_air_definitions::vm::VmTrace;
 use miden_core::{Felt, field::QuadFelt};
-use miden_stark::air::{ProverStatement, Statement, native::LiftedAir};
+use miden_stark::air::{LiftedAir, ProverStatement, Statement};
 
 /// Checks every constraint, panicking on the first violation with AIR and row diagnostics.
 pub fn check_constraints(trace: &VmTrace) {

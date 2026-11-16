@@ -26,12 +26,11 @@ use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
 };
-use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::native,
-    lookup::{Deg, LookupColumn, LookupGroup, LookupMessage, native as native_lookup},
+    air,
+    air::LiftedAirBuilder as _,
+    lookup::{self, Deg, LookupColumn, LookupGroup, LookupMessage},
 };
-
 use p3_field::Dup;
 
 use crate::{
@@ -95,9 +94,9 @@ const COLUMN_SHAPE: [usize; NUM_LOOKUP_COLS] = column_shape();
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EidosCompressionAir;
 
-impl<LB> native_lookup::LookupAir<LB> for EidosCompressionAir
+impl<LB> lookup::LookupAir<LB> for EidosCompressionAir
 where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -111,7 +110,7 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         {
             let local: &EidosCompressionCols<_> =
                 frame.main.current[..NUM_EIDOS_COMPRESSION_COLS].borrow();
@@ -120,7 +119,7 @@ where
             let selectors = EidosCompressionSelectors::new(frame.periodic, 0);
             emit_lookup_columns(builder, local, next, &selectors);
         }
-        <EidosCompressionInterfaceAir as native_lookup::LookupAir<LB>>::eval(
+        <EidosCompressionInterfaceAir as lookup::LookupAir<LB>>::eval(
             &EidosCompressionInterfaceAir,
             frame,
             builder,
@@ -140,8 +139,8 @@ pub struct EidosCompressionInterfaceAir;
 
 // The composed AIR's block denominator can vanish even at zero multiplicity. The two selected
 // columns have denominator one outside their active rows and are pinned by their lookup equations.
-fn enforce_inactive_block_aux<AB: native::LiftedAirBuilder<F = Felt>>(
-    frame: &native::Frame<'_, AB>,
+fn enforce_inactive_block_aux<AB: air::LiftedAirBuilder<F = Felt>>(
+    frame: &air::Frame<'_, AB>,
     builder: &mut AB,
 ) {
     let selectors = EidosCompressionSelectors::new(frame.periodic, 0);
@@ -150,8 +149,8 @@ fn enforce_inactive_block_aux<AB: native::LiftedAirBuilder<F = Felt>>(
     builder.assert_zero_ext(value * inactive);
 }
 
-fn enforce_interface_constraints<AB: native::LiftedAirBuilder<F = Felt>>(
-    frame: &native::Frame<'_, AB>,
+fn enforce_interface_constraints<AB: air::LiftedAirBuilder<F = Felt>>(
+    frame: &air::Frame<'_, AB>,
     builder: &mut AB,
 ) {
     let local = frame.main.current;
@@ -213,9 +212,9 @@ where
     }
 }
 
-impl<LB> native_lookup::LookupAir<LB> for EidosCompressionInterfaceAir
+impl<LB> lookup::LookupAir<LB> for EidosCompressionInterfaceAir
 where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &PVM_COLUMN_SHAPE
@@ -229,7 +228,7 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         let local = frame.main.current;
         let next = frame.main.next;
         let selectors = EidosCompressionSelectors::new(frame.periodic, 0);
@@ -374,10 +373,10 @@ fn pack_pair<E: PrimeCharacteristicRing>(lo: E, hi: E) -> E {
 
 const _: () = assert!(EIDOS_COMPRESSION_CYCLE_LEN == 32);
 
-impl native::LiftedAir for EidosCompressionAir {
+impl air::LiftedAir for EidosCompressionAir {
     type F = Felt;
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: NUM_AUX_COLS,
             num_public_values: 0,
@@ -387,10 +386,10 @@ impl native::LiftedAir for EidosCompressionAir {
             periodic_columns: Cow::Owned(get_periodic_column_values()),
         }
     }
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let local = &frame.main.current[..NUM_EIDOS_COMPRESSION_COLS];
@@ -406,24 +405,24 @@ impl native::LiftedAir for EidosCompressionAir {
             builder,
             AUX_REGISTER_COL,
         );
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for EidosCompressionAir {
+impl air::ProverAir<QuadFelt> for EidosCompressionAir {
     type Error = crate::shared::eidos::EidosWitnessError;
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
         crate::shared::eidos::build_aux_trace(self, inputs, AUX_REGISTER_COL)
     }
 }
 
-impl native::LiftedAir for EidosCompressionInterfaceAir {
+impl air::LiftedAir for EidosCompressionInterfaceAir {
     type F = Felt;
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: PVM_AUX_COLS,
             num_public_values: 0,
@@ -433,24 +432,24 @@ impl native::LiftedAir for EidosCompressionInterfaceAir {
             periodic_columns: Cow::Owned(get_periodic_column_values()),
         }
     }
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         enforce_interface_constraints(frame, builder);
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for EidosCompressionInterfaceAir {
-    type Error = native_lookup::LookupError;
+impl air::ProverAir<QuadFelt> for EidosCompressionInterfaceAir {
+    type Error = lookup::LookupError;
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        native_lookup::build_logup_aux_trace(self, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 #[cfg(test)]
@@ -463,8 +462,8 @@ mod tests {
         utils::RowMajorMatrix,
     };
     use miden_stark::{
-        air::native,
-        lookup::{Challenges, LookupMessage, native as native_lookup},
+        air,
+        lookup::{self, Challenges, LookupMessage},
     };
 
     use super::{
@@ -482,31 +481,31 @@ mod tests {
         fn eval_with(
             &mut self,
             evaluate: impl FnOnce(
-                &native::AirFrame<'_, Felt, QuadFelt>,
-                native::UniformInputs<'_, Felt, QuadFelt>,
+                &air::AirFrame<'_, Felt, QuadFelt>,
+                air::UniformInputs<'_, Felt, QuadFelt>,
                 &mut NumericSink<'_>,
             ),
         ) {
             let width = self.main.width;
             let aux_width = self.aux.width;
-            let frame = native::AirFrame {
-                main: native::Rows {
+            let frame = air::AirFrame {
+                main: air::Rows {
                     current: &self.main.values[..width],
                     next: &self.main.values[width..2 * width],
                 },
-                preprocessed: native::Rows { current: &[], next: &[] },
-                aux: native::Rows {
+                preprocessed: air::Rows { current: &[], next: &[] },
+                aux: air::Rows {
                     current: &self.aux.values[..aux_width],
                     next: &self.aux.values[aux_width..2 * aux_width],
                 },
                 periodic: &self.periodic_values,
-                selectors: native::Selectors {
+                selectors: air::Selectors {
                     first: self.is_first_row,
                     last: self.is_last_row,
                     transition: Felt::ONE - self.is_last_row,
                 },
             };
-            let inputs = native::UniformInputs {
+            let inputs = air::UniformInputs {
                 public_values: &[],
                 challenges: &self.randomness,
                 exports: &self.permutation_values,
@@ -525,14 +524,14 @@ mod tests {
         extension: &'a mut Vec<QuadFelt>,
     }
 
-    impl native::LiftedAirBuilder for NumericSink<'_> {
+    impl air::LiftedAirBuilder for NumericSink<'_> {
         type F = Felt;
         type Expr = Felt;
         type ExtExpr = QuadFelt;
-        fn emit_base(&mut self, value: Felt, _: native::ConstraintMeta<'_>) {
+        fn emit_base(&mut self, value: Felt, _: air::ConstraintMeta<'_>) {
             self.base.push(value);
         }
-        fn emit_ext(&mut self, value: QuadFelt, _: native::ConstraintMeta<'_>) {
+        fn emit_ext(&mut self, value: QuadFelt, _: air::ConstraintMeta<'_>) {
             self.extension.push(value);
         }
     }
@@ -583,9 +582,9 @@ mod tests {
         let main = RowMajorMatrix::new(rows.as_flattened().to_vec(), NUM_MAIN_COLS);
         let challenges =
             [QuadFelt::from_u32(7), QuadFelt::new([Felt::from_u32(11), Felt::from_u32(13)])];
-        let native::AuxTrace { columns: aux, exports: sums } = native::ProverAir::build_aux_trace(
+        let air::AuxTrace { columns: aux, exports: sums } = air::ProverAir::build_aux_trace(
             &air,
-            native::AuxTraceInputs {
+            air::AuxTraceInputs {
                 main: &main,
                 preprocessed: None,
                 public_values: &[],
@@ -606,9 +605,8 @@ mod tests {
                 .copy_from_slice(&aux.values[next * PVM_AUX_COLS..(next + 1) * PVM_AUX_COLS]);
             builder.randomness = challenges.to_vec();
             builder.permutation_values = sums.clone();
-            builder.eval_with(|frame, inputs, sink| {
-                native::LiftedAir::eval(&air, frame, inputs, sink)
-            });
+            builder
+                .eval_with(|frame, inputs, sink| air::LiftedAir::eval(&air, frame, inputs, sink));
             assert!(builder.base_evaluations.iter().all(|v| *v == Felt::ZERO), "row {row}");
             assert!(
                 builder.extension_evaluations.iter().all(|v| *v == QuadFelt::ZERO),
@@ -624,8 +622,7 @@ mod tests {
         let mut builder = builder(1, PVM_AUX_COLS);
         builder.aux.values[..PVM_AUX_COLS].fill(QuadFelt::ONE);
         let air = EidosCompressionInterfaceAir;
-        builder
-            .eval_with(|frame, inputs, sink| native_lookup::eval_lookup(&air, frame, inputs, sink));
+        builder.eval_with(|frame, inputs, sink| lookup::eval_lookup(&air, frame, inputs, sink));
         assert_eq!(
             builder.extension_evaluations,
             [QuadFelt::ZERO, QuadFelt::ZERO, QuadFelt::ONE, QuadFelt::ONE]
@@ -636,7 +633,7 @@ mod tests {
         builder.aux.values[INTERFACE_AUX_BEGIN] = QuadFelt::ONE;
         builder.aux.values[INTERFACE_AUX_BEGIN + 2] = QuadFelt::ONE;
         builder.eval_with(|frame, inputs, sink| {
-            native::LiftedAir::eval(&EidosCompressionAir, frame, inputs, sink)
+            air::LiftedAir::eval(&EidosCompressionAir, frame, inputs, sink)
         });
         assert_eq!(builder.extension_evaluations[0], QuadFelt::ONE);
         assert_eq!(builder.extension_evaluations.last(), Some(&QuadFelt::ONE));

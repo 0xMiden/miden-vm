@@ -27,7 +27,7 @@ pub mod selectors;
 #[cfg(test)]
 mod transition_tests;
 
-use miden_stark::air::native::Frame;
+use miden_stark::air::Frame;
 use selectors::ChipletSelectors;
 
 use crate::vm::{ChipletCols, NativeMidenAirBuilder};
@@ -75,7 +75,7 @@ mod tests {
     use core::borrow::Borrow;
 
     use miden_core::{Felt, field::QuadFelt};
-    use miden_stark::air::native::{
+    use miden_stark::air::{
         AirSpec, Assertion, capture_from_spec,
         symbolic::{BaseInput, BaseLeaf, RowOffset, SymbolicExpr, SymbolicExpression},
     };

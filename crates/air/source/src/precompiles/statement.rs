@@ -10,7 +10,7 @@ use miden_core::{
     field::{Field, PrimeCharacteristicRing, QuadFelt},
 };
 use miden_stark::{
-    air::{ReductionError, native::LiftedAir},
+    air::{LiftedAir, ReductionError},
     lookup::{Challenges, LookupMessage},
 };
 

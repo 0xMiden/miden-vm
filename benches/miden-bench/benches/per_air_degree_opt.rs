@@ -9,13 +9,12 @@
 //! - Synthetic Chip AIR: width 72, max constraint degree 5 (so `D = 4`).
 //!
 //! Two variants:
-//! - **Baseline**: both AIRs allocate eight quotient chunks (`D = 8`). Chip's constraints
-//!   are evaluated on `chip_height * 8` points (the full target domain) rather than its natural
+//! - **Baseline**: both AIRs allocate eight quotient chunks (`D = 8`). Chip's constraints are
+//!   evaluated on `chip_height * 8` points (the full target domain) rather than its natural
 //!   `chip_height * 4`.
-//! - **Optimized**: Core allocates eight chunks (`D = 8`), Chip four (`D = 4`). Chip evaluates
-//!   on its native domain (size `chip_height * 4`), divides by the
-//!   native vanishing polynomial, and `upsample_evals` lifts the resulting quotient to the target
-//!   (`chip_height * 8`).
+//! - **Optimized**: Core allocates eight chunks (`D = 8`), Chip four (`D = 4`). Chip evaluates on
+//!   its native domain (size `chip_height * 4`), divides by the native vanishing polynomial, and
+//!   `upsample_evals` lifts the resulting quotient to the target (`chip_height * 8`).
 //!
 //! Run:
 //! ```bash
@@ -28,10 +27,9 @@ mod eidos;
 use std::{borrow::Cow, convert::Infallible, time::Instant};
 
 use eidos::{Dft, Felt, QuadFelt, test_challenger, test_lmcs};
-use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    GenericStarkConfig, ProverInstance,
-    air::native,
+    GenericStarkConfig, ProverInstance, air,
+    air::LiftedAirBuilder as _,
     testing::{MultiAir, PcsParams, ProverStatement, Statement},
 };
 use p3_field::{Algebra, Dup, PrimeCharacteristicRing};
@@ -79,11 +77,11 @@ struct BenchAir {
     kind: BenchAirKind,
 }
 
-impl native::LiftedAir for BenchAir {
+impl air::LiftedAir for BenchAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: WIDTH,
             aux_width: 1,
             num_public_values: 0,
@@ -94,10 +92,10 @@ impl native::LiftedAir for BenchAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let local = frame.main.current;
@@ -117,15 +115,15 @@ impl native::LiftedAir for BenchAir {
     }
 }
 
-impl native::ProverAir<QuadFelt> for BenchAir {
+impl air::ProverAir<QuadFelt> for BenchAir {
     type Error = Infallible;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
         // Benchmark-owned inputs carry the one challenge and a validated main matrix.
-        Ok(native::AuxTrace {
+        Ok(air::AuxTrace {
             columns: RowMajorMatrix::new(vec![inputs.challenges[0]; inputs.main.height()], 1),
             exports: vec![],
         })
@@ -134,28 +132,28 @@ impl native::ProverAir<QuadFelt> for BenchAir {
 
 /// Benchmark execution capacity without modifying the authored relation's diagnostics.
 struct ConservativeKernel {
-    direct: native::DirectKernel<BenchAir>,
+    direct: air::DirectKernel<BenchAir>,
     chunks: usize,
 }
 
 impl ConservativeKernel {
-    fn new(source: BenchAir, chunks: usize) -> Result<Self, native::QuotientAllocationError> {
+    fn new(source: BenchAir, chunks: usize) -> Result<Self, air::QuotientAllocationError> {
         let kernel = Self {
-            direct: native::DirectKernel::new(source).expect("valid benchmark AIR"),
+            direct: air::DirectKernel::new(source).expect("valid benchmark AIR"),
             chunks,
         };
-        native::resolve_quotient_chunks(&kernel)?;
+        air::resolve_quotient_chunks(&kernel)?;
         Ok(kernel)
     }
 }
 
-impl native::AirKernel for ConservativeKernel {
+impl air::AirKernel for ConservativeKernel {
     type F = Felt;
     type Prepared<B: Algebra<Felt>, E: Algebra<B>> =
-        <native::DirectKernel<BenchAir> as native::AirKernel>::Prepared<B, E>;
+        <air::DirectKernel<BenchAir> as air::AirKernel>::Prepared<B, E>;
 
-    fn descriptor(&self) -> &native::AirDescriptor<Felt> {
-        native::AirKernel::descriptor(&self.direct)
+    fn descriptor(&self) -> &air::AirDescriptor<Felt> {
+        air::AirKernel::descriptor(&self.direct)
     }
 
     fn quotient_chunks(&self) -> Option<usize> {
@@ -164,47 +162,47 @@ impl native::AirKernel for ConservativeKernel {
 
     fn prepare<B: Algebra<Felt>, E: Algebra<B>>(
         &self,
-        inputs: native::UniformInputs<'_, B, E>,
+        inputs: air::UniformInputs<'_, B, E>,
     ) -> Self::Prepared<B, E> {
-        native::AirKernel::prepare(&self.direct, inputs)
+        air::AirKernel::prepare(&self.direct, inputs)
     }
 
-    fn eval_row<S: native::LiftedAirBuilder<F = Felt>>(
+    fn eval_row<S: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, S>,
-        inputs: native::Inputs<'_, S>,
+        frame: &air::Frame<'_, S>,
+        inputs: air::Inputs<'_, S>,
         prepared: &Self::Prepared<S::Expr, S::ExtExpr>,
         sink: &mut S,
     ) {
-        native::AirKernel::eval_row(&self.direct, frame, inputs, prepared, sink);
+        air::AirKernel::eval_row(&self.direct, frame, inputs, prepared, sink);
     }
 }
 
-impl native::LiftedAir for ConservativeKernel {
+impl air::LiftedAir for ConservativeKernel {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::LiftedAir::spec(&self.direct)
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::LiftedAir::spec(&self.direct)
     }
 
-    fn eval<S: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<S: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, S>,
-        inputs: native::Inputs<'_, S>,
+        frame: &air::Frame<'_, S>,
+        inputs: air::Inputs<'_, S>,
         sink: &mut S,
     ) {
-        native::LiftedAir::eval(&self.direct, frame, inputs, sink);
+        air::LiftedAir::eval(&self.direct, frame, inputs, sink);
     }
 }
 
-impl native::ProverAir<QuadFelt> for ConservativeKernel {
+impl air::ProverAir<QuadFelt> for ConservativeKernel {
     type Error = Infallible;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        native::ProverAir::build_aux_trace(&self.direct, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        air::ProverAir::build_aux_trace(&self.direct, inputs)
     }
 }
 
@@ -334,44 +332,44 @@ mod tests {
     #[test]
     fn conservative_capacity_does_not_modify_source_identity_or_analysis() {
         let source = super::BenchAir { kind: super::BenchAirKind::Chip };
-        let canonical = super::native::capture_with::<_, super::QuadFelt>(&source).unwrap();
+        let canonical = super::air::capture_with::<_, super::QuadFelt>(&source).unwrap();
         let natural = super::ConservativeKernel::new(source, 4).unwrap();
         let raised = super::ConservativeKernel::new(source, 8).unwrap();
         for kernel in [&natural, &raised] {
-            let descriptor = super::native::AirKernel::descriptor(kernel);
+            let descriptor = super::air::AirKernel::descriptor(kernel);
             assert_eq!(descriptor.fingerprint(), canonical.descriptor.fingerprint());
             assert_eq!(descriptor.analysis(), canonical.descriptor.analysis());
             assert_eq!(
                 descriptor.analysis().raw_degrees(),
-                super::native::ConstraintDegrees { base: 5, ext: 1 }
+                super::air::ConstraintDegrees { base: 5, ext: 1 }
             );
             let counts = descriptor.analysis().counts();
             assert_eq!(
                 (counts.base, counts.ext),
                 (super::CONSTRAINTS_PER_COLUMN * super::WIDTH, 1)
             );
-            let recaptured = super::native::capture_with::<_, super::QuadFelt>(kernel).unwrap();
+            let recaptured = super::air::capture_with::<_, super::QuadFelt>(kernel).unwrap();
             assert_eq!(recaptured.descriptor.fingerprint(), canonical.descriptor.fingerprint());
         }
-        assert_eq!(super::native::resolve_quotient_chunks(&natural).unwrap(), 4);
-        assert_eq!(super::native::resolve_quotient_chunks(&raised).unwrap(), 8);
-        let minimum = super::native::AirKernel::descriptor(&raised)
+        assert_eq!(super::air::resolve_quotient_chunks(&natural).unwrap(), 4);
+        assert_eq!(super::air::resolve_quotient_chunks(&raised).unwrap(), 8);
+        let minimum = super::air::AirKernel::descriptor(&raised)
             .analysis()
             .degree_profile()
             .validate_capacity(16, 8)
             .unwrap();
         assert_eq!(minimum.quotient_chunks, 4);
-        assert_eq!(super::native::resolve_quotient_chunks(&raised).unwrap(), 8);
+        assert_eq!(super::air::resolve_quotient_chunks(&raised).unwrap(), 8);
         assert!(matches!(
             super::ConservativeKernel::new(source, 2),
-            Err(super::native::QuotientAllocationError::BelowConservative {
+            Err(super::air::QuotientAllocationError::BelowConservative {
                 allocated: 2,
                 conservative: 4
             })
         ));
         assert!(matches!(
             super::ConservativeKernel::new(source, 3),
-            Err(super::native::QuotientAllocationError::InvalidChunks { chunks: 3 })
+            Err(super::air::QuotientAllocationError::InvalidChunks { chunks: 3 })
         ));
     }
 

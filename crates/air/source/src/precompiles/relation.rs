@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use miden_stark::air::native::LiftedAir;
+use miden_stark::air::LiftedAir;
 
 use crate::precompiles::{ChipletAir, NUM_CHIPLETS};
 

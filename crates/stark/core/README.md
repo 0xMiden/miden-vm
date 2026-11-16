@@ -31,11 +31,11 @@ The system supports **multiple traces of different power-of-two heights of at
 least 2 rows**. Shorter traces are virtually lifted to the maximum height via
 LMCS upsampling, so the PCS and verifier operate on a single uniform view.
 
-## Native AIR API
+## AIR API
 
 An equation author needs immutable row inputs and an assertion sink; a prover also needs a
 witness constructor, while optimized execution may prepare reusable terms. The
-[`air::native`](src/air/native/mod.rs) contracts keep these responsibilities separate:
+[`air`](src/air/mod.rs) contracts keep these responsibilities separate:
 
 | Capability | Responsibility |
 |------------|----------------|
@@ -46,7 +46,7 @@ witness constructor, while optimized execution may prepare reusable terms. The
 | `MultiAir` | Groups trusted kernels and supplies statement observation and external assertions |
 
 See the complete [source → DirectKernel → Statement example](src/air/statement.rs) and the
-[source/witness](src/air/native/contracts.rs) and [kernel/session](src/air/native/kernel.rs)
+[source/witness](src/air/contracts.rs) and [kernel/session](src/air/kernel.rs)
 contracts. The statement example demonstrates collection and observation; proving additionally
 requires a real witness implementation.
 
@@ -77,7 +77,7 @@ does not authenticate arbitrary matrix contents or evaluator code.
 
 ### Migrating custom AIRs
 
-| Previous interface | Native interface |
+| Previous interface | Current interface |
 |--------------------|------------------|
 | `BaseAir` dimensions and periodic/fixed metadata | `LiftedAir::spec` with `AirSpec` |
 | Combined builder input access and assertions | Separate borrowed `Frame`, uniform `Inputs`, and output-only sink |

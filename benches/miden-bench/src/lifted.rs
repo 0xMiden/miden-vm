@@ -4,7 +4,7 @@ use std::fmt;
 
 use miden_stark::{
     ProverInstance, StarkConfig, VerifierInstance,
-    air::{MultiAir, ProverStatement, Statement, native::DirectKernel},
+    air::{DirectKernel, MultiAir, ProverStatement, Statement},
     testing::airs::miden::DummyMidenAir,
 };
 use p3_field::{ExtensionField, PrimeField64, TwoAdicField};

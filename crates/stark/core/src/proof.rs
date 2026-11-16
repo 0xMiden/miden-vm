@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 pub use crate::transcript::{TranscriptChallenger, TranscriptData, TranscriptError};
 use crate::{
     StarkConfig,
-    air::{MultiAir, native::AirKernel},
+    air::{AirKernel, MultiAir},
     domain::Coset,
     lmcs::Lmcs,
     order::TraceOrder,

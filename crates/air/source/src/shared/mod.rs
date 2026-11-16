@@ -5,7 +5,7 @@ pub mod geometry;
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum WitnessError {
     #[error(transparent)]
-    Lookup(#[from] miden_stark::lookup::native::LookupError),
+    Lookup(#[from] miden_stark::lookup::LookupError),
     #[error(transparent)]
     Eidos(#[from] eidos::EidosWitnessError),
 }

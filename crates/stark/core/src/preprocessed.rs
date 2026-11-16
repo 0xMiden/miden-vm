@@ -17,10 +17,7 @@ use tracing::info_span;
 
 use crate::{
     StarkConfig,
-    air::{
-        MultiAir, Statement, log2_strict_u8,
-        native::{AirKernel, LiftedAir, PreprocessedSpec},
-    },
+    air::{AirKernel, LiftedAir, MultiAir, PreprocessedSpec, Statement, log2_strict_u8},
     domain::{DomainError, LiftedDomain},
     lmcs::{Lmcs, LmcsError, LmcsTree, tree_indices::TreeIndices},
     plan::ExecutionPlan,
@@ -503,10 +500,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        air::{
-            ProverStatement,
-            native::{self, DirectKernel},
-        },
+        air,
+        air::{DirectKernel, ProverStatement},
         pcs::PcsParams,
         testing::{
             airs::miden::DummyMidenAir,
@@ -540,7 +535,7 @@ mod tests {
     impl LiftedAir for FixedDummy {
         type F = Felt;
 
-        fn spec(&self) -> native::AirSpec<'_, Felt> {
+        fn spec(&self) -> air::AirSpec<'_, Felt> {
             let mut spec = LiftedAir::spec(&self.relation);
             spec.preprocessed = self.declared;
             spec
@@ -551,10 +546,10 @@ mod tests {
             self.matrix.clone()
         }
 
-        fn eval<S: native::LiftedAirBuilder<F = Felt>>(
+        fn eval<S: air::LiftedAirBuilder<F = Felt>>(
             &self,
-            frame: &native::Frame<'_, S>,
-            inputs: native::Inputs<'_, S>,
+            frame: &air::Frame<'_, S>,
+            inputs: air::Inputs<'_, S>,
             sink: &mut S,
         ) {
             LiftedAir::eval(&self.relation, frame, inputs, sink);

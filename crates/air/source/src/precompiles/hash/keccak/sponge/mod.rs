@@ -15,10 +15,10 @@ use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
 };
-use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::native,
-    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, native as native_lookup},
+    air,
+    air::LiftedAirBuilder as _,
+    lookup::{self, Deg, LookupBatch, LookupColumn, LookupGroup},
 };
 use miden_utils_sync::LazyLock;
 use p3_field::Dup;
@@ -172,11 +172,11 @@ fn offset_selectors<E: Algebra<Felt>>([b0, b1, b2]: [E; 3], product: E) -> [E; 8
 // LIFTED AIR
 // ================================================================================================
 
-impl native::LiftedAir for KeccakSpongeAir {
+impl air::LiftedAir for KeccakSpongeAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: NUM_AUX_COLS,
             num_public_values: 0,
@@ -187,34 +187,34 @@ impl native::LiftedAir for KeccakSpongeAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         eval_main(frame, builder, 0);
 
         // Phase 2: LogUp.
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for KeccakSpongeAir {
-    type Error = native_lookup::LookupError;
+impl air::ProverAir<QuadFelt> for KeccakSpongeAir {
+    type Error = lookup::LookupError;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        native_lookup::build_logup_aux_trace(self, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
 /// Evaluate this component's base constraints in a main-trace column band.
-pub(crate) fn eval_main<AB>(frame: &native::Frame<'_, AB>, builder: &mut AB, main_col_offset: usize)
+pub(crate) fn eval_main<AB>(frame: &air::Frame<'_, AB>, builder: &mut AB, main_col_offset: usize)
 where
-    AB: native::LiftedAirBuilder<F = Felt>,
+    AB: air::LiftedAirBuilder<F = Felt>,
 {
     eval_main_inner(frame, builder, main_col_offset, false);
 }
@@ -222,16 +222,16 @@ where
 /// Evaluate sponge constraints without zero-filling capacity-row chunk cells.
 ///
 /// The composite node/chunk AIR uses these cells for its serialized records.
-pub(crate) fn eval_main_with_shared_capacity<AB: native::LiftedAirBuilder<F = Felt>>(
-    frame: &native::Frame<'_, AB>,
+pub(crate) fn eval_main_with_shared_capacity<AB: air::LiftedAirBuilder<F = Felt>>(
+    frame: &air::Frame<'_, AB>,
     builder: &mut AB,
     main_col_offset: usize,
 ) {
     eval_main_inner(frame, builder, main_col_offset, true);
 }
 
-fn eval_main_inner<AB: native::LiftedAirBuilder<F = Felt>>(
-    frame: &native::Frame<'_, AB>,
+fn eval_main_inner<AB: air::LiftedAirBuilder<F = Felt>>(
+    frame: &air::Frame<'_, AB>,
     builder: &mut AB,
     main_col_offset: usize,
     shared_capacity: bool,
@@ -516,9 +516,9 @@ pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [
     2, // KeccakSponge request + chunk consume.
 ];
 
-impl<LB> native_lookup::LookupAir<LB> for KeccakSpongeAir
+impl<LB> lookup::LookupAir<LB> for KeccakSpongeAir
 where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -532,18 +532,18 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         eval_lookups(frame, builder, 0);
     }
 }
 
 /// Evaluate this component's LogUp columns in a main-trace column band.
 pub(crate) fn eval_lookups<LB>(
-    frame: &native_lookup::LookupFrame<'_, LB::Expr>,
+    frame: &lookup::LookupFrame<'_, LB::Expr>,
     builder: &mut LB,
     main_col_offset: usize,
 ) where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     let local: &[LB::Expr; NUM_MAIN_COLS] = frame.main.current
         [main_col_offset..main_col_offset + NUM_MAIN_COLS]

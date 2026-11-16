@@ -10,7 +10,7 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_stark::{
-    air::native::{ConstraintDegrees, LiftedAir},
+    air::{ConstraintDegrees, LiftedAir},
     lookup::{Challenges, LookupMessage, ProverLookupBuilder},
 };
 use proptest::prelude::*;
@@ -99,8 +99,8 @@ fn fold_balance<A>(
     challenges: &Challenges<QuadFelt>,
     net: &mut HashMap<QuadFelt, Felt>,
 ) where
-    A: miden_stark::air::native::LiftedAir<F = Felt>,
-    for<'a> A: miden_stark::lookup::native::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
+    A: miden_stark::air::LiftedAir<F = Felt>,
+    for<'a> A: miden_stark::lookup::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
     let fractions = lookup_fractions(air, main, challenges);
     for &(multiplicity, denom) in fractions.fractions() {
@@ -317,11 +317,8 @@ fn uint_store_shape_and_degree_match_design() {
     // row adds no new multiplication chain, mirroring `UintMulAir`'s `c` row.
     assert_eq!(crate::prover::tests::log_quotient_degree(&air), 1);
 
-    miden_stark::lookup::native::validate_native(
-        &air,
-        &miden_stark::air::native::LiftedAir::spec(&air),
-    )
-    .unwrap_or_else(|err| panic!("UintStoreAir lookup validation failed: {err}"));
+    miden_stark::lookup::validate_native(&air, &miden_stark::air::LiftedAir::spec(&air))
+        .unwrap_or_else(|err| panic!("UintStoreAir lookup validation failed: {err}"));
 }
 
 #[test]
@@ -338,11 +335,8 @@ fn uint_store_mul_shape_and_degree_match_design() {
     assert_eq!(crate::prover::tests::raw_degrees(&air), ConstraintDegrees { base: 3, ext: 3 });
     assert_eq!(crate::prover::tests::log_quotient_degree(&air), 1);
 
-    miden_stark::lookup::native::validate_native(
-        &air,
-        &miden_stark::air::native::LiftedAir::spec(&air),
-    )
-    .unwrap_or_else(|err| panic!("UintStoreMulAir lookup validation failed: {err}"));
+    miden_stark::lookup::validate_native(&air, &miden_stark::air::LiftedAir::spec(&air))
+        .unwrap_or_else(|err| panic!("UintStoreMulAir lookup validation failed: {err}"));
 }
 
 #[test]
@@ -368,9 +362,9 @@ fn uint_store_mul_registers_match_standalone_with_nonzero_cycle_sums() {
             STORE_MUL_NUM_MAIN_COLS,
         );
         let challenges = [rand_qf(&mut rng), rand_qf(&mut rng)];
-        let merged = miden_stark::air::native::ProverAir::build_aux_trace(
+        let merged = miden_stark::air::ProverAir::build_aux_trace(
             &UintStoreMulAir,
-            miden_stark::air::native::AuxTraceInputs {
+            miden_stark::air::AuxTraceInputs {
                 main: &main,
                 preprocessed: None,
                 public_values: &[],
@@ -382,9 +376,9 @@ fn uint_store_mul_registers_match_standalone_with_nonzero_cycle_sums() {
         .columns;
         let store_main = extract_band(&main, 0..NUM_MAIN_COLS);
         let mul_main = extract_band(&main, NUM_MAIN_COLS..STORE_MUL_NUM_MAIN_COLS);
-        let store = miden_stark::air::native::ProverAir::build_aux_trace(
+        let store = miden_stark::air::ProverAir::build_aux_trace(
             &UintStoreAir,
-            miden_stark::air::native::AuxTraceInputs {
+            miden_stark::air::AuxTraceInputs {
                 main: &store_main,
                 preprocessed: None,
                 public_values: &[],
@@ -394,9 +388,9 @@ fn uint_store_mul_registers_match_standalone_with_nonzero_cycle_sums() {
         )
         .expect("native integer witness inputs are valid")
         .columns;
-        let mul = miden_stark::air::native::ProverAir::build_aux_trace(
+        let mul = miden_stark::air::ProverAir::build_aux_trace(
             &UintMulAir,
-            miden_stark::air::native::AuxTraceInputs {
+            miden_stark::air::AuxTraceInputs {
                 main: &mul_main,
                 preprocessed: None,
                 public_values: &[],

@@ -18,10 +18,7 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_crypto::hash::blake::Blake3_256;
-use miden_stark::air::{
-    MultiAir, Statement,
-    native::{self, DirectKernel, LiftedAir, ProverAir},
-};
+use miden_stark::air::{self, DirectKernel, LiftedAir, MultiAir, ProverAir, Statement};
 
 const BASE: &str = "614c9f3608e6cc0a80397e8aa60315558f3069f7";
 const FORMAT: &str = "native-air-base-observation-v1";
@@ -203,8 +200,8 @@ fn observe_air<A: ProverAir<QuadFelt, F = Felt>>(air: &A) -> Record {
             quad([2 * i + 2, 2 * i + 3])
         })
         .collect();
-    let native::AuxTrace { columns: aux, exports } = air
-        .build_aux_trace(native::AuxTraceInputs {
+    let air::AuxTrace { columns: aux, exports } = air
+        .build_aux_trace(air::AuxTraceInputs {
             main: &main,
             preprocessed: fixed.as_ref(),
             public_values: &public,
@@ -234,7 +231,7 @@ fn observe_air<A: ProverAir<QuadFelt, F = Felt>>(air: &A) -> Record {
 
 struct AuthoredAirs<A>(Vec<A>);
 
-impl<A: native::AirKernel<F = Felt>> MultiAir<Felt, QuadFelt> for AuthoredAirs<A> {
+impl<A: air::AirKernel<F = Felt>> MultiAir<Felt, QuadFelt> for AuthoredAirs<A> {
     type Air = A;
 
     fn airs(&self) -> &[A] {

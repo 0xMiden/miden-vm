@@ -3,7 +3,7 @@ use miden_ace::EXT_DEGREE;
 #[cfg(any(test, feature = "compiler"))]
 use miden_core::{Felt, field::QuadFelt};
 #[cfg(any(test, feature = "compiler"))]
-use miden_stark::air::native;
+use miden_stark::air;
 #[cfg(any(test, feature = "compiler"))]
 use miden_stark::security::{AirShape, LookupShape};
 
@@ -12,16 +12,16 @@ use miden_stark::security::{AirShape, LookupShape};
 /// Each source is captured once. This does not invoke fixed factories or use the tighter
 /// actual-height degree bound, which proof setup must check separately against its allocation.
 #[cfg(any(test, feature = "compiler"))]
-pub(crate) fn derive_air_shape<A: native::LiftedAir<F = Felt>>(
+pub(crate) fn derive_air_shape<A: air::LiftedAir<F = Felt>>(
     airs: &[A],
     lookup: LookupShape,
     alignment: usize,
-) -> Result<AirShape, native::DescriptorError> {
+) -> Result<AirShape, air::DescriptorError> {
     let mut constraints = 0;
     let mut degree = 0;
     let mut raw_widths = alloc::vec::Vec::with_capacity(airs.len());
     for air in airs {
-        let captured = native::capture_with::<_, QuadFelt>(air)?;
+        let captured = air::capture_with::<_, QuadFelt>(air)?;
         let spec = captured.descriptor.spec();
         let analysis = captured.descriptor.analysis();
         constraints += analysis.layout().total_constraints();
@@ -80,6 +80,7 @@ pub fn num_deep_terms_for_widths(
 mod tests {
     use alloc::borrow::Cow;
     use core::sync::atomic::{AtomicUsize, Ordering};
+
     use p3_field::Dup;
 
     use super::*;
@@ -90,18 +91,18 @@ mod tests {
         evaluations: AtomicUsize,
     }
 
-    impl native::LiftedAir for CountingSource {
+    impl air::LiftedAir for CountingSource {
         type F = Felt;
 
-        fn spec(&self) -> native::AirSpec<'_, Felt> {
+        fn spec(&self) -> air::AirSpec<'_, Felt> {
             self.spec_reads.fetch_add(1, Ordering::Relaxed);
-            native::AirSpec {
+            air::AirSpec {
                 main_width: 1,
                 aux_width: 1,
                 num_public_values: 0,
                 num_challenges: 1,
                 num_exports: 0,
-                preprocessed: Some(native::PreprocessedSpec { width: 1, log_height: 1 }),
+                preprocessed: Some(air::PreprocessedSpec { width: 1, log_height: 1 }),
                 periodic_columns: Cow::Borrowed(&[]),
             }
         }
@@ -110,10 +111,10 @@ mod tests {
             panic!("security geometry must not materialize fixed data");
         }
 
-        fn eval<B: native::LiftedAirBuilder<F = Felt>>(
+        fn eval<B: air::LiftedAirBuilder<F = Felt>>(
             &self,
-            frame: &native::Frame<'_, B>,
-            inputs: native::Inputs<'_, B>,
+            frame: &air::Frame<'_, B>,
+            inputs: air::Inputs<'_, B>,
             sink: &mut B,
         ) {
             self.evaluations.fetch_add(1, Ordering::Relaxed);

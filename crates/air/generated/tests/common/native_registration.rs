@@ -5,7 +5,7 @@ use miden_constraint_compiler::{
     },
 };
 use miden_core::Felt;
-use miden_stark::air::native::{AirKernel, DirectKernel, LiftedAir};
+use miden_stark::air::{AirKernel, DirectKernel, LiftedAir};
 
 /// Authored equations are expected; actual prepared generated execution is the comparison subject.
 pub fn assert_native_registration<A, K>(source: &A, kernel: &K, seeds: &[u64])

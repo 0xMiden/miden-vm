@@ -2,7 +2,7 @@ use miden_ace::{
     AceError,
     compiler::{AceConfig, LayoutKind},
 };
-use miden_stark::air::native::DirectKernel;
+use miden_stark::air::DirectKernel;
 
 use super::multi_air::build_canonical_multi_air_ace_circuit;
 use crate::vm::AIRS;

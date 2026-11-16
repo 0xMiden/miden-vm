@@ -107,9 +107,9 @@ mod tests {
     #[test]
     fn handwritten_degrees_fit_the_pcs_policy() {
         for air in miden_air_definitions::vm::AIRS {
-            use miden_stark::air::native::AirKernel;
+            use miden_stark::air::AirKernel;
             let lookup_columns = air.column_shape().len();
-            let kernel = miden_stark::air::native::DirectKernel::new(air).unwrap();
+            let kernel = miden_stark::air::DirectKernel::new(air).unwrap();
             assert!(miden_stark::log_quotient_degree(&kernel).unwrap() <= super::LOG_BLOWUP);
             assert!(lookup_columns <= kernel.descriptor().spec().aux_width);
         }

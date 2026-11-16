@@ -69,7 +69,7 @@ use miden_core::{
     field::{Algebra, ExtensionField, PrimeCharacteristicRing},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_stark::air::native::{Frame, Inputs, LiftedAirBuilder};
+use miden_stark::air::{Frame, Inputs, LiftedAirBuilder};
 use p3_field::Dup;
 
 use super::{

@@ -44,11 +44,9 @@ use miden_core::{
 };
 use miden_stark::{
     StarkConfig,
-    air::{ProverStatement, Statement, native::LiftedAir},
+    air::{LiftedAir, ProverStatement, Statement},
     debug,
-    lookup::{
-        Challenges, LookupFractions, LookupMessage, accumulate, native::build_lookup_fractions,
-    },
+    lookup::{Challenges, LookupFractions, LookupMessage, accumulate, build_lookup_fractions},
 };
 use miden_vm_stark::setup::config::eidos_config;
 

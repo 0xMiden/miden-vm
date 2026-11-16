@@ -6,7 +6,7 @@ use miden_air::vm::MidenMultiAir;
 use miden_core::{Felt, field::QuadFelt};
 use miden_stark::{
     Preprocessed, PreprocessedValidationError, StarkConfig,
-    air::{Statement, native::AirKernel},
+    air::{AirKernel, Statement},
     lmcs::Lmcs,
 };
 

@@ -3,7 +3,7 @@
 //! polynomial assignments remain separate comparisons. The ignored timing case is manual only.
 
 use miden_air::vm::AIRS;
-use miden_stark::air::native::DirectKernel;
+use miden_stark::air::DirectKernel;
 
 const SEEDS: [u64; 4] =
     [0x243f6a8885a308d3, 0x13198a2e03707344, 0xa4093822299f31d0, 0x082efa98ec4e6c89];

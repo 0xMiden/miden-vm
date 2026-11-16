@@ -28,7 +28,7 @@
 //! The `4 * w1` check prevents Goldilocks field wraparound (P > 2^18).
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_stark::air::native::LiftedAirBuilder;
+use miden_stark::air::LiftedAirBuilder;
 use p3_field::Dup;
 
 use crate::vm::{

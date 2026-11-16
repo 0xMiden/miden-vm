@@ -8,7 +8,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt, batch_multiplicative_inverse},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_stark::air::native::LiftedAir;
+use miden_stark::air::LiftedAir;
 
 use crate::prover::{
     logup::{Challenges, LookupMessage, lookup_challenges_from_slice},
@@ -245,9 +245,9 @@ fn trace_rows_carry_the_aggregated_relation_multiplicities() {
 #[test]
 fn lookup_degree_annotations_match_the_unified_table_layout() {
     assert_eq!((NUM_MAIN_COLS, NUM_PREPROCESSED_COLS, NUM_AUX_COLS), (7, 5, 4));
-    miden_stark::lookup::native::validate_native(
+    miden_stark::lookup::validate_native(
         &BytePairLutAir,
-        &miden_stark::air::native::LiftedAir::spec(&BytePairLutAir),
+        &miden_stark::air::LiftedAir::spec(&BytePairLutAir),
     )
     .unwrap_or_else(|error| panic!("byte-pair lookup validation failed: {error}"));
     assert_eq!(crate::prover::tests::log_quotient_degree(&BytePairLutAir), 1);
@@ -259,12 +259,11 @@ fn build_aux(
 ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<QuadFelt>, QuadFelt) {
     let main = generate_trace(requires);
     let flat = test_alpha_beta();
-    let preprocessed =
-        miden_stark::air::native::LiftedAir::build_preprocessed_trace(&BytePairLutAir);
-    let miden_stark::air::native::AuxTrace { columns: aux, exports: aux_values } =
-        miden_stark::air::native::ProverAir::build_aux_trace(
+    let preprocessed = miden_stark::air::LiftedAir::build_preprocessed_trace(&BytePairLutAir);
+    let miden_stark::air::AuxTrace { columns: aux, exports: aux_values } =
+        miden_stark::air::ProverAir::build_aux_trace(
             &BytePairLutAir,
-            miden_stark::air::native::AuxTraceInputs {
+            miden_stark::air::AuxTraceInputs {
                 main: &main,
                 preprocessed: preprocessed.as_ref(),
                 public_values: &[],

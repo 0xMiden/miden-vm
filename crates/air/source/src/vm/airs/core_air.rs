@@ -5,8 +5,8 @@ use core::borrow::Borrow;
 
 use miden_core::{Felt, WORD_SIZE, field::ExtensionField};
 use miden_stark::{
-    air::{ReductionError, native},
-    lookup::{BoundaryBuilder, Challenges, native as native_lookup},
+    air::{self, ReductionError},
+    lookup::{self, BoundaryBuilder, Challenges},
 };
 
 use super::boundary::ReduceBoundaryBuilder;
@@ -69,11 +69,11 @@ impl CoreAir {
     }
 }
 
-impl native::LiftedAir for CoreAir {
+impl air::LiftedAir for CoreAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: constraints::columns::NUM_CORE_COLS,
             aux_width: constraints::lookup::main_air::MAIN_COLUMN_SHAPE.len(),
             num_public_values: crate::vm::inputs::NUM_PUBLIC_VALUES,
@@ -84,10 +84,10 @@ impl native::LiftedAir for CoreAir {
         }
     }
 
-    fn eval<B: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<B: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, B>,
-        inputs: native::Inputs<'_, B>,
+        frame: &air::Frame<'_, B>,
+        inputs: air::Inputs<'_, B>,
         sink: &mut B,
     ) {
         let local: &CoreCols<B::Expr> = frame.main.current.borrow();
@@ -96,11 +96,11 @@ impl native::LiftedAir for CoreAir {
             constraints::op_flags::OpFlags::new(&local.decoder, &local.stack, &next.decoder);
         constraints::enforce_core(frame, sink, local, next, &op_flags);
         constraints::public_inputs::enforce_main(frame, inputs, sink, local);
-        native_lookup::eval_lookup(self, frame, inputs, sink);
+        lookup::eval_lookup(self, frame, inputs, sink);
     }
 }
 
-impl<LB: NativeMainLookupBuilder> native_lookup::LookupAir<LB> for CoreAir {
+impl<LB: NativeMainLookupBuilder> lookup::LookupAir<LB> for CoreAir {
     fn column_shape(&self) -> &[usize] {
         &constraints::lookup::main_air::MAIN_COLUMN_SHAPE
     }
@@ -113,8 +113,8 @@ impl<LB: NativeMainLookupBuilder> native_lookup::LookupAir<LB> for CoreAir {
         BusId::COUNT
     }
 
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
-        native_lookup::LookupAir::eval(&MainLookupAir, frame, builder);
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        lookup::LookupAir::eval(&MainLookupAir, frame, builder);
     }
 
     fn eval_boundary<B: BoundaryBuilder<F = Felt>>(&self, boundary: &mut B) {
@@ -122,14 +122,14 @@ impl<LB: NativeMainLookupBuilder> native_lookup::LookupAir<LB> for CoreAir {
     }
 }
 
-impl<EF: ExtensionField<Felt>> native::ProverAir<EF> for CoreAir {
-    type Error = native_lookup::LookupError;
+impl<EF: ExtensionField<Felt>> air::ProverAir<EF> for CoreAir {
+    type Error = lookup::LookupError;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, EF>,
-    ) -> Result<native::AuxTrace<EF>, Self::Error> {
-        native_lookup::build_logup_aux_trace(self, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, EF>,
+    ) -> Result<air::AuxTrace<EF>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
@@ -144,8 +144,8 @@ mod tests {
         utils::RowMajorMatrix,
     };
     use miden_stark::{
-        air::native,
-        lookup::{Challenges, accumulate_slow, native as native_lookup},
+        air,
+        lookup::{self, Challenges, accumulate_slow},
     };
 
     use super::CoreAir;
@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn complete_native_core_capture_keeps_lookup_after_all_base_assertions() {
-        let captured = native::capture_with::<_, QuadFelt>(&CoreAir).unwrap();
+        let captured = air::capture_with::<_, QuadFelt>(&CoreAir).unwrap();
         let spec = captured.descriptor.spec();
         assert_eq!(spec.main_width, NUM_CORE_COLS);
         assert_eq!(spec.aux_width, 4);
@@ -172,16 +172,16 @@ mod tests {
         assert!(
             captured.assertions[..counts.base]
                 .iter()
-                .all(|value| matches!(value, native::Assertion::Base(_)))
+                .all(|value| matches!(value, air::Assertion::Base(_)))
         );
         assert!(
             captured.assertions[counts.base..]
                 .iter()
-                .all(|value| matches!(value, native::Assertion::Extension(_)))
+                .all(|value| matches!(value, air::Assertion::Extension(_)))
         );
 
-        use native::symbolic::{AuxInput, BaseLeaf, ExtLeaf, RowOffset, SymbolicExpr};
-        let native::Assertion::Extension(SymbolicExpr::Mul { x: acc, y: first, .. }) =
+        use air::symbolic::{AuxInput, BaseLeaf, ExtLeaf, RowOffset, SymbolicExpr};
+        let air::Assertion::Extension(SymbolicExpr::Mul { x: acc, y: first, .. }) =
             &captured.assertions[counts.base]
         else {
             panic!("the first lookup assertion must remain its accumulator anchor");
@@ -199,7 +199,7 @@ mod tests {
         ));
 
         #[cfg(feature = "std")]
-        miden_stark::lookup::native::validate_native(&CoreAir, spec).unwrap();
+        miden_stark::lookup::validate_native(&CoreAir, spec).unwrap();
     }
 
     #[test]
@@ -214,9 +214,9 @@ mod tests {
         );
         let public = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
         let challenges = [QuadFelt::from_u32(7), QuadFelt::from_u32(11)];
-        let native = native::ProverAir::build_aux_trace(
+        let native = air::ProverAir::build_aux_trace(
             &CoreAir,
-            native::AuxTraceInputs {
+            air::AuxTraceInputs {
                 main: &main,
                 preprocessed: None,
                 public_values: &public,
@@ -225,14 +225,14 @@ mod tests {
             },
         )
         .unwrap();
-        let spec = native::LiftedAir::spec(&CoreAir);
+        let spec = air::LiftedAir::spec(&CoreAir);
         let encoding = Challenges::new(
             challenges[0],
             challenges[1],
             crate::vm::logup::MIDEN_MAX_MESSAGE_WIDTH,
             crate::vm::logup::BusId::COUNT,
         );
-        let fractions = native_lookup::build_lookup_fractions(
+        let fractions = lookup::build_lookup_fractions(
             &CoreAir,
             &main,
             None,

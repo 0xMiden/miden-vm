@@ -12,12 +12,9 @@
 //! Shared sub-trees collapse to a single node, giving the compact "list of
 //! operations" encoding used by serde. It does not validate cached degrees or source addresses.
 
-use alloc::collections::BTreeMap;
-use alloc::sync::Arc;
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
-use serde::de::Error as _;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
 use super::SymbolicExpr;
 

@@ -7,16 +7,7 @@
 use p3_field::{Algebra, Field};
 
 use super::{BoundaryBuilder, Deg, LookupColumn};
-use crate::air::native::{AirFrame, Rows};
-
-mod constraint;
-mod prover;
-
-pub use super::ProverLookupBuilder;
-#[cfg(feature = "std")]
-pub use super::debug::validation::{NativeValidationBuilder, validate_native};
-pub use constraint::{ConstraintLookupBuilder, eval_lookup};
-pub use prover::{LookupError, build_logup_aux_trace, build_lookup_fractions};
+use crate::air::{AirFrame, Rows};
 
 /// The inputs a per-row lookup declaration may read.
 ///

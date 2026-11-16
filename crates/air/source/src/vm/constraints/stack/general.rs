@@ -23,7 +23,7 @@
 //!
 //! 4. **Top binary**: Enforced by the specific op constraints that require it.
 
-use miden_stark::air::native::{Frame, LiftedAirBuilder};
+use miden_stark::air::{Frame, LiftedAirBuilder};
 
 use crate::vm::{CoreCols, NativeMidenAirBuilder, constraints::op_flags::OpFlags};
 

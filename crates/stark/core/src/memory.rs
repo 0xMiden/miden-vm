@@ -11,10 +11,7 @@
 use p3_field::{ExtensionField, Field};
 
 use crate::{
-    air::{
-        MultiAir,
-        native::{AirKernel, resolve_quotient_chunks},
-    },
+    air::{AirKernel, MultiAir, resolve_quotient_chunks},
     pcs::PcsParams,
 };
 
@@ -361,7 +358,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        air::native::{self, DirectKernel},
+        air,
+        air::DirectKernel,
         testing::configs::{Felt, QuadFelt},
     };
 
@@ -373,11 +371,11 @@ mod tests {
         constraint_degree: u64,
     }
 
-    impl native::LiftedAir for TestAir {
+    impl air::LiftedAir for TestAir {
         type F = Felt;
 
-        fn spec(&self) -> native::AirSpec<'_, Felt> {
-            native::AirSpec {
+        fn spec(&self) -> air::AirSpec<'_, Felt> {
+            air::AirSpec {
                 main_width: self.width,
                 aux_width: self.aux_width,
                 num_public_values: 0,
@@ -385,7 +383,7 @@ mod tests {
                 num_exports: 0,
                 // A valid fixed native height for this metadata-only fixture. Budget heights
                 // remain independent estimates, not proof geometry. The factory must never run.
-                preprocessed: (self.preprocessed_width > 0).then_some(native::PreprocessedSpec {
+                preprocessed: (self.preprocessed_width > 0).then_some(air::PreprocessedSpec {
                     width: self.preprocessed_width,
                     log_height: 3,
                 }),
@@ -397,10 +395,10 @@ mod tests {
             panic!("memory estimation must not allocate preprocessed traces")
         }
 
-        fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+        fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
             &self,
-            frame: &native::Frame<'_, AB>,
-            _inputs: native::Inputs<'_, AB>,
+            frame: &air::Frame<'_, AB>,
+            _inputs: air::Inputs<'_, AB>,
             sink: &mut AB,
         ) {
             sink.assert_zero(frame.main.current[0].dup().exp_u64(self.constraint_degree));

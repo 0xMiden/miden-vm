@@ -9,8 +9,8 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_stark::{
-    air::native::LiftedAir,
-    lookup::{Challenges, ProverLookupBuilder, native::build_lookup_fractions},
+    air::LiftedAir,
+    lookup::{Challenges, ProverLookupBuilder, build_lookup_fractions},
 };
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
@@ -134,12 +134,12 @@ pub(crate) fn fold_balance<A>(
     challenges: &Challenges<QuadFelt>,
     net: &mut HashMap<QuadFelt, (Felt, String)>,
 ) where
-    A: miden_stark::air::native::LiftedAir<F = Felt>,
-    for<'a> A: miden_stark::lookup::native::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
+    A: miden_stark::air::LiftedAir<F = Felt>,
+    for<'a> A: miden_stark::lookup::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
-    let spec = miden_stark::air::native::LiftedAir::spec(air);
+    let spec = miden_stark::air::LiftedAir::spec(air);
     let periodic = spec.periodic_columns.as_ref();
-    let preprocessed = miden_stark::air::native::LiftedAir::build_preprocessed_trace(air);
+    let preprocessed = miden_stark::air::LiftedAir::build_preprocessed_trace(air);
     let fractions = build_lookup_fractions(air, main, preprocessed.as_ref(), periodic, challenges);
     for &(multiplicity, denom) in fractions.fractions() {
         net.entry(denom)
@@ -155,8 +155,8 @@ pub(crate) fn assert_unprovidable_xor_lookup<A>(
     main: &RowMajorMatrix<Felt>,
     [a, b, c]: [Felt; 3],
 ) where
-    A: miden_stark::air::native::LiftedAir<F = Felt>,
-    for<'a> A: miden_stark::lookup::native::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
+    A: miden_stark::air::LiftedAir<F = Felt>,
+    for<'a> A: miden_stark::lookup::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
     let mut rng = StdRng::seed_from_u64(0xb9e1);
     let challenges = Challenges::new(
@@ -182,8 +182,8 @@ pub(crate) fn assert_unprovidable_xor_lookup<A>(
 /// `[0, 2^16)` range.
 pub(crate) fn assert_unprovidable_range16_lookup<A>(air: &A, main: &RowMajorMatrix<Felt>, w: Felt)
 where
-    A: miden_stark::air::native::LiftedAir<F = Felt>,
-    for<'a> A: miden_stark::lookup::native::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
+    A: miden_stark::air::LiftedAir<F = Felt>,
+    for<'a> A: miden_stark::lookup::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
     let mut rng = StdRng::seed_from_u64(0x5e16);
     let challenges = Challenges::new(

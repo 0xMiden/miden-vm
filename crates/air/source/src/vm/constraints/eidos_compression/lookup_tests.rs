@@ -6,10 +6,9 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 #[cfg(feature = "std")]
-use miden_stark::lookup::native::validate_native;
+use miden_stark::lookup::validate_native;
 use miden_stark::lookup::{
-    Challenges, LookupFractions, LookupMessage, accumulate, accumulate_slow,
-    native::build_lookup_fractions,
+    Challenges, LookupFractions, LookupMessage, accumulate, accumulate_slow, build_lookup_fractions,
 };
 
 use super::{
@@ -257,7 +256,7 @@ fn lookup_air_emits_expected_aead_fraction_counts() {
 #[test]
 #[cfg(feature = "std")]
 fn lookup_degree_annotations_match_air_expressions() {
-    let spec = miden_stark::air::native::AirSpec {
+    let spec = miden_stark::air::AirSpec {
         main_width: NUM_COLS,
         aux_width: EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len(),
         num_public_values: 0,

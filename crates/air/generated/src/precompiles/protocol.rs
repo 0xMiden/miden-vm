@@ -164,7 +164,7 @@ mod tests {
 
         use miden_air_definitions::precompiles as source;
         use miden_core::field::QuadFelt;
-        use miden_stark::air::{MultiAir, Statement, native::DirectKernel};
+        use miden_stark::air::{DirectKernel, MultiAir, Statement};
 
         // Setup must be reconstructed from authored AIRs, independently of the production
         // evaluator adapter. Preprocessing only needs this list, not relation hook logic.

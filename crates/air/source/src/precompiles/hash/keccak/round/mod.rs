@@ -21,10 +21,10 @@ use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
 };
-use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::native,
-    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, native as native_lookup},
+    air,
+    air::LiftedAirBuilder as _,
+    lookup::{self, Deg, LookupBatch, LookupColumn, LookupGroup},
 };
 use miden_utils_sync::LazyLock;
 use p3_field::Dup;
@@ -127,11 +127,11 @@ pub struct KeccakRoundAir;
 
 static PERIODIC_COLUMNS: LazyLock<[Vec<Felt>; NUM_PERIODIC_COLS]> = LazyLock::new(round_program);
 
-impl native::LiftedAir for KeccakRoundAir {
+impl air::LiftedAir for KeccakRoundAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: NUM_AUX_COLS,
             num_public_values: 0,
@@ -142,10 +142,10 @@ impl native::LiftedAir for KeccakRoundAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         // Phase 1: local row constraints, replicated per lane over its
@@ -214,18 +214,18 @@ impl native::LiftedAir for KeccakRoundAir {
         }
 
         // Phase 2: LogUp argument via the LogUp adapter.
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for KeccakRoundAir {
-    type Error = native_lookup::LookupError;
+impl air::ProverAir<QuadFelt> for KeccakRoundAir {
+    type Error = lookup::LookupError;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        native_lookup::build_logup_aux_trace(self, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
@@ -279,9 +279,9 @@ const fn build_column_shape() -> [usize; NUM_AUX_COLS] {
     shape
 }
 
-impl<LB> native_lookup::LookupAir<LB> for KeccakRoundAir
+impl<LB> lookup::LookupAir<LB> for KeccakRoundAir
 where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -295,7 +295,7 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         let local = frame.main.current;
         let periodic: &[LB::Expr; NUM_PERIODIC_COLS] =
             frame.periodic.try_into().expect("Keccak round periodic columns");
@@ -491,14 +491,15 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use miden_core::utils::RowMajorMatrix;
-    use miden_stark::air::native::AirKernel;
+    use miden_stark::air::AirKernel;
+
+    use super::*;
 
     #[test]
     fn native_round_capture_and_direct_session_preserve_geometry() {
         // Native capture instantiates the complete source with non-Copy owned expression trees.
-        let captured = native::capture_with::<_, QuadFelt>(&KeccakRoundAir).unwrap();
+        let captured = air::capture_with::<_, QuadFelt>(&KeccakRoundAir).unwrap();
         let descriptor = &captured.descriptor;
         let spec = descriptor.spec();
         assert_eq!((spec.main_width, spec.aux_width), (56, 8));
@@ -506,24 +507,21 @@ mod tests {
         assert_eq!(spec.preprocessed, None);
         assert_eq!(spec.periodic_columns.as_ref(), PERIODIC_COLUMNS.as_slice());
         assert_eq!(COLUMN_SHAPE, [3, 4, 4, 2, 3, 4, 4, 2]);
-        assert_eq!(descriptor.analysis().counts(), native::ConstraintCounts { base: 11, ext: 9 });
-        assert_eq!(
-            descriptor.analysis().raw_degrees(),
-            native::ConstraintDegrees { base: 2, ext: 5 }
-        );
+        assert_eq!(descriptor.analysis().counts(), air::ConstraintCounts { base: 11, ext: 9 });
+        assert_eq!(descriptor.analysis().raw_degrees(), air::ConstraintDegrees { base: 2, ext: 5 });
         assert_eq!(descriptor.analysis().layout().base_indices(), &(0..11).collect::<Vec<_>>());
         assert_eq!(descriptor.analysis().layout().ext_indices(), &(11..20).collect::<Vec<_>>());
 
-        let kernel = native::DirectKernel::new(KeccakRoundAir).unwrap();
-        let direct = native::capture_from_spec::<Felt, QuadFelt>(
-            spec.as_borrowed(),
-            |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
-        )
-        .unwrap();
+        let kernel = air::DirectKernel::new(KeccakRoundAir).unwrap();
+        let direct =
+            air::capture_from_spec::<Felt, QuadFelt>(spec.as_borrowed(), |frame, inputs, sink| {
+                kernel.bind(inputs).unwrap().eval(frame, sink)
+            })
+            .unwrap();
         assert_eq!(direct.descriptor.fingerprint(), descriptor.fingerprint());
 
         #[cfg(feature = "std")]
-        native_lookup::validate_native(&KeccakRoundAir, spec).unwrap();
+        lookup::validate_native(&KeccakRoundAir, spec).unwrap();
     }
 
     #[derive(Default)]
@@ -532,17 +530,17 @@ mod tests {
         ext: usize,
     }
 
-    impl native::LiftedAirBuilder for ZeroRowSink {
+    impl air::LiftedAirBuilder for ZeroRowSink {
         type F = Felt;
         type Expr = Felt;
         type ExtExpr = QuadFelt;
 
-        fn emit_base(&mut self, value: Felt, _meta: native::ConstraintMeta<'_>) {
+        fn emit_base(&mut self, value: Felt, _meta: air::ConstraintMeta<'_>) {
             assert_eq!(value, Felt::ZERO);
             self.base += 1;
         }
 
-        fn emit_ext(&mut self, value: QuadFelt, _meta: native::ConstraintMeta<'_>) {
+        fn emit_ext(&mut self, value: QuadFelt, _meta: air::ConstraintMeta<'_>) {
             assert_eq!(value, QuadFelt::ZERO);
             self.ext += 1;
         }
@@ -558,12 +556,12 @@ mod tests {
         }
         let periodic: [Felt; NUM_PERIODIC_COLS] = array::from_fn(|i| PERIODIC_COLUMNS[i][0]);
         let aux = [QuadFelt::ZERO; NUM_AUX_COLS];
-        let frame = native::AirFrame {
-            main: native::Rows { current: &current, next: &next },
-            preprocessed: native::Rows { current: &[], next: &[] },
-            aux: native::Rows { current: &aux, next: &aux },
+        let frame = air::AirFrame {
+            main: air::Rows { current: &current, next: &next },
+            preprocessed: air::Rows { current: &[], next: &[] },
+            aux: air::Rows { current: &aux, next: &aux },
             periodic: &periodic,
-            selectors: native::Selectors {
+            selectors: air::Selectors {
                 first: Felt::ONE,
                 last: Felt::ZERO,
                 transition: Felt::ONE,
@@ -571,12 +569,12 @@ mod tests {
         };
         let challenges = [QuadFelt::from_u8(7), QuadFelt::from_u8(11)];
         let exports = [QuadFelt::ZERO];
-        let inputs = native::UniformInputs {
+        let inputs = air::UniformInputs {
             public_values: &[],
             challenges: &challenges,
             exports: &exports,
         };
-        let kernel = native::DirectKernel::new(KeccakRoundAir).unwrap();
+        let kernel = air::DirectKernel::new(KeccakRoundAir).unwrap();
         let mut sink = ZeroRowSink::default();
         kernel.bind(inputs).unwrap().eval(&frame, &mut sink);
         assert_eq!((sink.base, sink.ext), (11, 9));
@@ -586,9 +584,9 @@ mod tests {
     fn native_round_witness_rejects_wrong_main_width() {
         let main = RowMajorMatrix::new(vec![Felt::ZERO; NUM_MAIN_COLS - 1], NUM_MAIN_COLS - 1);
         let challenges = [QuadFelt::from_u8(7), QuadFelt::from_u8(11)];
-        let result = <KeccakRoundAir as native::ProverAir<QuadFelt>>::build_aux_trace(
+        let result = <KeccakRoundAir as air::ProverAir<QuadFelt>>::build_aux_trace(
             &KeccakRoundAir,
-            native::AuxTraceInputs {
+            air::AuxTraceInputs {
                 main: &main,
                 preprocessed: None,
                 public_values: &[],
@@ -598,7 +596,7 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            native_lookup::LookupError::MainWidth {
+            lookup::LookupError::MainWidth {
                 expected: NUM_MAIN_COLS,
                 actual: NUM_MAIN_COLS - 1,
             }

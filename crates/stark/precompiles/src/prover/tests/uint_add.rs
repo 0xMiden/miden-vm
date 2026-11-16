@@ -9,7 +9,7 @@ use miden_core::{
     field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_stark::lookup::{Challenges, ProverLookupBuilder, native::build_lookup_fractions};
+use miden_stark::lookup::{Challenges, ProverLookupBuilder, build_lookup_fractions};
 use proptest::prelude::*;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
@@ -41,12 +41,12 @@ fn fold_balance<A>(
     challenges: &Challenges<QuadFelt>,
     net: &mut HashMap<QuadFelt, Felt>,
 ) where
-    A: miden_stark::air::native::LiftedAir<F = Felt>,
-    for<'a> A: miden_stark::lookup::native::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
+    A: miden_stark::air::LiftedAir<F = Felt>,
+    for<'a> A: miden_stark::lookup::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
-    let spec = miden_stark::air::native::LiftedAir::spec(air);
+    let spec = miden_stark::air::LiftedAir::spec(air);
     let periodic = spec.periodic_columns.as_ref();
-    let preprocessed = miden_stark::air::native::LiftedAir::build_preprocessed_trace(air);
+    let preprocessed = miden_stark::air::LiftedAir::build_preprocessed_trace(air);
     let fractions = build_lookup_fractions(air, main, preprocessed.as_ref(), periodic, challenges);
     for &(multiplicity, denom) in fractions.fractions() {
         *net.entry(denom).or_insert(Felt::ZERO) += multiplicity;

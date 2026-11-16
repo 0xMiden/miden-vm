@@ -18,7 +18,7 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_stark::{
-    air::native::LiftedAir,
+    air::LiftedAir,
     lookup::{Challenges, LookupAir, ProverLookupBuilder, accumulate, build_lookup_fractions},
 };
 use miden_utils_testing::get_column_name;

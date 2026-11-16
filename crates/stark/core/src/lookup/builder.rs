@@ -3,11 +3,11 @@
 //! The trait stack sits on top of [`LookupAir`](super::LookupAir):
 //!
 //! - [`LookupBuilder`](super::LookupBuilder) — the mutable per-column handle. Declarations read
-//!   immutable rows through a separate [`LookupFrame`](super::native::LookupFrame); the handle
-//!   keeps assertion emission, auxiliary columns and verifier challenges with the adapter.
-//! - [`LookupColumn`] — per-column handle returned by [`super::LookupBuilder::next_column`]. It owns the
-//!   boundary between groups; its only job is to open a group (either the simple path or the
-//!   cached-encoding dual path).
+//!   immutable rows through a separate [`LookupFrame`](super::LookupFrame); the handle keeps
+//!   assertion emission, auxiliary columns and verifier challenges with the adapter.
+//! - [`LookupColumn`] — per-column handle returned by [`super::LookupBuilder::next_column`]. It
+//!   owns the boundary between groups; its only job is to open a group (either the simple path or
+//!   the cached-encoding dual path).
 //! - [`LookupGroup`] — the simple, challenge-free interaction API used by bus authors. Every method
 //!   here takes a `LookupMessage`; the enclosing adapter is responsible for encoding it under α + Σ
 //!   βⁱ · payload.
@@ -54,8 +54,8 @@ use super::message::LookupMessage;
 ///   carried in the struct.
 ///
 /// - **Group / column scope** ([`LookupColumn::group`], `group_with_cached_encoding`,
-///   [`super::LookupBuilder::next_column`]): the total post-flag `(V, U)` contribution of the group /
-///   column to the surrounding accumulator. Useful as a budget audit number when the author wants
+///   [`super::LookupBuilder::next_column`]): the total post-flag `(V, U)` contribution of the group
+///   / column to the surrounding accumulator. Useful as a budget audit number when the author wants
 ///   to assert what the scope as a whole contributes.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Deg {

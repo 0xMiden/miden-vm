@@ -11,8 +11,7 @@ use miden_air_definitions::vm::AIRS;
 use miden_constraint_compiler::ir::{
     Class, Graph, Leaf, Node, capture_native, capture_native_into, op_counts,
 };
-
-use miden_stark::air::native::{AirKernel, LiftedAir};
+use miden_stark::air::{AirKernel, LiftedAir};
 
 #[test]
 fn generated_adapter_preserves_authored_air_layout() {
@@ -39,7 +38,7 @@ fn capture_is_deterministic() {
 #[test]
 fn ids_are_dense_and_topological() {
     for air in AIRS {
-        let (g, _, _) = capture_native(&air).unwrap();
+        let (g, ..) = capture_native(&air).unwrap();
         for (id, node) in g.iter() {
             match node {
                 Node::Op { x, y, .. } => {
@@ -77,7 +76,7 @@ fn shared_builder_capture_gives_equal_roots() {
 #[test]
 fn classes_are_sound() {
     for air in AIRS {
-        let (g, _, _) = capture_native(&air).unwrap();
+        let (g, ..) = capture_native(&air).unwrap();
         for (_, node) in g.iter() {
             match node {
                 Node::Op { class: Class::Base, x, y, .. } => {

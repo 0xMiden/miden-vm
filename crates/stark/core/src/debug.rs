@@ -7,11 +7,8 @@ use p3_field::{ExtensionField, Field};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    air::{
-        MultiAir, ProverStatement,
-        debug::assert_multi_air_valid,
-        native::{self, AirKernel},
-    },
+    air,
+    air::{AirKernel, MultiAir, ProverStatement, debug::assert_multi_air_valid},
     order::TraceOrder,
     prover::periodic::periodic_matrix,
 };
@@ -33,7 +30,8 @@ where
 /// before auxiliary construction, then the complete relation and external closure are checked.
 ///
 /// Challenges observe only the statement and instance heights, preserving the local debugger's
-/// derivation rather than replaying proof commitments. Constraint failures and witness errors panic.
+/// derivation rather than replaying proof commitments. Constraint failures and witness errors
+/// panic.
 pub fn check_constraints<F, EF, MA, Ch>(
     prover_statement: &ProverStatement<F, EF, MA>,
     preprocessed: Option<&[Option<RowMajorMatrix<F>>]>,
@@ -42,7 +40,7 @@ pub fn check_constraints<F, EF, MA, Ch>(
     F: Field,
     EF: ExtensionField<F>,
     MA: MultiAir<F, EF>,
-    MA::Air: native::ProverAir<EF> + native::LiftedAir<F = F>,
+    MA::Air: air::ProverAir<EF> + air::LiftedAir<F = F>,
     Ch: CanObserve<F> + CanSample<F>,
 {
     let statement = prover_statement.statement();
@@ -74,7 +72,7 @@ pub fn check_constraints<F, EF, MA, Ch>(
                 "instance {instance}: fixed native height"
             );
         }
-        let chunks = native::resolve_quotient_chunks(kernel).expect("valid kernel allocation");
+        let chunks = air::resolve_quotient_chunks(kernel).expect("valid kernel allocation");
         kernel
             .descriptor()
             .analysis()
@@ -109,9 +107,9 @@ pub fn check_constraints<F, EF, MA, Ch>(
             &challenges[..spec.num_challenges],
             instance,
         );
-        let auxiliary = native::ProverAir::build_aux_trace(
+        let auxiliary = air::ProverAir::build_aux_trace(
             kernel,
-            native::AuxTraceInputs {
+            air::AuxTraceInputs {
                 main,
                 preprocessed: fixed,
                 public_values: &statement.air_inputs()[instance],
@@ -180,7 +178,7 @@ fn check_single_trace<F, EF, K>(
     let periodic = periodic_matrix(&spec.periodic_columns);
     let dummy_aux = vec![EF::ZERO; spec.aux_width];
     let session = kernel
-        .bind(native::UniformInputs { public_values, challenges, exports })
+        .bind(air::UniformInputs { public_values, challenges, exports })
         .expect("debug uniforms must match the descriptor");
     for row in 0..height {
         let next = (row + 1) % height;
@@ -194,18 +192,18 @@ fn check_single_trace<F, EF, K>(
         let periodic_row = periodic
             .as_ref()
             .map(|matrix| matrix.row_slice(row % matrix.height()).expect("periodic row"));
-        let frame = native::AirFrame {
-            main: native::Rows { current: &main_current, next: &main_next },
-            preprocessed: native::Rows {
+        let frame = air::AirFrame {
+            main: air::Rows { current: &main_current, next: &main_next },
+            preprocessed: air::Rows {
                 current: fixed_current.as_deref().unwrap_or(&[]),
                 next: fixed_next.as_deref().unwrap_or(&[]),
             },
-            aux: native::Rows {
+            aux: air::Rows {
                 current: aux_current.as_deref().unwrap_or(&dummy_aux),
                 next: aux_next.as_deref().unwrap_or(&dummy_aux),
             },
             periodic: periodic_row.as_deref().unwrap_or(&[]),
-            selectors: native::Selectors {
+            selectors: air::Selectors {
                 first: F::from_bool(row == 0),
                 last: F::from_bool(row + 1 == height),
                 transition: F::from_bool(row + 1 < height),
@@ -225,7 +223,7 @@ fn check_single_trace<F, EF, K>(
 }
 
 struct DebugConstraintBuilder<'a, F: Field, EF> {
-    descriptor: &'a native::AirDescriptor<F>,
+    descriptor: &'a air::AirDescriptor<F>,
     instance: usize,
     row: usize,
     ordinal: usize,
@@ -248,14 +246,12 @@ impl<F: Field, EF> DebugConstraintBuilder<'_, F, EF> {
     }
 }
 
-impl<F: Field, EF: ExtensionField<F>> native::LiftedAirBuilder
-    for DebugConstraintBuilder<'_, F, EF>
-{
+impl<F: Field, EF: ExtensionField<F>> air::LiftedAirBuilder for DebugConstraintBuilder<'_, F, EF> {
     type F = F;
     type Expr = F;
     type ExtExpr = EF;
 
-    fn emit_base(&mut self, value: F, _meta: native::ConstraintMeta<'_>) {
+    fn emit_base(&mut self, value: F, _meta: air::ConstraintMeta<'_>) {
         let ordinal = self.ordinal;
         self.ordinal += 1;
         if value != F::ZERO {
@@ -263,7 +259,7 @@ impl<F: Field, EF: ExtensionField<F>> native::LiftedAirBuilder
         }
     }
 
-    fn emit_ext(&mut self, value: EF, _meta: native::ConstraintMeta<'_>) {
+    fn emit_ext(&mut self, value: EF, _meta: air::ConstraintMeta<'_>) {
         let ordinal = self.ordinal;
         self.ordinal += 1;
         if self.check_extension && value != EF::ZERO {

@@ -15,7 +15,7 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_precompiles::Keccak256Precompile;
-use miden_stark::{air::native::LiftedAir, lookup::Challenges};
+use miden_stark::{air::LiftedAir, lookup::Challenges};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::prover::{

@@ -11,7 +11,7 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_stark::air::native::LiftedAir;
+use miden_stark::air::LiftedAir;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::prover::{

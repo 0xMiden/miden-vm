@@ -155,11 +155,11 @@ where
 ///
 /// These are two base assertions, component zero followed by component one. Their quadratic
 /// mathematical interpretation does not change their assertion class or global emission order.
-pub trait NativeQuadFeltAirBuilder: miden_stark::air::native::LiftedAirBuilder {
+pub trait NativeQuadFeltAirBuilder: miden_stark::air::LiftedAirBuilder {
     fn assert_eq_quad(&mut self, lhs: QuadFeltExpr<Self::Expr>, rhs: QuadFeltExpr<Self::Expr>) {
         self.assert_eq(lhs.0, rhs.0);
         self.assert_eq(lhs.1, rhs.1);
     }
 }
 
-impl<AB: miden_stark::air::native::LiftedAirBuilder> NativeQuadFeltAirBuilder for AB {}
+impl<AB: miden_stark::air::LiftedAirBuilder> NativeQuadFeltAirBuilder for AB {}

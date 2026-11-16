@@ -3,16 +3,14 @@
 //! expressions checked outside the per-row AIR constraints.
 
 use alloc::{borrow::Cow, vec, vec::Vec};
-
 use core::convert::Infallible;
 
 use p3_field::{Dup, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
-use crate::air::native::LiftedAirBuilder as _;
 use crate::{
-    ProverInstance, VerifierInstance,
-    air::{MultiAir, ProverStatement, ReductionError, Statement, native},
+    ProverInstance, VerifierInstance, air,
+    air::{LiftedAirBuilder as _, MultiAir, ProverStatement, ReductionError, Statement},
     testing::configs::goldilocks_poseidon2::{
         Felt, QuadFelt, generate_pow4_trace, test_challenger, test_config,
     },
@@ -30,11 +28,11 @@ struct ExternalAir {
     input: Felt,
 }
 
-impl native::LiftedAir for ExternalAir {
+impl air::LiftedAir for ExternalAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: 1,
             aux_width: 1,
             num_public_values: 1,
@@ -45,10 +43,10 @@ impl native::LiftedAir for ExternalAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let local = frame.main.current;
@@ -69,17 +67,17 @@ impl native::LiftedAir for ExternalAir {
     }
 }
 
-impl native::ProverAir<QuadFelt> for ExternalAir {
+impl air::ProverAir<QuadFelt> for ExternalAir {
     type Error = Infallible;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
         // One constant column: challenge + input.
         let value = QuadFelt::from(self.input) + inputs.challenges[0];
         let values = vec![value; inputs.main.height()];
-        Ok(native::AuxTrace {
+        Ok(air::AuxTrace {
             columns: RowMajorMatrix::new(values, 1),
             exports: vec![value],
         })
@@ -91,11 +89,11 @@ impl native::ProverAir<QuadFelt> for ExternalAir {
 // ---------------------------------------------------------------------------
 
 struct ExternalMultiAir {
-    airs: Vec<native::DirectKernel<ExternalAir>>,
+    airs: Vec<air::DirectKernel<ExternalAir>>,
 }
 
 impl MultiAir<Felt, QuadFelt> for ExternalMultiAir {
-    type Air = native::DirectKernel<ExternalAir>;
+    type Air = air::DirectKernel<ExternalAir>;
 
     fn airs(&self) -> &[Self::Air] {
         &self.airs
@@ -129,7 +127,7 @@ fn external_prover_statement(
 ) -> ProverStatement<Felt, QuadFelt, ExternalMultiAir> {
     let statement = Statement::new(
         ExternalMultiAir {
-            airs: vec![native::DirectKernel::new(ExternalAir { input }).unwrap()],
+            airs: vec![air::DirectKernel::new(ExternalAir { input }).unwrap()],
         },
         vec![(0, air_inputs)],
         aux_inputs,
@@ -193,20 +191,20 @@ fn missing_external_input_fails_proving() {
 
 #[test]
 fn native_external_source_preserves_export_and_direct_symbolic_order() {
-    use native::AirKernel;
+    use crate::air::AirKernel;
 
     let source = ExternalAir { input: Felt::from_u64(42) };
-    let expected = native::capture_with::<_, QuadFelt>(&source).unwrap();
+    let expected = air::capture_with::<_, QuadFelt>(&source).unwrap();
     assert_eq!(expected.descriptor.analysis().layout().base_indices(), &[0, 1]);
     assert_eq!(expected.descriptor.analysis().layout().ext_indices(), &[2, 3]);
 
-    let kernel = native::DirectKernel::new(source).unwrap();
+    let kernel = air::DirectKernel::new(source).unwrap();
     let main = generate_pow4_trace(Felt::from_u64(2), 4);
     let public = [Felt::from_u64(2)];
     let challenges = [QuadFelt::from_u64(7)];
-    let aux = native::ProverAir::build_aux_trace(
+    let aux = air::ProverAir::build_aux_trace(
         &kernel,
-        native::AuxTraceInputs {
+        air::AuxTraceInputs {
             main: &main,
             preprocessed: None,
             public_values: &public,
@@ -219,7 +217,7 @@ fn native_external_source_preserves_export_and_direct_symbolic_order() {
     assert_eq!(aux.columns.values, vec![QuadFelt::from_u64(49); 4]);
     assert_eq!(aux.exports, vec![QuadFelt::from_u64(49)]);
 
-    let observed = native::capture_from_spec::<Felt, QuadFelt>(
+    let observed = air::capture_from_spec::<Felt, QuadFelt>(
         kernel.descriptor().spec().as_borrowed(),
         |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
     )

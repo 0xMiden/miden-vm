@@ -16,7 +16,7 @@
 
 use core::borrow::Borrow;
 
-use miden_stark::lookup::native;
+use miden_stark::lookup;
 
 use super::buses::{
     chiplet_responses::{self, emit_chiplet_responses},
@@ -34,7 +34,7 @@ use crate::vm::{
 
 /// Activity construction over immutable expression rows. Explicit adapter implementations preserve
 /// the source-specific override seam; the concrete prover uses the same polynomial default.
-pub(crate) trait NativeChipletLookupBuilder: native::LookupBuilder<F = Felt> {
+pub(crate) trait NativeChipletLookupBuilder: lookup::LookupBuilder<F = Felt> {
     fn build_chiplet_active(
         &self,
         local: &ChipletCols<Self::Expr>,
@@ -84,7 +84,7 @@ pub(crate) const CHIPLET_COLUMN_SHAPE: [usize; 4] = [
 ///
 /// Driven by `ChipletsAir`'s [`LookupAir`] impl.
 pub(crate) fn emit_chiplet_lookup_columns<LB: NativeChipletLookupBuilder>(
-    frame: &native::LookupFrame<'_, LB::Expr>,
+    frame: &lookup::LookupFrame<'_, LB::Expr>,
     builder: &mut LB,
 ) {
     let local: &ChipletCols<_> = frame.main.current.borrow();
@@ -106,8 +106,8 @@ mod tests {
         field::{PrimeCharacteristicRing, QuadFelt},
     };
     use miden_stark::{
-        air::native::Rows,
-        lookup::{Challenges, Deg, LookupFractions, ProverLookupBuilder, native as native_lookup},
+        air::Rows,
+        lookup::{self, Challenges, Deg, LookupFractions, ProverLookupBuilder},
     };
 
     use super::{CHIPLET_COLUMN_SHAPE, NativeChipletLookupBuilder};
@@ -125,12 +125,12 @@ mod tests {
         next: &'a [Felt],
     }
 
-    impl<'a> native_lookup::LookupBuilder for HookProbe<'a> {
+    impl<'a> lookup::LookupBuilder for HookProbe<'a> {
         type F = Felt;
         type Expr = Felt;
         type ExprEF = QuadFelt;
         type Column<'b>
-            = <ProverLookupBuilder<'a, Felt, QuadFelt> as native_lookup::LookupBuilder>::Column<'b>
+            = <ProverLookupBuilder<'a, Felt, QuadFelt> as lookup::LookupBuilder>::Column<'b>
         where
             Self: 'b;
 
@@ -139,7 +139,7 @@ mod tests {
             f: impl FnOnce(&mut Self::Column<'b>) -> R,
             deg: Deg,
         ) -> R {
-            native_lookup::LookupBuilder::next_column(&mut self.inner, f, deg)
+            lookup::LookupBuilder::next_column(&mut self.inner, f, deg)
         }
     }
 
@@ -168,7 +168,7 @@ mod tests {
         );
         let mut fractions = LookupFractions::from_shape(CHIPLET_COLUMN_SHAPE.to_vec(), 1);
         {
-            let frame = native_lookup::LookupFrame {
+            let frame = lookup::LookupFrame {
                 main: Rows { current: &current, next: &next },
                 preprocessed: Rows { current: &[], next: &[] },
                 periodic: &periodic,
@@ -176,7 +176,7 @@ mod tests {
             let inner =
                 ProverLookupBuilder::new(&challenges, &CHIPLET_COLUMN_SHAPE, &mut fractions);
             let mut builder = HookProbe { inner, calls: Cell::new(0), next: &next };
-            native_lookup::LookupAir::eval(&ChipletsAir, &frame, &mut builder);
+            lookup::LookupAir::eval(&ChipletsAir, &frame, &mut builder);
             assert_eq!(builder.calls.get(), 1);
         }
         assert_eq!(fractions.counts().len(), CHIPLET_COLUMN_SHAPE.len());

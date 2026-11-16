@@ -19,10 +19,8 @@ use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
     PlanError, Preprocessed, PreprocessedValidationError, ProverError, ProverInstance, ShapeError,
-    VerifierError, VerifierInstance,
-    air::{
-        MultiAir, ProverStatement, Statement, log2_strict_u8, native, native::LiftedAirBuilder as _,
-    },
+    VerifierError, VerifierInstance, air,
+    air::{LiftedAirBuilder as _, MultiAir, ProverStatement, Statement, log2_strict_u8},
     check_constraints,
     pcs::params::PcsParams,
     proof::{StarkOutput, StarkProof},
@@ -59,17 +57,17 @@ impl RowCounterAir {
     }
 }
 
-impl native::LiftedAir for RowCounterAir {
+impl air::LiftedAir for RowCounterAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: 1,
             aux_width: 1,
             num_public_values: 0,
             num_challenges: 1,
             num_exports: 0,
-            preprocessed: Some(native::PreprocessedSpec {
+            preprocessed: Some(air::PreprocessedSpec {
                 width: self.declared_width,
                 log_height: self
                     .declared_log_height
@@ -83,10 +81,10 @@ impl native::LiftedAir for RowCounterAir {
         Some(self.preprocessed.clone())
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let local_main = frame.main.current[0].dup();
@@ -104,15 +102,15 @@ impl native::LiftedAir for RowCounterAir {
     }
 }
 
-impl native::ProverAir<QuadFelt> for RowCounterAir {
+impl air::ProverAir<QuadFelt> for RowCounterAir {
     type Error = Infallible;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
         let (columns, exports) = build_aux(inputs.main.height(), inputs.challenges);
-        Ok(native::AuxTrace { columns, exports })
+        Ok(air::AuxTrace { columns, exports })
     }
 }
 
@@ -120,11 +118,11 @@ impl native::ProverAir<QuadFelt> for RowCounterAir {
 #[derive(Clone, Copy, Debug)]
 struct ConstantAir;
 
-impl native::LiftedAir for ConstantAir {
+impl air::LiftedAir for ConstantAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: 1,
             aux_width: 1,
             num_public_values: 0,
@@ -135,10 +133,10 @@ impl native::LiftedAir for ConstantAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let local = frame.main.current[0].dup();
@@ -151,15 +149,15 @@ impl native::LiftedAir for ConstantAir {
     }
 }
 
-impl native::ProverAir<QuadFelt> for ConstantAir {
+impl air::ProverAir<QuadFelt> for ConstantAir {
     type Error = Infallible;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
         let (columns, exports) = build_aux(inputs.main.height(), inputs.challenges);
-        Ok(native::AuxTrace { columns, exports })
+        Ok(air::AuxTrace { columns, exports })
     }
 }
 
@@ -170,46 +168,46 @@ enum MixedAir {
     RowCounter(RowCounterAir),
 }
 
-impl native::LiftedAir for MixedAir {
+impl air::LiftedAir for MixedAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
         match self {
-            Self::Constant(air) => native::LiftedAir::spec(air),
-            Self::RowCounter(air) => native::LiftedAir::spec(air),
+            Self::Constant(air) => air::LiftedAir::spec(air),
+            Self::RowCounter(air) => air::LiftedAir::spec(air),
         }
     }
 
     fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
         match self {
-            Self::Constant(air) => native::LiftedAir::build_preprocessed_trace(air),
-            Self::RowCounter(air) => native::LiftedAir::build_preprocessed_trace(air),
+            Self::Constant(air) => air::LiftedAir::build_preprocessed_trace(air),
+            Self::RowCounter(air) => air::LiftedAir::build_preprocessed_trace(air),
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         match self {
-            Self::Constant(air) => native::LiftedAir::eval(air, frame, inputs, builder),
-            Self::RowCounter(air) => native::LiftedAir::eval(air, frame, inputs, builder),
+            Self::Constant(air) => air::LiftedAir::eval(air, frame, inputs, builder),
+            Self::RowCounter(air) => air::LiftedAir::eval(air, frame, inputs, builder),
         }
     }
 }
 
-impl native::ProverAir<QuadFelt> for MixedAir {
+impl air::ProverAir<QuadFelt> for MixedAir {
     type Error = Infallible;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
         match self {
-            Self::Constant(air) => native::ProverAir::build_aux_trace(air, inputs),
-            Self::RowCounter(air) => native::ProverAir::build_aux_trace(air, inputs),
+            Self::Constant(air) => air::ProverAir::build_aux_trace(air, inputs),
+            Self::RowCounter(air) => air::ProverAir::build_aux_trace(air, inputs),
         }
     }
 }
@@ -224,7 +222,7 @@ struct PreprocMultiAir<A> {
     airs: Vec<A>,
 }
 
-impl<A: native::AirKernel<F = Felt>> MultiAir<Felt, QuadFelt> for PreprocMultiAir<A> {
+impl<A: air::AirKernel<F = Felt>> MultiAir<Felt, QuadFelt> for PreprocMultiAir<A> {
     type Air = A;
 
     fn airs(&self) -> &[A] {
@@ -257,7 +255,7 @@ fn build_aux(height: usize, challenges: &[QuadFelt]) -> (RowMajorMatrix<QuadFelt
 }
 
 /// Build a prover statement with fixed public inputs for the fixture AIRs.
-fn prover_statement<A: native::AirKernel<F = Felt>>(
+fn prover_statement<A: air::AirKernel<F = Felt>>(
     airs: Vec<A>,
     traces: Vec<RowMajorMatrix<Felt>>,
 ) -> ProverStatement<Felt, QuadFelt, PreprocMultiAir<A>> {
@@ -275,11 +273,11 @@ fn prover_statement<A: native::AirKernel<F = Felt>>(
 
 fn row_counter_statement(
     traces: Vec<RowMajorMatrix<Felt>>,
-) -> ProverStatement<Felt, QuadFelt, PreprocMultiAir<native::DirectKernel<RowCounterAir>>> {
+) -> ProverStatement<Felt, QuadFelt, PreprocMultiAir<air::DirectKernel<RowCounterAir>>> {
     let airs = traces
         .iter()
         .cloned()
-        .map(|trace| native::DirectKernel::new(RowCounterAir::new(trace)).unwrap())
+        .map(|trace| air::DirectKernel::new(RowCounterAir::new(trace)).unwrap())
         .collect();
     prover_statement(airs, traces)
 }
@@ -293,8 +291,8 @@ fn prove_with_preprocessed<MA>(
 ) -> (TestOutput, TestPreprocessed, Statement<Felt, QuadFelt, MA>)
 where
     MA: MultiAir<Felt, QuadFelt>,
-    MA::Air: native::ProverAir<QuadFelt> + native::LiftedAir<F = Felt>,
-    <MA::Air as native::AirKernel>::Prepared<PackedFelt, PackedQuadFelt>: PackedPreparation,
+    MA::Air: air::ProverAir<QuadFelt> + air::LiftedAir<F = Felt>,
+    <MA::Air as air::AirKernel>::Prepared<PackedFelt, PackedQuadFelt>: PackedPreparation,
 {
     let preprocessed = Preprocessed::build(ps.statement(), config)
         .expect("valid fixed setup")
@@ -330,8 +328,8 @@ fn verify_and_reparse<MA>(
 fn prove_verify_reparse<MA>(ps: ProverStatement<Felt, QuadFelt, MA>)
 where
     MA: MultiAir<Felt, QuadFelt>,
-    MA::Air: native::ProverAir<QuadFelt> + native::LiftedAir<F = Felt>,
-    <MA::Air as native::AirKernel>::Prepared<PackedFelt, PackedQuadFelt>: PackedPreparation,
+    MA::Air: air::ProverAir<QuadFelt> + air::LiftedAir<F = Felt>,
+    <MA::Air as air::AirKernel>::Prepared<PackedFelt, PackedQuadFelt>: PackedPreparation,
 {
     let config = test_config();
     let (output, preprocessed, statement) = prove_with_preprocessed(&config, ps);
@@ -365,8 +363,8 @@ fn mixed_airs_preprocessed_at_index_1() {
     let height = 8;
     let ps = prover_statement(
         vec![
-            native::DirectKernel::new(MixedAir::Constant(ConstantAir)).unwrap(),
-            native::DirectKernel::new(MixedAir::RowCounter(RowCounterAir::new(row_index_trace(
+            air::DirectKernel::new(MixedAir::Constant(ConstantAir)).unwrap(),
+            air::DirectKernel::new(MixedAir::RowCounter(RowCounterAir::new(row_index_trace(
                 height,
             ))))
             .unwrap(),
@@ -382,10 +380,8 @@ fn rejects_width_mismatch() {
     let height = 8;
     let mut air = RowCounterAir::new(row_index_trace(height));
     air.declared_width = 2;
-    let ps = prover_statement(
-        vec![native::DirectKernel::new(air).unwrap()],
-        vec![row_index_trace(height)],
-    );
+    let ps =
+        prover_statement(vec![air::DirectKernel::new(air).unwrap()], vec![row_index_trace(height)]);
     let config = test_config();
 
     // Factory output is rejected before LDE/tree construction or instance creation.
@@ -403,7 +399,7 @@ fn rejects_width_mismatch() {
 fn rejects_height_mismatch() {
     // Preprocessed matrix height (4) differs from the main trace height (8).
     let ps = prover_statement(
-        vec![native::DirectKernel::new(RowCounterAir::new(row_index_trace(4))).unwrap()],
+        vec![air::DirectKernel::new(RowCounterAir::new(row_index_trace(4))).unwrap()],
         vec![row_index_trace(8)],
     );
     let config = test_config();
@@ -541,7 +537,7 @@ fn setup_rejects_incorrect_declared_height() {
     air.declared_log_height = Some(3);
     let statement = Statement::new(
         PreprocMultiAir {
-            airs: vec![native::DirectKernel::new(air).unwrap()],
+            airs: vec![air::DirectKernel::new(air).unwrap()],
         },
         vec![],
         vec![],
@@ -566,7 +562,7 @@ fn reuses_setup_with_equal_table_heights_and_variable_main_height() {
             airs: airs
                 .iter()
                 .cloned()
-                .map(|source| native::DirectKernel::new(source).unwrap())
+                .map(|source| air::DirectKernel::new(source).unwrap())
                 .collect(),
         },
         vec![],
@@ -580,7 +576,7 @@ fn reuses_setup_with_equal_table_heights_and_variable_main_height() {
         let ps = prover_statement(
             airs.iter()
                 .cloned()
-                .map(|source| native::DirectKernel::new(source).unwrap())
+                .map(|source| air::DirectKernel::new(source).unwrap())
                 .collect(),
             vec![squaring_trace(height), row_index_trace(4), shifted_row_index_trace(4)],
         );
@@ -619,8 +615,8 @@ fn preprocessed_with_short_nonlinear_air() {
     // checks that a partial pack writes its output, including without preprocessed columns.
     let ps = prover_statement(
         vec![
-            native::DirectKernel::new(MixedAir::Constant(ConstantAir)).unwrap(),
-            native::DirectKernel::new(MixedAir::RowCounter(RowCounterAir::new(row_index_trace(8))))
+            air::DirectKernel::new(MixedAir::Constant(ConstantAir)).unwrap(),
+            air::DirectKernel::new(MixedAir::RowCounter(RowCounterAir::new(row_index_trace(8))))
                 .unwrap(),
         ],
         vec![squaring_trace(2), row_index_trace(8)],
@@ -636,8 +632,8 @@ fn preprocessed_shorter_than_max_trace() {
     // height. The PCS virtually lifts the shorter preprocessed tree.
     let ps = prover_statement(
         vec![
-            native::DirectKernel::new(MixedAir::Constant(ConstantAir)).unwrap(),
-            native::DirectKernel::new(MixedAir::RowCounter(RowCounterAir::new(row_index_trace(4))))
+            air::DirectKernel::new(MixedAir::Constant(ConstantAir)).unwrap(),
+            air::DirectKernel::new(MixedAir::RowCounter(RowCounterAir::new(row_index_trace(4))))
                 .unwrap(),
         ],
         vec![squaring_trace(8), row_index_trace(4)],
@@ -652,8 +648,8 @@ fn preprocessed_much_shorter_than_max_trace() {
     // time against a max trace height of 8.
     let ps = prover_statement(
         vec![
-            native::DirectKernel::new(MixedAir::Constant(ConstantAir)).unwrap(),
-            native::DirectKernel::new(MixedAir::RowCounter(RowCounterAir::new(row_index_trace(2))))
+            air::DirectKernel::new(MixedAir::Constant(ConstantAir)).unwrap(),
+            air::DirectKernel::new(MixedAir::RowCounter(RowCounterAir::new(row_index_trace(2))))
                 .unwrap(),
         ],
         vec![squaring_trace(8), row_index_trace(2)],
@@ -669,10 +665,10 @@ fn preprocessed_multiple_heights_below_max() {
     // both within-tree lifting and the global query fold.
     let ps = prover_statement(
         vec![
-            native::DirectKernel::new(MixedAir::Constant(ConstantAir)).unwrap(),
-            native::DirectKernel::new(MixedAir::RowCounter(RowCounterAir::new(row_index_trace(4))))
+            air::DirectKernel::new(MixedAir::Constant(ConstantAir)).unwrap(),
+            air::DirectKernel::new(MixedAir::RowCounter(RowCounterAir::new(row_index_trace(4))))
                 .unwrap(),
-            native::DirectKernel::new(MixedAir::RowCounter(RowCounterAir::new(row_index_trace(2))))
+            air::DirectKernel::new(MixedAir::RowCounter(RowCounterAir::new(row_index_trace(2))))
                 .unwrap(),
         ],
         vec![squaring_trace(8), row_index_trace(4), row_index_trace(2)],
@@ -707,7 +703,7 @@ impl CountedAir {
     }
 }
 
-fn counted_value<B: Algebra<Felt>, E: Algebra<B>>(inputs: native::UniformInputs<'_, B, E>) -> E {
+fn counted_value<B: Algebra<Felt>, E: Algebra<B>>(inputs: air::UniformInputs<'_, B, E>) -> E {
     inputs.challenges[0].square() + inputs.exports[0].dup() * inputs.public_values[0].dup()
 }
 
@@ -718,24 +714,24 @@ impl CountedAir {
         self.max_batch_evaluations.fetch_max(count, Ordering::Relaxed);
     }
 
-    fn eval_cached<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval_cached<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         cached: &AB::ExtExpr,
         builder: &mut AB,
     ) {
         // Compare with independently read uniform inputs before the inner assertion stream.
         builder.assert_eq_ext(cached.dup(), counted_value(inputs));
-        native::LiftedAir::eval(&self.inner, frame, inputs, builder);
+        air::LiftedAir::eval(&self.inner, frame, inputs, builder);
     }
 }
 
-impl native::LiftedAir for CountedAir {
+impl air::LiftedAir for CountedAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        let mut spec = native::LiftedAir::spec(&self.inner);
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        let mut spec = air::LiftedAir::spec(&self.inner);
         spec.num_public_values = 1;
         spec.num_exports = 1;
         spec
@@ -743,13 +739,13 @@ impl native::LiftedAir for CountedAir {
 
     fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
         self.materializations.fetch_add(1, Ordering::Relaxed);
-        native::LiftedAir::build_preprocessed_trace(&self.inner)
+        air::LiftedAir::build_preprocessed_trace(&self.inner)
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         // Source capture describes the relation without exercising kernel lifecycle counters.
@@ -767,14 +763,14 @@ enum CountedWitnessError {
     Height { main: usize, preprocessed: usize },
 }
 
-impl native::ProverAir<QuadFelt> for CountedAir {
+impl air::ProverAir<QuadFelt> for CountedAir {
     type Error = CountedWitnessError;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        let width = native::LiftedAir::spec(self).preprocessed_width();
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        let width = air::LiftedAir::spec(self).preprocessed_width();
         if inputs.preprocessed.is_some() != (width > 0) {
             return Err(CountedWitnessError::Presence);
         }
@@ -794,9 +790,9 @@ impl native::ProverAir<QuadFelt> for CountedAir {
             Ordering::Relaxed,
         );
         self.aux_calls.fetch_add(1, Ordering::Relaxed);
-        let auxiliary = native::ProverAir::build_aux_trace(&self.inner, inputs)
+        let auxiliary = air::ProverAir::build_aux_trace(&self.inner, inputs)
             .unwrap_or_else(|never| match never {});
-        Ok(native::AuxTrace {
+        Ok(air::AuxTrace {
             columns: auxiliary.columns,
             exports: vec![
                 inputs.challenges[0].double() + QuadFelt::from_usize(inputs.main.height()),
@@ -816,27 +812,27 @@ struct CountedPrepared<E> {
 
 struct CountingKernel {
     source: CountedAir,
-    descriptor: native::AirDescriptor<Felt>,
+    descriptor: air::AirDescriptor<Felt>,
 }
 
 impl CountingKernel {
-    fn new(source: CountedAir) -> Result<Self, native::DescriptorError> {
-        let descriptor = native::capture(&source)?.descriptor;
+    fn new(source: CountedAir) -> Result<Self, air::DescriptorError> {
+        let descriptor = air::capture(&source)?.descriptor;
         Ok(Self { source, descriptor })
     }
 }
 
-impl native::AirKernel for CountingKernel {
+impl air::AirKernel for CountingKernel {
     type F = Felt;
     type Prepared<B: Algebra<Felt>, E: Algebra<B>> = CountedPrepared<E>;
 
-    fn descriptor(&self) -> &native::AirDescriptor<Felt> {
+    fn descriptor(&self) -> &air::AirDescriptor<Felt> {
         &self.descriptor
     }
 
     fn prepare<B: Algebra<Felt>, E: Algebra<B>>(
         &self,
-        inputs: native::UniformInputs<'_, B, E>,
+        inputs: air::UniformInputs<'_, B, E>,
     ) -> CountedPrepared<E> {
         self.source.preparations.fetch_add(1, Ordering::Relaxed);
         CountedPrepared {
@@ -847,10 +843,10 @@ impl native::AirKernel for CountingKernel {
         }
     }
 
-    fn eval_row<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval_row<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         prepared: &CountedPrepared<AB::ExtExpr>,
         builder: &mut AB,
     ) {
@@ -859,35 +855,35 @@ impl native::AirKernel for CountingKernel {
     }
 }
 
-impl native::LiftedAir for CountingKernel {
+impl air::LiftedAir for CountingKernel {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
         self.descriptor.spec().as_borrowed()
     }
 
     fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
-        native::LiftedAir::build_preprocessed_trace(&self.source)
+        air::LiftedAir::build_preprocessed_trace(&self.source)
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
-        native::LiftedAir::eval(&self.source, frame, inputs, builder);
+        air::LiftedAir::eval(&self.source, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for CountingKernel {
+impl air::ProverAir<QuadFelt> for CountingKernel {
     type Error = CountedWitnessError;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        native::ProverAir::build_aux_trace(&self.source, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        air::ProverAir::build_aux_trace(&self.source, inputs)
     }
 }
 
@@ -980,10 +976,10 @@ fn constraint_checker_uses_prover_hooks() {
 fn capture_counting_kernel(
     kernel: &CountingKernel,
     rows_per_binding: usize,
-) -> native::Capture<Felt, QuadFelt> {
-    use native::AirKernel;
+) -> air::Capture<Felt, QuadFelt> {
+    use crate::air::AirKernel;
 
-    native::capture_from_spec::<Felt, QuadFelt>(
+    air::capture_from_spec::<Felt, QuadFelt>(
         kernel.descriptor().spec().as_borrowed(),
         |frame, inputs, sink| {
             let session = kernel.bind(inputs).unwrap();
@@ -997,7 +993,7 @@ fn capture_counting_kernel(
 
 #[test]
 fn native_counted_kernel_preserves_source_setup_borrows_and_binding_lifecycle() {
-    use native::AirKernel;
+    use crate::air::AirKernel;
 
     fn assert_prepared<T: PackedPreparation>() {}
     assert_prepared::<CountedPrepared<PackedQuadFelt>>();
@@ -1012,7 +1008,7 @@ fn native_counted_kernel_preserves_source_setup_borrows_and_binding_lifecycle() 
         ),
     ] {
         let source = CountedAir::new(inner);
-        let expected = native::capture_with::<_, QuadFelt>(&source).unwrap();
+        let expected = air::capture_with::<_, QuadFelt>(&source).unwrap();
         let kernel = CountingKernel::new(source.clone()).unwrap();
         assert_eq!(expected.descriptor.analysis().layout().base_indices(), base_indices.as_slice());
         assert_eq!(expected.descriptor.analysis().layout().ext_indices(), ext_indices.as_slice());
@@ -1022,14 +1018,14 @@ fn native_counted_kernel_preserves_source_setup_borrows_and_binding_lifecycle() 
         assert_eq!(source.prepared_evaluations.load(Ordering::Relaxed), 0);
 
         // Explicit setup materializes at most one table. Both witness calls borrow that allocation.
-        let fixed = native::LiftedAir::build_preprocessed_trace(&kernel);
+        let fixed = air::LiftedAir::build_preprocessed_trace(&kernel);
         let address = fixed.as_ref().map_or(0, |trace| trace.values.as_ptr() as usize);
         let public = [Felt::from_u64(3)];
         let challenges = [QuadFelt::from_u64(7)];
         for _ in 0..2 {
-            let auxiliary = native::ProverAir::build_aux_trace(
+            let auxiliary = air::ProverAir::build_aux_trace(
                 &kernel,
-                native::AuxTraceInputs {
+                air::AuxTraceInputs {
                     main: &main,
                     preprocessed: fixed.as_ref(),
                     public_values: &public,
@@ -1047,12 +1043,12 @@ fn native_counted_kernel_preserves_source_setup_borrows_and_binding_lifecycle() 
 
         let exports = [QuadFelt::from_u64(18)];
         assert!(matches!(
-            kernel.bind::<Felt, QuadFelt>(native::UniformInputs {
+            kernel.bind::<Felt, QuadFelt>(air::UniformInputs {
                 public_values: &[],
                 challenges: &challenges,
                 exports: &exports,
             }),
-            Err(native::BindError::PublicValues { expected: 1, actual: 0 }),
+            Err(air::BindError::PublicValues { expected: 1, actual: 0 }),
         ));
         assert_eq!(source.preparations.load(Ordering::Relaxed), 0);
 
@@ -1085,9 +1081,9 @@ fn native_counted_witness_checks_setup_before_recording_a_borrow() {
     let public = [Felt::from_u64(3)];
     let challenges = [QuadFelt::from_u64(7)];
     let build = |preprocessed| {
-        native::ProverAir::build_aux_trace(
+        air::ProverAir::build_aux_trace(
             &source,
-            native::AuxTraceInputs {
+            air::AuxTraceInputs {
                 main: &main,
                 preprocessed,
                 public_values: &public,

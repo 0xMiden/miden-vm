@@ -25,10 +25,10 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::native,
-    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, native as native_lookup},
+    air,
+    air::LiftedAirBuilder as _,
+    lookup::{self, Deg, LookupBatch, LookupColumn, LookupGroup},
 };
 use miden_utils_sync::LazyLock;
 use p3_field::Dup;
@@ -136,9 +136,9 @@ static PERIODIC_COLUMNS: LazyLock<Vec<Vec<Felt>>> = LazyLock::new(|| {
 // LOOKUP AIR
 // ================================================================================================
 
-impl<LB> native_lookup::LookupAir<LB> for UintStoreMulAir
+impl<LB> lookup::LookupAir<LB> for UintStoreMulAir
 where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -152,7 +152,7 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         // STORE's own window.
         let local_s: &[LB::Expr; STORE_NUM_MAIN_COLS] = frame.main.current[..STORE_NUM_MAIN_COLS]
             .try_into()
@@ -449,10 +449,10 @@ where
     }
 }
 
-impl native::LiftedAir for UintStoreMulAir {
+impl air::LiftedAir for UintStoreMulAir {
     type F = Felt;
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: AUX_WIDTH,
             num_public_values: 0,
@@ -462,10 +462,10 @@ impl native::LiftedAir for UintStoreMulAir {
             periodic_columns: Cow::Borrowed(PERIODIC_COLUMNS.as_slice()),
         }
     }
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         // ---- STORE (`UintStoreAir::eval` constraints, columns 0..18) ----
@@ -715,16 +715,16 @@ impl native::LiftedAir for UintStoreMulAir {
         }
 
         // Phase 2: LogUp.
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for UintStoreMulAir {
-    type Error = native_lookup::LookupError;
+impl air::ProverAir<QuadFelt> for UintStoreMulAir {
+    type Error = lookup::LookupError;
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
         aux::build_aux(inputs)
     }
 }

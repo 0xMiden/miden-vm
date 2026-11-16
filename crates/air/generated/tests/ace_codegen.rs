@@ -11,7 +11,7 @@ use miden_ace::{
 use miden_air_definitions::vm::{AIRS, MIDEN_AIR_COUNT, MidenAir};
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{Field, PrimeCharacteristicRing};
-use miden_stark::air::native::LiftedAir;
+use miden_stark::air::LiftedAir;
 
 /// The DAG's evaluation on arbitrary inputs must equal an independently
 /// computed reference: folded constraints minus recomposed quotient times

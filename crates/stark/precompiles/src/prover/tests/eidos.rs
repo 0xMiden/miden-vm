@@ -12,8 +12,8 @@ use miden_core::{
 use miden_crypto::hash::eidos::Eidos;
 use miden_precompiles::{CurvePrecompile, Keccak256Precompile};
 use miden_stark::{
-    air::native::{ConstraintDegrees, LiftedAir},
-    lookup::native::build_lookup_fractions,
+    air::{ConstraintDegrees, LiftedAir},
+    lookup::build_lookup_fractions,
 };
 
 use crate::prover::{
@@ -163,7 +163,7 @@ fn eidos_balance(trace: &RowMajorMatrix<Felt>) -> HashMap<QuadFelt, Felt> {
         &air,
         trace,
         None,
-        &miden_stark::air::native::LiftedAir::spec(&air).periodic_columns,
+        &miden_stark::air::LiftedAir::spec(&air).periodic_columns,
         &lookup_challenges(),
     );
     lookup_balance(fractions.fractions())
@@ -175,7 +175,7 @@ fn continuation_balance(trace: &RowMajorMatrix<Felt>) -> HashMap<QuadFelt, Felt>
         &air,
         trace,
         None,
-        &miden_stark::air::native::LiftedAir::spec(&air).periodic_columns,
+        &miden_stark::air::LiftedAir::spec(&air).periodic_columns,
         &lookup_challenges(),
     );
     let mut offset = 0;
@@ -346,9 +346,9 @@ fn constraint_degree_remains_three() {
 
 #[test]
 fn lookup_degree_annotations_match_the_unified_layout() {
-    miden_stark::lookup::native::validate_native(
+    miden_stark::lookup::validate_native(
         &EidosCompressionAir,
-        &miden_stark::air::native::LiftedAir::spec(&EidosCompressionAir),
+        &miden_stark::air::LiftedAir::spec(&EidosCompressionAir),
     )
     .unwrap_or_else(|error| panic!("PVM Eidos compression lookup validation failed: {error}"));
 }
@@ -364,7 +364,7 @@ fn lookup_interaction_liveness_matches_the_nineteen_lookup_columns() {
         &EidosCompressionAir,
         &compression,
         None,
-        &miden_stark::air::native::LiftedAir::spec(&EidosCompressionAir).periodic_columns,
+        &miden_stark::air::LiftedAir::spec(&EidosCompressionAir).periodic_columns,
         &lookup_challenges(),
     );
     let mut expected_shape = [2; NUM_LOOKUP_COLS];
@@ -1043,7 +1043,7 @@ fn block_init_and_output_relations_fire_at_the_expected_chain_boundaries() {
         &EidosCompressionAir,
         &compression,
         None,
-        &miden_stark::air::native::LiftedAir::spec(&EidosCompressionAir).periodic_columns,
+        &miden_stark::air::LiftedAir::spec(&EidosCompressionAir).periodic_columns,
         &lookup_challenges(),
     );
 

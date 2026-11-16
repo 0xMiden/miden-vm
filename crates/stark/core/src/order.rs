@@ -16,7 +16,7 @@ use p3_challenger::CanObserve;
 use p3_field::Field;
 use thiserror::Error;
 
-use crate::air::{log2_strict_u8, native::AirKernel};
+use crate::air::{AirKernel, log2_strict_u8};
 
 // ============================================================================
 // TraceOrder
@@ -272,7 +272,7 @@ impl TraceOrder {
     /// AIR instance index backing each committed preprocessed trace.
     ///
     /// The preprocessed commitment contains one committed LDE trace per AIR with
-    /// [`preprocessed_width`](crate::air::native::AirSpec::preprocessed_width)
+    /// [`preprocessed_width`](crate::air::AirSpec::preprocessed_width)
     /// `> 0`, in proof order (the LMCS height-monotone committed-trace order). The result
     /// length is the number of preprocessed AIRs, which is `<= len()`.
     pub(crate) fn preprocessed_air_for_trace_index<K: AirKernel>(&self, airs: &[K]) -> Vec<u8> {
@@ -346,7 +346,7 @@ mod tests {
     use p3_goldilocks::Goldilocks;
 
     use super::*;
-    use crate::{air::native::DirectKernel, testing::airs::miden::DummyMidenAir};
+    use crate::{air::DirectKernel, testing::airs::miden::DummyMidenAir};
 
     type TF = Goldilocks;
 
@@ -455,7 +455,10 @@ mod tests {
 
         use p3_field::PrimeCharacteristicRing;
 
-        use crate::air::native::{self, AirSpec, PreprocessedSpec};
+        use crate::{
+            air,
+            air::{AirSpec, PreprocessedSpec},
+        };
         let specs = [
             AirSpec {
                 main_width: 1,
@@ -486,7 +489,7 @@ mod tests {
             },
         ];
         let captured =
-            specs.map(|spec| native::capture_from_spec::<TF, TF>(spec, |_, _, _| {}).unwrap());
+            specs.map(|spec| air::capture_from_spec::<TF, TF>(spec, |_, _, _| {}).unwrap());
         let shape_at = |index: usize| {
             let spec = captured[index].descriptor.spec();
             OrderShape {

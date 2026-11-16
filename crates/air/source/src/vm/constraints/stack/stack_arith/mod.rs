@@ -8,7 +8,7 @@
 mod tests;
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_stark::air::native::LiftedAirBuilder;
+use miden_stark::air::LiftedAirBuilder;
 
 use crate::vm::{
     CoreCols, NativeMidenAirBuilder,

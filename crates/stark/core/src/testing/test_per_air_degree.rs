@@ -7,15 +7,14 @@
 extern crate alloc;
 
 use alloc::{borrow::Cow, vec, vec::Vec};
-
 use core::convert::Infallible;
 
 use p3_field::{Dup, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
-use crate::air::native::LiftedAirBuilder as _;
 use crate::{
-    air::{MultiAir, ProverStatement, Statement, native},
+    air,
+    air::{LiftedAirBuilder as _, MultiAir, ProverStatement, Statement},
     domain::log_quotient_degree,
     testing::configs::goldilocks_poseidon2::{Felt, QuadFelt, prove_and_verify_statement},
 };
@@ -29,11 +28,11 @@ struct PowerAir {
     power: u64,
 }
 
-impl native::LiftedAir for PowerAir {
+impl air::LiftedAir for PowerAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: 1,
             aux_width: 1,
             num_public_values: 0,
@@ -44,10 +43,10 @@ impl native::LiftedAir for PowerAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let x = frame.main.current[0].dup();
@@ -64,14 +63,14 @@ impl native::LiftedAir for PowerAir {
     }
 }
 
-impl native::ProverAir<QuadFelt> for PowerAir {
+impl air::ProverAir<QuadFelt> for PowerAir {
     type Error = Infallible;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        Ok(native::AuxTrace {
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        Ok(air::AuxTrace {
             columns: RowMajorMatrix::new(vec![inputs.challenges[0]; inputs.main.height()], 1),
             exports: vec![],
         })
@@ -87,11 +86,11 @@ struct PeriodicPowerAir {
     power: u64,
 }
 
-impl native::LiftedAir for PeriodicPowerAir {
+impl air::LiftedAir for PeriodicPowerAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: 1,
             aux_width: 1,
             num_public_values: 0,
@@ -102,10 +101,10 @@ impl native::LiftedAir for PeriodicPowerAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let x = frame.main.current[0].dup();
@@ -124,14 +123,14 @@ impl native::LiftedAir for PeriodicPowerAir {
     }
 }
 
-impl native::ProverAir<QuadFelt> for PeriodicPowerAir {
+impl air::ProverAir<QuadFelt> for PeriodicPowerAir {
     type Error = Infallible;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        Ok(native::AuxTrace {
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        Ok(air::AuxTrace {
             columns: RowMajorMatrix::new(vec![inputs.challenges[0]; inputs.main.height()], 1),
             exports: vec![],
         })
@@ -154,7 +153,7 @@ impl<A> TwoTraceMultiAir<A> {
 
 impl<A> MultiAir<Felt, QuadFelt> for TwoTraceMultiAir<A>
 where
-    A: native::AirKernel<F = Felt>,
+    A: air::AirKernel<F = Felt>,
 {
     type Air = A;
 
@@ -184,7 +183,7 @@ fn generate_pow_trace(power: u64, start: Felt, height: usize) -> RowMajorMatrix<
 #[test]
 fn quadratic_air_uses_one_quotient_chunk() {
     assert_eq!(
-        log_quotient_degree(&native::DirectKernel::new(PowerAir { power: 2 }).unwrap()).unwrap(),
+        log_quotient_degree(&air::DirectKernel::new(PowerAir { power: 2 }).unwrap()).unwrap(),
         0
     );
 }
@@ -195,7 +194,7 @@ fn one_chunk_quadratic_quotient_proves() {
     let trace = generate_pow_trace(2, Felt::from_u64(7), 16);
 
     let statement = Statement::new(
-        TwoTraceMultiAir::new(vec![native::DirectKernel::new(air).unwrap()]),
+        TwoTraceMultiAir::new(vec![air::DirectKernel::new(air).unwrap()]),
         Vec::new(),
         Vec::new(),
     )
@@ -213,8 +212,8 @@ fn run_upsample_case(low_power: u64, low_height: usize, high_power: u64, high_he
 
     let statement = Statement::new(
         TwoTraceMultiAir::new(vec![
-            native::DirectKernel::new(low).unwrap(),
-            native::DirectKernel::new(high).unwrap(),
+            air::DirectKernel::new(low).unwrap(),
+            air::DirectKernel::new(high).unwrap(),
         ]),
         Vec::new(),
         Vec::new(),
@@ -249,8 +248,8 @@ fn upsample_fires_with_periodic_columns() {
 
     let statement = Statement::new(
         TwoTraceMultiAir::new(vec![
-            native::DirectKernel::new(low).unwrap(),
-            native::DirectKernel::new(high).unwrap(),
+            air::DirectKernel::new(low).unwrap(),
+            air::DirectKernel::new(high).unwrap(),
         ]),
         Vec::new(),
         Vec::new(),
@@ -262,19 +261,19 @@ fn upsample_fires_with_periodic_columns() {
 
 #[test]
 fn native_power_sources_preserve_witness_and_direct_symbolic_order() {
-    use native::AirKernel;
+    use crate::air::AirKernel;
 
     for power in [2, 5, 9] {
         let source = PowerAir { power };
-        let expected = native::capture_with::<_, QuadFelt>(&source).unwrap();
+        let expected = air::capture_with::<_, QuadFelt>(&source).unwrap();
         assert_eq!(expected.descriptor.analysis().layout().base_indices(), &[0]);
         assert_eq!(expected.descriptor.analysis().layout().ext_indices(), &[1]);
-        let kernel = native::DirectKernel::new(source).unwrap();
+        let kernel = air::DirectKernel::new(source).unwrap();
         let main = generate_pow_trace(power, Felt::from_u64(2), 4);
         let challenges = [QuadFelt::from_u64(7)];
-        let aux = native::ProverAir::build_aux_trace(
+        let aux = air::ProverAir::build_aux_trace(
             &kernel,
-            native::AuxTraceInputs {
+            air::AuxTraceInputs {
                 main: &main,
                 preprocessed: None,
                 public_values: &[],
@@ -285,7 +284,7 @@ fn native_power_sources_preserve_witness_and_direct_symbolic_order() {
         .unwrap();
         assert_eq!(aux.columns.values, vec![QuadFelt::from_u64(7); 4]);
         assert!(aux.exports.is_empty());
-        let observed = native::capture_from_spec::<Felt, QuadFelt>(
+        let observed = air::capture_from_spec::<Felt, QuadFelt>(
             kernel.descriptor().spec().as_borrowed(),
             |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
         )
@@ -296,19 +295,19 @@ fn native_power_sources_preserve_witness_and_direct_symbolic_order() {
 
     for power in [3, 5] {
         let source = PeriodicPowerAir { power };
-        let expected = native::capture_with::<_, QuadFelt>(&source).unwrap();
+        let expected = air::capture_with::<_, QuadFelt>(&source).unwrap();
         assert_eq!(
             expected.descriptor.spec().periodic_columns.as_ref(),
             &[vec![Felt::ONE, Felt::ZERO]]
         );
         assert_eq!(expected.descriptor.analysis().layout().base_indices(), &[0, 1]);
         assert_eq!(expected.descriptor.analysis().layout().ext_indices(), &[2]);
-        let kernel = native::DirectKernel::new(source).unwrap();
+        let kernel = air::DirectKernel::new(source).unwrap();
         let main = generate_pow_trace(power, Felt::from_u64(2), 4);
         let challenges = [QuadFelt::from_u64(7)];
-        let aux = native::ProverAir::build_aux_trace(
+        let aux = air::ProverAir::build_aux_trace(
             &kernel,
-            native::AuxTraceInputs {
+            air::AuxTraceInputs {
                 main: &main,
                 preprocessed: None,
                 public_values: &[],
@@ -319,7 +318,7 @@ fn native_power_sources_preserve_witness_and_direct_symbolic_order() {
         .unwrap();
         assert_eq!(aux.columns.values, vec![QuadFelt::from_u64(7); 4]);
         assert!(aux.exports.is_empty());
-        let observed = native::capture_from_spec::<Felt, QuadFelt>(
+        let observed = air::capture_from_spec::<Felt, QuadFelt>(
             kernel.descriptor().spec().as_borrowed(),
             |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
         )

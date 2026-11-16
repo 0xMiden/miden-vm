@@ -34,13 +34,10 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::native,
-    lookup::{
-        Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage,
-        native as native_lookup,
-    },
+    air,
+    air::LiftedAirBuilder as _,
+    lookup::{self, Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage},
 };
 use p3_field::Dup;
 
@@ -326,11 +323,11 @@ const TWO16: u32 = 1 << 16;
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EcMsmAir;
 
-impl native::LiftedAir for EcMsmAir {
+impl air::LiftedAir for EcMsmAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: AUX_WIDTH,
             num_public_values: 0,
@@ -341,10 +338,10 @@ impl native::LiftedAir for EcMsmAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         let local = frame.main.current;
@@ -554,27 +551,27 @@ impl native::LiftedAir for EcMsmAir {
         builder.assert_zero(endo_mint * (cert_val - cert_base - AB::Expr::ONE - cert_diff));
 
         // Phase 2: LogUp.
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for EcMsmAir {
-    type Error = native_lookup::LookupError;
+impl air::ProverAir<QuadFelt> for EcMsmAir {
+    type Error = lookup::LookupError;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        native_lookup::build_logup_aux_trace(self, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
 // LOOKUP AIR
 // ================================================================================================
 
-impl<LB> native_lookup::LookupAir<LB> for EcMsmAir
+impl<LB> lookup::LookupAir<LB> for EcMsmAir
 where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -588,7 +585,7 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         let local = frame.main.current;
 
         let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_MULT].dup();
@@ -1025,8 +1022,8 @@ mod tests {
         field::{PrimeCharacteristicRing, QuadFelt},
     };
     use miden_stark::{
-        air::native::{self, AirKernel},
-        lookup::native as native_lookup,
+        air::{self, AirKernel},
+        lookup,
     };
 
     use super::{COL_ACT, COL_EXPR_PTR, COL_IDX, EcMsmAir, NUM_MAIN_COLS};
@@ -1034,33 +1031,29 @@ mod tests {
     #[test]
     fn native_msm_capture_keeps_complete_shape_and_order() {
         // The actual twelve-column callbacks are instantiated with non-Copy expressions.
-        let captured = native::capture_with::<_, QuadFelt>(&EcMsmAir).unwrap();
+        let captured = air::capture_with::<_, QuadFelt>(&EcMsmAir).unwrap();
         let spec = captured.descriptor.spec();
         assert_eq!((spec.main_width, spec.aux_width), (35, 12));
         assert_eq!((spec.num_public_values, spec.num_challenges, spec.num_exports), (0, 2, 1));
         assert!(spec.preprocessed.is_none());
         assert!(spec.periodic_columns.is_empty());
         assert_eq!(
-            <EcMsmAir as native_lookup::LookupAir<
-                native_lookup::ProverLookupBuilder<'_, Felt, QuadFelt>,
+            <EcMsmAir as lookup::LookupAir<
+                lookup::ProverLookupBuilder<'_, Felt, QuadFelt>,
             >>::column_shape(&EcMsmAir),
             &[2; 12],
         );
         let layout = captured.descriptor.analysis().layout();
         assert_eq!(layout.base_indices(), (0..54).collect::<Vec<_>>().as_slice());
         assert_eq!(layout.ext_indices(), (54..67).collect::<Vec<_>>().as_slice());
-        assert!(
-            captured.assertions[..54]
-                .iter()
-                .all(|a| matches!(a, native::Assertion::Base(_)))
-        );
+        assert!(captured.assertions[..54].iter().all(|a| matches!(a, air::Assertion::Base(_))));
         assert!(
             captured.assertions[54..]
                 .iter()
-                .all(|a| matches!(a, native::Assertion::Extension(_)))
+                .all(|a| matches!(a, air::Assertion::Extension(_)))
         );
         #[cfg(feature = "std")]
-        miden_stark::lookup::native::validate_native(&EcMsmAir, spec).unwrap();
+        miden_stark::lookup::validate_native(&EcMsmAir, spec).unwrap();
     }
 
     #[derive(Default)]
@@ -1069,26 +1062,26 @@ mod tests {
         ext: Vec<QuadFelt>,
     }
 
-    impl native::LiftedAirBuilder for Values {
+    impl air::LiftedAirBuilder for Values {
         type F = Felt;
         type Expr = Felt;
         type ExtExpr = QuadFelt;
 
-        fn emit_base(&mut self, value: Felt, _meta: native::ConstraintMeta<'_>) {
+        fn emit_base(&mut self, value: Felt, _meta: air::ConstraintMeta<'_>) {
             self.base.push(value);
         }
 
-        fn emit_ext(&mut self, value: QuadFelt, _meta: native::ConstraintMeta<'_>) {
+        fn emit_ext(&mut self, value: QuadFelt, _meta: air::ConstraintMeta<'_>) {
             self.ext.push(value);
         }
     }
 
     #[test]
     fn native_msm_direct_session_preserves_inactive_row_and_boolean_polarity() {
-        let kernel = native::DirectKernel::new(EcMsmAir).unwrap();
+        let kernel = air::DirectKernel::new(EcMsmAir).unwrap();
         let challenges = [QuadFelt::from_u8(7), QuadFelt::from_u8(11)];
         let exports = [QuadFelt::ZERO];
-        let inputs = native::UniformInputs {
+        let inputs = air::UniformInputs {
             public_values: &[],
             challenges: &challenges,
             exports: &exports,
@@ -1100,12 +1093,12 @@ mod tests {
             let mut next = current;
             next[COL_IDX] = Felt::ONE;
             let auxiliary = [QuadFelt::ZERO; 12];
-            let frame = native::AirFrame {
-                main: native::Rows { current: &current, next: &next },
-                preprocessed: native::Rows { current: &[], next: &[] },
-                aux: native::Rows { current: &auxiliary, next: &auxiliary },
+            let frame = air::AirFrame {
+                main: air::Rows { current: &current, next: &next },
+                preprocessed: air::Rows { current: &[], next: &[] },
+                aux: air::Rows { current: &auxiliary, next: &auxiliary },
                 periodic: &[],
-                selectors: native::Selectors {
+                selectors: air::Selectors {
                     first: Felt::ONE,
                     last: Felt::ZERO,
                     transition: Felt::ONE,

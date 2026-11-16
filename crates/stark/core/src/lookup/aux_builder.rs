@@ -1,7 +1,8 @@
 //! Generic LogUp aux-trace construction.
 //!
-//! [`crate::lookup::native::build_logup_aux_trace`] builds lookup fractions for an AIR and returns an `n`-row cyclic
-//! auxiliary trace together with the normalized global sum `sigma_prime = sigma / n`.
+//! [`crate::lookup::build_logup_aux_trace`] builds lookup fractions for an AIR and returns an
+//! `n`-row cyclic auxiliary trace together with the normalized global sum `sigma_prime = sigma /
+//! n`.
 //!
 //! ## Aux trace shape
 //!

@@ -9,10 +9,10 @@ use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
 };
-use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::native,
-    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage, native as native_lookup},
+    air,
+    air::LiftedAirBuilder as _,
+    lookup::{self, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage},
 };
 use miden_utils_sync::LazyLock;
 use p3_field::Dup;
@@ -115,11 +115,11 @@ pub struct Sha256CompressionAir;
 static PERIODIC_COLUMNS: LazyLock<[Vec<Felt>; NUM_PERIODIC_COLS]> =
     LazyLock::new(compression_program);
 
-impl native::LiftedAir for Sha256CompressionAir {
+impl air::LiftedAir for Sha256CompressionAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: NUM_AUX_COLS,
             num_public_values: 0,
@@ -130,30 +130,30 @@ impl native::LiftedAir for Sha256CompressionAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         eval_main(frame, builder, 0, 0);
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for Sha256CompressionAir {
-    type Error = native_lookup::LookupError;
+impl air::ProverAir<QuadFelt> for Sha256CompressionAir {
+    type Error = lookup::LookupError;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        native_lookup::build_logup_aux_trace(self, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
-pub fn eval_main<AB: native::LiftedAirBuilder<F = Felt>>(
-    frame: &native::Frame<'_, AB>,
+pub fn eval_main<AB: air::LiftedAirBuilder<F = Felt>>(
+    frame: &air::Frame<'_, AB>,
     builder: &mut AB,
     main_col_offset: usize,
     periodic_col_offset: usize,
@@ -162,8 +162,8 @@ pub fn eval_main<AB: native::LiftedAirBuilder<F = Felt>>(
 }
 
 /// Keep the block controller live while the final 32 NOP rows hold IO witnesses.
-pub(super) fn eval_main_with_io<AB: native::LiftedAirBuilder<F = Felt>>(
-    frame: &native::Frame<'_, AB>,
+pub(super) fn eval_main_with_io<AB: air::LiftedAirBuilder<F = Felt>>(
+    frame: &air::Frame<'_, AB>,
     builder: &mut AB,
     main_col_offset: usize,
     periodic_col_offset: usize,
@@ -632,8 +632,8 @@ pub(super) fn eval_lookup_batch<B>(
     }
 }
 
-pub fn eval_lookups<LB: native_lookup::LookupBuilder<F = Felt>>(
-    frame: &native_lookup::LookupFrame<'_, LB::Expr>,
+pub fn eval_lookups<LB: lookup::LookupBuilder<F = Felt>>(
+    frame: &lookup::LookupFrame<'_, LB::Expr>,
     builder: &mut LB,
     main_col_offset: usize,
     periodic_col_offset: usize,
@@ -664,9 +664,7 @@ pub fn eval_lookups<LB: native_lookup::LookupBuilder<F = Felt>>(
     }
 }
 
-impl<LB: native_lookup::LookupBuilder<F = Felt>> native_lookup::LookupAir<LB>
-    for Sha256CompressionAir
-{
+impl<LB: lookup::LookupBuilder<F = Felt>> lookup::LookupAir<LB> for Sha256CompressionAir {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
@@ -676,7 +674,7 @@ impl<LB: native_lookup::LookupBuilder<F = Felt>> native_lookup::LookupAir<LB>
     fn num_bus_ids(&self) -> usize {
         NUM_BUS_IDS
     }
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         eval_lookups(frame, builder, 0, 0);
     }
 }

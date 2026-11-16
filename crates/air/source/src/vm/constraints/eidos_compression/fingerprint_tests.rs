@@ -6,8 +6,8 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_stark::{
-    air::native::{self, LiftedAir},
-    lookup::{Challenges, accumulate_slow, native as native_lookup},
+    air::{self, LiftedAir},
+    lookup::{self, Challenges, accumulate_slow},
 };
 
 use super::{
@@ -113,9 +113,9 @@ fn native_aux_preserves_lookup_prefix_and_closes_each_cycle() {
     let challenges =
         [QuadFelt::from_u32(7), QuadFelt::new([Felt::from_u32(11), Felt::from_u32(13)])];
     let air = MidenAir::EidosCompression;
-    let native::AuxTrace { columns: aux, exports: sums } = native::ProverAir::build_aux_trace(
+    let air::AuxTrace { columns: aux, exports: sums } = air::ProverAir::build_aux_trace(
         &air,
-        native::AuxTraceInputs {
+        air::AuxTraceInputs {
             main: &main,
             preprocessed: None,
             public_values: &[],
@@ -132,7 +132,7 @@ fn native_aux_preserves_lookup_prefix_and_closes_each_cycle() {
         crate::vm::logup::BusId::COUNT,
     );
     let fractions =
-        native_lookup::build_lookup_fractions(&air, &main, None, &spec.periodic_columns, &encoding);
+        lookup::build_lookup_fractions(&air, &main, None, &spec.periodic_columns, &encoding);
     let (columns, sigma) = accumulate_slow(&fractions);
     let prefix = RowMajorMatrix::new(
         (0..rows.len())

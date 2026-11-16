@@ -7,7 +7,7 @@
 //! Stack shifting is enforced in the general stack constraints; here we only cover explicit
 //! rewrites of stack positions for these op groups.
 
-use miden_stark::air::native::LiftedAirBuilder;
+use miden_stark::air::LiftedAirBuilder;
 use p3_field::Dup;
 
 use crate::vm::{

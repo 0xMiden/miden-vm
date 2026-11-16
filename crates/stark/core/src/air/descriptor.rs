@@ -167,7 +167,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        air::native::{
+        air::{
             AirAnalysis, DegreeProfile,
             symbolic::{
                 BaseInput, BaseLeaf, RowOffset, SymbolicExpr, SymbolicExpression,

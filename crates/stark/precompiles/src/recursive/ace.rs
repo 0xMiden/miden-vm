@@ -87,13 +87,13 @@ pub(crate) fn structured_orders() -> Vec<[usize; NUM_CHIPLETS]> {
 #[cfg(test)]
 mod tests {
     use alloc::{format, string::String, vec::Vec};
-    use miden_stark::air::native::AirKernel;
 
     use miden_ace::InputKey;
     use miden_air::precompiles::policy::precompile_pcs_params;
     use miden_air_definitions::precompiles::ace::LMCS_ALIGNMENT;
     use miden_core::{Felt, Word, crypto::hash::Eidos, field::QuadFelt};
     use miden_crypto::field::PrimeCharacteristicRing;
+    use miden_stark::air::AirKernel;
 
     use super::*;
     use crate::recursive::ace_constants::{

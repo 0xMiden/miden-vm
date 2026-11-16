@@ -12,7 +12,7 @@ use miden_air::precompiles::{ChipletAir, ChipletMultiAir, policy::precompile_pcs
 use miden_core::{Felt, field::QuadFelt};
 use miden_stark::{
     Preprocessed, StarkConfig,
-    air::{Statement, native::AirKernel},
+    air::{AirKernel, Statement},
     config::{Blake3Config, KeccakConfig, blake3_256_config, keccak_config},
     lmcs::Lmcs,
 };

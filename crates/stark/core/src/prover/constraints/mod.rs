@@ -22,7 +22,8 @@ use packed_row_bitrev::collect_vertically_packed_row_pair_bitrev_into;
 
 use super::PackedPreparation;
 use crate::{
-    air::native::{self, AirKernel, ConstraintLayout},
+    air,
+    air::{AirKernel, ConstraintLayout},
     domain::{Coset, EvaluationDomain},
     prover::periodic::PeriodicLde,
 };
@@ -152,7 +153,7 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
 
     let packed_public_values: Vec<P<F>> = public_values.iter().copied().map(Into::into).collect();
     let session = air
-        .bind(native::UniformInputs {
+        .bind(air::UniformInputs {
             public_values: &packed_public_values,
             challenges: &packed_randomness,
             exports: &packed_perm_values,
@@ -200,9 +201,9 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
                     preproc_buf,
                 );
                 let (current, next) = preproc_buf.split_at(preprocessed_width);
-                native::Rows { current, next }
+                air::Rows { current, next }
             } else {
-                native::Rows { current: &[], next: &[] }
+                air::Rows { current: &[], next: &[] }
             };
 
             // Get aux trace as packed row pair and convert to packed extension field
@@ -239,12 +240,12 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
                     _phantom: PhantomData,
                 };
 
-            let frame = native::AirFrame {
-                main: native::Rows { current: main_current, next: main_next },
+            let frame = air::AirFrame {
+                main: air::Rows { current: main_current, next: main_next },
                 preprocessed,
-                aux: native::Rows { current: aux_current, next: aux_next },
+                aux: air::Rows { current: aux_current, next: aux_next },
                 periodic: &periodic_values,
-                selectors: native::Selectors {
+                selectors: air::Selectors {
                     first: selectors.is_first_row,
                     last: selectors.is_last_row,
                     transition: selectors.is_transition,

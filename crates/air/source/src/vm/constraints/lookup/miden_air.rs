@@ -100,11 +100,8 @@ mod tests {
         utils::{Matrix, RowMajorMatrix},
     };
     use miden_stark::{
-        air::native::LiftedAir,
-        lookup::{
-            Challenges,
-            native::{build_lookup_fractions, validate_native},
-        },
+        air::LiftedAir,
+        lookup::{Challenges, build_lookup_fractions, validate_native},
     };
 
     use crate::vm::{

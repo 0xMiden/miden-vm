@@ -20,8 +20,8 @@ use miden_core::{
 };
 use miden_precompiles::{CurveId, CurvePoint, phi_generator};
 use miden_stark::{
-    air::native::{ConstraintDegrees, LiftedAir},
-    lookup::{ProverLookupBuilder, native::LookupAir},
+    air::{ConstraintDegrees, LiftedAir},
+    lookup::{LookupAir, ProverLookupBuilder},
 };
 
 use crate::prover::{
@@ -107,11 +107,8 @@ fn shape_and_degree_match_design() {
     assert_eq!(crate::prover::tests::raw_degrees(&air), ConstraintDegrees { base: 3, ext: 3 });
     assert_eq!(crate::prover::tests::log_quotient_degree(&air), 1);
 
-    miden_stark::lookup::native::validate_native(
-        &air,
-        &miden_stark::air::native::LiftedAir::spec(&air),
-    )
-    .unwrap_or_else(|err| panic!("EcMsmAir lookup validation failed: {err}"));
+    miden_stark::lookup::validate_native(&air, &miden_stark::air::LiftedAir::spec(&air))
+        .unwrap_or_else(|err| panic!("EcMsmAir lookup validation failed: {err}"));
 }
 
 #[test]

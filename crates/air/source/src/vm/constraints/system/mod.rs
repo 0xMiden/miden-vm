@@ -35,7 +35,7 @@
 
 pub mod columns;
 
-use miden_stark::air::native::{Frame, LiftedAirBuilder};
+use miden_stark::air::{Frame, LiftedAirBuilder};
 use p3_field::Dup;
 
 use crate::vm::{

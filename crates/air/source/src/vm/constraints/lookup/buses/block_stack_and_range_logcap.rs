@@ -10,7 +10,7 @@
 //!
 //! # Structure
 //!
-//! One [`miden_stark::lookup::native::LookupBuilder::next_column`] call with one opcode-gated group:
+//! One [`miden_stark::lookup::LookupBuilder::next_column`] call with one opcode-gated group:
 //!
 //! - Block-stack table: JOIN/SPLIT/SPAN/DYN, LOOP, DYNCALL, CALL/SYSCALL, two END cases, RESPAN
 //!   batch (7 branches, mutually exclusive via decoder opcode flags).
@@ -381,7 +381,7 @@ mod tests {
         operations::opcodes,
         utils::RowMajorMatrix,
     };
-    use miden_stark::lookup::{Challenges, native::build_lookup_fractions};
+    use miden_stark::lookup::{Challenges, build_lookup_fractions};
 
     use crate::vm::{
         CoreCols, MidenAir,

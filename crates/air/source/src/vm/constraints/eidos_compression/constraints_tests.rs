@@ -1,8 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_core::field::{Field, PrimeCharacteristicRing, QuadFelt};
-use miden_stark::air::native;
-use miden_stark::{air::native::ConstraintDegrees, lookup::native as native_lookup};
+use miden_stark::{air, air::ConstraintDegrees, lookup};
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::{
@@ -35,31 +34,31 @@ impl ConstraintEvalBuilder {
     fn eval_with(
         &mut self,
         evaluate: impl FnOnce(
-            &native::AirFrame<'_, Felt, QuadFelt>,
-            native::UniformInputs<'_, Felt, QuadFelt>,
+            &air::AirFrame<'_, Felt, QuadFelt>,
+            air::UniformInputs<'_, Felt, QuadFelt>,
             &mut NumericSink<'_>,
         ),
     ) {
         let width = self.main.width;
         let aux_width = self.aux.width;
-        let frame = native::AirFrame {
-            main: native::Rows {
+        let frame = air::AirFrame {
+            main: air::Rows {
                 current: &self.main.values[..width],
                 next: &self.main.values[width..2 * width],
             },
-            preprocessed: native::Rows { current: &[], next: &[] },
-            aux: native::Rows {
+            preprocessed: air::Rows { current: &[], next: &[] },
+            aux: air::Rows {
                 current: &self.aux.values[..aux_width],
                 next: &self.aux.values[aux_width..2 * aux_width],
             },
             periodic: &self.periodic_values,
-            selectors: native::Selectors {
+            selectors: air::Selectors {
                 first: self.is_first_row,
                 last: self.is_last_row,
                 transition: Felt::ONE - self.is_last_row,
             },
         };
-        let inputs = native::UniformInputs {
+        let inputs = air::UniformInputs {
             public_values: &[],
             challenges: &self.randomness,
             exports: &self.permutation_values,
@@ -78,14 +77,14 @@ struct NumericSink<'a> {
     extension: &'a mut Vec<QuadFelt>,
 }
 
-impl native::LiftedAirBuilder for NumericSink<'_> {
+impl air::LiftedAirBuilder for NumericSink<'_> {
     type F = Felt;
     type Expr = Felt;
     type ExtExpr = QuadFelt;
-    fn emit_base(&mut self, value: Felt, _: native::ConstraintMeta<'_>) {
+    fn emit_base(&mut self, value: Felt, _: air::ConstraintMeta<'_>) {
         self.base.push(value);
     }
-    fn emit_ext(&mut self, value: QuadFelt, _: native::ConstraintMeta<'_>) {
+    fn emit_ext(&mut self, value: QuadFelt, _: air::ConstraintMeta<'_>) {
         self.extension.push(value);
     }
 }
@@ -137,7 +136,7 @@ fn enforce_inactive_footer_output_aux(
 #[test]
 fn handwritten_constraint_degree_remains_three() {
     let air = MidenAir::EidosCompression;
-    let degree = native::capture(&air).unwrap().descriptor.analysis().raw_degrees();
+    let degree = air::capture(&air).unwrap().descriptor.analysis().raw_degrees();
     assert_eq!(degree, ConstraintDegrees { base: 3, ext: 3 });
 }
 
@@ -276,7 +275,7 @@ fn inactive_footer_aux_pins_close_zero_denominator_rows() {
     builder.aux.values[FOOTER_OUTPUT_COLUMN] = QuadFelt::ONE;
 
     let air = MidenAir::EidosCompression;
-    builder.eval_with(|frame, inputs, sink| native_lookup::eval_lookup(&air, frame, inputs, sink));
+    builder.eval_with(|frame, inputs, sink| lookup::eval_lookup(&air, frame, inputs, sink));
 
     // Column zero emits its anchor and recurrence; every later column emits one constraint.
     assert_eq!(builder.extension_evaluations.len(), NUM_LOGUP_COLS + 1);

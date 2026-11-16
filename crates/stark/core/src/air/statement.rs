@@ -10,7 +10,7 @@ use p3_field::{ExtensionField, Field};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use thiserror::Error;
 
-use crate::air::{MultiAir, ReductionError, native::AirKernel};
+use crate::air::{AirKernel, MultiAir, ReductionError};
 
 // ============================================================================
 // Statement
@@ -140,35 +140,46 @@ where
     ///
     /// ```
     /// use std::borrow::Cow;
+    ///
     /// use miden_crypto::Felt;
-    /// use miden_stark::air::{MultiAir, Statement, native};
+    /// use miden_stark::{
+    ///     air,
+    ///     air::{MultiAir, Statement},
+    /// };
     /// use p3_challenger::CanObserve;
     ///
     /// struct ExampleAir;
     ///
-    /// impl native::LiftedAir for ExampleAir {
+    /// impl air::LiftedAir for ExampleAir {
     ///     type F = Felt;
     ///
-    ///     fn spec(&self) -> native::AirSpec<'_, Felt> {
-    ///         native::AirSpec {
-    ///             main_width: 1, aux_width: 1, num_public_values: 2,
-    ///             num_challenges: 0, num_exports: 0, preprocessed: None,
+    ///     fn spec(&self) -> air::AirSpec<'_, Felt> {
+    ///         air::AirSpec {
+    ///             main_width: 1,
+    ///             aux_width: 1,
+    ///             num_public_values: 2,
+    ///             num_challenges: 0,
+    ///             num_exports: 0,
+    ///             preprocessed: None,
     ///             periodic_columns: Cow::Borrowed(&[]),
     ///         }
     ///     }
     ///
-    ///     fn eval<B: native::LiftedAirBuilder<F = Felt>>(
-    ///         &self, _frame: &native::Frame<'_, B>, _inputs: native::Inputs<'_, B>,
+    ///     fn eval<B: air::LiftedAirBuilder<F = Felt>>(
+    ///         &self,
+    ///         _frame: &air::Frame<'_, B>,
+    ///         _inputs: air::Inputs<'_, B>,
     ///         _sink: &mut B,
-    ///     ) {}
+    ///     ) {
+    ///     }
     /// }
     ///
     /// struct ExampleMultiAir {
-    ///     airs: [native::DirectKernel<ExampleAir>; 1],
+    ///     airs: [air::DirectKernel<ExampleAir>; 1],
     /// }
     ///
     /// impl MultiAir<Felt, Felt> for ExampleMultiAir {
-    ///     type Air = native::DirectKernel<ExampleAir>;
+    ///     type Air = air::DirectKernel<ExampleAir>;
     ///
     ///     fn airs(&self) -> &[Self::Air] {
     ///         &self.airs
@@ -189,7 +200,9 @@ where
     /// }
     ///
     /// let statement = Statement::<Felt, Felt, _>::new(
-    ///     ExampleMultiAir { airs: [native::DirectKernel::new(ExampleAir).unwrap()] },
+    ///     ExampleMultiAir {
+    ///         airs: [air::DirectKernel::new(ExampleAir).unwrap()],
+    ///     },
     ///     vec![(0, vec![Felt::new_unchecked(10), Felt::new_unchecked(11)])],
     ///     vec![Felt::new_unchecked(20), Felt::new_unchecked(21)],
     /// )

@@ -34,7 +34,7 @@ use miden_core::{
 use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
     StarkConfig, VerifierInstance,
-    air::{Statement, native::AirKernel},
+    air::{AirKernel, Statement},
     config::observe_protocol_params,
     proof::{StarkProof, StarkProofData},
     recursive::advice::{

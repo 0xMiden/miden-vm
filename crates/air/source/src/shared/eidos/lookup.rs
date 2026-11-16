@@ -3,7 +3,7 @@
 use core::borrow::Borrow;
 
 use miden_core::{Felt, field::PrimeCharacteristicRing};
-use miden_stark::lookup::{Deg, LookupColumn, LookupGroup, native::LookupBuilder};
+use miden_stark::lookup::{Deg, LookupBuilder, LookupColumn, LookupGroup};
 use p3_field::Dup;
 
 use super::{

@@ -5,10 +5,13 @@
 // unchecked degree/lowering traversals are omitted. Concrete field conversions retain upstream
 // coherence boundaries.
 
-use p3_field::extension::{
-    BinomialExtensionField, Complex, CubicTrinomialExtensionField, QuinticTrinomialExtensionField,
+use p3_field::{
+    Algebra, ExtensionField, Field, PrimeCharacteristicRing,
+    extension::{
+        BinomialExtensionField, Complex, CubicTrinomialExtensionField,
+        QuinticTrinomialExtensionField,
+    },
 };
-use p3_field::{Algebra, ExtensionField, Field, PrimeCharacteristicRing};
 use serde::{Deserialize, Serialize};
 
 use super::{BaseLeaf, RowOffset, SymLeaf, SymbolicExpr, SymbolicExpression};

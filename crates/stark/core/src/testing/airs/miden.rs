@@ -10,7 +10,7 @@ use core::{convert::Infallible, marker::PhantomData};
 use p3_field::{Dup, ExtensionField, Field, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
-use crate::air::native;
+use crate::air;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -52,11 +52,11 @@ impl<F> DummyMidenAir<F> {
 // Trait impls for lifted STARK path
 // ---------------------------------------------------------------------------
 
-impl<F: Field> native::LiftedAir for DummyMidenAir<F> {
+impl<F: Field> air::LiftedAir for DummyMidenAir<F> {
     type F = F;
 
-    fn spec(&self) -> native::AirSpec<'_, F> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, F> {
+        air::AirSpec {
             main_width: self.width,
             aux_width: self.num_aux_cols,
             num_public_values: 0,
@@ -67,10 +67,10 @@ impl<F: Field> native::LiftedAir for DummyMidenAir<F> {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = F>>(
+    fn eval<AB: air::LiftedAirBuilder<F = F>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        _inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        _inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         // Preserve the original degree-nine product and multiplication order.
@@ -80,19 +80,19 @@ impl<F: Field> native::LiftedAir for DummyMidenAir<F> {
     }
 }
 
-impl<F: Field, EF: ExtensionField<F>> native::ProverAir<EF> for DummyMidenAir<F> {
+impl<F: Field, EF: ExtensionField<F>> air::ProverAir<EF> for DummyMidenAir<F> {
     type Error = Infallible;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, F, EF>,
-    ) -> Result<native::AuxTrace<EF>, Self::Error> {
+        inputs: air::AuxTraceInputs<'_, F, EF>,
+    ) -> Result<air::AuxTrace<EF>, Self::Error> {
         // Constraints touch only the main trace: preserve the configured all-zero auxiliary data.
         let columns = RowMajorMatrix::new(
             EF::zero_vec(inputs.main.height() * self.num_aux_cols),
             self.num_aux_cols,
         );
-        Ok(native::AuxTrace {
+        Ok(air::AuxTrace {
             columns,
             exports: EF::zero_vec(self.num_aux_cols),
         })
@@ -131,24 +131,24 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::air::native::AirKernel;
+    use crate::air::AirKernel;
 
     fn native_dummy_pilot<F: Field, EF: ExtensionField<F>>() {
         for (width, auxiliary_width) in [(9, 1), (TRACE2_WIDTH, 3), (TRACE1_WIDTH, NUM_AUX_COLS)] {
             let source = DummyMidenAir::<F>::new(width, auxiliary_width);
-            let expected = native::capture_with::<_, EF>(&source).unwrap();
+            let expected = air::capture_with::<_, EF>(&source).unwrap();
             assert_eq!(expected.descriptor.analysis().layout().base_indices(), &[0]);
             assert!(expected.descriptor.analysis().layout().ext_indices().is_empty());
             assert_eq!(
                 expected.descriptor.analysis().raw_degrees(),
-                native::ConstraintDegrees { base: 9, ext: 0 },
+                air::ConstraintDegrees { base: 9, ext: 0 },
             );
-            let kernel = native::DirectKernel::new(source).unwrap();
+            let kernel = air::DirectKernel::new(source).unwrap();
             let main = RowMajorMatrix::new(F::zero_vec(2 * width), width);
             let challenges = [EF::from_u32(7), EF::from_u32(13)];
-            let auxiliary = native::ProverAir::build_aux_trace(
+            let auxiliary = air::ProverAir::build_aux_trace(
                 &kernel,
-                native::AuxTraceInputs {
+                air::AuxTraceInputs {
                     main: &main,
                     preprocessed: None,
                     public_values: &[],
@@ -161,7 +161,7 @@ mod tests {
             assert_eq!(auxiliary.columns.height(), 2);
             assert_eq!(auxiliary.columns.values, EF::zero_vec(2 * auxiliary_width));
             assert_eq!(auxiliary.exports, EF::zero_vec(auxiliary_width));
-            let observed = native::capture_from_spec::<F, EF>(
+            let observed = air::capture_from_spec::<F, EF>(
                 kernel.descriptor().spec().as_borrowed(),
                 |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
             )
@@ -172,7 +172,7 @@ mod tests {
 
         // Metadata can still represent no auxiliaries without selecting an aux-free proof path.
         let no_aux = DummyMidenAir::<F>::new(9, 0);
-        let descriptor = native::capture(&no_aux).unwrap().descriptor;
+        let descriptor = air::capture(&no_aux).unwrap().descriptor;
         assert_eq!(descriptor.spec().aux_width, 0);
         assert_eq!(descriptor.spec().num_exports, 0);
     }

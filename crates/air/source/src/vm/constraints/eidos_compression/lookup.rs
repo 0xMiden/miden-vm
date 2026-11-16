@@ -5,9 +5,8 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing},
 };
 use miden_stark::lookup::{
-    Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage, native::LookupBuilder,
+    Challenges, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, LookupMessage,
 };
-
 use p3_field::Dup;
 
 use super::{

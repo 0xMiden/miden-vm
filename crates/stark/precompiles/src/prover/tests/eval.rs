@@ -12,8 +12,8 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_stark::{
-    air::native::{ConstraintDegrees, LiftedAir},
-    lookup::{LookupMessage, ProverLookupBuilder, native::LookupAir},
+    air::{ConstraintDegrees, LiftedAir},
+    lookup::{LookupAir, LookupMessage, ProverLookupBuilder},
 };
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
@@ -217,11 +217,8 @@ fn shape_and_degree_match_design() {
     assert_eq!(crate::prover::tests::raw_degrees(&air), ConstraintDegrees { base: 3, ext: 3 });
     assert_eq!(crate::prover::tests::log_quotient_degree(&air), 1);
 
-    miden_stark::lookup::native::validate_native(
-        &air,
-        &miden_stark::air::native::LiftedAir::spec(&air),
-    )
-    .unwrap_or_else(|err| panic!("TranscriptEvalAir lookup validation failed: {err}"));
+    miden_stark::lookup::validate_native(&air, &miden_stark::air::LiftedAir::spec(&air))
+        .unwrap_or_else(|err| panic!("TranscriptEvalAir lookup validation failed: {err}"));
 }
 
 fn typed_relation_fold(row: Vec<Felt>, challenges: &Challenges<QuadFelt>) -> (QuadFelt, QuadFelt) {

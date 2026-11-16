@@ -32,7 +32,7 @@
 //! activity is raw membership and can be nonzero on the cyclic last-to-first opening.
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
-use miden_stark::air::native::{Frame, LiftedAirBuilder};
+use miden_stark::air::{Frame, LiftedAirBuilder};
 use p3_field::Dup;
 
 use crate::vm::{ChipletCols, Felt, NativeMidenAirBuilder, constraints::utils::BoolNot};

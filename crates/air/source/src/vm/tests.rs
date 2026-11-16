@@ -18,7 +18,7 @@ use super::{
 
 #[test]
 fn core_shape_and_degree_match_design() {
-    use miden_stark::air::native::{AirKernel, ConstraintDegrees, DirectKernel};
+    use miden_stark::air::{AirKernel, ConstraintDegrees, DirectKernel};
     let kernel = DirectKernel::new(MidenAir::CORE).expect("Core source descriptor");
     let descriptor = kernel.descriptor();
     assert_eq!(descriptor.spec().main_width, 48);
@@ -30,7 +30,7 @@ fn core_shape_and_degree_match_design() {
 
 #[test]
 fn and8_lookup_shape_and_degree_match_design() {
-    use miden_stark::air::native::{AirKernel, ConstraintDegrees, DirectKernel};
+    use miden_stark::air::{AirKernel, ConstraintDegrees, DirectKernel};
     let kernel = DirectKernel::new(MidenAir::AND8_LOOKUP).expect("And8 source descriptor");
     let descriptor = kernel.descriptor();
     assert_eq!(descriptor.spec().main_width, 7);

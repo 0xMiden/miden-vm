@@ -10,7 +10,7 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_stark::{air::native, lookup::native as native_lookup};
+use miden_stark::{air, lookup};
 use p3_field::Dup;
 
 use crate::precompiles::{
@@ -29,11 +29,11 @@ const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2];
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EcPointStoreGroupsAir;
 
-impl native::LiftedAir for EcPointStoreGroupsAir {
+impl air::LiftedAir for EcPointStoreGroupsAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: NUM_MAIN_COLS,
             aux_width: NUM_AUX_COLS,
             num_public_values: 0,
@@ -44,32 +44,32 @@ impl native::LiftedAir for EcPointStoreGroupsAir {
         }
     }
 
-    fn eval<AB: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, AB>,
-        inputs: native::Inputs<'_, AB>,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
         builder: &mut AB,
     ) {
         ec::eval_point_store_main(frame, builder, 0);
         groups::eval_main(frame, builder, GROUPS_COL_OFFSET);
-        native_lookup::eval_lookup(self, frame, inputs, builder);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl native::ProverAir<QuadFelt> for EcPointStoreGroupsAir {
-    type Error = native_lookup::LookupError;
+impl air::ProverAir<QuadFelt> for EcPointStoreGroupsAir {
+    type Error = lookup::LookupError;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
-        native_lookup::build_logup_aux_trace(self, inputs)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
-impl<LB> native_lookup::LookupAir<LB> for EcPointStoreGroupsAir
+impl<LB> lookup::LookupAir<LB> for EcPointStoreGroupsAir
 where
-    LB: native_lookup::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -83,7 +83,7 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         let local: &[LB::Expr; groups::NUM_MAIN_COLS] = frame.main.current
             [GROUPS_COL_OFFSET..GROUPS_COL_OFFSET + groups::NUM_MAIN_COLS]
             .try_into()

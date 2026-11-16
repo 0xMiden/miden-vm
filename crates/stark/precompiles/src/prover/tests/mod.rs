@@ -48,14 +48,11 @@ use miden_core::{
 };
 use miden_stark::{
     air::{
-        MultiAir, ProverStatement, ReductionError, Statement,
-        native::{self, AirKernel, DirectKernel, LiftedAir, ProverAir},
+        self, AirKernel, DirectKernel, LiftedAir, MultiAir, ProverAir, ProverStatement,
+        ReductionError, Statement,
     },
     check_constraints,
-    lookup::{
-        Challenges, LookupFractions,
-        native::{LookupAir, ProverLookupBuilder, build_lookup_fractions},
-    },
+    lookup::{Challenges, LookupAir, LookupFractions, ProverLookupBuilder, build_lookup_fractions},
 };
 
 use crate::{
@@ -194,7 +191,7 @@ where
 }
 
 /// Trace-independent degree diagnostics from the independently authored native source.
-pub(crate) fn raw_degrees<A: LiftedAir<F = Felt>>(air: &A) -> native::ConstraintDegrees {
+pub(crate) fn raw_degrees<A: LiftedAir<F = Felt>>(air: &A) -> air::ConstraintDegrees {
     DirectKernel::new(air)
         .expect("source descriptor is valid")
         .descriptor()

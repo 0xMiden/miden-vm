@@ -2,8 +2,8 @@
 
 use miden_core::{Felt, field::ExtensionField};
 use miden_stark::{
-    air::native::{AuxTrace, AuxTraceInputs, LiftedAir},
-    lookup::native::{LookupAir, LookupError, ProverLookupBuilder, build_logup_aux_trace},
+    air::{AuxTrace, AuxTraceInputs, LiftedAir},
+    lookup::{LookupAir, LookupError, ProverLookupBuilder, build_logup_aux_trace},
 };
 use thiserror::Error;
 
@@ -63,7 +63,7 @@ mod tests {
         field::{PrimeCharacteristicRing, QuadFelt},
         utils::{Matrix, RowMajorMatrix},
     };
-    use miden_stark::air::native::{self, AirKernel, ProverAir};
+    use miden_stark::air::{self, AirKernel, ProverAir};
 
     use super::*;
     use crate::{
@@ -89,7 +89,7 @@ mod tests {
             <A as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::max_message_width(air),
             <A as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::num_bus_ids(air),
         );
-        let fractions = miden_stark::lookup::native::build_lookup_fractions(
+        let fractions = miden_stark::lookup::build_lookup_fractions(
             air,
             main,
             None,
@@ -105,8 +105,9 @@ mod tests {
     }
 
     fn capture_geometry<A: LiftedAir<F = Felt>>(air: A, aux_width: usize, base: usize, ext: usize) {
-        // Source capture uses non-Copy owned expressions; direct execution is the comparison subject.
-        let captured = native::capture_with::<_, QuadFelt>(&air).unwrap();
+        // Source capture uses non-Copy owned expressions; direct execution is the comparison
+        // subject.
+        let captured = air::capture_with::<_, QuadFelt>(&air).unwrap();
         let descriptor = &captured.descriptor;
         let spec = descriptor.spec();
         assert_eq!((spec.main_width, spec.aux_width), (104, aux_width));
@@ -114,21 +115,19 @@ mod tests {
         assert_eq!(spec.preprocessed, None);
         assert_eq!(spec.periodic_columns.len(), 10);
         assert!(spec.periodic_columns.iter().all(|column| column.len() == 32));
-        assert_eq!(descriptor.analysis().counts(), native::ConstraintCounts { base, ext });
+        assert_eq!(descriptor.analysis().counts(), air::ConstraintCounts { base, ext });
         assert_eq!(descriptor.analysis().layout().base_indices(), &(0..base).collect::<Vec<_>>());
         assert_eq!(
             descriptor.analysis().layout().ext_indices(),
             &(base..base + ext).collect::<Vec<_>>()
         );
 
-        let kernel = native::DirectKernel::new(air).unwrap();
-        let direct = native::capture_from_spec::<Felt, QuadFelt>(
-            spec.as_borrowed(),
-            |frame, inputs, sink| {
+        let kernel = air::DirectKernel::new(air).unwrap();
+        let direct =
+            air::capture_from_spec::<Felt, QuadFelt>(spec.as_borrowed(), |frame, inputs, sink| {
                 kernel.bind(inputs).unwrap().eval(frame, sink);
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
         assert_eq!(direct.descriptor.fingerprint(), descriptor.fingerprint());
     }
 
@@ -137,9 +136,9 @@ mod tests {
         capture_geometry(VmEidos, 19, 157, 23);
         capture_geometry(PvmEidos, 20, 151, 23);
         capture_geometry(Interface, 3, 5, 4);
-        miden_stark::lookup::native::validate_native(&VmEidos, &VmEidos.spec()).unwrap();
-        miden_stark::lookup::native::validate_native(&PvmEidos, &PvmEidos.spec()).unwrap();
-        miden_stark::lookup::native::validate_native(&Interface, &Interface.spec()).unwrap();
+        miden_stark::lookup::validate_native(&VmEidos, &VmEidos.spec()).unwrap();
+        miden_stark::lookup::validate_native(&PvmEidos, &PvmEidos.spec()).unwrap();
+        miden_stark::lookup::validate_native(&Interface, &Interface.spec()).unwrap();
     }
 
     #[test]

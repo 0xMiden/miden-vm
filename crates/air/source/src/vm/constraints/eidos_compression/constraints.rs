@@ -1,7 +1,7 @@
 //! Miden VM controller and AEAD constraints around the shared Eidos compression core.
 
 use miden_core::{Felt, field::PrimeCharacteristicRing};
-use miden_stark::air::native::{Frame, LiftedAirBuilder};
+use miden_stark::air::{Frame, LiftedAirBuilder};
 use p3_field::Dup;
 
 use super::{

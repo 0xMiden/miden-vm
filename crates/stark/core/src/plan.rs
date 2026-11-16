@@ -6,7 +6,7 @@ use p3_field::TwoAdicField;
 use thiserror::Error;
 
 use crate::{
-    air::native::{AirKernel, AnalysisError, QuotientAllocationError, resolve_quotient_chunks},
+    air::{AirKernel, AnalysisError, QuotientAllocationError, resolve_quotient_chunks},
     domain::{DomainError, LiftedDomain},
     order::{ShapeError, TraceOrder},
 };

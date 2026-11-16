@@ -19,10 +19,10 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing},
 };
 use miden_precompiles::Keccak256Precompile;
-use miden_stark::air::native::LiftedAirBuilder as _;
 use miden_stark::{
-    air::native,
-    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, native as native_lookup},
+    air,
+    air::LiftedAirBuilder as _,
+    lookup::{self, Deg, LookupBatch, LookupColumn, LookupGroup},
 };
 use p3_field::Dup;
 
@@ -88,8 +88,8 @@ pub(crate) fn periodic_columns() -> Vec<Vec<Felt>> {
     columns
 }
 
-pub(crate) fn eval_main<AB: native::LiftedAirBuilder<F = Felt>>(
-    frame: &native::Frame<'_, AB>,
+pub(crate) fn eval_main<AB: air::LiftedAirBuilder<F = Felt>>(
+    frame: &air::Frame<'_, AB>,
     builder: &mut AB,
 ) {
     let local: &[AB::Expr; NUM_MAIN_COLS] =
@@ -174,8 +174,8 @@ pub(crate) fn eval_main<AB: native::LiftedAirBuilder<F = Felt>>(
     }
 }
 
-pub(crate) fn eval_lookups<LB: native_lookup::LookupBuilder<F = Felt>>(
-    frame: &native_lookup::LookupFrame<'_, LB::Expr>,
+pub(crate) fn eval_lookups<LB: lookup::LookupBuilder<F = Felt>>(
+    frame: &lookup::LookupFrame<'_, LB::Expr>,
     builder: &mut LB,
 ) {
     let local: &[LB::Expr; NUM_MAIN_COLS] =

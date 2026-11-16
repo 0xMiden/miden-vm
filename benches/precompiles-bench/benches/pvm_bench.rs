@@ -10,7 +10,7 @@ use miden_precompiles_stark::prover::{
     DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES, HashFunction,
     prove_precompiles_with_limits_and_budget, testing,
 };
-use miden_stark::air::native::AirKernel;
+use miden_stark::air::AirKernel;
 use miden_vm::Verifier;
 use miden_vm_precompiles_bench::{PrecompileFixture, PrecompileWorkload, benchmark_workloads};
 

@@ -8,8 +8,8 @@ use p3_field::{Dup, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    ProverInstance, VerifierError, VerifierInstance,
-    air::{InstanceError, ProverStatement, Statement, native, native::LiftedAirBuilder as _},
+    ProverInstance, VerifierError, VerifierInstance, air,
+    air::{InstanceError, LiftedAirBuilder as _, ProverStatement, Statement},
     domain::DomainError,
     order::{ShapeError, TraceOrder},
     proof::{TranscriptData, TranscriptError},
@@ -54,11 +54,11 @@ impl TinyAir {
     }
 }
 
-impl native::LiftedAir for TinyAir {
+impl air::LiftedAir for TinyAir {
     type F = Felt;
 
-    fn spec(&self) -> native::AirSpec<'_, Felt> {
-        native::AirSpec {
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
             main_width: 1,
             aux_width: 1,
             num_public_values: self.num_public_values,
@@ -69,10 +69,10 @@ impl native::LiftedAir for TinyAir {
         }
     }
 
-    fn eval<B: native::LiftedAirBuilder<F = Felt>>(
+    fn eval<B: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        frame: &native::Frame<'_, B>,
-        inputs: native::Inputs<'_, B>,
+        frame: &air::Frame<'_, B>,
+        inputs: air::Inputs<'_, B>,
         sink: &mut B,
     ) {
         let local = frame.main.current;
@@ -97,20 +97,20 @@ impl native::LiftedAir for TinyAir {
     }
 }
 
-impl native::ProverAir<QuadFelt> for TinyAir {
+impl air::ProverAir<QuadFelt> for TinyAir {
     type Error = Infallible;
 
     fn build_aux_trace(
         &self,
-        inputs: native::AuxTraceInputs<'_, Felt, QuadFelt>,
-    ) -> Result<native::AuxTrace<QuadFelt>, Self::Error> {
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
         let (mut trace, values) = tiny_aux(
             inputs.main,
             inputs.challenges[0]
                 + QuadFelt::from(inputs.public_values.iter().copied().sum::<Felt>()),
         );
         trace.values[0] += QuadFelt::from(self.aux_offset);
-        Ok(native::AuxTrace { columns: trace, exports: values })
+        Ok(air::AuxTrace { columns: trace, exports: values })
     }
 }
 
@@ -133,10 +133,10 @@ fn tiny_aux(
     (aux_trace, aux_values)
 }
 
-fn tiny_multi_air(airs: Vec<TinyAir>) -> TestMultiAir<native::DirectKernel<TinyAir>> {
+fn tiny_multi_air(airs: Vec<TinyAir>) -> TestMultiAir<air::DirectKernel<TinyAir>> {
     TestMultiAir::new(
         airs.into_iter()
-            .map(|air| native::DirectKernel::new(air).expect("valid TinyAir source"))
+            .map(|air| air::DirectKernel::new(air).expect("valid TinyAir source"))
             .collect(),
     )
 }
@@ -148,10 +148,8 @@ fn tiny_prover_statement(
     airs: Vec<TinyAir>,
     traces: Vec<RowMajorMatrix<Felt>>,
     air_inputs: Vec<(usize, Vec<Felt>)>,
-) -> Result<
-    ProverStatement<Felt, QuadFelt, TestMultiAir<native::DirectKernel<TinyAir>>>,
-    InstanceError,
-> {
+) -> Result<ProverStatement<Felt, QuadFelt, TestMultiAir<air::DirectKernel<TinyAir>>>, InstanceError>
+{
     let statement = Statement::new(tiny_multi_air(airs), air_inputs, Vec::new())?;
     ProverStatement::new(statement, traces)
 }
@@ -579,7 +577,8 @@ mod native_kernel_pilot {
 
     use super::{Felt, QuadFelt, START, TinyAir, trace_of_height};
     use crate::{
-        air::native::{self, AirKernel, LiftedAirBuilder},
+        air,
+        air::{AirKernel, LiftedAirBuilder},
         testing::configs::{PackedFelt, PackedQuadFelt},
     };
 
@@ -603,11 +602,11 @@ mod native_kernel_pilot {
         type Expr = B;
         type ExtExpr = E;
 
-        fn emit_base(&mut self, value: B, _meta: native::ConstraintMeta<'_>) {
+        fn emit_base(&mut self, value: B, _meta: air::ConstraintMeta<'_>) {
             self.emissions.push(Emission::Base(value));
         }
 
-        fn emit_ext(&mut self, value: E, _meta: native::ConstraintMeta<'_>) {
+        fn emit_ext(&mut self, value: E, _meta: air::ConstraintMeta<'_>) {
             self.emissions.push(Emission::Extension(value));
         }
     }
@@ -622,11 +621,11 @@ mod native_kernel_pilot {
     }
 
     struct ConcretePilot {
-        kernel: native::DirectKernel<TinyAir>,
+        kernel: air::DirectKernel<TinyAir>,
         main: RowMajorMatrix<Felt>,
         public: [Felt; 2],
         challenges: [QuadFelt; 1],
-        auxiliary: native::AuxTrace<QuadFelt>,
+        auxiliary: air::AuxTrace<QuadFelt>,
     }
 
     impl ConcretePilot {
@@ -635,15 +634,15 @@ mod native_kernel_pilot {
                 num_public_values: 2,
                 ..TinyAir::new([2, 4])
             };
-            let kernel = native::DirectKernel::new(source).unwrap();
+            let kernel = air::DirectKernel::new(source).unwrap();
             let main = trace_of_height(height);
             let public = [Felt::ONE, Felt::from_u64(START - 1)];
             let challenges =
                 [QuadFelt::from_basis_coefficients_slice(&[Felt::from_u64(3), Felt::from_u64(5)])
                     .unwrap()];
-            let auxiliary = native::ProverAir::build_aux_trace(
+            let auxiliary = air::ProverAir::build_aux_trace(
                 &kernel,
-                native::AuxTraceInputs {
+                air::AuxTraceInputs {
                     main: &main,
                     preprocessed: None,
                     public_values: &public,
@@ -679,7 +678,7 @@ mod native_kernel_pilot {
         let pilot = ConcretePilot::new(8);
         let session = pilot
             .kernel
-            .bind(native::UniformInputs {
+            .bind(air::UniformInputs {
                 public_values: &pilot.public,
                 challenges: &pilot.challenges,
                 exports: &pilot.auxiliary.exports,
@@ -694,18 +693,18 @@ mod native_kernel_pilot {
                 .iter()
                 .map(|column| column[row % column.len()])
                 .collect();
-            let frame = native::AirFrame {
-                main: native::Rows {
+            let frame = air::AirFrame {
+                main: air::Rows {
                     current: &pilot.main.values[row..row + 1],
                     next: &pilot.main.values[next..next + 1],
                 },
-                preprocessed: native::Rows { current: &[], next: &[] },
-                aux: native::Rows {
+                preprocessed: air::Rows { current: &[], next: &[] },
+                aux: air::Rows {
                     current: &pilot.auxiliary.columns.values[row..row + 1],
                     next: &pilot.auxiliary.columns.values[next..next + 1],
                 },
                 periodic: &periodic,
-                selectors: native::Selectors {
+                selectors: air::Selectors {
                     first: indicator(row == 0),
                     last: indicator(row + 1 == pilot.main.height()),
                     transition: indicator(row + 1 != pilot.main.height()),
@@ -733,7 +732,7 @@ mod native_kernel_pilot {
             pilot.auxiliary.exports.iter().copied().map(PackedQuadFelt::from).collect();
         let session = pilot
             .kernel
-            .bind(native::UniformInputs {
+            .bind(air::UniformInputs {
                 public_values: &public,
                 challenges: &challenges,
                 exports: &exports,
@@ -762,15 +761,15 @@ mod native_kernel_pilot {
                 .iter()
                 .map(|column| PackedFelt::from_fn(|lane| column[(start + lane) % column.len()]))
                 .collect();
-            let frame = native::AirFrame {
-                main: native::Rows { current: &main, next: &next },
-                preprocessed: native::Rows { current: &[], next: &[] },
-                aux: native::Rows {
+            let frame = air::AirFrame {
+                main: air::Rows { current: &main, next: &next },
+                preprocessed: air::Rows { current: &[], next: &[] },
+                aux: air::Rows {
                     current: &auxiliary,
                     next: &next_auxiliary,
                 },
                 periodic: &periodic,
-                selectors: native::Selectors {
+                selectors: air::Selectors {
                     first: PackedFelt::from_fn(|lane| indicator(start + lane == 0)),
                     last: PackedFelt::from_fn(|lane| indicator(start + lane + 1 == height)),
                     transition: PackedFelt::from_fn(|lane| indicator(start + lane + 1 != height)),
@@ -799,7 +798,7 @@ mod native_kernel_pilot {
 
     #[test]
     fn direct_tiny_symbolic_session_preserves_non_copy_inputs_and_capture_order() {
-        use native::symbolic::{
+        use crate::air::symbolic::{
             AuxInput, BaseInput, BaseLeaf, RowOffset, SymbolicExpression, SymbolicExpressionExt,
         };
         type B = SymbolicExpression<Felt>;
@@ -809,8 +808,8 @@ mod native_kernel_pilot {
             num_public_values: 2,
             ..TinyAir::new([2, 4])
         };
-        let capture = native::capture(&source).unwrap();
-        let kernel = native::DirectKernel::new(source).unwrap();
+        let capture = air::capture(&source).unwrap();
+        let kernel = air::DirectKernel::new(source).unwrap();
         assert_eq!(kernel.descriptor().fingerprint(), capture.descriptor.fingerprint());
         let main = [B::input(BaseInput::Main { offset: RowOffset::Current, index: 0 })];
         let next = [B::input(BaseInput::Main { offset: RowOffset::Next, index: 0 })];
@@ -821,21 +820,21 @@ mod native_kernel_pilot {
         let challenges = [E::input(AuxInput::Challenge(0))];
         let exports = [E::input(AuxInput::Export(0))];
         let session = kernel
-            .bind(native::UniformInputs {
+            .bind(air::UniformInputs {
                 public_values: &public,
                 challenges: &challenges,
                 exports: &exports,
             })
             .unwrap();
-        let frame = native::AirFrame {
-            main: native::Rows { current: &main, next: &next },
-            preprocessed: native::Rows { current: &[], next: &[] },
-            aux: native::Rows {
+        let frame = air::AirFrame {
+            main: air::Rows { current: &main, next: &next },
+            preprocessed: air::Rows { current: &[], next: &[] },
+            aux: air::Rows {
                 current: &auxiliary,
                 next: &next_auxiliary,
             },
             periodic: &periodic,
-            selectors: native::Selectors {
+            selectors: air::Selectors {
                 first: B::Leaf(BaseLeaf::IsFirstRow),
                 last: B::Leaf(BaseLeaf::IsLastRow),
                 transition: B::Leaf(BaseLeaf::IsTransition),
@@ -847,11 +846,11 @@ mod native_kernel_pilot {
         assert_eq!(sink.emissions.len(), capture.assertions.len());
         for (actual, expected) in sink.emissions.into_iter().zip(capture.assertions) {
             match (actual, expected) {
-                (Emission::Base(actual), native::Assertion::Base(expected)) => {
+                (Emission::Base(actual), air::Assertion::Base(expected)) => {
                     assert_eq!(actual.degree_multiple(), expected.degree_multiple());
                     assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
                 },
-                (Emission::Extension(actual), native::Assertion::Extension(expected)) => {
+                (Emission::Extension(actual), air::Assertion::Extension(expected)) => {
                     assert_eq!(actual.degree_multiple(), expected.degree_multiple());
                     assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
                 },

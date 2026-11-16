@@ -7,7 +7,7 @@
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
-use miden_stark::air::native;
+use miden_stark::air;
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
 
 use crate::{AceError, InputCounts, InputKey, InputLayout, compiler::AceDag};
@@ -27,11 +27,11 @@ pub fn eval_multi_air_constraints<A>(
     trace_alignment: usize,
 ) -> QuadFelt
 where
-    A: native::LiftedAir<F = Felt>,
+    A: air::LiftedAir<F = Felt>,
 {
-    let specs: Vec<_> = airs.iter().map(native::LiftedAir::spec).collect();
+    let specs: Vec<_> = airs.iter().map(air::LiftedAir::spec).collect();
     let shared_period =
-        specs.iter().map(native::AirSpec::max_periodic_length).max().unwrap_or(0).max(1);
+        specs.iter().map(air::AirSpec::max_periodic_length).max().unwrap_or(0).max(1);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
     let (mut public, mut preprocessed, mut main, mut aux, mut boundary) = (0, 0, 0, 0, 0);
     let mut roots = Vec::with_capacity(airs.len());
@@ -90,9 +90,9 @@ where
 ///
 /// Auxiliary coordinate inputs are QuadFelt values, so reconstruction multiplies each whole
 /// coordinate by its extension basis element. The source emits once into the global Horner fold.
-pub fn eval_native_constraints<A: native::LiftedAir<F = Felt>>(
+pub fn eval_native_constraints<A: air::LiftedAir<F = Felt>>(
     air: &A,
-    spec: &native::AirSpec<'_, Felt>,
+    spec: &air::AirSpec<'_, Felt>,
     inputs: &[QuadFelt],
     layout: &InputLayout,
     periodic_values: &[QuadFelt],
@@ -131,18 +131,18 @@ pub fn eval_native_constraints<A: native::LiftedAir<F = Felt>>(
     let exports: Vec<_> = (0..spec.num_exports)
         .map(|index| inputs[layout.index(InputKey::AuxBusBoundary(index)).unwrap()])
         .collect();
-    let frame = native::AirFrame {
-        main: native::Rows { current: &main[0], next: &main[1] },
-        preprocessed: native::Rows {
+    let frame = air::AirFrame {
+        main: air::Rows { current: &main[0], next: &main[1] },
+        preprocessed: air::Rows {
             current: &preprocessed[0],
             next: &preprocessed[1],
         },
-        aux: native::Rows {
+        aux: air::Rows {
             current: &auxiliary[0],
             next: &auxiliary[1],
         },
         periodic: periodic_values,
-        selectors: native::Selectors {
+        selectors: air::Selectors {
             first: inputs[layout.index(InputKey::IsFirst).unwrap()],
             last: inputs[layout.index(InputKey::IsLast).unwrap()],
             transition: inputs[layout.index(InputKey::IsTransition).unwrap()],
@@ -152,10 +152,10 @@ pub fn eval_native_constraints<A: native::LiftedAir<F = Felt>>(
         alpha: inputs[layout.index(InputKey::Alpha).unwrap()],
         accumulator: QuadFelt::ZERO,
     };
-    native::LiftedAir::eval(
+    air::LiftedAir::eval(
         air,
         &frame,
-        native::UniformInputs {
+        air::UniformInputs {
             public_values: &public_values,
             challenges: &challenges,
             exports: &exports,
@@ -176,16 +176,16 @@ impl ReferenceFolder {
     }
 }
 
-impl native::LiftedAirBuilder for ReferenceFolder {
+impl air::LiftedAirBuilder for ReferenceFolder {
     type F = Felt;
     type Expr = QuadFelt;
     type ExtExpr = QuadFelt;
 
-    fn emit_base(&mut self, value: QuadFelt, _meta: native::ConstraintMeta<'_>) {
+    fn emit_base(&mut self, value: QuadFelt, _meta: air::ConstraintMeta<'_>) {
         self.fold(value);
     }
 
-    fn emit_ext(&mut self, value: QuadFelt, _meta: native::ConstraintMeta<'_>) {
+    fn emit_ext(&mut self, value: QuadFelt, _meta: air::ConstraintMeta<'_>) {
         self.fold(value);
     }
 }

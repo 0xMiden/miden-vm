@@ -4,7 +4,7 @@ use alloc::{vec, vec::Vec};
 use core::borrow::Borrow;
 
 use miden_core::Felt;
-use miden_stark::lookup::native as native_lookup;
+use miden_stark::lookup;
 
 use super::{
     layout::*,
@@ -73,9 +73,7 @@ impl LookupPlan {
 #[derive(Copy, Clone, Debug, Default)]
 pub struct EidosCompressionLookupAir;
 
-impl<LB: native_lookup::LookupBuilder<F = Felt>> native_lookup::LookupAir<LB>
-    for EidosCompressionLookupAir
-{
+impl<LB: lookup::LookupBuilder<F = Felt>> lookup::LookupAir<LB> for EidosCompressionLookupAir {
     fn column_shape(&self) -> &[usize] {
         &EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE
     }
@@ -85,7 +83,7 @@ impl<LB: native_lookup::LookupBuilder<F = Felt>> native_lookup::LookupAir<LB>
     fn num_bus_ids(&self) -> usize {
         crate::vm::logup::BusId::COUNT
     }
-    fn eval(&self, frame: &native_lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         let local: &EidosCompressionCols<_> = frame.main.current.borrow();
         let next: &EidosCompressionCols<_> = frame.main.next.borrow();
         let selectors = EidosCompressionSelectors::new(frame.periodic, 0);

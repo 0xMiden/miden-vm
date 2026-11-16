@@ -11,7 +11,7 @@
 //!   [`miden_stark::lookup::ConstraintLookupBuilder`].
 
 use chiplets::selectors::ChipletSelectors;
-use miden_stark::air::native::Frame;
+use miden_stark::air::Frame;
 
 use crate::vm::{ChipletCols, CoreCols, NativeMidenAirBuilder};
 

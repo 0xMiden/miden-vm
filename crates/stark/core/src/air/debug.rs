@@ -5,7 +5,7 @@
 
 use p3_field::{ExtensionField, Field};
 
-use crate::air::{MultiAir, native::AirKernel};
+use crate::air::{AirKernel, MultiAir};
 
 /// Assert a collection's descriptor schemas and this engine's positive auxiliary-width contract.
 ///

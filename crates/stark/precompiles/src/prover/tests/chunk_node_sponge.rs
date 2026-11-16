@@ -9,8 +9,8 @@ use miden_core::{
 };
 use miden_crypto::hash::keccak::Keccak256;
 use miden_stark::{
-    air::native::{ConstraintDegrees, LiftedAir},
-    lookup::{ProverLookupBuilder, native::LookupAir},
+    air::{ConstraintDegrees, LiftedAir},
+    lookup::{LookupAir, ProverLookupBuilder},
 };
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
@@ -83,9 +83,9 @@ fn layout_and_lookup_shape_match_design() {
     );
     assert_eq!(log_quotient_degree(&ChunkNodeSpongeAir), 2);
 
-    miden_stark::lookup::native::validate_native(
+    miden_stark::lookup::validate_native(
         &ChunkNodeSpongeAir,
-        &miden_stark::air::native::LiftedAir::spec(&ChunkNodeSpongeAir),
+        &miden_stark::air::LiftedAir::spec(&ChunkNodeSpongeAir),
     )
     .unwrap_or_else(|err| panic!("ChunkNodeSpongeAir lookup validation failed: {err}"));
 }

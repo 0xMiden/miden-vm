@@ -3,7 +3,7 @@
 use core::borrow::Borrow;
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_stark::lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage, native};
+use miden_stark::lookup::{self, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage};
 use p3_field::Dup;
 
 use super::messages::{BytePairLookupMsg, EidosRotationMsg, RangeMsg};
@@ -27,7 +27,7 @@ fn emit_byte_table_single<LB, M>(
     multiplicity: LB::Expr,
     msg: impl FnOnce() -> M,
 ) where
-    LB: native::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
     M: LookupMessage<LB::Expr, LB::ExprEF>,
 {
     builder.next_column(
@@ -61,7 +61,7 @@ fn emit_byte_table_pair<LB, M0, M1>(
     multiplicity1: LB::Expr,
     msg1: impl FnOnce() -> M1,
 ) where
-    LB: native::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
     M0: LookupMessage<LB::Expr, LB::ExprEF>,
     M1: LookupMessage<LB::Expr, LB::ExprEF>,
 {
@@ -89,10 +89,10 @@ fn emit_byte_table_pair<LB, M0, M1>(
 
 /// Emit the table side of the byte-pair lookup.
 pub(crate) fn emit_and8_lookup_columns<LB>(
-    frame: &native::LookupFrame<'_, LB::Expr>,
+    frame: &lookup::LookupFrame<'_, LB::Expr>,
     builder: &mut LB,
 ) where
-    LB: native::LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     let local: &And8LookupCols<LB::Expr> = frame.main.current.borrow();
     let fixed: &And8LookupPreprocessedCols<LB::Expr> = frame.preprocessed.current.borrow();

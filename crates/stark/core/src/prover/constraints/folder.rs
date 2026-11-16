@@ -9,7 +9,7 @@ use core::marker::PhantomData;
 
 use p3_field::{Algebra, BasedVectorSpace, ExtensionField, Field, PackedField};
 
-use crate::air::native;
+use crate::air;
 
 /// Packed constraint folder for SIMD-optimized prover evaluation.
 ///
@@ -105,7 +105,7 @@ where
     }
 }
 
-impl<F, EF, P, PE> native::LiftedAirBuilder for ProverConstraintFolder<'_, F, EF, P, PE>
+impl<F, EF, P, PE> air::LiftedAirBuilder for ProverConstraintFolder<'_, F, EF, P, PE>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -117,12 +117,12 @@ where
     type ExtExpr = PE;
 
     #[inline]
-    fn emit_base(&mut self, value: P, _meta: native::ConstraintMeta<'_>) {
+    fn emit_base(&mut self, value: P, _meta: air::ConstraintMeta<'_>) {
         self.record_base(value);
     }
 
     #[inline]
-    fn emit_ext(&mut self, value: PE, _meta: native::ConstraintMeta<'_>) {
+    fn emit_ext(&mut self, value: PE, _meta: air::ConstraintMeta<'_>) {
         self.record_ext(value);
     }
 
@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn native_packed_fold_preserves_interleaved_classes_zeros_and_repeats() {
-        let layout = native::ConstraintLayout::new(vec![1, 2, 4, 6], vec![0, 3, 5, 7]).unwrap();
+        let layout = air::ConstraintLayout::new(vec![1, 2, 4, 6], vec![0, 3, 5, 7]).unwrap();
         let alpha = QuadFelt::new([Felt::from_u64(17), Felt::from_u64(19)]);
         let (base_weights, ext_weights) = layout.decompose_alpha(alpha);
         let base0 = PackedFelt::from_fn(|lane| Felt::from_usize(3 + lane));
@@ -185,17 +185,17 @@ mod tests {
             QuadFelt::new([Felt::from_usize(11 + lane), Felt::from_usize(13 + lane)])
         });
         let mut native = folder(&base_weights, &ext_weights);
-        native::LiftedAirBuilder::emit_ext(&mut native, ext0, native::ConstraintMeta::default());
-        native::LiftedAirBuilder::assert_zeros(&mut native, [base0, PackedFelt::ZERO]);
-        native::LiftedAirBuilder::emit_ext(&mut native, ext0, native::ConstraintMeta::default());
-        native::LiftedAirBuilder::emit_base(&mut native, base0, native::ConstraintMeta::default());
-        native::LiftedAirBuilder::emit_ext(
+        air::LiftedAirBuilder::emit_ext(&mut native, ext0, air::ConstraintMeta::default());
+        air::LiftedAirBuilder::assert_zeros(&mut native, [base0, PackedFelt::ZERO]);
+        air::LiftedAirBuilder::emit_ext(&mut native, ext0, air::ConstraintMeta::default());
+        air::LiftedAirBuilder::emit_base(&mut native, base0, air::ConstraintMeta::default());
+        air::LiftedAirBuilder::emit_ext(
             &mut native,
             PackedQuadFelt::ZERO,
-            native::ConstraintMeta::default(),
+            air::ConstraintMeta::default(),
         );
-        native::LiftedAirBuilder::emit_base(&mut native, base1, native::ConstraintMeta::default());
-        native::LiftedAirBuilder::emit_ext(&mut native, ext1, native::ConstraintMeta::default());
+        air::LiftedAirBuilder::emit_base(&mut native, base1, air::ConstraintMeta::default());
+        air::LiftedAirBuilder::emit_ext(&mut native, ext1, air::ConstraintMeta::default());
 
         assert_eq!(native.constraint_index, 8);
         assert_eq!(native.base_constraints.len(), 4);
@@ -213,9 +213,9 @@ mod tests {
 
     #[test]
     fn direct_dummy_kernel_binds_packed_uniforms_across_independent_row_buffers() {
-        use crate::{air::native::AirKernel, testing::airs::miden::DummyMidenAir};
+        use crate::{air::AirKernel, testing::airs::miden::DummyMidenAir};
 
-        let kernel = native::DirectKernel::new(DummyMidenAir::<Felt>::new(9, 2)).unwrap();
+        let kernel = air::DirectKernel::new(DummyMidenAir::<Felt>::new(9, 2)).unwrap();
         let layout = kernel.descriptor().analysis().layout();
         assert_eq!(layout.base_indices(), &[0]);
         assert!(layout.ext_indices().is_empty());
@@ -230,7 +230,7 @@ mod tests {
         ];
         let exports = [PackedQuadFelt::ZERO; 2];
         let session = kernel
-            .bind(native::UniformInputs {
+            .bind(air::UniformInputs {
                 public_values: &public,
                 challenges: &challenges,
                 exports: &exports,
@@ -249,12 +249,12 @@ mod tests {
                 .collect();
             let aux = [PackedQuadFelt::ONE; 2];
             let aux_next = [PackedQuadFelt::from(QuadFelt::from_u64(23)); 2];
-            let frame = native::AirFrame {
-                main: native::Rows { current: &main, next: &next },
-                preprocessed: native::Rows { current: &[], next: &[] },
-                aux: native::Rows { current: &aux, next: &aux_next },
+            let frame = air::AirFrame {
+                main: air::Rows { current: &main, next: &next },
+                preprocessed: air::Rows { current: &[], next: &[] },
+                aux: air::Rows { current: &aux, next: &aux_next },
                 periodic: &[],
-                selectors: native::Selectors {
+                selectors: air::Selectors {
                     first: PackedFelt::from_fn(|lane| Felt::from_bool(lane == 0)),
                     last: PackedFelt::from_fn(|lane| {
                         Felt::from_bool(lane + 1 == PackedFelt::WIDTH)

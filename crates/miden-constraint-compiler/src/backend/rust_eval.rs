@@ -31,7 +31,7 @@
 use std::fmt::Write as _;
 
 use miden_core::Felt;
-use miden_stark::air::native::AirDescriptor;
+use miden_stark::air::AirDescriptor;
 
 use self::preparation::PreparationPlan;
 use crate::ir::{CapturedConstraints, Class, Graph, Leaf, Node, NodeId, OpKind};
@@ -200,7 +200,7 @@ fn validate_native(native: &AirEvaluator<'_>) {
 const NATIVE_MODULE_IMPORTS: &str = r"
 use miden_core::Felt;
 use miden_crypto::field::PrimeCharacteristicRing as _;
-use miden_stark::air::native::{LiftedAirBuilder, Frame, Inputs, UniformInputs};
+use miden_stark::air::{LiftedAirBuilder, Frame, Inputs, UniformInputs};
 use p3_field::Dup as _;
 ";
 
@@ -665,7 +665,7 @@ mod tests {
 
     use miden_core::{Felt, field::QuadFelt};
     use miden_crypto::field::PrimeCharacteristicRing;
-    use miden_stark::air::native;
+    use miden_stark::air;
     use p3_field::Dup;
 
     use super::*;
@@ -703,11 +703,11 @@ mod tests {
 
     struct NativeRewrites;
 
-    impl native::LiftedAir for NativeRewrites {
+    impl air::LiftedAir for NativeRewrites {
         type F = Felt;
 
-        fn spec(&self) -> native::AirSpec<'_, Felt> {
-            native::AirSpec {
+        fn spec(&self) -> air::AirSpec<'_, Felt> {
+            air::AirSpec {
                 main_width: 4,
                 aux_width: 4,
                 num_public_values: 0,
@@ -718,10 +718,10 @@ mod tests {
             }
         }
 
-        fn eval<B: native::LiftedAirBuilder<F = Felt>>(
+        fn eval<B: air::LiftedAirBuilder<F = Felt>>(
             &self,
-            frame: &native::Frame<'_, B>,
-            _inputs: native::Inputs<'_, B>,
+            frame: &air::Frame<'_, B>,
+            _inputs: air::Inputs<'_, B>,
             sink: &mut B,
         ) {
             let sum: B::Expr = frame.main.current[..4].iter().map(Dup::dup).sum();
@@ -805,11 +805,12 @@ mod tests {
         let mut builder = GraphBuilder::new();
         let (cons, descriptor) =
             crate::ir::capture_native_into_with(&NativeRewrites, &mut builder, |_, _, sink| {
-                native::LiftedAirBuilder::assert_zero_ext(
+                air::LiftedAirBuilder::assert_zero_ext(
                     sink,
-                    native::symbolic::SymbolicExpressionExt::<Felt, QuadFelt>::from(QuadFelt::new(
-                        [Felt::ONE, Felt::from_u64(second_coefficient)],
-                    )),
+                    air::symbolic::SymbolicExpressionExt::<Felt, QuadFelt>::from(QuadFelt::new([
+                        Felt::ONE,
+                        Felt::from_u64(second_coefficient),
+                    ])),
                 );
             })
             .unwrap();

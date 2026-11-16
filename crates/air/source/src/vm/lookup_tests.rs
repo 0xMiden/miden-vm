@@ -2,8 +2,8 @@
 
 use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
 use miden_stark::{
-    air::native::{AuxTraceInputs, LiftedAir, ProverAir},
-    lookup::{Challenges, accumulate_slow, native as native_lookup},
+    air::{AuxTraceInputs, LiftedAir, ProverAir},
+    lookup::{self, Challenges, accumulate_slow},
 };
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
@@ -15,7 +15,7 @@ use crate::vm::Felt;
 /// boundaries and the cyclic closing edge.
 #[test]
 fn chunked_driver_matches_slow_accumulation_with_preprocessed_window() {
-    use miden_stark::lookup::native::build_lookup_fractions;
+    use miden_stark::lookup::build_lookup_fractions;
 
     use crate::vm::{
         MidenAir,
@@ -51,7 +51,7 @@ fn chunked_driver_matches_slow_accumulation_with_preprocessed_window() {
         statement: &[],
         challenges: &challenges,
     };
-    let actual = native_lookup::build_logup_aux_trace(&air, inputs).unwrap();
+    let actual = lookup::build_logup_aux_trace(&air, inputs).unwrap();
     let borrowed = ProverAir::build_aux_trace(&air, inputs).unwrap();
     assert_eq!(borrowed.columns.values, actual.columns.values);
     assert_eq!(borrowed.exports, actual.exports);
@@ -73,7 +73,7 @@ fn native_logup_allocates_the_full_declared_width_with_a_zero_suffix() {
     let challenges = [QuadFelt::from_u32(7), QuadFelt::from_u32(13)];
     let lookup_width = air.column_shape().len();
     assert_eq!(spec.aux_width, lookup_width + 1);
-    let auxiliary = native_lookup::build_logup_aux_trace(
+    let auxiliary = lookup::build_logup_aux_trace(
         &air,
         AuxTraceInputs {
             main: &main,
@@ -102,7 +102,7 @@ fn borrowed_logup_rejects_missing_or_malformed_setup_windows() {
     let assert_rejected = |air: crate::vm::MidenAir,
                            main: &RowMajorMatrix<Felt>,
                            preprocessed: Option<&RowMajorMatrix<Felt>>| {
-        let result = native_lookup::build_logup_aux_trace(
+        let result = lookup::build_logup_aux_trace(
             &air,
             AuxTraceInputs {
                 main,
@@ -113,7 +113,7 @@ fn borrowed_logup_rejects_missing_or_malformed_setup_windows() {
             },
         );
         assert!(
-            matches!(result, Err(native_lookup::LookupError::PreprocessedShape)),
+            matches!(result, Err(lookup::LookupError::PreprocessedShape)),
             "invalid setup must fail before fraction accumulation"
         );
     };
