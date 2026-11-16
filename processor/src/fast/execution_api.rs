@@ -91,6 +91,13 @@ impl FastProcessor {
     }
 
     /// Async variant of [`Self::execute_sync`] for hosts that need async callbacks.
+    ///
+    /// # Cancellation safety
+    ///
+    /// Dropping this future discards the processor. Completed host effects are not rolled back,
+    /// so cancellation correctness also depends on the host callbacks. To continue execution
+    /// across `select!` iterations, create and pin this future once and poll it by mutable
+    /// reference.
     #[inline(always)]
     pub async fn execute(
         self,

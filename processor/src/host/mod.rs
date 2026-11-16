@@ -216,6 +216,12 @@ pub trait Host: BaseHost {
     /// Returns the forest for the requested procedure root.
     ///
     /// `Ok(None)` means the procedure was not found. `Err` preserves a retrieval failure.
+    ///
+    /// # Cancellation safety
+    ///
+    /// Dropping a pending lookup must leave shared host and datastore state valid and permit
+    /// another lookup without losing stored forests. Implementations must arrange any required
+    /// cleanup before affected resources are reused.
     fn get_mast_forest(
         &self,
         node_digest: &Word,
