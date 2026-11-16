@@ -378,15 +378,15 @@ where
             array::from_fn(|i| p[i].dup())
         };
 
-        let a_ptr: LB::Expr = local[COL_A_PTR].dup();
-        let b_ptr: LB::Expr = local[COL_B_PTR].dup();
-        let r_ptr: LB::Expr = local[COL_R_PTR].dup();
-        let bound_ptr: LB::Expr = local[COL_BOUND_PTR].dup();
-        let kappa_a: LB::Expr = local[COL_KAPPA_A].dup();
-        let act: LB::Expr = local[COL_ACT].dup();
-        let c_ptr_local: LB::Expr = local[TERM_CELL_C_PTR].dup();
-        let kappa_c_local: LB::Expr = local[TERM_CELL_KAPPA_C].dup();
-        let neg_mult: LB::Expr = LB::Expr::ZERO - local[TERM_CELL_MULT].dup();
+        let a_ptr = local[COL_A_PTR].dup();
+        let b_ptr = local[COL_B_PTR].dup();
+        let r_ptr = local[COL_R_PTR].dup();
+        let bound_ptr = local[COL_BOUND_PTR].dup();
+        let kappa_a = local[COL_KAPPA_A].dup();
+        let act = local[COL_ACT].dup();
+        let c_ptr_local = local[TERM_CELL_C_PTR].dup();
+        let kappa_c_local = local[TERM_CELL_KAPPA_C].dup();
+        let neg_mult = -local[TERM_CELL_MULT].dup();
 
         let provide_deg = Deg { v: 2, u: 1 };
         let consume_deg = Deg { v: 2, u: 1 };
@@ -523,7 +523,8 @@ where
             GAMMA_SLOTS
                 .iter()
                 .filter(|&&(_, c)| c == cell)
-                .fold(LB::Expr::ZERO, |acc, &(row, _)| acc + sel[row].clone())
+                .map(|&(row, _)| sel[row].dup())
+                .sum()
         };
         let cell_gate = |cell: usize| -> LB::Expr { raw16_gate(cell) + gamma_gate(cell) };
 
@@ -658,30 +659,25 @@ impl air::LiftedAir for UintMulAir {
         builder: &mut AB,
     ) {
         let local: &[AB::Expr; NUM_MAIN_COLS] =
-            frame.main.current[..NUM_MAIN_COLS].try_into().expect("uint main row band");
+            frame.main.current[..NUM_MAIN_COLS].try_into().expect("declared AIR row band");
         let next: &[AB::Expr; NUM_MAIN_COLS] =
-            frame.main.next[..NUM_MAIN_COLS].try_into().expect("uint main row band");
+            frame.main.next[..NUM_MAIN_COLS].try_into().expect("declared AIR row band");
 
-        let sel: [AB::Expr; NUM_PERIODIC] = {
-            let p = frame.periodic;
-            array::from_fn(|i| p[i].dup())
-        };
+        let sel: &[AB::Expr; NUM_PERIODIC] =
+            frame.periodic[..NUM_PERIODIC].try_into().expect("declared AIR row band");
 
         // β⁰..β³¹ (the γ weights reach (β − t)·β³⁰).
-        let beta: AB::ExtExpr = inputs.challenge(1);
-        let mut bp: Vec<AB::ExtExpr> = Vec::with_capacity(NUM_GAMMA + 1);
-        bp.push(AB::ExtExpr::ONE);
-        for i in 1..NUM_GAMMA + 1 {
-            bp.push(bp[i - 1].clone() * beta.clone());
-        }
-        let t16: AB::Expr = AB::Expr::from(Felt::from(1u32 << 16));
-        let x_minus_t: AB::ExtExpr = beta - t16.clone();
-        let offset: AB::Expr = AB::Expr::from(Felt::from(GAMMA_OFFSET));
+        let beta: AB::ExtExpr = inputs.challenges[1].dup();
+        let mut bp: [AB::ExtExpr; NUM_GAMMA + 1] = array::from_fn(|_| AB::ExtExpr::ZERO);
+        beta.powers().fill(&mut bp);
+        let t16 = AB::Expr::from(Felt::from(1u32 << 16));
+        let x_minus_t: AB::ExtExpr = beta - t16.dup();
+        let offset = AB::Expr::from(Felt::from(GAMMA_OFFSET));
 
-        let kappa_a: AB::Expr = local[COL_KAPPA_A].dup();
-        let act: AB::Expr = local[COL_ACT].dup();
+        let kappa_a = local[COL_KAPPA_A].dup();
+        let act = local[COL_ACT].dup();
         // The `c` row reads its signed scale from its local term metadata.
-        let kappa_c_signed_local: AB::Expr = local[TERM_CELL_KAPPA_C_SIGNED].dup();
+        let kappa_c_signed_local = local[TERM_CELL_KAPPA_C_SIGNED].dup();
 
         // Registers.
         let id: AB::ExtExpr = frame.aux.current[REG_ID].dup();
@@ -692,61 +688,71 @@ impl air::LiftedAir for UintMulAir {
         // Weighted cell sums: the 16-limb operands (a/b/bound, cells
         // 0–15), the 17-limb quotient (cells 0–16), and the linear r/c
         // operands (eight 32-bit limbs at even powers, cells 0–7).
-        let full16_sum: AB::ExtExpr =
-            (0..16).fold(AB::ExtExpr::ZERO, |acc, i| acc + bp[i].clone() * local[i].dup());
-        let full_q_sum: AB::ExtExpr =
-            (0..NUM_Q_LIMBS).fold(AB::ExtExpr::ZERO, |acc, i| acc + bp[i].clone() * local[i].dup());
-        let val_sum: AB::ExtExpr =
-            (0..8).fold(AB::ExtExpr::ZERO, |acc, m| acc + bp[2 * m].clone() * local[m].dup());
+        // Keep the 16-limb prefix shared with the 17-limb quotient.
+        let full16_sum = <AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product::<8>(
+            bp[..8].try_into().expect("low operand weights"),
+            local[..8].try_into().expect("low operand limbs"),
+        ) + <AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product::<8>(
+            bp[8..16].try_into().expect("high operand weights"),
+            local[8..16].try_into().expect("high operand limbs"),
+        );
+        let full_q_sum =
+            full16_sum.dup() + bp[NUM_Q_LIMBS - 1].dup() * local[NUM_Q_LIMBS - 1].dup();
+        let even_weights: [AB::ExtExpr; 8] = array::from_fn(|m| bp[2 * m].dup());
+        let val_sum = <AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product(
+            &even_weights,
+            local[..8].try_into().expect("linear operand limbs"),
+        );
 
         // S: build κₐ·a(β) on the `a` row, bound(β) on the `p` row;
         // hold / reset per the periodic keep gate.
-        let build: AB::ExtExpr = full16_sum.clone() * (sel[ROW_A].clone() * kappa_a)
-            + full16_sum.clone() * sel[ROW_P].clone();
-        let keep: AB::Expr = sel[PCOL_S_KEEP].clone();
-        builder.when(frame.first_row()).assert_zero_ext(s.clone());
-        builder
-            .when(frame.transition())
-            .assert_zero_ext(s_next - s.clone() * keep - build);
+        let build: AB::ExtExpr =
+            full16_sum.dup() * (sel[ROW_A].dup() * kappa_a.dup() + sel[ROW_P].dup());
+        let keep = sel[PCOL_S_KEEP].dup();
+        builder.when(frame.first_row()).assert_zero_ext(s.dup());
+        builder.when(frame.transition()).assert_eq_ext(s_next, s.dup() * keep + build);
 
         // id contributions.
         // The product: S = κₐ·a(β) through the `b` row.
-        let product = s.clone() * full16_sum.clone() * sel[ROW_B].clone();
+        let product = s.dup() * full16_sum.dup() * sel[ROW_B].dup();
         // The quotient: S = bound(β) through the `q` row; q(β)·(bound(β)+1).
-        let quotient = (s + AB::ExtExpr::ONE) * full_q_sum * sel[ROW_Q].clone();
+        let quotient = (s + AB::ExtExpr::ONE) * full_q_sum * sel[ROW_Q].dup();
         // The linear operands: eight 32-bit limbs at even powers, both halves on
         // one row. κ_c_signed is local to the `c` row.
-        let linear = val_sum.clone() * (sel[ROW_C].clone() * kappa_c_signed_local.clone())
-            - val_sum.clone() * sel[ROW_R].clone();
+        let linear =
+            val_sum.dup() * (sel[ROW_C].dup() * kappa_c_signed_local.dup() - sel[ROW_R].dup());
         // The carries: per slot, w(s) = (β − t)·β^k (·2¹⁶ for hi halves);
         // the lo halves carry the −2³¹ offset correction, act-gated so
         // all-zero padding blocks contribute nothing.
-        let mut carries = AB::ExtExpr::ZERO;
-        for (slot, &(row, cell)) in GAMMA_SLOTS.iter().enumerate() {
-            let k = slot / 2;
-            let mut w = x_minus_t.clone() * bp[k].clone();
-            if slot % 2 == 1 {
-                w *= t16.clone();
-            }
-            let mut gated: AB::Expr = sel[row].clone() * local[cell].dup();
-            if slot % 2 == 0 {
-                gated -= sel[row].clone() * act.clone() * offset.clone();
-            }
-            carries += w * gated;
-        }
+        let carries: AB::ExtExpr = GAMMA_SLOTS
+            .iter()
+            .enumerate()
+            .map(|(slot, &(row, cell))| {
+                let k = slot / 2;
+                let mut w = x_minus_t.dup() * bp[k].dup();
+                if slot % 2 == 1 {
+                    w = w.mul_2exp_u64(16);
+                }
+                let mut gated = sel[row].dup() * local[cell].dup();
+                if slot % 2 == 0 {
+                    gated -= sel[row].dup() * act.dup() * offset.dup();
+                }
+                w * gated
+            })
+            .sum();
 
         // The subtractive borrow: when `is_sub` and `κₐ·a·b < κ_c·c`, the
         // canonical reduction wraps up by one p, so the identity carries
         // `+borrow·(bound(β)+1)`. Contributed on the `p` row, where
         // bound(β) is live as the full limb sum; the +1 of `p = bound + 1`
         // rides β⁰.
-        let borrow: AB::Expr = local[COL_BORROW].dup();
+        let borrow = local[COL_BORROW].dup();
         let borrow_contrib: AB::ExtExpr =
-            (full16_sum + AB::ExtExpr::ONE) * (sel[ROW_P].clone() * borrow.clone());
+            (full16_sum + AB::ExtExpr::ONE) * (sel[ROW_P].dup() * borrow.dup());
 
         let contrib: AB::ExtExpr = product - quotient + linear + carries + borrow_contrib;
-        builder.when(frame.first_row()).assert_zero_ext(id.clone());
-        builder.when(frame.transition()).assert_zero_ext(id_next - id.clone() - contrib);
+        builder.when(frame.first_row()).assert_zero_ext(id.dup());
+        builder.when(frame.transition()).assert_eq_ext(id_next, id.dup() + contrib);
 
         // The closing row (`c`) has a nonzero contribution of its own —
         // its `κ_c_signed · val_sum` linear term plus its share of γ — so
@@ -759,48 +765,50 @@ impl air::LiftedAir for UintMulAir {
         // other-role terms carry their own periodic gates and would
         // needlessly bloat this constraint's degree once multiplied by
         // `sel[ROW_C]`).
-        let mut c_own: AB::ExtExpr = val_sum * kappa_c_signed_local.clone();
-        for (slot, &(row, cell)) in GAMMA_SLOTS.iter().enumerate() {
-            if row == ROW_C {
-                let k = slot / 2;
-                let mut w = x_minus_t.clone() * bp[k].clone();
+        let c_carries: AB::ExtExpr = GAMMA_SLOTS
+            .iter()
+            .enumerate()
+            .filter(|&(_, &(row, _))| row == ROW_C)
+            .map(|(slot, &(_, cell))| {
+                let mut weight = x_minus_t.dup() * bp[slot / 2].dup();
                 if slot % 2 == 1 {
-                    w *= t16.clone();
+                    weight = weight.mul_2exp_u64(16);
                 }
-                let mut gated: AB::Expr = local[cell].dup();
-                if slot % 2 == 0 {
-                    gated -= act.clone() * offset.clone();
-                }
-                c_own += w * gated;
-            }
-        }
-        builder.assert_zero_ext((id + c_own) * sel[ROW_C].clone());
+                let carry = if slot % 2 == 0 {
+                    local[cell].dup() - act.dup() * offset.dup()
+                } else {
+                    local[cell].dup()
+                };
+                weight * carry
+            })
+            .sum();
+        let c_own = val_sum * kappa_c_signed_local.dup() + c_carries;
+        builder.when(sel[ROW_C].dup()).assert_zero_ext(id + c_own);
 
         // act is the boolean block-active flag (cycle-constant).
-        builder.assert_zero(act.clone() * (AB::Expr::ONE - act.clone()));
+        builder.assert_bool(act.dup());
 
         // `is_sub` (`c`-row cell) is boolean; `borrow` (cycle-constant)
         // ∈ {0, 1, 2} — a `κ_c = 2` double (`λ² − 2x₁`) underflows by up to
         // 2p — and only fires in the subtractive mode (`borrow ⟹ is_sub`),
         // so an additive op cannot smuggle a +p shift onto its quotient.
-        let is_sub: AB::Expr = local[TERM_CELL_IS_SUB].dup();
-        builder.assert_zero(sel[ROW_C].clone() * is_sub.clone() * (AB::Expr::ONE - is_sub.clone()));
+        let is_sub = local[TERM_CELL_IS_SUB].dup();
+        builder.when(sel[ROW_C].dup()).assert_bool(is_sub.dup());
 
         // κ_c_signed = κ_c · (1 − 2·is_sub), pinned `c`-row-local (both
         // operands live on this row), so `linear` above can read it via a
         // single local witness. Degree 2 (`κ_c` × `is_sub`), well under
         // the lqd-1 budget.
-        let kappa_c_local: AB::Expr = local[TERM_CELL_KAPPA_C].dup();
-        let c_sign_local: AB::Expr = AB::Expr::ONE - is_sub.double();
-        builder.assert_zero(
-            sel[ROW_C].clone() * (kappa_c_signed_local - kappa_c_local * c_sign_local),
-        );
+        let kappa_c_local = local[TERM_CELL_KAPPA_C].dup();
+        let c_sign_local = AB::Expr::ONE - is_sub.double();
+        builder
+            .when(sel[ROW_C].dup())
+            .assert_eq(kappa_c_signed_local.dup(), kappa_c_local.dup() * c_sign_local);
 
-        let two = AB::Expr::from(Felt::from(2u32));
-        builder.assert_zero(
-            borrow.clone() * (borrow.clone() - AB::Expr::ONE) * (borrow.clone() - two),
-        );
-        builder.assert_zero(sel[ROW_C].clone() * borrow * (AB::Expr::ONE - is_sub));
+        builder.assert_zero(borrow.bool_check() * (borrow.dup() - AB::Expr::TWO));
+        builder
+            .when(sel[ROW_C].dup() * borrow.dup())
+            .assert_eq(AB::Expr::ONE, is_sub.dup());
 
         // A provide must come from an active block. The `UintMul` provide is
         // gated only by `sel[ROW_C]` (not `act`), and the operand consumes
@@ -809,17 +817,18 @@ impl air::LiftedAir for UintMulAir {
         // provide a *false* relation onto the bus. Force the mult to 0 when
         // act = 0.
         builder
-            .assert_zero(sel[ROW_C].clone() * (AB::Expr::ONE - act) * local[TERM_CELL_MULT].dup());
+            .when(sel[ROW_C].dup() * (AB::Expr::ONE - act.dup()))
+            .assert_zero(local[TERM_CELL_MULT].dup());
 
         // Cycle-constancy: ptrs / κₐ / act are constant within a block
         // (every row but the terminal one).
-        let not_term: AB::Expr = AB::Expr::ONE - sel[ROW_C].clone();
+        let not_term = AB::Expr::ONE - sel[ROW_C].dup();
         for col in
             [COL_A_PTR, COL_B_PTR, COL_R_PTR, COL_BOUND_PTR, COL_KAPPA_A, COL_ACT, COL_BORROW]
         {
-            let here: AB::Expr = local[col].dup();
-            let there: AB::Expr = next[col].dup();
-            builder.assert_zero(not_term.clone() * (there - here));
+            let here = local[col].dup();
+            let there = next[col].dup();
+            builder.when(not_term.dup()).assert_eq(there, here);
         }
 
         // Phase 2: LogUp — the UintMul provide + Range16 + the

@@ -798,8 +798,8 @@ mod native_kernel_pilot {
 
     #[test]
     fn direct_tiny_symbolic_session_preserves_non_copy_inputs_and_capture_order() {
-        use crate::air::symbolic::{
-            AuxInput, BaseInput, BaseLeaf, RowOffset, SymbolicExpression, SymbolicExpressionExt,
+        use air::symbolic::{
+            AuxInput, BaseInput, RowOffset, SymbolicExpression, SymbolicExpressionExt,
         };
         type B = SymbolicExpression<Felt>;
         type E = SymbolicExpressionExt<Felt, Felt>;
@@ -811,14 +811,20 @@ mod native_kernel_pilot {
         let capture = air::capture(&source).unwrap();
         let kernel = air::DirectKernel::new(source).unwrap();
         assert_eq!(kernel.descriptor().fingerprint(), capture.descriptor.fingerprint());
-        let main = [B::input(BaseInput::Main { offset: RowOffset::Current, index: 0 })];
-        let next = [B::input(BaseInput::Main { offset: RowOffset::Next, index: 0 })];
-        let auxiliary = [E::input(AuxInput::Trace { offset: RowOffset::Current, index: 0 })];
-        let next_auxiliary = [E::input(AuxInput::Trace { offset: RowOffset::Next, index: 0 })];
-        let periodic = [B::input(BaseInput::Periodic(0)), B::input(BaseInput::Periodic(1))];
-        let public = [B::input(BaseInput::Public(0)), B::input(BaseInput::Public(1))];
-        let challenges = [E::input(AuxInput::Challenge(0))];
-        let exports = [E::input(AuxInput::Export(0))];
+        let main = [B::input(BaseInput::Main { row: RowOffset::Current, column: 0 })];
+        let next = [B::input(BaseInput::Main { row: RowOffset::Next, column: 0 })];
+        let auxiliary = [E::input(AuxInput::Trace { row: RowOffset::Current, column: 0 })];
+        let next_auxiliary = [E::input(AuxInput::Trace { row: RowOffset::Next, column: 0 })];
+        let periodic = [
+            B::input(BaseInput::Periodic { index: 0 }),
+            B::input(BaseInput::Periodic { index: 1 }),
+        ];
+        let public = [
+            B::input(BaseInput::Public { index: 0 }),
+            B::input(BaseInput::Public { index: 1 }),
+        ];
+        let challenges = [E::input(AuxInput::Challenge { index: 0 })];
+        let exports = [E::input(AuxInput::Export { index: 0 })];
         let session = kernel
             .bind(air::UniformInputs {
                 public_values: &public,
@@ -835,9 +841,9 @@ mod native_kernel_pilot {
             },
             periodic: &periodic,
             selectors: air::Selectors {
-                first: B::Leaf(BaseLeaf::IsFirstRow),
-                last: B::Leaf(BaseLeaf::IsLastRow),
-                transition: B::Leaf(BaseLeaf::IsTransition),
+                first: B::is_first_row(),
+                last: B::is_last_row(),
+                transition: B::is_transition(),
             },
         };
         let mut sink = Sink::<B, E>::default();

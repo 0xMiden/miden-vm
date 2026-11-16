@@ -116,19 +116,19 @@ pub fn enforce_controller_constraints<AB>(
     {
         let gate = is_active.clone() * rows.is_hash.clone() * op_final.not();
         let builder = &mut builder.when(gate);
-        builder.assert_one(is_active_next.clone());
-        builder.assert_zero(cols_next.s0.dup());
-        builder.assert_zero(cols_next.s1.dup());
-        builder.assert_zero(cols_next.s2.dup());
+        builder.assert_one(is_active_next.dup());
+        builder.assert_zeros([cols_next.s0.dup(), cols_next.s1.dup(), cols_next.s2.dup()]);
     }
     {
         let gate = controller_merkle.clone() * op_final.not();
         let builder = &mut builder.when(gate);
         builder.assert_one(is_active_next.clone());
         builder.assert_one(cols_next.s0.dup());
-        builder.assert_eq(cols_next.s1.dup(), cols.s1.dup());
-        builder.assert_eq(cols_next.s2.dup(), cols.s2.dup());
-        builder.assert_zero(merkle_start_next.clone());
+        builder.assert_eq_arrays(
+            [cols_next.s1.dup(), cols_next.s2.dup()],
+            [cols.s1.dup(), cols.s2.dup()],
+        );
+        builder.assert_zero(merkle_start_next.dup());
     }
 
     // Conversely, any continuation row must follow a non-final matching row.
@@ -137,9 +137,7 @@ pub fn enforce_controller_constraints<AB>(
             cols_next.s0.dup().not() * cols_next.s1.dup().not() * cols_next.s2.dup().not();
         let gate = is_active_next.clone() * hash_absorb_next;
         let builder = &mut builder.when(gate);
-        builder.assert_zero(op_final.clone());
-        builder.assert_zero(cols.s1.dup());
-        builder.assert_zero(cols.s2.dup());
+        builder.assert_zeros([op_final.dup(), cols.s1.dup(), cols.s2.dup()]);
     }
     {
         let merkle_or_padding_next: AB::Expr = cols_next.merkle_or_padding.dup();
@@ -148,8 +146,10 @@ pub fn enforce_controller_constraints<AB>(
         let builder = &mut builder.when(merkle_cont_next);
         builder.assert_zero(op_final.clone());
         builder.assert_one(cols.s0.dup());
-        builder.assert_eq(cols.s1.dup(), cols_next.s1.dup());
-        builder.assert_eq(cols.s2.dup(), cols_next.s2.dup());
+        builder.assert_eq_arrays(
+            [cols.s1.dup(), cols.s2.dup()],
+            [cols_next.s1.dup(), cols_next.s2.dup()],
+        );
     }
 
     // Hash continuation: the next hash row's input CV equals this row's output CV.
@@ -158,9 +158,7 @@ pub fn enforce_controller_constraints<AB>(
         let cv_next = cols_next.state_tail();
         let cv_out = cols.hash_cv();
         let builder = &mut builder.when(gate);
-        for i in 0..4 {
-            builder.assert_eq(cv_next[i].dup(), cv_out[i].dup());
-        }
+        builder.assert_eq_arrays(cv_next.each_ref().map(Dup::dup), cv_out.each_ref().map(Dup::dup));
     }
 
     // Merkle rows.

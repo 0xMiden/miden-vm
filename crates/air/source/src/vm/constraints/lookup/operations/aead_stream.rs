@@ -8,10 +8,9 @@
 
 use core::array;
 
-use p3_field::Dup;
-
 use miden_core::field::PrimeCharacteristicRing;
 use miden_stark::lookup::{Deg, LookupBatch, LookupGroup};
+use p3_field::Dup;
 
 use crate::vm::constraints::{
     chiplets::columns::AeadStreamCols,
@@ -65,7 +64,7 @@ pub(in crate::vm::constraints::lookup) fn emit_core_requests<LB, G>(
                 // of one 8-row entry, so Core supplies multiplicity -2.
                 b.insert(
                     name,
-                    -LB::Expr::from_u16(2),
+                    -LB::Expr::TWO,
                     AeadStreamRequestMsg {
                         ctx: sys_ctx.dup(),
                         clk: clk.dup(),

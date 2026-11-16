@@ -212,13 +212,12 @@ pub(crate) fn eval_chunk_count<AB>(
     AB: air::LiftedAirBuilder<F = Felt>,
 {
     let is_empty =
-        (n_chunks.clone() - AB::Expr::ONE) * Felt::from_u8(32) + remainder.clone() + AB::Expr::ONE
-            - len_bytes.clone();
+        (n_chunks.dup() - AB::Expr::ONE).mul_2exp_u64(5) + remainder.dup() + AB::Expr::ONE
+            - len_bytes.dup();
 
-    builder.assert_zero(act.clone() * is_empty.clone() * (is_empty.clone() - AB::Expr::ONE));
-    builder.assert_zero(act.clone() * is_empty.clone() * len_bytes);
-    builder.assert_zero(act.clone() * is_empty * remainder);
-    builder.assert_zero(act * (n_chunks * n_chunks_inv - AB::Expr::ONE));
+    builder.when(act.dup()).assert_bool(is_empty.dup());
+    builder.when(act.dup() * is_empty).assert_zeros([len_bytes, remainder]);
+    builder.when(act).assert_one(n_chunks * n_chunks_inv);
 }
 
 impl air::LiftedAir for KeccakNodeAir {
@@ -268,15 +267,17 @@ impl air::LiftedAir for KeccakNodeAir {
         // and chunk chiplet's row-0 anchors. Ungated by `act` — an
         // all-inactive trace's prover sets them to 0 anyway, and the
         // gating cost (one mult) is not worth it.
-        builder.when(frame.first_row()).assert_zero(sponge_seq_id_head.clone());
-        builder.when(frame.first_row()).assert_zero(chunk_seq_id_head.clone());
+        builder
+            .when(frame.first_row())
+            .assert_zeros([sponge_seq_id_head.dup(), chunk_seq_id_head.dup()]);
 
         // Activity -----------------------------------------------
         // Binary, sticky-downward (matches chunk / sponge convention).
         builder.assert_bool(local[COL_ACT].dup());
         builder
             .when(frame.transition())
-            .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
+            .when(AB::Expr::ONE - act.dup())
+            .assert_zero(act_next.dup());
         eval_chunk_count(
             builder,
             local[COL_ACT].dup(),
@@ -289,20 +290,19 @@ impl air::LiftedAir for KeccakNodeAir {
         // out_mult on inactive rows --------------------------------
         // Pin `out_mult = 0` on dead rows so the `Binding` provide
         // (mult = `−out_mult`) contributes 0 on padding. Deg 2.
-        builder.assert_zero((AB::Expr::ONE - act) * out_mult);
+        builder.when(AB::Expr::ONE - act.dup()).assert_zero(out_mult);
 
         // Continuity (gated on `act_next`) -----------------------
         // sponge namespace: 32 sponge rows per perm.
-        builder.when(frame.transition()).assert_zero(
-            act_next.clone()
-                * (sponge_seq_id_head_next
-                    - sponge_seq_id_head
-                    - AB::Expr::from(Felt::from(32u8)) * n_sponge_perms),
+        builder.when(frame.transition()).when(act_next.dup()).assert_eq(
+            sponge_seq_id_head_next,
+            sponge_seq_id_head + n_sponge_perms.mul_2exp_u64(5),
         );
         // chunk namespace.
         builder
             .when(frame.transition())
-            .assert_zero(act_next * (chunk_seq_id_head_next - chunk_seq_id_head - n_chunks));
+            .when(act_next)
+            .assert_eq(chunk_seq_id_head_next, chunk_seq_id_head + n_chunks);
         // No Eidos chunks-absorption namespace continuity. Other Eidos
         // callers (transcript-node hashing, the digest-chunks / keccak
         // one-shots this chiplet drives, …) interleave with chunk-
@@ -399,16 +399,16 @@ where
             array::from_fn(|i| local[COL_H_KECCAK_BEGIN + i].dup());
 
         // Multiplicities.
-        let neg_act: LB::Expr = LB::Expr::ZERO - act.clone();
-        let pos_act: LB::Expr = act.clone();
-        let digest_mult: LB::Expr = act;
-        let out_mult: LB::Expr = local[COL_OUT_MULT].dup();
-        let neg_out_mult: LB::Expr = LB::Expr::ZERO - out_mult;
+        let neg_act = -act.dup();
+        let pos_act = act.dup();
+        let digest_mult = act.dup();
+        let out_mult = local[COL_OUT_MULT].dup();
+        let neg_out_mult = -out_mult.dup();
 
         // Derived addresses / cycles.
         // chunk_ptr_head = 4·chunk_seq_id_head — the bus-side
         // conversion lives here, not in the chunk chiplet.
-        let chunk_ptr_head: LB::Expr = LB::Expr::from(Felt::from(4u8)) * chunk_seq_id_head.clone();
+        let chunk_ptr_head = chunk_seq_id_head.mul_2exp_u64(2);
         // absorption_id_chunks_tail = absorption_id_chunks + n_chunks − 1.
         let absorption_id_chunks_tail: LB::Expr =
             absorption_id_chunks.clone() + n_chunks.clone() - LB::Expr::ONE;
@@ -424,7 +424,7 @@ where
         // Eidos frames and their initial chaining values.
         let frame_chunks = [
             LB::Expr::from(DEFERRED_CHUNKS_DOMAIN),
-            LB::Expr::from(Felt::from(8u8)) * n_chunks,
+            n_chunks.mul_2exp_u64(3),
             LB::Expr::ZERO,
             LB::Expr::ZERO,
         ];

@@ -305,21 +305,25 @@ const _: () = {
 /// ZERO_HASH is the remaining active family. Its boolean constraint enforces the family one-hot.
 pub fn zero_flag<E: PrimeCharacteristicRing, V: Dup + Into<E>>(row: &[V]) -> E {
     row[COL_ACT].dup().into()
-        - row[COL_IS_AND].dup().into()
-        - row[COL_IS_UINT_LEAF].dup().into()
-        - row[COL_IS_UINT_OP].dup().into()
-        - row[COL_IS_EC_CREATE].dup().into()
-        - row[COL_IS_EC_PAI].dup().into()
-        - row[COL_IS_EC_OP].dup().into()
-        - row[COL_IS_EC_MSM].dup().into()
+        - E::sum_array::<7>(&[
+            row[COL_IS_AND].dup().into(),
+            row[COL_IS_UINT_LEAF].dup().into(),
+            row[COL_IS_UINT_OP].dup().into(),
+            row[COL_IS_EC_CREATE].dup().into(),
+            row[COL_IS_EC_PAI].dup().into(),
+            row[COL_IS_EC_OP].dup().into(),
+            row[COL_IS_EC_MSM].dup().into(),
+        ])
 }
 
 /// Add is the remaining operation in either op family; constrain this expression to be boolean.
 pub fn add_flag<E: PrimeCharacteristicRing, V: Dup + Into<E>>(row: &[V]) -> E {
     row[COL_IS_UINT_OP].dup().into() + row[COL_IS_EC_OP].dup().into()
-        - row[COL_IS_SUB].dup().into()
-        - row[COL_IS_MUL].dup().into()
-        - row[COL_IS_IS].dup().into()
+        - E::sum_array::<3>(&[
+            row[COL_IS_SUB].dup().into(),
+            row[COL_IS_MUL].dup().into(),
+            row[COL_IS_IS].dup().into(),
+        ])
 }
 
 // The constrained uint add/sub flags let us derive frame parameter 0 linearly,
@@ -328,19 +332,33 @@ fn frame_op_id<E: PrimeCharacteristicRing, V: Dup + Into<E>>(row: &[V]) -> E {
     let uint_add: E = row[COL_IS_UINT_ADD].dup().into();
     let uint_sub: E = row[COL_IS_UINT_SUB].dup().into();
     let uint_mul: E = row[COL_IS_MUL].dup().into();
-    let uint_eq =
-        row[COL_IS_UINT_OP].dup().into() - uint_add.clone() - uint_sub.clone() - uint_mul.clone();
-    let ec_add = add_flag::<E, V>(row) - uint_add.clone();
-    let ec_sub = row[COL_IS_SUB].dup().into() - uint_sub.clone();
-    let ec_eq = row[COL_IS_IS].dup().into() - uint_eq.clone();
-    uint_add * E::from_u64(UintPrecompile::ADD_OP_ID)
-        + uint_sub * E::from_u64(UintPrecompile::SUB_OP_ID)
-        + uint_mul * E::from_u64(UintPrecompile::MUL_OP_ID)
-        + uint_eq * E::from_u64(UintPrecompile::EQ_OP_ID)
-        + ec_add * E::from_u64(CurvePrecompile::ADD_OP_ID)
-        + ec_sub * E::from_u64(CurvePrecompile::SUB_OP_ID)
-        + ec_eq * E::from_u64(CurvePrecompile::EQ_OP_ID)
-        + row[COL_IS_EC_MSM].dup().into() * E::from_u64(CurvePrecompile::MSM_OP_ID)
+    let uint_eq = row[COL_IS_UINT_OP].dup().into()
+        - E::sum_array::<3>(&[uint_add.dup(), uint_sub.dup(), uint_mul.dup()]);
+    let ec_add = add_flag::<E, V>(row) - uint_add.dup();
+    let ec_sub = row[COL_IS_SUB].dup().into() - uint_sub.dup();
+    let ec_eq = row[COL_IS_IS].dup().into() - uint_eq.dup();
+    E::dot_product(
+        &[
+            uint_add,
+            uint_sub,
+            uint_mul,
+            uint_eq,
+            ec_add,
+            ec_sub,
+            ec_eq,
+            row[COL_IS_EC_MSM].dup().into(),
+        ],
+        &[
+            E::from_u64(UintPrecompile::ADD_OP_ID),
+            E::from_u64(UintPrecompile::SUB_OP_ID),
+            E::from_u64(UintPrecompile::MUL_OP_ID),
+            E::from_u64(UintPrecompile::EQ_OP_ID),
+            E::from_u64(CurvePrecompile::ADD_OP_ID),
+            E::from_u64(CurvePrecompile::SUB_OP_ID),
+            E::from_u64(CurvePrecompile::EQ_OP_ID),
+            E::from_u64(CurvePrecompile::MSM_OP_ID),
+        ],
+    )
 }
 
 // PUBLIC VALUES LAYOUT
@@ -424,31 +442,24 @@ impl air::LiftedAir for TranscriptEvalAir {
 
         // Activity: binary, sticky-downward.
         builder.assert_bool(local[COL_ACT].dup());
-        builder
-            .when(frame.transition())
-            .assert_zero((AB::Expr::ONE - act.clone()) * act_next);
+        let inactive = AB::Expr::ONE - act.dup();
+        builder.when(frame.transition()).when(inactive.dup()).assert_zero(act_next);
 
         // ZERO_HASH leaf: boolean flag, and `h = 0` when set (so a prover
         // can't shortcut a non-zero hash to the `True` base case).
-        builder.assert_bool(is_zero.clone());
-        for h_i in &h {
-            builder.assert_zero(is_zero.clone() * h_i.clone());
-        }
+        builder.assert_bool(is_zero.dup());
+        builder.when(is_zero.dup()).assert_zeros(h.each_ref().map(Dup::dup));
 
         // Root pin: the first row is the root; its `h` is the public
         // transcript root. (Empty transcript: row 0 is a ZERO_HASH leaf,
         // so `h = 0` forces `public_root = 0`.)
-        for i in 0..DIGEST_WIDTH {
-            builder
-                .when(frame.first_row())
-                .assert_zero(h[i].clone() - public_root[i].clone());
-        }
+        builder.when(frame.first_row()).assert_eq_arrays(h, public_root);
 
         // Inactive rows provide nothing: pin `out_mult = 0` so the
         // `Binding(h, True)` provide (mult `−out_mult`) contributes 0 on
         // padding. (The root's `out_mult = 0` is not pinned here — it is
         // forced by bus balance: the root has no consumer.)
-        builder.assert_zero((AB::Expr::ONE - act) * out_mult);
+        builder.when(inactive).assert_zero(out_mult);
 
         // `zero_flag` completes the family one-hot on each active row: is_and + is_zero +
         // is_uint_leaf + is_uint_op + is_ec_create + is_ec_pai + is_ec_op + is_ec_msm = act. The
@@ -462,35 +473,31 @@ impl air::LiftedAir for TranscriptEvalAir {
         let is_ec_op: AB::Expr = local[COL_IS_EC_OP].dup();
         // EcMsm: the family bit (every absorb row) + the boundary (last
         // absorb). is_msm_last is a sub-flag, not in the activity one-hot.
-        let is_ec_msm: AB::Expr = local[COL_IS_EC_MSM].dup();
-        let is_msm_last: AB::Expr = local[COL_IS_MSM_LAST].dup();
-        for col in [
-            COL_IS_AND,
-            COL_IS_UINT_LEAF,
-            COL_IS_UINT_OP,
-            COL_IS_EC_CREATE,
-            COL_IS_EC_PAI,
-            COL_IS_EC_OP,
-            COL_IS_EC_MSM,
-            COL_IS_MSM_LAST,
-        ] {
-            builder.assert_bool(local[col].dup());
-        }
+        let is_ec_msm = local[COL_IS_EC_MSM].dup();
+        let is_msm_last = local[COL_IS_MSM_LAST].dup();
+        builder.assert_bools([
+            is_and.dup(),
+            is_uint_leaf.dup(),
+            is_uint_op.dup(),
+            is_ec_create.dup(),
+            is_ec_pai.dup(),
+            is_ec_op.dup(),
+            is_ec_msm.dup(),
+            is_msm_last.dup(),
+        ]);
         // The boundary is an absorb row.
-        builder.assert_zero(is_msm_last.clone() * (AB::Expr::ONE - is_ec_msm.clone()));
+        builder.when(is_msm_last.dup()).assert_eq(AB::Expr::ONE, is_ec_msm.dup());
         // Shared op one-hot: the operation on a uint-op OR ec-op row (the two
         // op families never coexist, so the columns serve both).
         let is_add: AB::Expr = add_flag(local);
-        let is_sub: AB::Expr = local[COL_IS_SUB].dup();
-        let is_mul: AB::Expr = local[COL_IS_MUL].dup();
-        let is_is: AB::Expr = local[COL_IS_IS].dup();
-        builder.assert_bool(is_add.clone());
-        builder.assert_eq(local[COL_IS_UINT_ADD].dup(), is_uint_op.clone() * is_add.clone());
-        builder.assert_eq(local[COL_IS_UINT_SUB].dup(), is_uint_op.clone() * is_sub.clone());
-        for col in [COL_IS_SUB, COL_IS_MUL, COL_IS_IS] {
-            builder.assert_bool(local[col].dup());
-        }
-        let is_op = is_add + is_sub + is_mul.clone() + is_is.clone();
+        let is_sub = local[COL_IS_SUB].dup();
+        let is_mul = local[COL_IS_MUL].dup();
+        let is_is = local[COL_IS_IS].dup();
+        builder.assert_bool(is_add.dup());
+        builder.assert_eq(local[COL_IS_UINT_ADD].dup(), is_uint_op.dup() * is_add.dup());
+        builder.assert_eq(local[COL_IS_UINT_SUB].dup(), is_uint_op.dup() * is_sub.dup());
+        builder.assert_bools([is_sub.dup(), is_mul.dup(), is_is.dup()]);
+        let is_op = AB::Expr::sum_array::<4>(&[is_add, is_sub.dup(), is_mul.dup(), is_is.dup()]);
         // The op one-hot sums to "this is an op row" = is_uint_op + is_ec_op,
         // so a set op flag forces exactly one op family (and conversely).
         // EC has no multiply — is_mul only ever rides a uint-op row.
@@ -499,18 +506,17 @@ impl air::LiftedAir for TranscriptEvalAir {
         // Row 0 is the public transcript root and must be a True-binding node.
         // This excludes value rows and EcMsm interior absorbs, whose `h` is not
         // a public assertion digest.
-        let root_truthy = is_zero + is_and + is_is.clone();
-        builder.when(frame.first_row()).assert_zero(root_truthy - AB::Expr::ONE);
+        let root_truthy = is_zero + is_and.dup() + is_is.dup();
+        builder.when(frame.first_row()).assert_one(root_truthy);
 
         // Both create modes (finite + PAI) carry the group in frame parameter 1 and
         // consume EcPoint. PAI has no coordinate children, so its VALUE payload is the canonical
         // `(TRUE_DIGEST, TRUE_DIGEST)` pair (zero digest in both block halves).
         let is_create = is_ec_create.clone() + is_ec_pai.clone();
         for i in 0..DIGEST_WIDTH {
-            let lhs_i: AB::Expr = local[COL_LHS_BEGIN + i].dup();
-            let rhs_i: AB::Expr = local[COL_RHS_BEGIN + i].dup();
-            builder.assert_zero(is_ec_pai.clone() * lhs_i);
-            builder.assert_zero(is_ec_pai.clone() * rhs_i);
+            let lhs_i = local[COL_LHS_BEGIN + i].dup();
+            let rhs_i = local[COL_RHS_BEGIN + i].dup();
+            builder.when(is_ec_pai.dup()).assert_zeros([lhs_i, rhs_i]);
         }
         let group_ptr: AB::Expr = local[COL_EC_CONTEXT_GROUP_PTR].dup();
         // Result-binding op rows (all ops but `Is`, which binds True) —
@@ -526,13 +532,17 @@ impl air::LiftedAir for TranscriptEvalAir {
         let bound_ptr: AB::Expr = local[COL_BOUND_PTR].dup();
         // VM admission uses the native fixed catalogue. The uint store and
         // arithmetic chiplets retain their generic pointer-based relations.
-        let uint_context =
-            is_uint_leaf.clone() + is_uint_op.clone() + is_ec_create.clone() + is_ec_msm.clone();
-        let selector: AB::Expr = local[COL_UINT_DOMAIN_SELECTOR].dup();
+        let uint_context = AB::Expr::sum_array::<4>(&[
+            is_uint_leaf.dup(),
+            is_uint_op.dup(),
+            is_ec_create.dup(),
+            is_ec_msm.dup(),
+        ]);
+        let selector = local[COL_UINT_DOMAIN_SELECTOR].dup();
         builder.assert_zero(
-            selector.clone()
-                * (selector.clone() - uint_context.clone() * Felt::from_u8(3))
-                * (selector.clone() - uint_context.clone() * Felt::from_u8(8)),
+            selector.dup()
+                * (selector.dup() - uint_context.dup() * Felt::from_u8(3))
+                * (selector.dup() - uint_context.mul_2exp_u64(3)),
         );
         // In uint contexts, set x = bound_ptr - 2 and group the native bounds into triples:
         // selector 0: 2*(x+1)*x*(x-1)       -> bounds {1, 2, 3}
@@ -544,55 +554,50 @@ impl air::LiftedAir for TranscriptEvalAir {
         // at selectors 0, 3, 8; the total degree stays three. Scaling by 2 clears denominators.
         // Outside uint contexts, bound_ptr = 0 and the first cubic forces selector = 0;
         // shifting by 2*uint_context also makes x = 0, satisfying the second cubic.
-        let x = bound_ptr.clone() - uint_context * Felt::from_u8(2);
+        let x = bound_ptr.dup() - uint_context.double();
         builder.assert_zero(
-            x.clone()
-                * (x.clone() * (x * Felt::from_u8(2) - selector.clone() * Felt::from_u8(6))
-                    + selector.clone() * (selector.clone() * Felt::from_u8(3) + Felt::from_u8(9))
+            x.dup()
+                * (x.dup() * (x.double() - selector.dup() * Felt::from_u8(6))
+                    + selector.dup() * (selector.dup() * Felt::from_u8(3) + Felt::from_u8(9))
                     - Felt::from_u8(2))
                 + selector.clone() * (selector * Felt::from_u8(11) - Felt::from_u8(49)),
         );
         // ptr also carries the claim's value point on an EcMsm boundary row
         // (the Group binding provide / MsmExpr consume); 0 on the run's
         // earlier absorbs.
-        builder.assert_zero(
-            (not_uint_leaf.clone()
-                - is_result_op.clone()
-                - is_ec_create.clone()
-                - is_ec_pai
-                - is_msm_last.clone())
-                * ptr,
-        );
+        let no_result_ptr = not_uint_leaf.dup()
+            - AB::Expr::sum_array::<4>(&[
+                is_result_op.dup(),
+                is_ec_create.dup(),
+                is_ec_pai.dup(),
+                is_msm_last.dup(),
+            ]);
+        builder.when(no_result_ptr).assert_zero(ptr);
         // bound_ptr also carries the scalar bound on every EcMsm absorb row
         // (the sᵢ `Uint` binding consume).
-        builder.assert_zero(
-            (not_uint_leaf - is_uint_op - is_ec_create.clone() - is_ec_msm.clone())
-                * bound_ptr.clone(),
-        );
+        let no_bound_ptr = not_uint_leaf
+            - AB::Expr::sum_array::<3>(&[is_uint_op.dup(), is_ec_create.dup(), is_ec_msm.dup()]);
+        builder.when(no_bound_ptr).assert_zero(bound_ptr.dup());
         // Keep frame parameter 1 linear in the Eidos messages. Uint VALUE rows carry the bound,
         // and curve VALUE rows carry the admitted group. EcMsm carries its term count, checked
         // at the run's tail below.
         let frame_param1: AB::Expr = local[COL_FRAME_PARAM1].dup();
         let expected_frame_param1 =
-            is_uint_leaf * bound_ptr + is_create.clone() * group_ptr.clone();
-        builder.assert_zero(
-            (AB::Expr::ONE - is_ec_msm.clone()) * (frame_param1.clone() - expected_frame_param1),
-        );
+            is_uint_leaf.dup() * bound_ptr.dup() + is_create.dup() * group_ptr.dup();
+        builder
+            .when(AB::Expr::ONE - is_ec_msm.dup())
+            .assert_eq(frame_param1.dup(), expected_frame_param1);
 
         // Op operand ptrs: a_ptr and b_ptr on any op row (both families) or
         // finite EcCreate. On `Is` (either family) b_ptr = a_ptr *is* the equality.
         // a_ptr / b_ptr also carry the absorb's (Pᵢ_ptr, sᵢ_ptr) on EcMsm
         // rows — the MsmClaimTerm base/scalar and the child binding consumes.
-        let a_ptr: AB::Expr = local[COL_A_PTR].dup();
-        let b_ptr: AB::Expr = local[COL_B_PTR].dup();
-        builder.assert_zero(
-            (AB::Expr::ONE - is_op.clone() - is_ec_create.clone() - is_ec_msm.clone())
-                * a_ptr.clone(),
-        );
-        builder.assert_zero(
-            (AB::Expr::ONE - is_op - is_ec_create - is_ec_msm.clone()) * b_ptr.clone(),
-        );
-        builder.assert_zero(is_is * (b_ptr - a_ptr));
+        let a_ptr = local[COL_A_PTR].dup();
+        let b_ptr = local[COL_B_PTR].dup();
+        let no_operands =
+            AB::Expr::ONE - AB::Expr::sum_array::<3>(&[is_op, is_ec_create.dup(), is_ec_msm.dup()]);
+        builder.when(no_operands).assert_zeros([a_ptr.dup(), b_ptr.dup()]);
+        builder.when(is_is.dup()).assert_eq(b_ptr, a_ptr);
 
         // Subtract the uint value-op selectors to get a linear curve-context flag.
         // Point equality compares child pointers and carries no group context.
@@ -615,30 +620,21 @@ impl air::LiftedAir for TranscriptEvalAir {
         let is_msm_head: AB::Expr = local[COL_MSM_IS_HEAD].dup();
         let is_msm_head_next: AB::Expr = next[COL_MSM_IS_HEAD].dup();
         builder.assert_bool(local[COL_MSM_IS_HEAD].dup());
-        builder.assert_zero(is_msm_head.clone() * (AB::Expr::ONE - is_ec_msm.clone()));
+        builder.when(is_msm_head.dup()).assert_eq(AB::Expr::ONE, is_ec_msm.dup());
 
-        let continues = is_ec_msm.clone() - is_msm_last.clone();
-        let starts =
-            is_ec_msm_next.clone() * (AB::Expr::ONE - is_ec_msm.clone() + is_msm_last.clone());
-        builder
-            .when(frame.first_row())
-            .assert_zero(is_ec_msm.clone() * (is_msm_head - AB::Expr::ONE));
-        builder
-            .when(frame.transition())
-            .assert_zero(continues.clone() * (AB::Expr::ONE - is_ec_msm_next));
-        builder
-            .when(frame.transition())
-            .assert_zero(continues.clone() * is_msm_head_next.clone());
-        builder
-            .when(frame.transition())
-            .assert_zero(starts.clone() * (is_msm_head_next - AB::Expr::ONE));
+        let continues = is_ec_msm.dup() - is_msm_last.dup();
+        let starts = is_ec_msm_next.dup() * (AB::Expr::ONE - continues.dup());
+        let msm_continuation = frame.transition() * continues.dup();
+        builder.when(frame.first_row()).when(is_ec_msm.dup()).assert_one(is_msm_head);
+        builder.when(msm_continuation.dup()).assert_eq(AB::Expr::ONE, is_ec_msm_next);
+        builder.when(msm_continuation.dup()).assert_zero(is_msm_head_next.dup());
+        builder.when(frame.transition()).when(starts.dup()).assert_one(is_msm_head_next);
 
-        let absorption_id_local_for_msm: AB::Expr = local[COL_ABSORPTION_ID].dup();
-        let absorption_id_next_for_msm: AB::Expr = next[COL_ABSORPTION_ID].dup();
-        builder.when(frame.transition()).assert_zero(
-            continues.clone()
-                * (absorption_id_next_for_msm - absorption_id_local_for_msm - AB::Expr::ONE),
-        );
+        let absorption_id_local_for_msm = local[COL_ABSORPTION_ID].dup();
+        let absorption_id_next_for_msm = next[COL_ABSORPTION_ID].dup();
+        builder
+            .when(msm_continuation.dup())
+            .assert_eq(absorption_id_next_for_msm, absorption_id_local_for_msm + AB::Expr::ONE);
 
         // `msm_idx` is a pure **position counter** within an absorb run (0 at
         // the run start, +1 per continuation), so the boundary's `k =
@@ -651,13 +647,15 @@ impl air::LiftedAir for TranscriptEvalAir {
         // Keep the position cell canonical off MSM rows. Besides ruling out
         // irrelevant witness freedom, this makes `absorption_id - msm_idx` a
         // linear expression for the head-aware terminal relation.
-        builder.assert_zero((AB::Expr::ONE - is_ec_msm.clone()) * msm_idx.clone());
-        builder.when(frame.first_row()).assert_zero(is_ec_msm * msm_idx.clone());
-        builder.when(frame.transition()).assert_zero(starts * msm_idx_next.clone());
+        builder.when(AB::Expr::ONE - is_ec_msm.dup()).assert_zero(msm_idx.dup());
+        builder.when(frame.first_row()).when(is_ec_msm.dup()).assert_zero(msm_idx.dup());
+        builder.when(frame.transition()).when(starts).assert_zero(msm_idx_next.dup());
         builder
-            .when(frame.transition())
-            .assert_zero(continues.clone() * (msm_idx_next - msm_idx.clone() - AB::Expr::ONE));
-        builder.assert_zero(is_msm_last * (frame_param1.clone() - msm_idx - AB::Expr::ONE));
+            .when(msm_continuation.dup())
+            .assert_eq(msm_idx_next, msm_idx.dup() + AB::Expr::ONE);
+        builder
+            .when(is_msm_last.dup())
+            .assert_eq(frame_param1.dup(), msm_idx + AB::Expr::ONE);
 
         // The claim's `expr_ptr` and `group_ptr` are constant across an absorb run. Each absorb row
         // attributes its term through `MsmClaimTerm(msm_expr, …)`, while the boundary binds the
@@ -665,20 +663,15 @@ impl air::LiftedAir for TranscriptEvalAir {
         // prover could hash the terms of one expression while binding the node to another
         // expression's value. Holding `group_ptr` constant also aligns the boundary message with
         // the complete run.
-        let msm_expr: AB::Expr = local[COL_MSM_EXPR].dup();
-        let msm_expr_next: AB::Expr = next[COL_MSM_EXPR].dup();
-        let group_local: AB::Expr = local[COL_EC_CONTEXT_GROUP_PTR].dup();
-        let group_next_const: AB::Expr = next[COL_EC_CONTEXT_GROUP_PTR].dup();
-        builder
-            .when(frame.transition())
-            .assert_zero(continues.clone() * (msm_expr_next - msm_expr));
-        let frame_param1_next: AB::Expr = next[COL_FRAME_PARAM1].dup();
-        builder
-            .when(frame.transition())
-            .assert_zero(continues.clone() * (frame_param1_next - frame_param1));
-        builder
-            .when(frame.transition())
-            .assert_zero(continues * (group_next_const - group_local));
+        let msm_expr = local[COL_MSM_EXPR].dup();
+        let msm_expr_next = next[COL_MSM_EXPR].dup();
+        let group_local = local[COL_EC_CONTEXT_GROUP_PTR].dup();
+        let group_next_const = next[COL_EC_CONTEXT_GROUP_PTR].dup();
+        let frame_param1_next = next[COL_FRAME_PARAM1].dup();
+        builder.when(msm_continuation).assert_eq_arrays(
+            [msm_expr_next, frame_param1_next, group_next_const],
+            [msm_expr, frame_param1, group_local],
+        );
 
         // Evaluate this AIR's LogUp relations through the shared adapter.
         lookup::eval_lookup(self, frame, inputs, builder);
@@ -754,23 +747,24 @@ where
         // Node-type gates: the compression fires on every hashing node (AND ∪
         // uint-leaf ∪ uint-op ∪ create ∪ ec-op ∪ EcMsm); the AND child
         // consumes on is_and; uint-op child consumes fire on the family bit.
-        let node: LB::Expr = is_and.clone()
-            + is_uint_leaf.clone()
-            + is_uint_op.clone()
-            + is_create.clone()
-            + is_ec_op.clone()
-            + is_ec_msm.clone();
-        let and_gate: LB::Expr = is_and.clone();
-        let op_lhs_gate: LB::Expr = is_uint_op.clone();
+        let node = LB::Expr::sum_array::<6>(&[
+            is_and.dup(),
+            is_uint_leaf.dup(),
+            is_uint_op.dup(),
+            is_create.dup(),
+            is_ec_op.dup(),
+            is_ec_msm.dup(),
+        ]);
+        let and_gate = is_and.dup();
+        let op_lhs_gate = is_uint_op.dup();
         // Provide multiplicity `−out_mult` (supply), split between the True
         // provide (AND ∪ ZERO ∪ Is — either family, col 1) and the Uint
         // provide (uint-leaf ∪ uint value op, col 4); `out_mult = 0` on the
         // root and padding ⇒ provide nothing.
-        let neg_out_mult: LB::Expr = LB::Expr::ZERO - out_mult;
-        let and_provide: LB::Expr =
-            neg_out_mult.clone() * (is_and.clone() + is_zero + is_is.clone());
-        let uint_gate: LB::Expr = is_uint_leaf.clone();
-        let uint_provide: LB::Expr = neg_out_mult * (is_uint_leaf.clone() + is_value_op);
+        let neg_out_mult = -out_mult.dup();
+        let and_provide = neg_out_mult.dup() * (is_and.dup() + is_zero + is_is.dup());
+        let uint_gate = is_uint_leaf.dup();
+        let uint_provide = neg_out_mult * (is_uint_leaf.dup() + is_value_op);
 
         // Node-compression frame, every slot degree 1.
         let uint_domain = LB::Expr::from(UintPrecompile::domain().as_felt());
@@ -811,8 +805,13 @@ where
         // AND has zero operand/bound pointers; EC operations have zero bound pointers.
         // These canonical fields permit one linear child pair for all three families.
         // PAI has no children; MSM needs a separate Group child with a zero bound.
-        let child_gate = is_and + is_uint_op.clone() + is_ec_create.clone() + is_ec_op.clone();
-        let child_tag = (is_uint_op + is_ec_create)
+        let child_gate = LB::Expr::sum_array::<4>(&[
+            is_and.dup(),
+            is_uint_op.dup(),
+            is_ec_create.dup(),
+            is_ec_op.dup(),
+        ]);
+        let child_tag = (is_uint_op.dup() + is_ec_create.dup())
             * LB::Expr::from(Felt::from(ValueTag::Uint as u8))
             + is_ec_op.clone() * LB::Expr::from(Felt::from(ValueTag::Group as u8));
         frac_col!(
@@ -1008,9 +1007,9 @@ where
         // used only where a gate must exclude an op. The relation *messages*
         // ride the bare op flags — the consume's family gate already pins us
         // to an ec-op row, keeping those degree-1.
-        let ec_result: LB::Expr = is_ec_op * (LB::Expr::ONE - is_is);
-        let g_out_mult: LB::Expr = local[COL_OUT_MULT].dup();
-        let g_neg_out_mult: LB::Expr = LB::Expr::ZERO - g_out_mult;
+        let ec_result = is_ec_op.dup() * (LB::Expr::ONE - is_is.dup());
+        let g_out_mult = local[COL_OUT_MULT].dup();
+        let g_neg_out_mult = -g_out_mult.dup();
 
         // col 5: provide the created / result point's `Group` binding
         // (create ∪ add/sub), alone (heavy). Create / pai / result-binding

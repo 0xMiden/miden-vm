@@ -195,7 +195,7 @@ pub(in crate::vm::constraints::lookup) fn emit_hash_kernel_table<LB>(
                             );
                             let w0: LB::Expr = mem_w0.dup();
                             let w1: LB::Expr = mem_w1.dup();
-                            let w1_mul4 = w1.clone() * LB::Expr::from_u16(4);
+                            let w1_mul4 = w1.mul_2exp_u64(2);
                             b.remove("mem_w0", RangeMsg { value: w0 }, Deg { v: 3, u: 4 });
                             b.remove("mem_w1", RangeMsg { value: w1 }, Deg { v: 3, u: 4 });
                             b.remove(

@@ -179,7 +179,9 @@ impl air::LiftedAir for KeccakRoundAir {
 
             // IP transition: ip' − ip − 1 = 0, per lane. `when_transition` skips the cyclic wrap
             // at row N−1 → 0; the centered LogUp recurrence independently includes that wrap.
-            builder.when(frame.transition()).assert_zero(next_ip - ip - AB::Expr::ONE);
+            builder
+                .when(frame.transition())
+                .assert_eq(next_ip.dup(), ip.dup() + AB::Expr::ONE);
 
             // Active binarity: act ∈ {0, 1}.
             builder.assert_bool(local[base + COL_ACT].dup());
@@ -192,12 +194,12 @@ impl air::LiftedAir for KeccakRoundAir {
             // pow2 height ≥ 128), so `p_last = 1` and the constraint is
             // vacuous. The sponge bus forces `act = 1` at row 0 by providing
             // RC[0] to the iota row, whose `act` equals the round's through this constraint.
-            builder.assert_zero((AB::Expr::ONE - p_last.dup()) * (next_act - act));
+            builder.when(AB::Expr::ONE - p_last.dup()).assert_eq(next_act.dup(), act.dup());
 
             // Active pure-ROL rows range-check both vectors through BytePairLut. Each
             // packed u32 embeds injectively in the field, so two equalities bind all eight
             // bytes. NOP and inactive rows have no observable operand/result bus traffic.
-            let no_logic = AB::Expr::ONE - is_xor.dup() - is_andnot.dup();
+            let no_logic = AB::Expr::ONE - (is_xor.dup() + is_andnot.dup());
             for half in 0..2 {
                 let a: AB::Expr = pack_le(
                     &local[base + A_BYTES_RANGE.start + 4 * half
@@ -209,7 +211,7 @@ impl air::LiftedAir for KeccakRoundAir {
                         ..base + R_BYTES_RANGE.start + 4 * half + 4],
                     256,
                 );
-                builder.assert_zero(no_logic.dup() * (r - a));
+                builder.when(no_logic.dup()).assert_eq(r, a);
             }
         }
 
@@ -248,14 +250,13 @@ fn memory_provide_c<E: Algebra<Felt>>(
         let logic = x[half].dup() + is_andnot.dup() * (andnot - x[half].dup());
         // Fixed coefficients include the rotation selector and half swap. Each product in
         // the destination expression has one periodic coefficient and one witness value.
+        let same_bytes = array::from_fn::<_, 4, _>(|i| x_bytes[4 * half + i].dup());
+        let other_bytes = array::from_fn::<_, 4, _>(|i| x_bytes[4 * (1 - half) + i].dup());
+        let same_coefficients = array::from_fn(|i| periodic[program::COL_OUTPUT_SAME + i].dup());
+        let other_coefficients = array::from_fn(|i| periodic[program::COL_OUTPUT_OTHER + i].dup());
         logic
-            + (0..4)
-                .map(|i| {
-                    periodic[program::COL_OUTPUT_SAME + i].dup() * x_bytes[4 * half + i].dup()
-                        + periodic[program::COL_OUTPUT_OTHER + i].dup()
-                            * x_bytes[4 * (1 - half) + i].dup()
-                })
-                .sum::<E>()
+            + E::dot_product(&same_bytes, &same_coefficients)
+            + E::dot_product(&other_bytes, &other_coefficients)
             + periodic[program::COL_OUTPUT_MASK_SAME].dup() * mask_xors[half].dup()
             + periodic[program::COL_OUTPUT_MASK_OTHER].dup() * mask_xors[1 - half].dup()
             + periodic[program::COL_OUTPUT_BIAS].dup()
@@ -358,7 +359,7 @@ where
             let [c_lo, c_hi] =
                 memory_provide_c(a_bytes, b_bytes, x_bytes, mask_xors, periodic, is_andnot.clone());
             // A destination can have several readers, so its provide uses the negative read count.
-            let neg_dst_mult: LB::Expr = LB::Expr::ZERO - dst_mult_act;
+            let neg_dst_mult = -dst_mult_act;
             let [a_lo, a_hi] = halves_le(a_bytes, 256);
             let [b_lo, b_hi] = halves_le(b_bytes, 256);
             frac_col!(
@@ -459,12 +460,14 @@ where
                                 LB::Expr::ONE,
                                 |batch| {
                                     for half in 0..2 {
-                                        let byte = (0..4)
-                                            .map(|i| {
-                                                periodic[program::COL_ROT_BYTE_BEGIN + i].clone()
-                                                    * x_bytes[4 * half + i].dup()
-                                            })
-                                            .sum::<LB::Expr>();
+                                        let byte = LB::Expr::dot_product(
+                                            &array::from_fn::<_, 4, _>(|i| {
+                                                x_bytes[4 * half + i].dup()
+                                            }),
+                                            &array::from_fn(|i| {
+                                                periodic[program::COL_ROT_BYTE_BEGIN + i].dup()
+                                            }),
+                                        );
                                         batch.insert(
                                             "masked-byte",
                                             rol_act.clone(),

@@ -9,6 +9,7 @@ mod tests;
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_stark::air::LiftedAirBuilder;
+use p3_field::Dup;
 
 use crate::vm::{
     CoreCols, NativeMidenAirBuilder,
@@ -98,17 +99,15 @@ pub fn enforce_main<AB>(
     // AND: s0, s1 are boolean, s0' = s0 * s1.
     {
         let builder = &mut builder.when(is_and);
-        builder.assert_bool(s0.clone());
-        builder.assert_bool(s1.clone());
-        builder.assert_eq(s0_next.clone(), s0.clone() * s1.clone());
+        builder.assert_bools([s0.dup(), s1.dup()]);
+        builder.assert_eq(s0_next.dup(), s0.dup() * s1.dup());
     }
 
     // OR: s0, s1 are boolean, s0' = s0 + s1 - s0 * s1.
     {
         let builder = &mut builder.when(is_or);
-        builder.assert_bool(s0.clone());
-        builder.assert_bool(s1.clone());
-        builder.assert_eq(s0_next.clone(), s0.clone() + s1.clone() - s0.clone() * s1.clone());
+        builder.assert_bools([s0.dup(), s1.dup()]);
+        builder.assert_eq(s0_next.dup(), s0.dup() + s1.dup() - s0.dup() * s1.dup());
     }
 
     // EQ: if s0 != s1, h0 acts as 1/(s0 - s1) and forces s0' = 0; if equal, s0' = 1.
@@ -141,10 +140,10 @@ pub fn enforce_main<AB>(
     // check.
     {
         let builder = &mut builder.when(is_expacc);
-        builder.assert_eq(exp_next, exp.clone() * exp.clone());
-        builder.assert_eq(exp_val.clone(), (exp - F_1) * exp_bit.clone() + F_1);
+        builder.assert_eq(exp_next, exp.square());
+        builder.assert_eq(exp_val.dup(), (exp - F_1) * exp_bit.dup() + F_1);
         builder.assert_eq(acc_next, acc * exp_val);
-        builder.assert_eq(exp_b, exp_b_next * F_2 + exp_bit.clone());
+        builder.assert_eq(exp_b, exp_b_next.double() + exp_bit.dup());
         builder.assert_bool(exp_bit);
     }
 
@@ -163,21 +162,20 @@ pub fn enforce_main<AB>(
     // EXT2MUL transition: quadratic extension multiplication producing (c0, c1) from (a, b).
     {
         let builder = &mut builder.when(is_ext2mul);
-        builder.assert_eq(ext_d0, ext_b0.clone());
-        builder.assert_eq(ext_d1, ext_b1.clone());
-        builder.assert_eq(ext_c0, ext_a0_b0.clone() + ext_a1_b1.clone() * F_7);
-        builder.assert_eq(ext_c1, (ext_a0 + ext_a1) * (ext_b0 + ext_b1) - ext_a0_b0 - ext_a1_b1);
+        builder.assert_eq_arrays([ext_d0, ext_d1], [ext_b0.dup(), ext_b1.dup()]);
+        builder.assert_eq(ext_c0, ext_a0_b0.dup() + ext_a1_b1.dup() * F_7);
+        builder.assert_eq(ext_c1, (ext_a0 + ext_a1) * (ext_b0 + ext_b1) - (ext_a0_b0 + ext_a1_b1));
     }
 
     // -------------------------------------------------------------------------
     // U32 ops
     // -------------------------------------------------------------------------
     // U32 limbs: v_lo = h1*2^16 + h0, v_hi = h3*2^16 + h2.
-    let u32_v_lo = uop_h1 * TWO_POW_16 + uop_h0;
-    let u32_v_hi = uop_h3.clone() * TWO_POW_16 + uop_h2.clone();
-    let u32_remainder_diff = uop_h5 * TWO_POW_16 + uop_h4.clone();
-    let u32_v48 = uop_h2 * TWO_POW_32 + u32_v_lo.clone();
-    let u32_v64 = uop_h3.clone() * TWO_POW_48 + u32_v48.clone();
+    let u32_v_lo = uop_h1.mul_2exp_u64(16) + uop_h0;
+    let u32_v_hi = uop_h3.mul_2exp_u64(16) + uop_h2.dup();
+    let u32_remainder_diff = uop_h5.mul_2exp_u64(16) + uop_h4.dup();
+    let u32_v48 = uop_h2.mul_2exp_u64(32) + u32_v_lo.dup();
+    let u32_v64 = uop_h3.mul_2exp_u64(48) + u32_v48.dup();
 
     // Element validity check for u32split/u32mul/u32madd.
     // u32_v_hi_comp * u32_v_lo is intrinsic (symmetry test: setting either factor to 0 hides a
@@ -188,15 +186,16 @@ pub fn enforce_main<AB>(
     builder.when(u32_split_mul_madd).assert_zero(u32_v_hi_comp * u32_v_lo.clone());
 
     // U32 ops with two outputs: s0' = v_lo, s1' = v_hi.
-    let u32_two_outputs = is_u32split.clone()
-        + is_u32add.clone()
-        + is_u32add3.clone()
-        + is_u32mul.clone()
-        + is_u32madd.clone();
+    let u32_two_outputs = AB::Expr::sum_array::<5>(&[
+        is_u32split.dup(),
+        is_u32add.dup(),
+        is_u32add3.dup(),
+        is_u32mul.dup(),
+        is_u32madd.dup(),
+    ]);
     {
         let builder = &mut builder.when(u32_two_outputs);
-        builder.assert_eq(s0_next.clone(), u32_v_lo.clone());
-        builder.assert_eq(s1_next.clone(), u32_v_hi.clone());
+        builder.assert_eq_arrays([s0_next.dup(), s1_next.dup()], [u32_v_lo.dup(), u32_v_hi.dup()]);
     }
 
     builder.when(is_u32split).assert_eq(s0.clone(), u32_v64.clone());
@@ -233,7 +232,6 @@ pub fn enforce_main<AB>(
     // U32ASSERT2: verifies both stack elements are valid u32 values.
     {
         let builder = &mut builder.when(is_u32assert2);
-        builder.assert_eq(s0_next, u32_v_hi);
-        builder.assert_eq(s1_next, u32_v_lo);
+        builder.assert_eq_arrays([s0_next, s1_next], [u32_v_hi, u32_v_lo]);
     }
 }

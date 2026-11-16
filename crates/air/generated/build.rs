@@ -6,18 +6,31 @@ use miden_constraint_compiler::backend::{
     rust_eval::{AirEvaluator, emit_native_optimized_module},
 };
 
+#[path = "build/current_inputs_fixture.rs"]
+mod current_inputs_fixture;
+#[cfg(feature = "symbolic-experiments")]
+#[path = "build/folding_experiments.rs"]
+mod folding_experiments;
 #[path = "build/precompiles.rs"]
 mod precompiles;
 #[path = "build/preparation_pilot.rs"]
 mod preparation_pilot;
+#[path = "build/symbolic_fixture.rs"]
+mod symbolic_fixture;
 
 fn main() {
+    #[cfg(feature = "symbolic-experiments")]
+    folding_experiments::generate();
     precompiles::generate();
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=build/preparation_pilot.rs");
     println!("cargo:rerun-if-changed=build/preparation_fixture.rs");
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo provides OUT_DIR"));
     preparation_pilot::generate(&out);
+    println!("cargo:rerun-if-changed=build/current_inputs_fixture.rs");
+    println!("cargo:rerun-if-changed=build/symbolic_fixture.rs");
+    fs::write(out.join("symbolic_operations_fixture.rs"), symbolic_fixture::generate())
+        .expect("write rich-operation execution fixture");
     let write = |name: &str, contents: String| {
         let path = out.join(name);
         fs::write(&path, contents)
@@ -32,8 +45,7 @@ fn main() {
         .map(|((air, captured), label)| AirEvaluator {
             name: air.file_token(),
             air_label: label,
-            graph: captured.graph(),
-            constraints: captured.constraints(),
+            program: captured.program(),
             descriptor: captured.descriptor(),
         })
         .collect();
@@ -46,6 +58,7 @@ fn main() {
             descriptor: captured.descriptor(),
         })
         .collect();
+    write("current_inputs_fixture.rs", current_inputs_fixture::generate());
     write("native_evaluators.rs", emit_native_optimized_module("", &evals));
     write("native_descriptors.rs", rust_descriptor::emit_module("", &descriptors));
     let airs: Vec<_> = captured.iter().map(|(_, air)| air).collect();

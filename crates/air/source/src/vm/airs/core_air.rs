@@ -180,23 +180,21 @@ mod tests {
                 .all(|value| matches!(value, air::Assertion::Extension(_)))
         );
 
-        use air::symbolic::{AuxInput, BaseLeaf, ExtLeaf, RowOffset, SymbolicExpr};
-        let air::Assertion::Extension(SymbolicExpr::Mul { x: acc, y: first, .. }) =
-            &captured.assertions[counts.base]
-        else {
+        use air::symbolic::{AuxInput, ExprView, RowOffset};
+        let air::Assertion::Extension(expression) = &captured.assertions[counts.base] else {
             panic!("the first lookup assertion must remain its accumulator anchor");
         };
+        let ExprView::Mul { x: acc, y: first } = expression.as_ref().view() else {
+            panic!("the accumulator anchor must retain its first-row gate");
+        };
         assert!(matches!(
-            acc.as_ref(),
-            SymbolicExpr::Leaf(ExtLeaf::Input(AuxInput::Trace {
-                offset: RowOffset::Current,
-                index: 0
-            }))
+            acc.view(),
+            ExprView::AuxInput(AuxInput::Trace { row: RowOffset::Current, column: 0 })
         ));
-        assert!(matches!(
-            first.as_ref(),
-            SymbolicExpr::Leaf(ExtLeaf::Base(SymbolicExpr::Leaf(BaseLeaf::IsFirstRow)))
-        ));
+        let ExprView::Lift { value: first } = first.view() else {
+            panic!("the first-row marker must retain its base-domain lift");
+        };
+        assert!(matches!(first.view(), ExprView::IsFirstRow));
 
         #[cfg(feature = "std")]
         miden_stark::lookup::validate_native(&CoreAir, spec).unwrap();

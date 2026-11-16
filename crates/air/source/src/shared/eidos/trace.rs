@@ -435,7 +435,7 @@ fn write_footer_b_sum_correction<T: TraceRow>(row: &mut T, final_v: [u32; 16]) {
     let coefficient = cv_storage_coefficient::<Felt>(7);
     let correction = at(F_B_SUM_CORRECTION_COL);
     let base = sum_input_b(at) - coefficient * correction;
-    let target = final_v[4..8].iter().fold(Felt::ZERO, |sum, &word| sum + Felt::from_u32(word));
+    let target = final_v[4..8].iter().copied().map(Felt::from_u32).sum::<Felt>();
     row.set_u64(
         F_B_SUM_CORRECTION_COL,
         ((target - base) * CV_STORAGE_COEFFICIENT_INVERSES[7]).as_canonical_u64(),

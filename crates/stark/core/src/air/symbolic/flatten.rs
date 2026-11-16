@@ -1,160 +1,238 @@
-// Derived from p3-air 0.8.0, Plonky3 commit a21e3ed42905040ad49c519e402f018381c12d0c.
 // Copyright (c) 2022 The Plonky3 Authors
 // SPDX-License-Identifier: MIT OR Apache-2.0
-// Modified for Miden native expression inputs; provenance and changes are recorded in README.md.
+// Derived from p3-air 0.8.0; see mod.rs documentation for provenance.
 
-//! Flattened wire format for [`SymbolicExpr`].
-//!
-//! An expression tree is an acyclic DAG whose interior nodes share `Arc`
-//! children. Serializing the `Arc` pointers directly would expand each shared
-//! sub-tree once per parent, so instead the tree is lowered to a topologically
-//! ordered `Vec` of [`FlatNode`]s in which children are referenced by index.
-//! Shared sub-trees collapse to a single node, giving the compact "list of
-//! operations" encoding used by serde. It does not validate cached degrees or source addresses.
-
+//! Version-three wire graph. No cached degree is accepted from the wire: decoding
+//! checks topological references, domains, operation arities, and recomputes all bounds.
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use core::marker::PhantomData;
 
+use p3_field::{ExtensionField, Field};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
-use super::SymbolicExpr;
+use super::{AuxInput, BaseInput, Domain, Expr, ExpressionDomain, Op, RawExpr};
 
-/// A single node in the flattened expression arena.
-///
-/// Interior nodes refer to their operands by their position in the node list.
-/// Every operand index is strictly smaller than the node's own index, so the
-/// list is a valid topological (post-order) ordering with the root last.
-#[derive(Debug, Serialize, Deserialize)]
-enum FlatNode<A> {
-    Leaf(A),
-    Add {
-        x: usize,
-        y: usize,
-        degree_multiple: usize,
-    },
-    Sub {
-        x: usize,
-        y: usize,
-        degree_multiple: usize,
-    },
-    Neg {
-        x: usize,
-        degree_multiple: usize,
+const VERSION: u8 = 3;
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireExpression<F, EF> {
+    version: u8,
+    root: usize,
+    nodes: Vec<WireNode<F, EF>>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireNode<F, EF> {
+    domain: ExpressionDomain,
+    op: WireOp<F, EF>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+enum WireOp<F, EF> {
+    BaseConstant(F),
+    ExtensionConstant(EF),
+    BaseInput(BaseInput),
+    AuxInput(AuxInput),
+    IsFirstRow,
+    IsLastRow,
+    IsTransition,
+    Lift {
+        value: usize,
     },
     Mul {
         x: usize,
         y: usize,
-        degree_multiple: usize,
+    },
+    Neg {
+        x: usize,
+    },
+    Sum {
+        values: Vec<usize>,
+    },
+    Product {
+        values: Vec<usize>,
+    },
+    LinearCombination {
+        values: Vec<usize>,
+        coefficients: Vec<usize>,
+    },
+    Exp {
+        x: usize,
+        power: u64,
+    },
+    ExpPowerOf2 {
+        x: usize,
+        power_log: usize,
+    },
+    ScalePow2 {
+        x: usize,
+        exponent: i128,
+    },
+    BoolCheck {
+        x: usize,
     },
 }
-
-/// Lower `node` into `nodes` in post-order, returning its index.
-///
-/// `seen` maps the address of an already-emitted node to its index so shared
-/// `Arc` children are emitted exactly once. The whole tree is borrowed for the
-/// duration, so addresses stay live and unique while flattening.
-fn flatten_into<'a, A>(
-    node: &'a SymbolicExpr<A>,
-    nodes: &mut Vec<FlatNode<&'a A>>,
-    seen: &mut BTreeMap<*const SymbolicExpr<A>, usize>,
-) -> usize {
-    let key: *const SymbolicExpr<A> = node;
-    if let Some(&idx) = seen.get(&key) {
-        return idx;
-    }
-    let flat = match node {
-        SymbolicExpr::Leaf(a) => FlatNode::Leaf(a),
-        SymbolicExpr::Add { x, y, degree_multiple } => {
-            let x = flatten_into(x, nodes, seen);
-            let y = flatten_into(y, nodes, seen);
-            FlatNode::Add { x, y, degree_multiple: *degree_multiple }
-        },
-        SymbolicExpr::Sub { x, y, degree_multiple } => {
-            let x = flatten_into(x, nodes, seen);
-            let y = flatten_into(y, nodes, seen);
-            FlatNode::Sub { x, y, degree_multiple: *degree_multiple }
-        },
-        SymbolicExpr::Neg { x, degree_multiple } => {
-            let x = flatten_into(x, nodes, seen);
-            FlatNode::Neg { x, degree_multiple: *degree_multiple }
-        },
-        SymbolicExpr::Mul { x, y, degree_multiple } => {
-            let x = flatten_into(x, nodes, seen);
-            let y = flatten_into(y, nodes, seen);
-            FlatNode::Mul { x, y, degree_multiple: *degree_multiple }
-        },
-    };
-    let idx = nodes.len();
-    nodes.push(flat);
-    seen.insert(key, idx);
-    idx
+struct Encoder<F, EF> {
+    nodes: Vec<WireNode<F, EF>>,
+    expressions: BTreeMap<usize, usize>,
 }
-
-/// Rebuild a tree from a flattened arena, sharing `Arc`s for repeated indices.
-///
-/// Returns `None` if the list is empty, an operand index is not strictly
-/// smaller than its node's index (a forward or self reference), or the root is
-/// somehow still shared after construction.
-fn unflatten<A>(nodes: Vec<FlatNode<A>>) -> Option<SymbolicExpr<A>> {
-    let mut built: Vec<Arc<SymbolicExpr<A>>> = Vec::with_capacity(nodes.len());
-    for (i, flat) in nodes.into_iter().enumerate() {
-        let expr = match flat {
-            FlatNode::Leaf(a) => SymbolicExpr::Leaf(a),
-            FlatNode::Add { x, y, degree_multiple } => {
-                if x >= i || y >= i {
-                    return None;
-                }
-                SymbolicExpr::Add {
-                    x: built[x].clone(),
-                    y: built[y].clone(),
-                    degree_multiple,
-                }
-            },
-            FlatNode::Sub { x, y, degree_multiple } => {
-                if x >= i || y >= i {
-                    return None;
-                }
-                SymbolicExpr::Sub {
-                    x: built[x].clone(),
-                    y: built[y].clone(),
-                    degree_multiple,
-                }
-            },
-            FlatNode::Neg { x, degree_multiple } => {
-                if x >= i {
-                    return None;
-                }
-                SymbolicExpr::Neg { x: built[x].clone(), degree_multiple }
-            },
-            FlatNode::Mul { x, y, degree_multiple } => {
-                if x >= i || y >= i {
-                    return None;
-                }
-                SymbolicExpr::Mul {
-                    x: built[x].clone(),
-                    y: built[y].clone(),
-                    degree_multiple,
-                }
+impl<F: Field, EF: ExtensionField<F>> Encoder<F, EF> {
+    fn expression(&mut self, expression: &RawExpr<F, EF>) -> usize {
+        let identity = match expression {
+            RawExpr::Node(node) => Some(Arc::as_ptr(node) as usize),
+            _ => None,
+        };
+        if let Some(index) = identity.and_then(|key| self.expressions.get(&key)) {
+            return *index;
+        }
+        let op = match expression {
+            RawExpr::BaseConstant { value, .. } => WireOp::BaseConstant(*value),
+            RawExpr::ExtensionConstant(value) => WireOp::ExtensionConstant(*value),
+            RawExpr::BaseInput(input) => WireOp::BaseInput(*input),
+            RawExpr::AuxInput(input) => WireOp::AuxInput(*input),
+            RawExpr::IsFirstRow => WireOp::IsFirstRow,
+            RawExpr::IsLastRow => WireOp::IsLastRow,
+            RawExpr::IsTransition => WireOp::IsTransition,
+            RawExpr::Node(node) => match &node.op {
+                Op::Lift(value) => WireOp::Lift { value: self.expression(value) },
+                Op::Mul { x, y } => WireOp::Mul {
+                    x: self.expression(x),
+                    y: self.expression(y),
+                },
+                Op::Neg(x) => WireOp::Neg { x: self.expression(x) },
+                Op::Sum(values) => WireOp::Sum {
+                    values: values.iter().map(|v| self.expression(v)).collect(),
+                },
+                Op::Product(values) => WireOp::Product {
+                    values: values.iter().map(|v| self.expression(v)).collect(),
+                },
+                Op::LinearCombination { values, coefficients } => WireOp::LinearCombination {
+                    values: values.iter().map(|v| self.expression(v)).collect(),
+                    coefficients: coefficients.iter().map(|v| self.expression(v)).collect(),
+                },
+                Op::Exp { x, power } => WireOp::Exp { x: self.expression(x), power: *power },
+                Op::ExpPowerOf2 { x, power_log } => WireOp::ExpPowerOf2 {
+                    x: self.expression(x),
+                    power_log: *power_log,
+                },
+                Op::ScalePow2 { x, exponent } => WireOp::ScalePow2 {
+                    x: self.expression(x),
+                    exponent: *exponent,
+                },
+                Op::BoolCheck(x) => WireOp::BoolCheck { x: self.expression(x) },
             },
         };
-        built.push(Arc::new(expr));
+        let index = self.nodes.len();
+        self.nodes.push(WireNode { domain: expression.domain(), op });
+        if let Some(key) = identity {
+            self.expressions.insert(key, index);
+        }
+        index
     }
-    // The root is the last node emitted; no other node references it, so it is
-    // uniquely owned and can be unwrapped without cloning.
-    Arc::try_unwrap(built.pop()?).ok()
 }
-
-impl<A: Serialize> Serialize for SymbolicExpr<A> {
+fn decode<F: Field, EF: ExtensionField<F>, D: Domain>(
+    wire: WireExpression<F, EF>,
+) -> Option<Expr<F, EF, D>> {
+    if wire.version != VERSION || wire.nodes.is_empty() || wire.root != wire.nodes.len() - 1 {
+        return None;
+    }
+    let mut built: Vec<RawExpr<F, EF>> = Vec::with_capacity(wire.nodes.len());
+    for node in wire.nodes {
+        let expression = |index: usize| built.get(index).cloned();
+        let list =
+            |indices: Vec<usize>| indices.into_iter().map(expression).collect::<Option<Vec<_>>>();
+        let domain = node.domain;
+        let raw = match node.op {
+            WireOp::BaseConstant(value) => RawExpr::BaseConstant { value, domain },
+            WireOp::ExtensionConstant(value) => {
+                if domain != ExpressionDomain::Extension {
+                    return None;
+                }
+                RawExpr::from_constant(domain, value)
+            },
+            WireOp::BaseInput(input) => {
+                if domain != ExpressionDomain::Base {
+                    return None;
+                }
+                RawExpr::BaseInput(input)
+            },
+            WireOp::AuxInput(input) => {
+                if domain != ExpressionDomain::Extension {
+                    return None;
+                }
+                RawExpr::AuxInput(input)
+            },
+            WireOp::IsFirstRow => {
+                if domain != ExpressionDomain::Base {
+                    return None;
+                }
+                RawExpr::IsFirstRow
+            },
+            WireOp::IsLastRow => {
+                if domain != ExpressionDomain::Base {
+                    return None;
+                }
+                RawExpr::IsLastRow
+            },
+            WireOp::IsTransition => {
+                if domain != ExpressionDomain::Base {
+                    return None;
+                }
+                RawExpr::IsTransition
+            },
+            WireOp::Lift { value } => RawExpr::node(domain, Op::Lift(expression(value)?)).ok()?,
+            WireOp::Mul { x, y } => {
+                RawExpr::node(domain, Op::Mul { x: expression(x)?, y: expression(y)? }).ok()?
+            },
+            WireOp::Neg { x } => RawExpr::node(domain, Op::Neg(expression(x)?)).ok()?,
+            WireOp::Sum { values } => {
+                RawExpr::node(domain, Op::Sum(list(values)?.into_boxed_slice())).ok()?
+            },
+            WireOp::Product { values } => {
+                RawExpr::node(domain, Op::Product(list(values)?.into_boxed_slice())).ok()?
+            },
+            WireOp::LinearCombination { values, coefficients } => RawExpr::node(
+                domain,
+                Op::LinearCombination {
+                    values: list(values)?.into_boxed_slice(),
+                    coefficients: list(coefficients)?.into_boxed_slice(),
+                },
+            )
+            .ok()?,
+            WireOp::Exp { x, power } => {
+                RawExpr::node(domain, Op::Exp { x: expression(x)?, power }).ok()?
+            },
+            WireOp::ExpPowerOf2 { x, power_log } => {
+                RawExpr::node(domain, Op::ExpPowerOf2 { x: expression(x)?, power_log }).ok()?
+            },
+            WireOp::ScalePow2 { x, exponent } => {
+                RawExpr::node(domain, Op::ScalePow2 { x: expression(x)?, exponent }).ok()?
+            },
+            WireOp::BoolCheck { x } => RawExpr::node(domain, Op::BoolCheck(expression(x)?)).ok()?,
+        };
+        built.push(raw);
+    }
+    let raw = built.pop()?;
+    (raw.domain() == D::DOMAIN).then_some(Expr { raw, marker: PhantomData })
+}
+impl<F: Field, EF: ExtensionField<F>, D: Domain> Serialize for Expr<F, EF, D> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut nodes: Vec<FlatNode<&A>> = Vec::new();
-        let mut seen: BTreeMap<*const Self, usize> = BTreeMap::new();
-        flatten_into(self, &mut nodes, &mut seen);
-        nodes.serialize(serializer)
+        let mut encoder = Encoder {
+            nodes: Vec::new(),
+            expressions: BTreeMap::new(),
+        };
+        let root = encoder.expression(&self.raw);
+        WireExpression {
+            version: VERSION,
+            root,
+            nodes: encoder.nodes,
+        }
+        .serialize(serializer)
     }
 }
-
-impl<'de, A: Deserialize<'de>> Deserialize<'de> for SymbolicExpr<A> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let nodes = Vec::<FlatNode<A>>::deserialize(deserializer)?;
-        unflatten(nodes).ok_or_else(|| D::Error::custom("invalid flattened symbolic expression"))
+impl<'de, F: Field, EF: ExtensionField<F>, D: Domain> Deserialize<'de> for Expr<F, EF, D> {
+    fn deserialize<S: Deserializer<'de>>(deserializer: S) -> Result<Self, S::Error> {
+        decode(WireExpression::<F, EF>::deserialize(deserializer)?)
+            .ok_or_else(|| S::Error::custom("invalid version-three symbolic expression graph"))
     }
 }

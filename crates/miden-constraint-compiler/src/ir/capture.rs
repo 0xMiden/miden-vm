@@ -10,21 +10,13 @@
 //! and hash-conses structurally into the target [`GraphBuilder`]. Pointer identity
 //! is only an accelerator: structural interning defines node identity.
 
-use std::{collections::HashMap, sync::Arc};
-
 use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::field::BasedVectorSpace;
-use miden_stark::air::{
-    self, AirDescriptor, AirKernel, DescriptorError,
-    symbolic::{
-        AuxInput, BaseInput, BaseLeaf as AirBaseLeaf, ExtLeaf as AirExtLeaf,
-        SymbolicExpression as AirExpression, SymbolicExpressionExt as AirExpressionExt,
-    },
-};
+use miden_stark::air::{self, AirDescriptor, AirKernel, DescriptorError};
 
 use super::{
     analyze::OpCounts,
-    graph::{Class, Graph, GraphBuilder, Leaf, NodeId, OpKind},
+    graph::{Graph, GraphBuilder, NodeId},
+    program::{CapturedProgram, lower_assertions_into},
 };
 
 type EF = QuadFelt;
@@ -59,9 +51,20 @@ pub fn capture_native<A>(
 where
     A: air::LiftedAir<F = Felt>,
 {
-    let mut builder = GraphBuilder::new();
-    let (captured, descriptor) = capture_native_into(air, &mut builder)?;
-    Ok((builder.freeze(), captured, descriptor))
+    let (program, descriptor) = capture_program_native_with_descriptor(air)?;
+    let (graph, constraints) = program.into_lowered();
+    Ok((graph, constraints, descriptor))
+}
+
+/// Capture the authored operations and checked source metadata in one execution.
+pub fn capture_program_native_with_descriptor<A>(
+    air: &A,
+) -> Result<(CapturedProgram, AirDescriptor<Felt>), DescriptorError>
+where
+    A: air::LiftedAir<F = Felt>,
+{
+    let air::Capture { descriptor, assertions } = air::capture_with::<A, EF>(air)?;
+    Ok((CapturedProgram::from_assertions(assertions), descriptor))
 }
 
 /// Add native source constraints to an existing graph for structural comparison or composition.
@@ -124,173 +127,8 @@ fn lower_native(
     builder: &mut GraphBuilder,
 ) -> (CapturedConstraints, AirDescriptor<Felt>) {
     let air::Capture { descriptor, assertions } = captured;
-    let layout = descriptor.analysis().layout();
-    let mut walker = Walker::new(builder);
-    // Preserve the legacy graph's discovery convention separately from assertion emission order.
-    // Repeated and zero roots retain their individual global positions through this layout.
-    let base_roots = layout
-        .base_indices()
-        .iter()
-        .map(|&index| {
-            let air::Assertion::Base(expression) = &assertions[index] else {
-                unreachable!("validated capture class/layout mismatch")
-            };
-            walker.native_base_node(expression)
-        })
-        .collect();
-    let ext_roots = layout
-        .ext_indices()
-        .iter()
-        .map(|&index| {
-            let air::Assertion::Extension(expression) = &assertions[index] else {
-                unreachable!("validated capture class/layout mismatch")
-            };
-            walker.native_ext_node(expression)
-        })
-        .collect();
-    let constraints = CapturedConstraints {
-        base_roots,
-        ext_roots,
-        base_global_indices: layout.base_indices().to_vec(),
-        ext_global_indices: layout.ext_indices().to_vec(),
-        naive_base: walker.naive_base,
-        naive_ext: walker.naive_ext,
-    };
+    let constraints = lower_assertions_into(&assertions, builder);
     (constraints, descriptor)
-}
-
-/// Walks symbolic expression trees into the graph builder.
-struct Walker<'a> {
-    builder: &'a mut GraphBuilder,
-    // Pointer memoization is scoped to one capture; graph interning defines structural identity.
-    base_memo: HashMap<usize, NodeId>,
-    ext_memo: HashMap<usize, NodeId>,
-    naive_base: OpCounts,
-    naive_ext: OpCounts,
-}
-
-impl<'a> Walker<'a> {
-    fn new(builder: &'a mut GraphBuilder) -> Self {
-        Self {
-            builder,
-            base_memo: HashMap::new(),
-            ext_memo: HashMap::new(),
-            naive_base: OpCounts::default(),
-            naive_ext: OpCounts::default(),
-        }
-    }
-
-    fn op(&mut self, class: Class, op: OpKind, x: NodeId, y: Option<NodeId>) -> NodeId {
-        match class {
-            Class::Base => self.naive_base.bump(op),
-            Class::Ext => self.naive_ext.bump(op),
-        }
-        self.builder.op(class, op, x, y).0
-    }
-
-    fn native_base_child(&mut self, expression: &Arc<AirExpression<Felt>>) -> NodeId {
-        let pointer = Arc::as_ptr(expression) as usize;
-        if let Some(&id) = self.base_memo.get(&pointer) {
-            return id;
-        }
-        let id = self.native_base_node(expression);
-        self.base_memo.insert(pointer, id);
-        id
-    }
-
-    fn native_base_node(&mut self, expression: &AirExpression<Felt>) -> NodeId {
-        match expression {
-            AirExpression::Leaf(leaf) => {
-                let leaf = match leaf {
-                    AirBaseLeaf::Input(input) => match *input {
-                        BaseInput::Main { offset, index } => {
-                            Leaf::Main { offset: offset.index(), index }
-                        },
-                        BaseInput::Preprocessed { offset, index } => {
-                            Leaf::Preprocessed { offset: offset.index(), index }
-                        },
-                        BaseInput::Public(index) => Leaf::Public(index),
-                        BaseInput::Periodic(index) => Leaf::Periodic(index),
-                    },
-                    AirBaseLeaf::IsFirstRow => Leaf::IsFirst,
-                    AirBaseLeaf::IsLastRow => Leaf::IsLast,
-                    AirBaseLeaf::IsTransition => Leaf::IsTransition,
-                    AirBaseLeaf::Constant(value) => Leaf::BaseConst(value.as_canonical_u64()),
-                };
-                self.builder.leaf(leaf)
-            },
-            AirExpression::Add { x, y, .. } => {
-                let (left, right) = (self.native_base_child(x), self.native_base_child(y));
-                self.op(Class::Base, OpKind::Add, left, Some(right))
-            },
-            AirExpression::Sub { x, y, .. } => {
-                let (left, right) = (self.native_base_child(x), self.native_base_child(y));
-                self.op(Class::Base, OpKind::Sub, left, Some(right))
-            },
-            AirExpression::Mul { x, y, .. } => {
-                let (left, right) = (self.native_base_child(x), self.native_base_child(y));
-                self.op(Class::Base, OpKind::Mul, left, Some(right))
-            },
-            AirExpression::Neg { x, .. } => {
-                let inner = self.native_base_child(x);
-                self.op(Class::Base, OpKind::Neg, inner, None)
-            },
-        }
-    }
-
-    fn native_ext_child(&mut self, expression: &Arc<AirExpressionExt<Felt, EF>>) -> NodeId {
-        let pointer = Arc::as_ptr(expression) as usize;
-        if let Some(&id) = self.ext_memo.get(&pointer) {
-            return id;
-        }
-        let id = self.native_ext_node(expression);
-        self.ext_memo.insert(pointer, id);
-        id
-    }
-
-    fn native_ext_node(&mut self, expression: &AirExpressionExt<Felt, EF>) -> NodeId {
-        match expression {
-            AirExpressionExt::Leaf(leaf) => match leaf {
-                AirExtLeaf::Base(base) => {
-                    let id = self.native_base_node(base);
-                    self.builder.leaf(Leaf::ExtBase(id))
-                },
-                AirExtLeaf::Input(input) => {
-                    let leaf = match *input {
-                        AuxInput::Trace { offset, index } => {
-                            Leaf::Aux { offset: offset.index(), index }
-                        },
-                        AuxInput::Challenge(index) => Leaf::Challenge(index),
-                        AuxInput::Export(index) => Leaf::PermValue(index),
-                    };
-                    self.builder.leaf(leaf)
-                },
-                AirExtLeaf::ExtConstant(value) => {
-                    let coefficients: &[Felt] = value.as_basis_coefficients_slice();
-                    self.builder.leaf(Leaf::ExtConst([
-                        coefficients[0].as_canonical_u64(),
-                        coefficients[1].as_canonical_u64(),
-                    ]))
-                },
-            },
-            AirExpressionExt::Add { x, y, .. } => {
-                let (left, right) = (self.native_ext_child(x), self.native_ext_child(y));
-                self.op(Class::Ext, OpKind::Add, left, Some(right))
-            },
-            AirExpressionExt::Sub { x, y, .. } => {
-                let (left, right) = (self.native_ext_child(x), self.native_ext_child(y));
-                self.op(Class::Ext, OpKind::Sub, left, Some(right))
-            },
-            AirExpressionExt::Mul { x, y, .. } => {
-                let (left, right) = (self.native_ext_child(x), self.native_ext_child(y));
-                self.op(Class::Ext, OpKind::Mul, left, Some(right))
-            },
-            AirExpressionExt::Neg { x, .. } => {
-                let inner = self.native_ext_child(x);
-                self.op(Class::Ext, OpKind::Neg, inner, None)
-            },
-        }
-    }
 }
 
 #[cfg(test)]
@@ -299,10 +137,13 @@ mod tests {
 
     use miden_core::utils::RowMajorMatrix;
     use miden_crypto::field::PrimeCharacteristicRing;
-    use miden_stark::air::LiftedAirBuilder as _;
+    use miden_stark::air::{
+        LiftedAirBuilder as _, symbolic::SymbolicExpressionExt as NativeExpressionExt,
+    };
     use p3_field::{Algebra, Dup};
 
     use super::*;
+    use crate::ir::Leaf;
 
     struct Source;
 
@@ -367,6 +208,13 @@ mod tests {
     #[test]
     fn source_capture_retains_ordered_graph_and_all_input_namespaces() {
         let (native_graph, captured, descriptor) = capture_native(&Source).unwrap();
+        let (program, program_descriptor) =
+            capture_program_native_with_descriptor(&Source).unwrap();
+        assert_same(&captured, program.constraints());
+        assert_eq!(descriptor.fingerprint(), program_descriptor.fingerprint());
+        for seed in [0, 42, u64::MAX] {
+            crate::testing::assert_program_lowering(&program, seed);
+        }
         assert_eq!(captured.base_global_indices, vec![0, 2, 3, 5]);
         assert_eq!(captured.ext_global_indices, vec![1, 4]);
         assert_eq!(captured.base_roots[0], captured.base_roots[3]);
@@ -471,7 +319,7 @@ mod tests {
             capture_native_into_with(&Source, &mut builder, |_, _, sink| {
                 air::LiftedAirBuilder::assert_zero_ext(
                     sink,
-                    AirExpressionExt::<Felt, EF>::from(value),
+                    NativeExpressionExt::<Felt, EF>::from(value),
                 );
             })
             .unwrap();

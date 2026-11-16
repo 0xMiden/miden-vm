@@ -32,6 +32,11 @@ Test standalone and composed AIRs through their complete evaluators on valid tra
 lookups. For optimized evaluators, compare constraint values and assertion order with the
 authored evaluator on arbitrary field assignments.
 
+## Writing constraints
+
+See the [crate documentation](src/lib.rs) for constraint-authoring guidance and
+[`LiftedAirBuilder`](../../stark/core/src/air/builder.rs) for assertion and gating contracts.
+
 ## License
 
 This project is dual-licensed under the [MIT](http://opensource.org/licenses/MIT) and

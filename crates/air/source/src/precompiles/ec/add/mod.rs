@@ -101,6 +101,7 @@ use miden_core::{
 };
 use miden_stark::{
     air,
+    air::LiftedAirBuilder as _,
     lookup::{self, Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage},
 };
 use miden_utils_sync::LazyLock;
@@ -316,13 +317,24 @@ impl air::LiftedAir for EcGroupAddAir {
         // rides its operand's consumed tuple as the `is_pai` field, and an
         // infinite operand matches no `is_pai = 0` provide). The ties below
         // then force `p = q = r`: the group's canonical PAI row.
-        for flag in [&pai_p, &pai_q, &cancel, &dbl, &generic, &act, &mints] {
-            builder.assert_zero((*flag).dup() * (AB::Expr::ONE - (*flag).dup()));
-        }
-        builder.assert_zero(
-            pai_p.clone() + pai_q.clone() + cancel + dbl + generic
-                - act.clone()
-                - pai_p.clone() * pai_q.clone(),
+        builder.assert_bools([
+            pai_p.dup(),
+            pai_q.dup(),
+            cancel.dup(),
+            dbl.dup(),
+            generic.dup(),
+            act.dup(),
+            mints.dup(),
+        ]);
+        builder.assert_eq(
+            AB::Expr::sum_array::<5>(&[
+                pai_p.dup(),
+                pai_q.dup(),
+                cancel.dup(),
+                dbl.dup(),
+                generic.dup(),
+            ]),
+            act.dup() + pai_p.dup() * pai_q.dup(),
         );
 
         // Operand-coordinate ties for the `x₁ = x₂` cases. The coordinate
@@ -333,22 +345,22 @@ impl air::LiftedAir for EcGroupAddAir {
         //    `2x₁` and grounds the chord/tangent.
         //  - `dbl`: `y₁ = y₂`. The tangent lookups below rule out zero y on the authenticated
         //    smooth curve, so this case cannot substitute the cancellation branch.
-        let px_eq: AB::Expr = local[COL_PX].dup();
-        let qx_eq: AB::Expr = local[COL_QX].dup();
-        let py_eq: AB::Expr = local[COL_PY].dup();
-        let qy_eq: AB::Expr = local[COL_QY].dup();
-        let cancel_eq: AB::Expr = local[COL_CANCEL].dup();
-        let dbl_eq: AB::Expr = local[COL_DBL].dup();
-        builder.assert_zero((cancel_eq + dbl_eq.clone()) * (px_eq - qx_eq));
-        builder.assert_zero(dbl_eq * (py_eq - qy_eq));
+        let px_eq = local[COL_PX].dup();
+        let qx_eq = local[COL_QX].dup();
+        let py_eq = local[COL_PY].dup();
+        let qy_eq = local[COL_QY].dup();
+        let cancel_eq = local[COL_CANCEL].dup();
+        let dbl_eq = local[COL_DBL].dup();
+        builder.when(cancel_eq + dbl_eq.dup()).assert_eq(px_eq, qx_eq);
+        builder.when(dbl_eq).assert_eq(py_eq, qy_eq);
 
         // Pass-through result ties, at the res row where r is local and
         // p / q sit in the term row's cells (next).
-        let r_cell: AB::Expr = local[CELL_R].dup();
-        let p_cell: AB::Expr = next[TERM_CELL_P].dup();
-        let q_cell: AB::Expr = next[TERM_CELL_Q].dup();
-        builder.assert_zero(sel[PCOL_RES].clone() * pai_p * (r_cell.clone() - q_cell));
-        builder.assert_zero(sel[PCOL_RES].clone() * pai_q * (r_cell - p_cell));
+        let r_cell = local[CELL_R].dup();
+        let p_cell = next[TERM_CELL_P].dup();
+        let q_cell = next[TERM_CELL_Q].dup();
+        builder.when(sel[PCOL_RES].dup() * pai_p.dup()).assert_eq(r_cell.dup(), q_cell);
+        builder.when(sel[PCOL_RES].dup() * pai_q.dup()).assert_eq(r_cell, p_cell);
 
         // Closure-cert scaffolding (Phase 1). A mint op (its result freshly
         // allocated → strictly-maximal ptr) is pinned two ways:
@@ -358,35 +370,37 @@ impl air::LiftedAir for EcGroupAddAir {
         //  - strict ordering: r_ptr > p_ptr ∧ r_ptr > q_ptr, via the witnessed limb diffs `r − p −
         //    1 = lo + 2¹⁶·hi` (limbs Range16-checked in the LookupAir). Read on the res row, where
         //    r is local and p / q are the term cells (next).
-        let dbl_g: AB::Expr = local[COL_DBL].dup();
-        let gen_g: AB::Expr = local[COL_GEN].dup();
-        builder.assert_zero(mints.clone() * (AB::Expr::ONE - dbl_g - gen_g));
-        let r_res: AB::Expr = local[CELL_R].dup();
-        let p_res: AB::Expr = next[TERM_CELL_P].dup();
-        let q_res: AB::Expr = next[TERM_CELL_Q].dup();
-        let two_16 = AB::Expr::from(Felt::from(1u32 << 16));
-        let rp_lo: AB::Expr = local[COL_RP_LO].dup();
-        let rp_hi: AB::Expr = local[COL_RP_HI].dup();
-        let rq_lo: AB::Expr = next[COL_RQ_LO].dup();
-        let rq_hi: AB::Expr = next[COL_RQ_HI].dup();
-        let at_res: AB::Expr = sel[PCOL_RES].clone();
-        builder.assert_zero(at_res.clone() * (AB::Expr::ONE - act) * next[TERM_CELL_MULT].dup());
-        builder.assert_zero(
-            at_res.clone()
-                * mints.clone()
-                * (r_res.clone() - p_res - AB::Expr::ONE - rp_lo - two_16.clone() * rp_hi),
-        );
+        let dbl_g = local[COL_DBL].dup();
+        let gen_g = local[COL_GEN].dup();
+        builder.when(mints.dup()).assert_eq(AB::Expr::ONE, dbl_g + gen_g);
+        let r_res = local[CELL_R].dup();
+        let p_res = next[TERM_CELL_P].dup();
+        let q_res = next[TERM_CELL_Q].dup();
+        let rp_lo = local[COL_RP_LO].dup();
+        let rp_hi = local[COL_RP_HI].dup();
+        let rq_lo = next[COL_RQ_LO].dup();
+        let rq_hi = next[COL_RQ_HI].dup();
+        let at_res = sel[PCOL_RES].dup();
         builder
-            .assert_zero(at_res * mints * (r_res - q_res - AB::Expr::ONE - rq_lo - two_16 * rq_hi));
+            .when(at_res.dup() * (AB::Expr::ONE - act.dup()))
+            .assert_zero(next[TERM_CELL_MULT].dup());
+        let mint_at_res = at_res * mints.dup();
+        builder.when(mint_at_res).assert_eq_arrays(
+            [r_res.dup(), r_res],
+            [
+                AB::Expr::ONE + AB::Expr::sum_array::<3>(&[p_res, rp_lo, rp_hi.mul_2exp_u64(16)]),
+                AB::Expr::ONE + AB::Expr::sum_array::<3>(&[q_res, rq_lo, rq_hi.mul_2exp_u64(16)]),
+            ],
+        );
 
         // Cycle-constancy for metadata, excluding the row-hosted ordering limbs (the term row is
         // the block's last, so the not_term gate drops exactly at the
         // boundary).
         let not_term: AB::Expr = AB::Expr::ONE - sel[PCOL_TERM].clone();
         for col in (COL_PX..COL_RP_LO).chain(COL_BETA_PTR..NUM_MAIN_COLS) {
-            let here: AB::Expr = local[col].dup();
-            let there: AB::Expr = next[col].dup();
-            builder.assert_zero(not_term.clone() * (there - here));
+            let here = local[col].dup();
+            let there = next[col].dup();
+            builder.when(not_term.dup()).assert_eq(there, here);
         }
 
         // Phase 2: LogUp.
@@ -474,25 +488,27 @@ where
         let r_next: LB::Expr = next[CELL_R].dup();
         let group_next: LB::Expr = next[CELL_GROUP].dup();
         // Row-2 window: the result cells (local) + the term cells (next).
-        let r_local: LB::Expr = local[CELL_R].dup();
-        let sbound: LB::Expr = local[CELL_SBOUND].dup();
-        let group_local: LB::Expr = local[CELL_GROUP].dup();
-        let neg_mult: LB::Expr = LB::Expr::ZERO - next[TERM_CELL_MULT].dup();
-        let p_ptr: LB::Expr = next[TERM_CELL_P].dup();
-        let q_ptr: LB::Expr = next[TERM_CELL_Q].dup();
+        let r_local = local[CELL_R].dup();
+        let sbound = local[CELL_SBOUND].dup();
+        let group_local = local[CELL_GROUP].dup();
+        let neg_mult = -next[TERM_CELL_MULT].dup();
+        let p_ptr = next[TERM_CELL_P].dup();
+        let q_ptr = next[TERM_CELL_Q].dup();
 
-        let one: LB::Expr = LB::Expr::ONE;
-        let zero: LB::Expr = LB::Expr::ZERO;
-        let two: LB::Expr = LB::Expr::from(Felt::from(2u32));
-        let three: LB::Expr = LB::Expr::from(Felt::from(3u32));
+        let one = LB::Expr::ONE;
+        let zero = LB::Expr::ZERO;
+        let two = LB::Expr::TWO;
+        let three = LB::Expr::from_u32(3);
 
         let f2 = Deg { v: 2, u: 1 };
         let group_deg = Deg { v: 2, u: 2 };
         let pair_deg = Deg { v: 3, u: 2 };
-        let cert_group: LB::Expr = local[CELL_GROUP].dup();
-        let cert_r: LB::Expr = local[CELL_R].dup();
-        let cert_gate = sel[PCOL_RES].clone() * mints.clone();
-        let gate = (sel[PCOL_RES].clone() + sel[PCOL_TERM].clone()) * mints;
+        let cert_group = local[CELL_GROUP].dup();
+        let cert_r = local[CELL_R].dup();
+        let cert_gate = sel[PCOL_RES].dup() * mints.dup();
+        let active_at_res = act.dup() * at_res.dup();
+        let generic_at_slope = generic.dup() * at_slope.dup();
+        let gate = (sel[PCOL_RES].dup() + sel[PCOL_TERM].dup()) * mints.dup();
 
         // Each group selects at most one affine denominator, so its closing constraint has
         // degree three. Row roles are fixed one-hots. The Boolean case flags and their sum
@@ -665,7 +681,7 @@ where
             pair_deg,
             (
                 "consume-ecpoint-p",
-                act.clone() * at_res.clone(),
+                active_at_res.dup(),
                 EcPointMsg {
                     point_ptr: p_ptr.clone(),
                     group_ptr: group_local.clone(),
@@ -677,7 +693,7 @@ where
             ),
             (
                 "consume-ecpoint-q",
-                act.clone() * at_res.clone(),
+                active_at_res.dup(),
                 EcPointMsg {
                     point_ptr: q_ptr.clone(),
                     group_ptr: group_local.clone(),
@@ -709,7 +725,7 @@ where
             ),
             (
                 "consume-t-add",
-                generic.clone() * at_slope.clone(),
+                generic_at_slope.dup(),
                 UintAddMsg {
                     bound_ptr: bound.clone(),
                     a_ptr: px.clone(),
@@ -727,7 +743,7 @@ where
             pair_deg,
             (
                 "consume-x3-macsub-gen",
-                generic.clone() * at_slope.clone(),
+                generic_at_slope.dup(),
                 UintMulMsg {
                     kappa_a: one.clone(),
                     kappa_c: one.clone(),
@@ -778,8 +794,11 @@ where
             ),
             (
                 "provide-ecgroupadd-cert",
-                LB::Expr::ZERO - cert_gate,
-                EcOnCurveCertMsg { group_ptr: cert_group, r_ptr: cert_r },
+                -cert_gate,
+                EcOnCurveCertMsg {
+                    group_ptr: cert_group.dup(),
+                    r_ptr: cert_r.dup()
+                },
                 f2
             ),
         );

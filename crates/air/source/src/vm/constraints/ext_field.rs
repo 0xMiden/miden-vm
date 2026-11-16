@@ -1,4 +1,4 @@
-//! Quadratic extension expression helpers (F_p[u] / u^2 - 7).
+//! Quadratic extension expression helpers (`F_p[u] / u^2 - 7`).
 //!
 //! This keeps constraint code readable when manipulating extension elements in terms of
 //! base-field expressions. All arithmetic requires `E: PrimeCharacteristicRing`.
@@ -59,15 +59,15 @@ impl<E: PrimeCharacteristicRing> QuadFeltExpr<E> {
     pub fn square(self) -> Self {
         let w = E::from_u16(W);
         // (a0 + a1·u)^2 = (a0^2 + 7·a1^2) + (2·a0·a1)·u
-        let a0_sq = self.0.clone() * self.0.clone();
-        let a1_sq = self.1.clone() * self.1.clone();
+        let a0_sq = self.0.square();
+        let a1_sq = self.1.square();
         let a0_a1 = self.0 * self.1;
         let c0 = a0_sq + w * a1_sq;
         let c1 = a0_a1.double();
         Self(c0, c1)
     }
 
-    /// Extension multiplication: (a0 + a1·u)(b0 + b1·u) in F_p[u]/(u² - 7).
+    /// Extension multiplication: (a0 + a1·u)(b0 + b1·u) in `F_p[u]/(u² - 7)`.
     fn ext_mul(self, rhs: Self) -> Self {
         let w = E::from_u16(W);
         let c0 = self.0.clone() * rhs.0.clone() + w * (self.1.clone() * rhs.1.clone());
@@ -157,8 +157,7 @@ where
 /// mathematical interpretation does not change their assertion class or global emission order.
 pub trait NativeQuadFeltAirBuilder: miden_stark::air::LiftedAirBuilder {
     fn assert_eq_quad(&mut self, lhs: QuadFeltExpr<Self::Expr>, rhs: QuadFeltExpr<Self::Expr>) {
-        self.assert_eq(lhs.0, rhs.0);
-        self.assert_eq(lhs.1, rhs.1);
+        self.assert_eq_arrays(lhs.into_parts(), rhs.into_parts());
     }
 }
 

@@ -128,10 +128,8 @@ where
     // included (they are just mult = 0 rows), so ptr → tuple is
     // injective by construction. The wrap edge is dropped, keeping
     // the cyclic last → first transition free.
-    builder
-        .when(frame.transition())
-        .assert_zero(ptr_next - ptr.clone() - AB::Expr::ONE);
-    builder.when(frame.first_row()).assert_zero(ptr - AB::Expr::ONE);
+    builder.when(frame.transition()).assert_eq(ptr_next, ptr.dup() + AB::Expr::ONE);
+    builder.when(frame.first_row()).assert_one(ptr);
 }
 
 // LOOKUP AIR
@@ -172,7 +170,7 @@ pub(crate) fn eval_lookups<LB>(
         .expect("EC store lookup main row band");
 
     // Pads zero the mult cell, so the provide needs no act gate.
-    let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_MULT].dup();
+    let neg_mult = -local[COL_MULT].dup();
 
     let provide_deg = Deg { v: 1, u: 1 };
     let col_deg = Deg { v: 1, u: 1 };

@@ -17,14 +17,17 @@
 //!
 //! - **MPVERIFY / MRUPDATE**: Bind the Merkle node index to its canonical field representative.
 
-use miden_core::{Felt, field::PrimeCharacteristicRing};
+use miden_core::{
+    Felt,
+    field::{Algebra, PrimeCharacteristicRing},
+};
 use miden_stark::air::LiftedAirBuilder;
 use p3_field::Dup;
 
 use crate::vm::{
     CoreCols, NativeMidenAirBuilder,
     constraints::{
-        constants::{F_1, F_2, F_3, F_8, F_16, TWO_POW_16, TWO_POW_32, TWO_POW_48},
+        constants::{F_1, F_3, F_8, F_16, TWO_POW_16, TWO_POW_32, TWO_POW_48},
         ext_field::{NativeQuadFeltAirBuilder, QuadFeltExpr},
         op_flags::OpFlags,
     },
@@ -73,18 +76,18 @@ fn enforce_merkle_index_canonicality<AB>(
     AB: NativeMidenAirBuilder,
 {
     let helpers = local.decoder.user_op_helpers();
-    let bit: AB::Expr = helpers[1].dup();
-    let y = helpers[2].dup()
-        + AB::Expr::from(TWO_POW_16) * helpers[3].dup()
-        + AB::Expr::from(TWO_POW_32) * helpers[4].dup()
-        + AB::Expr::from(TWO_POW_48) * helpers[5].dup();
-    let index: AB::Expr = local.stack.get(5);
+    let bit = helpers[1].dup();
+    let y = <AB::Expr as Algebra<Felt>>::mixed_dot_product(
+        &[helpers[2].dup(), helpers[3].dup(), helpers[4].dup(), helpers[5].dup()],
+        &[Felt::ONE, TWO_POW_16, TWO_POW_32, TWO_POW_48],
+    );
+    let index = local.stack.get(5);
     let gate = op_flags.mpverify() + op_flags.mrupdate();
     let merkle = &mut builder.when(gate);
 
-    merkle.assert_zero(bit.clone() * (bit.clone() - AB::Expr::ONE));
+    merkle.assert_bool(bit.dup());
     // `p - 1` is `-1` in the base field.
-    merkle.assert_zero(index + bit + AB::Expr::from(F_2) * y + AB::Expr::ONE);
+    merkle.assert_eq(index + bit + y.double(), AB::Expr::NEG_ONE);
 }
 
 // CONSTRAINT HELPERS
@@ -130,10 +133,12 @@ fn enforce_aead_stream_constraints<AB>(
 /// The constraints below bind those helpers to the expected Horner steps.
 ///
 /// Stack layout:
+/// ```text
 ///   s[0..8]    c0..c7       base-field coefficients (c0 = alpha^7 term, c7 = constant)
 ///   s[8..13]   (unused)     not affected by this operation
 ///   s[13]      alpha_ptr    address of the word [alpha0, alpha1, 0, 0]
 ///   s[14..16]  (acc0, acc1) accumulator (quadratic extension element)
+/// ```
 ///
 /// Preservation of s[0..14] is enforced by the general stack transition constraints
 /// (HORNERBASE is a no-shift op at depths 0..14); only the accumulator update is
@@ -201,6 +206,7 @@ fn enforce_hornerbase_constraints<AB>(
 /// so only alpha^2 is needed.
 ///
 /// Stack layout:
+/// ```text
 ///   s[0..2]    (c0_0, c0_1)  highest-degree coefficient (alpha^3 term)
 ///   s[2..4]    (c1_0, c1_1)  alpha^2 term
 ///   s[4..6]    (c2_0, c2_1)  alpha term
@@ -208,6 +214,7 @@ fn enforce_hornerbase_constraints<AB>(
 ///   s[8..13]   (unused)       not affected by this operation
 ///   s[13]      alpha_ptr      address of the word [alpha0, alpha1, 0, 0]
 ///   s[14..16]  (acc0, acc1)   accumulator (quadratic extension element)
+/// ```
 ///
 /// Helper registers:
 ///   h[0..2]    (alpha0, alpha1) evaluation point
@@ -301,6 +308,7 @@ fn enforce_hornerext_constraints<AB>(
 /// ## Register map
 ///
 /// Input stack (current trace row):
+/// ```text
 ///   s[0..2]    (q0_0, q0_1)  leaf value q0
 ///   s[2..4]    (q2_0, q2_1)  leaf value q2
 ///   s[4..6]    (q1_0, q1_1)  leaf value q1
@@ -311,8 +319,10 @@ fn enforce_hornerext_constraints<AB>(
 ///   s[11..13]  prev_eval     previous layer's folded value (for consistency check)
 ///   s[13..15]  (alpha0, alpha1) verifier challenge for this FRI layer
 ///   s[15]      layer_ptr     memory address of current FRI layer data
+/// ```
 ///
 /// Output stack (next trace row; first 8 positions are degree-reduction intermediates):
+/// ```text
 ///   s'[0..2]   fold_mid0       first fold2 intermediate result
 ///   s'[2..4]   fold_mid1       second fold2 intermediate result
 ///   s'[4..7]   coset_flag[1..3]  nonzero natural coset flags
@@ -323,12 +333,15 @@ fn enforce_hornerext_constraints<AB>(
 ///   s'[11]     folded_pos        copied from input
 ///   s'[12..14] fold_result       final fold4 output
 ///   s'[14]     layer_ptr + 8     copy used by the next fold input
+/// ```
 ///
 /// Helper registers (nondeterministic, provided by prover):
+/// ```text
 ///   h[0..2]    eval_point        folding parameter = alpha / domain_point
 ///   h[2..4]    eval_point_sq     eval_point^2 (for the final fold2 round)
 ///   h[4]       domain_point      x = poe * tau_factor
 ///   h[5]       domain_point_inv  1/x
+/// ```
 ///
 /// Fold4 pairs conjugate points: (q0, q2) and (q1, q3).
 fn enforce_frie2f4_constraints<AB>(
@@ -367,33 +380,26 @@ fn enforce_frie2f4_constraints<AB>(
     // The coset flags are one-hot and use natural order: flag_i is active when coset == i.
     // The flags also select the tau factor used to compute the domain point.
 
-    let coset_flag_1: AB::Expr = s_next[4].dup();
-    let coset_flag_2: AB::Expr = s_next[5].dup();
-    let coset_flag_3: AB::Expr = s_next[6].dup();
+    let coset_flag_1 = s_next[4].dup();
+    let coset_flag_2 = s_next[5].dup();
+    let coset_flag_3 = s_next[6].dup();
     let coset_flag_0 =
-        AB::Expr::ONE - coset_flag_1.clone() - coset_flag_2.clone() - coset_flag_3.clone();
+        AB::Expr::ONE - (coset_flag_1.dup() + coset_flag_2.dup() + coset_flag_3.dup());
 
     // One-hot coset encoding.
-    for value in [
-        coset_flag_0.clone(),
-        coset_flag_1.clone(),
-        coset_flag_2.clone(),
-        coset_flag_3.clone(),
-    ] {
-        builder.assert_bool(value);
-    }
+    let coset_flags = [coset_flag_0, coset_flag_1.dup(), coset_flag_2.dup(), coset_flag_3.dup()];
+    builder.assert_bools(coset_flags.each_ref().map(Dup::dup));
 
     // coset = 0*flag0 + 1*flag1 + 2*flag2 + 3*flag3.
     let folded_pos_next = s_next[11].dup();
-    let expected_coset =
-        coset_flag_1.clone() + coset_flag_2.clone() * F_2 + coset_flag_3.clone() * F_3;
+    let expected_coset = coset_flag_1.dup() + coset_flag_2.double() + coset_flag_3.dup() * F_3;
     builder.assert_eq(coset, expected_coset);
 
     // tau_factor = tau^-coset.
-    let expected_tau = coset_flag_0.clone()
-        + coset_flag_1.clone() * TAU_INV
-        + coset_flag_2.clone() * TAU2_INV
-        + coset_flag_3.clone() * TAU3_INV;
+    let expected_tau = <AB::Expr as Algebra<Felt>>::mixed_dot_product(
+        &coset_flags,
+        &[Felt::ONE, TAU_INV, TAU2_INV, TAU3_INV],
+    );
 
     // ==========================================================================
     // Phase 2: Folding parameters
@@ -466,27 +472,25 @@ fn enforce_frie2f4_constraints<AB>(
     // Stack order is [q0, q2, q1, q3], so natural position 0 maps to s[0..2], 1 maps to
     // s[4..6], 2 maps to s[2..4], and 3 maps to s[6..8].
     // Enforce prev_eval = q_coset.
-    let selected_component_0 = s[0].dup() * coset_flag_0.clone()
-        + s[4].dup() * coset_flag_1.clone()
-        + s[2].dup() * coset_flag_2.clone()
-        + s[6].dup() * coset_flag_3.clone();
-    let selected_component_1 = s[1].dup() * coset_flag_0
-        + s[5].dup() * coset_flag_1
-        + s[3].dup() * coset_flag_2
-        + s[7].dup() * coset_flag_3;
+    let selected_component_0 =
+        AB::Expr::dot_product(&[s[0].dup(), s[4].dup(), s[2].dup(), s[6].dup()], &coset_flags);
+    let selected_component_1 =
+        AB::Expr::dot_product(&[s[1].dup(), s[5].dup(), s[3].dup(), s[7].dup()], &coset_flags);
     builder
         .assert_eq_quad(prev_eval, QuadFeltExpr::new(selected_component_0, selected_component_1));
 
     // Domain generator power for the next layer: poe -> poe^2 -> poe^4.
     let poe_sq = s_next[7].dup();
     let poe_fourth = s_next[10].dup();
-    builder.assert_eq(poe_sq.dup(), poe.dup() * poe);
-    builder.assert_eq(poe_fourth, poe_sq.dup() * poe_sq);
+    builder.assert_eq(poe_sq.dup(), poe.square());
+    builder.assert_eq(poe_fourth, poe_sq.square());
 
     // Advance the layer pointer and preserve the folded position.
     let layer_ptr_next = s_next[8].dup();
-    builder.assert_eq(layer_ptr_next, layer_ptr.dup() + F_8);
-    builder.assert_eq(s_next[9].dup(), layer_ptr.dup() + F_8);
-    builder.assert_eq(s_next[14].dup(), layer_ptr.dup() + F_8);
+    let advanced_layer_ptr = layer_ptr + F_8;
+    builder.assert_eq_arrays(
+        [layer_ptr_next, s_next[9].dup(), s_next[14].dup()],
+        [advanced_layer_ptr.dup(), advanced_layer_ptr.dup(), advanced_layer_ptr],
+    );
     builder.assert_eq(folded_pos_next, folded_pos);
 }

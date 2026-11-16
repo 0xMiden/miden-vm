@@ -213,62 +213,56 @@ pub(super) fn eval_main_with_io<AB: air::LiftedAirBuilder<F = Felt>>(
     let block_last = last.dup() * phase_end.dup() * phases[program::PHASE_PADDING].dup();
     // Exactly one phase is selected, even in inactive padding. Combined with the fixed initial
     // state and transitions below, this prevents the witness from skipping or mixing phases.
-    builder.assert_bool(local[COL_ACT].dup());
-    builder.assert_bool(local[COL_PHASE_END].dup());
-    for i in 0..program::NUM_PHASES {
-        builder.assert_bool(local[COL_PHASE_BEGIN + i].dup());
-    }
-    builder.assert_zero(phases.iter().map(Dup::dup).sum::<AB::Expr>() - AB::Expr::ONE);
+    builder.assert_bools([local[COL_ACT].dup(), local[COL_PHASE_END].dup()]);
+    builder.assert_bools(phases.each_ref().map(Dup::dup));
+    builder.assert_one(phases.iter().map(Dup::dup).sum::<AB::Expr>());
     // Start at block zero, in the first cycle of MASK. The periodic lane already starts at zero.
     builder.when(frame.first_row()).assert_zero(block_id.dup());
-    builder
-        .when(frame.first_row())
-        .assert_zero(phases[program::PHASE_MASK].dup() - AB::Expr::ONE);
+    builder.when(frame.first_row()).assert_one(phases[program::PHASE_MASK].dup());
     builder.when(frame.first_row()).assert_zero(cycle.dup());
-    let phase_length: AB::Expr = phases
-        .iter()
-        .zip(program::PHASE_CYCLES)
-        .map(|(phase, length)| phase.dup() * Felt::from(length))
-        .sum();
+    let phase_length = AB::Expr::mixed_dot_product(&phases, &program::PHASE_CYCLES.map(Felt::from));
     // `phase_end` marks the entire final 32-row cycle. The inverse witness makes it an
     // exact zero test; the lane-31 selector below controls when the phase actually advances.
     // For d = cycle + 1 - phase_length: d = 0 forces phase_end = 1; otherwise phase_end = 0
     // and phase_inv = 1/d. Neither an early exit nor a delayed phase change is possible.
     let remaining = cycle.dup() + AB::Expr::ONE - phase_length;
-    builder.assert_zero(remaining.dup() * phase_end.dup());
-    builder.assert_zero(remaining * local[COL_PHASE_INV].dup() - (AB::Expr::ONE - phase_end.dup()));
+    builder.when(phase_end.dup()).assert_zero(remaining.dup());
+    builder.assert_eq(remaining * local[COL_PHASE_INV].dup(), AB::Expr::ONE - phase_end.dup());
     // Active blocks form a prefix: activity cannot restart after becoming zero, and it can
     // change only at a block's last row. Thus an active block cannot omit any of its 4096 rows.
     builder
         .when(frame.transition())
-        .assert_zero((AB::Expr::ONE - act.dup()) * act_next.dup());
+        .when(AB::Expr::ONE - act.dup())
+        .assert_zero(act_next.dup());
     builder
         .when(frame.transition())
-        .assert_zero((AB::Expr::ONE - block_last.dup()) * (act_next - act.dup()));
+        .when(AB::Expr::ONE - block_last.dup())
+        .assert_eq(act_next.dup(), act.dup());
     // Give each block a unique consecutive ID for all word and metadata lookups.
     builder
         .when(frame.transition())
-        .assert_zero(next[COL_BLOCK_ID].dup() - block_id - block_last.dup());
+        .assert_eq(next[COL_BLOCK_ID].dup(), block_id.dup() + block_last.dup());
     // Hold the cycle within its 32 lanes. At lane 31, increment it unless the phase ends;
     // the final term then cancels cycle + 1, resetting the next phase's cycle to zero.
-    builder.when(frame.transition()).assert_zero(
-        next[COL_CYCLE].dup() - cycle.dup() - last.dup()
-            + last.dup() * phase_end.dup() * (cycle.dup() + AB::Expr::ONE),
+    builder.when(frame.transition()).assert_eq(
+        next[COL_CYCLE].dup(),
+        cycle.dup() + last.dup() - last.dup() * phase_end.dup() * (cycle.dup() + AB::Expr::ONE),
     );
     // Advance the one-hot phase only at the last lane of its last cycle. The cyclic previous
     // index also implements PADDING -> MASK at the start of the next compression block.
     for i in 0..program::NUM_PHASES {
         let previous = (i + program::NUM_PHASES - 1) % program::NUM_PHASES;
-        builder.when(frame.transition()).assert_zero(
-            next[COL_PHASE_BEGIN + i].dup()
-                - phases[i].dup()
-                - last.dup() * phase_end.dup() * (phases[previous].dup() - phases[i].dup()),
+        builder.when(frame.transition()).assert_eq(
+            next[COL_PHASE_BEGIN + i].dup(),
+            phases[i].dup()
+                + last.dup() * phase_end.dup() * (phases[previous].dup() - phases[i].dup()),
         );
     }
     // Transition constraints alone would accept a truncated active block.
     builder
         .when(frame.last_row())
-        .assert_zero(act.dup() * (AB::Expr::ONE - block_last));
+        .when(act.dup())
+        .assert_zero(AB::Expr::ONE - block_last);
     // IO rows retain the controller but reinterpret the remaining cells. `act` gates execution
     // and lookups; `program_gate` still enforces template equations on inactive, non-IO rows.
     let act = act - io_act.dup();
@@ -280,16 +274,13 @@ pub(super) fn eval_main_with_io<AB: air::LiftedAirBuilder<F = Felt>>(
     let input_word: AB::Expr = local[COL_META_INPUT_WORD].dup();
     // Opcode lookup selectors must be Boolean before the metadata lookup is interpreted.
     // IO uses this cell only in the padding phase, where word_phase is zero.
-    builder.assert_zero(word_phase.dup() * input_word.dup() * (input_word.dup() - AB::Expr::ONE));
+    builder.when(word_phase.dup()).assert_bool(input_word.dup());
     // A word-schedule cycle contains rounds 2*cycle and 2*cycle+1; a hash cycle contains one
     // round. Binding t to these counters prevents substituting another round's constants/fanout.
-    builder.assert_zero(
-        word_phase.dup()
-            * (round.dup()
-                - cycle.dup() * Felt::from(2u8)
-                - periodic[program::COL_LANE_HALF].dup()),
-    );
-    builder.assert_zero(hash_phase.dup() * (round.dup() - cycle.dup()));
+    builder
+        .when(word_phase.dup())
+        .assert_eq(round.dup(), cycle.double() + periodic[program::COL_LANE_HALF].dup());
+    builder.when(hash_phase.dup()).assert_eq(round.dup(), cycle.dup());
     // A metadata lookup authenticates only the first row of each word/hash round. Hold all
     // fields throughout its 16/32-row round so every instruction uses that authenticated data.
     let hold_metadata = word_phase * (AB::Expr::ONE - periodic[program::COL_WORD_LAST].dup())
@@ -297,7 +288,8 @@ pub(super) fn eval_main_with_io<AB: air::LiftedAirBuilder<F = Felt>>(
     for column in COL_META_T..=COL_META_K_HI {
         builder
             .when(frame.transition())
-            .assert_zero(hold_metadata.dup() * (next[column].dup() - local[column].dup()));
+            .when(hold_metadata.dup())
+            .assert_eq(next[column].dup(), local[column].dup());
     }
 
     // Materialize the opcode, sources, and rotation parameters from the selected fixed template.
@@ -307,8 +299,7 @@ pub(super) fn eval_main_with_io<AB: air::LiftedAirBuilder<F = Felt>>(
     let word_last = periodic[program::COL_WORD_LAST].dup();
     let is_add: AB::Expr = local[COL_PROG_BEGIN + program::T_IS_ADD].dup();
     for field in 0..11 {
-        let mut expected = AB::Expr::ZERO;
-        for (phase, phase_selector) in phases.iter().enumerate() {
+        let values = core::array::from_fn(|phase| {
             let template = &periodic[program::TEMPLATE_BEGIN + phase * program::TEMPLATE_COLS..];
             // The expansion template starts at W[16], after eight cycles of two input words.
             // Its affine source addresses therefore use cycle - 8; hash templates use cycle.
@@ -333,7 +324,7 @@ pub(super) fn eval_main_with_io<AB: air::LiftedAirBuilder<F = Felt>>(
             };
             // The first 16 words use only the last lane, reading an external
             // input. Later words execute the full 16-instruction schedule.
-            let value = if phase == program::PHASE_WORDS {
+            if phase == program::PHASE_WORDS {
                 let input_value = match field {
                     0 => word_last.dup(),
                     7 => word_last.dup() * round.dup(),
@@ -342,15 +333,18 @@ pub(super) fn eval_main_with_io<AB: air::LiftedAirBuilder<F = Felt>>(
                 value.dup() + input_word.dup() * (input_value - value)
             } else {
                 value
-            };
-            expected += phase_selector.dup() * value;
-        }
-        let residual = local[COL_PROG_BEGIN + field].dup() - expected;
+            }
+        });
+        let expected = AB::Expr::dot_product(&phases, &values);
         if field >= 9 {
             // ADD uses these otherwise idle rotation cells for its two carries.
-            builder.assert_zero(program_gate.dup() * (AB::Expr::ONE - is_add.dup()) * residual);
+            builder
+                .when(program_gate.dup() * (AB::Expr::ONE - is_add.dup()))
+                .assert_eq(local[COL_PROG_BEGIN + field].dup(), expected);
         } else {
-            builder.assert_zero(program_gate.dup() * residual);
+            builder
+                .when(program_gate.dup())
+                .assert_eq(local[COL_PROG_BEGIN + field].dup(), expected);
         }
     }
     let is_const: AB::Expr = local[COL_PROG_BEGIN + program::T_IS_CONST].dup();
@@ -379,32 +373,22 @@ pub(super) fn eval_main_with_io<AB: air::LiftedAirBuilder<F = Felt>>(
     // ADD reuses the two ROL-parameter cells as Boolean carries. Its operand halves are bound
     // to prior u32 results by source lookups; Range16 bounds the four result limbs.
     builder
-        .when(program_gate.dup() * is_add.dup())
-        .assert_bool(local[COL_CARRY_LO].dup());
-    builder.when(program_gate * is_add.dup()).assert_bool(local[COL_CARRY_HI].dup());
-    let gate_add = act.dup() * is_add;
+        .when(program_gate * is_add.dup())
+        .assert_bools([carry_lo.dup(), carry_hi.dup()]);
+    let gate_add = act.dup() * is_add.dup();
     // Enforce r = a + b mod 2^64 through two integer equalities:
     // a_lo + b_lo = r_lo + 2^32*carry_lo,
     // a_hi + b_hi + carry_lo = r_hi + 2^32*carry_hi.
     // Each side is far below the base-field modulus, so field equality cannot hide overflow.
     // The high carry is deliberately discarded to implement wrapping addition.
-    builder.assert_zero(
-        gate_add.dup()
-            * (a_lo.dup() + b_lo
-                - r_lo.dup()
-                - AB::Expr::from(Felt::new(1u64 << 32).unwrap()) * carry_lo.dup()),
-    );
-    builder.assert_zero(
-        gate_add
-            * (a_hi.dup() + b_hi + carry_lo
-                - r_hi.dup()
-                - AB::Expr::from(Felt::new(1u64 << 32).unwrap()) * carry_hi),
+    builder.when(gate_add).assert_eq_arrays(
+        [a_lo.dup() + b_lo, a_hi.dup() + b_hi + carry_lo.dup()],
+        [r_lo.dup() + carry_lo.mul_2exp_u64(32), r_hi.dup() + carry_hi.mul_2exp_u64(32)],
     );
     // CONST has no source lookup: bind its result halves directly to the selected mask
     // or round constant. The same result is then available to consumers through the word bus.
-    let gate_const = act.dup() * is_const;
-    builder.assert_zero(gate_const.dup() * (r_lo - const_lo));
-    builder.assert_zero(gate_const * (r_hi - const_hi));
+    let gate_const = act.dup() * is_const.dup();
+    builder.when(gate_const).assert_eq_arrays([r_lo, r_hi], [const_lo, const_hi]);
     // On ROL rows, B holds two four-u16 decompositions of
     // y = (input_half + 2^32) * k, where k = 2^(shift mod 32). For shift mod 32 in 1..=30,
     // we have 2^32 - 1 < y < p. Since p = 2^64 - 2^32 + 1, y + p exceeds 2^64 - 1:
@@ -416,17 +400,19 @@ pub(super) fn eval_main_with_io<AB: air::LiftedAirBuilder<F = Felt>>(
     let lo_decomp: AB::Expr = pack_le(&limbs[0..4], 1u64 << 16);
     let hi_decomp: AB::Expr = pack_le(&limbs[4..8], 1u64 << 16);
     let two32 = AB::Expr::from(Felt::new(1u64 << 32).unwrap());
-    builder.assert_zero(rol_gate.dup() * ((a_lo + two32.dup()) * k.dup() - lo_decomp));
-    builder.assert_zero(rol_gate * ((a_hi + two32) * k - hi_decomp));
+    builder.when(rol_gate).assert_eq_arrays(
+        [(a_lo + two32.dup()) * k.dup(), (a_hi + two32) * k],
+        [lo_decomp, hi_decomp],
+    );
 }
 
 /// Join each shifted half's low 32 bits with the bits spilling from the opposite half.
 /// Subtract `k` to remove the decomposition bias, then swap halves for rotations of 32 or more.
 fn rotated_halves<E: Algebra<Felt>>(limbs: &[E; 8], k: E, swap: E) -> [E; 2] {
-    let x: [E; 8] = array::from_fn(|i| limbs[i].dup());
-    let two16 = E::from(Felt::from(1u32 << 16));
-    let lo = x[0].dup() + x[6].dup() + two16.dup() * (x[1].dup() + x[7].dup()) - k.dup();
-    let hi = x[2].dup() + x[4].dup() + two16 * (x[3].dup() + x[5].dup()) - k;
+    let lo = limbs[0].dup() + limbs[6].dup() + (limbs[1].dup() + limbs[7].dup()).mul_2exp_u64(16)
+        - k.dup();
+    let hi =
+        limbs[2].dup() + limbs[4].dup() + (limbs[3].dup() + limbs[5].dup()).mul_2exp_u64(16) - k;
     [lo.dup() + swap.dup() * (hi.dup() - lo.dup()), hi.dup() + swap * (lo - hi)]
 }
 
@@ -544,32 +530,34 @@ pub(super) fn eval_lookup_batch<B>(
             // the template; W/a/e fanouts vary by round and come from authenticated metadata.
             // The extra read of each feedforward result binds it to the IO state or digest.
             let bid = v(COL_BLOCK_ID);
-            let phases: [B::Expr; program::NUM_PHASES] = array::from_fn(|i| v(COL_PHASE_BEGIN + i));
-            let dst_mult: B::Expr = phases
-                .iter()
-                .enumerate()
-                .map(|(phase, selector)| {
-                    let template = program::TEMPLATE_BEGIN + phase * program::TEMPLATE_COLS;
-                    let constant = if phase == program::PHASE_WORDS {
-                        p(template + program::T_DST_CONST) * (B::Expr::ONE - v(COL_META_INPUT_WORD))
-                    } else {
-                        p(template + program::T_DST_CONST)
-                    };
-                    selector.dup()
-                        * (constant
-                            + p(template + program::T_DST_W) * v(COL_META_W_MULT)
-                            + p(template + program::T_DST_A) * v(COL_META_A_MULT)
-                            + p(template + program::T_DST_E) * v(COL_META_E_MULT))
-                })
-                .sum();
+            let phases: &[B::Expr; program::NUM_PHASES] = local
+                [COL_PHASE_BEGIN..COL_PHASE_BEGIN + program::NUM_PHASES]
+                .try_into()
+                .expect("declared AIR row band");
+            let fanouts =
+                [B::Expr::ONE, v(COL_META_W_MULT), v(COL_META_A_MULT), v(COL_META_E_MULT)];
+            let weights = core::array::from_fn(|phase| {
+                let template = program::TEMPLATE_BEGIN + phase * program::TEMPLATE_COLS;
+                let constant = if phase == program::PHASE_WORDS {
+                    p(template + program::T_DST_CONST) * (B::Expr::ONE - v(COL_META_INPUT_WORD))
+                } else {
+                    p(template + program::T_DST_CONST)
+                };
+                B::Expr::dot_product(
+                    &fanouts,
+                    &[
+                        constant,
+                        p(template + program::T_DST_W),
+                        p(template + program::T_DST_A),
+                        p(template + program::T_DST_E),
+                    ],
+                )
+            });
+            let dst_mult = B::Expr::dot_product(phases, &weights);
             // Reconstruct the unique destination address from the controller; the witness
             // cannot publish a result at another instruction's address to satisfy its readers.
-            let slot = phases
-                .iter()
-                .zip(program::PHASE_BASES)
-                .map(|(phase, base)| phase.dup() * Felt::from(base))
-                .sum::<B::Expr>()
-                + v(COL_CYCLE) * Felt::from(32u8)
+            let slot = B::Expr::mixed_dot_product(phases, &program::PHASE_BASES.map(Felt::from))
+                + v(COL_CYCLE).mul_2exp_u64(5)
                 + p(program::COL_LANE);
             let r: &[B::Expr; 8] =
                 local[COL_R_BEGIN..COL_R_BEGIN + 8].try_into().expect("SHA-512 lookup r band");
@@ -596,7 +584,7 @@ pub(super) fn eval_lookup_batch<B>(
                 r.dup()
                     + logic.dup() * (x.dup() - r.dup())
                     + is_and.dup() * (a.dup() + b.dup() - x.dup() * Felt::from_u8(3)) * half.dup()
-                    + is_andnot.dup() * (b - a - x) * half.dup()
+                    + is_andnot.dup() * (b - (a + x)) * half.dup()
                     + is_rol.dup() * (rotated - r)
             };
             let out_lo = output(r_lo, x_lo, a_lo, b_lo, c_lo);
@@ -628,8 +616,8 @@ pub(super) fn eval_lookup_batch<B>(
             let is_andnot = v(COL_PROG_BEGIN + program::T_IS_ANDNOT);
             let is_add = v(COL_PROG_BEGIN + program::T_IS_ADD);
             let is_rol = v(COL_PROG_BEGIN + program::T_IS_ROL);
-            let reads_a = is_xor.dup() + is_and.dup() + is_andnot.dup() + is_add.dup() + is_rol;
-            let reads_b = is_xor + is_and + is_andnot + is_add;
+            let reads_b = [is_xor, is_and, is_andnot, is_add].into_iter().sum::<B::Expr>();
+            let reads_a = reads_b.dup() + is_rol;
             let addrs = [v(COL_SRC_A), v(COL_SRC_B)];
             batch.insert(
                 "src_a",
@@ -706,11 +694,12 @@ pub(super) fn eval_lookup_batch<B>(
             // of each valid entry: one for W[t]'s schedule and one for hash round t. Padding
             // entries 80..128 provide nothing, so they cannot authenticate an extra round.
             let bid = v(COL_BLOCK_ID);
-            let phases: [B::Expr; program::NUM_PHASES] = array::from_fn(|i| v(COL_PHASE_BEGIN + i));
-            let provider = -B::Expr::from(Felt::from(2u8))
-                * act
-                * phases[program::PHASE_BOOTSTRAP].dup()
-                * p(program::COL_META_VALID);
+            let phases: &[B::Expr; program::NUM_PHASES] = local
+                [COL_PHASE_BEGIN..COL_PHASE_BEGIN + program::NUM_PHASES]
+                .try_into()
+                .expect("declared AIR row band");
+            let provider =
+                -act.double() * phases[program::PHASE_BOOTSTRAP].dup() * p(program::COL_META_VALID);
             batch.insert(
                 "provider",
                 provider,

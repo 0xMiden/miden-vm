@@ -1,9 +1,9 @@
 //! Selector container for constraint folding.
 //!
 //! The [`Selectors`] struct is a plain container holding selector values.
-//! Computation is done via [`LiftedDomain`](crate::domain::LiftedDomain) methods:
-//! - [`LiftedDomain::selectors`](crate::domain::LiftedDomain::selectors) for coset evaluation
-//!   (prover)
+//! Computation uses the domain matching the evaluation point:
+//! - [`EvaluationDomain::selectors`](crate::domain::EvaluationDomain::selectors) for coset
+//!   evaluation (prover)
 //! - [`LiftedDomain::selectors_at`](crate::domain::LiftedDomain::selectors_at) for lifted OOD point
 //!   evaluation (verifier)
 
@@ -13,8 +13,8 @@ use p3_field::{PackedField, TwoAdicField};
 
 /// Selector values for constraint evaluation.
 ///
-/// Plain container for selector values. Use [`LiftedDomain`](crate::domain::LiftedDomain) methods
-/// to compute selectors.
+/// Use [`EvaluationDomain::selectors`](crate::domain::EvaluationDomain::selectors) for cosets or
+/// [`LiftedDomain::selectors_at`](crate::domain::LiftedDomain::selectors_at) for OOD points.
 ///
 /// Generic over `T` to support:
 /// - `EF` for single-point OOD evaluation (verifier)

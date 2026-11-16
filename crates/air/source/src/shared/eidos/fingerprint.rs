@@ -114,7 +114,10 @@ where
     B: PrimeCharacteristicRing,
     E: Algebra<B>,
 {
-    (0..NUM_G).map(|g| coefficients.powers[g].clone() * lane(g)).sum()
+    E::mixed_dot_product(
+        &core::array::from_fn::<_, NUM_G, _>(|g| coefficients.powers[g].dup()),
+        &core::array::from_fn(lane),
+    )
 }
 
 /// Returns `q*(acc + A_t + D_t)` and the `A_t` correction for the fused-row recurrence.
@@ -130,8 +133,7 @@ where
     let a = lane_sum(|g| packed_fused_bytes(&at, G_AC_BYTE_SLOT_BASE_COL, g, 1), coefficients);
     let delta = lane_sum(
         |g| {
-            B::from_u64(1 << 32) * at(g_k3_col(g))
-                - packed_fused_bytes(&at, G_BD_ROT_SLOT_BASE_COL, g, 0)
+            at(g_k3_col(g)).mul_2exp_u64(32) - packed_fused_bytes(&at, G_BD_ROT_SLOT_BASE_COL, g, 0)
         },
         coefficients,
     );
@@ -158,19 +160,18 @@ where
     next += a * selectors.is_last_fused();
     next += powers[2 * NUM_G].clone() * b * selectors.is_first_fused();
     for g in 0..NUM_G {
-        let weight: E = (0..FOOTER_ROWS)
-            .map(|footer| {
-                coefficients.message_weights[NUM_G * footer + g].clone()
-                    * selectors.is_footer_row(footer)
-            })
-            .sum();
+        let weight = E::mixed_dot_product(
+            &core::array::from_fn::<_, FOOTER_ROWS, _>(|footer| {
+                coefficients.message_weights[NUM_G * footer + g].dup()
+            }),
+            &core::array::from_fn(|footer| selectors.is_footer_row(footer)),
+        );
         next -= weight * footer_message_word(&at, g);
     }
-    let mut initial_cv = E::ZERO;
-    for g in 0..NUM_G {
-        initial_cv += powers[INITIAL_A_EXPONENT + g].clone() * footer_cv_word(&at, g)
-            + powers[INITIAL_B_EXPONENT + g].clone() * footer_cv_word(&at, g + NUM_G);
-    }
+    let initial_cv = E::mixed_dot_product(
+        &core::array::from_fn::<_, { 2 * NUM_G }, _>(|g| powers[INITIAL_A_EXPONENT + g].dup()),
+        &core::array::from_fn(|g| footer_cv_word(&at, g)),
+    );
     next -= initial_cv * selectors.is_footer_row(FOOTER_ROWS - 1);
     next
 }
@@ -187,10 +188,11 @@ pub fn enforce_register_constraints<AB: LiftedAirBuilder<F = Felt>>(
     let acc_next = frame.aux.next[aux_column].dup();
     let selectors = EidosCompressionSelectors::new(frame.periodic, 0);
     let coefficients = Coefficients::new(inputs.challenge(1));
-    builder.assert_zero_ext(
-        acc_next - next_accumulator(|col| local[col].dup(), &selectors, acc.clone(), &coefficients),
+    builder.assert_eq_ext(
+        acc_next,
+        next_accumulator(|col| local[col].dup(), &selectors, acc.dup(), &coefficients),
     );
-    builder.assert_zero_ext(acc * selectors.is_first_fused());
+    builder.when(selectors.is_first_fused()).assert_zero_ext(acc);
 }
 
 /// Fills the auxiliary register at `aux_column`, preserving every other column.

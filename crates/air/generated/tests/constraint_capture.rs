@@ -54,9 +54,9 @@ fn ids_are_dense_and_topological() {
     }
 }
 
-/// The structural-equality primitive drift tests build on: capturing the same
-/// constraints twice into one shared builder yields identical per-constraint root
-/// ids (hash-consing canonicalizes both captures onto the same nodes).
+/// Capturing the same authored constraints twice reuses the shared builder's nodes.
+/// This checks idempotent structural interning for identical input, independently
+/// of semantic comparisons between different polynomial representations.
 #[test]
 fn shared_builder_capture_gives_equal_roots() {
     for air in AIRS {

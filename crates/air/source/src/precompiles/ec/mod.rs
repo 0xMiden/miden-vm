@@ -258,43 +258,40 @@ pub(crate) fn eval_point_store_main<AB>(
     let ptr_next: AB::Expr = next[COL_PTR].dup();
 
     // Booleanity.
-    builder.assert_zero(is_pai.clone() * (AB::Expr::ONE - is_pai.clone()));
-    builder.assert_zero(is_cert.clone() * (AB::Expr::ONE - is_cert.clone()));
-    builder.assert_zero(act.clone() * (AB::Expr::ONE - act.clone()));
-    builder.assert_zero(is_pai.clone() * (AB::Expr::ONE - act.clone()));
-    builder.assert_zero(is_cert.clone() * (AB::Expr::ONE - act.clone()));
+    builder.assert_bools([is_pai.dup(), is_cert.dup(), act.dup()]);
+    let inactive = AB::Expr::ONE - act.dup();
+    builder.when(inactive.dup()).assert_zeros([is_pai.dup(), is_cert.dup()]);
     // A cert point is finite — the two membership modes are exclusive.
     builder.assert_zero(is_pai.clone() * is_cert.clone());
 
     // PAI rows reference no uints: coordinate / transient ptrs are the
     // none-sentinel.
     for col in [COL_X_PTR, COL_Y_PTR, COL_U_PTR, COL_W_PTR] {
-        let cell: AB::Expr = local[col].dup();
-        builder.assert_zero(is_pai.clone() * cell);
+        let cell = local[col].dup();
+        builder.when(is_pai.dup()).assert_zero(cell);
     }
     // Cert rows carry real coordinates but no MAC transients — the trio
     // ptrs are the none-sentinel (the cert discharges membership instead).
     for col in [COL_U_PTR, COL_W_PTR] {
-        let cell: AB::Expr = local[col].dup();
-        builder.assert_zero(is_cert.clone() * cell);
+        let cell = local[col].dup();
+        builder.when(is_cert.dup()).assert_zero(cell);
     }
     // Inactive rows cannot provide phantom EcPoint tuples: their group and
     // membership consumes are act-gated, while the provide self-gates via
     // this multiplicity cell.
-    let point_mult: AB::Expr = local[COL_ECPOINT_MULT].dup();
-    builder.assert_zero((AB::Expr::ONE - act.clone()) * point_mult);
+    let point_mult = local[COL_ECPOINT_MULT].dup();
+    builder.when(inactive.dup()).assert_zero(point_mult);
 
     // act is monotone (pads only at the tail; the wrap is dropped so
     // the cyclic last → first edge stays free)…
-    builder
-        .when(frame.transition())
-        .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
+    builder.when(frame.transition()).when(inactive).assert_zero(act_next.dup());
     // …and ptrs are consecutive along the active prefix, starting at 1
     // (an all-pad trace starts at 0).
     builder
         .when(frame.transition())
-        .assert_zero(act_next * (ptr_next - ptr.clone() - AB::Expr::ONE));
-    builder.when(frame.first_row()).assert_zero(ptr - act);
+        .when(act_next)
+        .assert_eq(ptr_next, ptr.dup() + AB::Expr::ONE);
+    builder.when(frame.first_row()).assert_eq(ptr, act);
 }
 
 // LOOKUP AIR
@@ -355,9 +352,9 @@ pub(crate) fn eval_point_store_lookups<LB>(
     // consumes do (an all-zero pad row must touch no bus). The trio fires
     // on finite, non-cert rows; the cert consume on finite cert rows —
     // disjoint, partitioning a finite point's one membership obligation.
-    let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_ECPOINT_MULT].dup();
-    let member_flag: LB::Expr = act.clone() - is_pai.clone() - is_cert.clone();
-    let cert_flag: LB::Expr = is_cert;
+    let neg_mult = -local[COL_ECPOINT_MULT].dup();
+    let member_flag = act.dup() - (is_pai.dup() + is_cert.dup());
+    let cert_flag = is_cert.dup();
 
     let one: LB::Expr = LB::Expr::ONE;
     let zero: LB::Expr = LB::Expr::ZERO;

@@ -64,7 +64,7 @@ mod tests {
     };
     use miden_stark::air::{
         AirSpec, Assertion, UniformInputs, capture_from_spec,
-        symbolic::{BaseInput, BaseLeaf, RowOffset, SymbolicExpr},
+        symbolic::{BaseInput, ExprView, RowOffset},
     };
 
     use super::{PUBLIC_LEN, STACK_DEPTH, enforce_main};
@@ -128,25 +128,31 @@ mod tests {
         let public_start = captured.assertions.len() - PUBLIC_LEN;
         assert!(public_start >= 19, "the 19 system assertions precede decoder and public inputs");
         for i in 0..PUBLIC_LEN {
-            let Assertion::Base(SymbolicExpr::Mul { x: selector, y: difference, .. }) =
-                &captured.assertions[public_start + i]
-            else {
+            let Assertion::Base(expression) = &captured.assertions[public_start + i] else {
+                panic!("public boundary must retain its selector times difference");
+            };
+            let ExprView::Mul { x: selector, y: difference } = expression.as_ref().view() else {
                 panic!("public boundary must retain its selector times difference");
             };
             if i < STACK_DEPTH {
-                assert!(matches!(selector.as_ref(), SymbolicExpr::Leaf(BaseLeaf::IsFirstRow)));
+                assert!(matches!(selector.view(), ExprView::IsFirstRow));
             } else {
-                assert!(matches!(selector.as_ref(), SymbolicExpr::Leaf(BaseLeaf::IsLastRow)));
+                assert!(matches!(selector.view(), ExprView::IsLastRow));
             }
-            let SymbolicExpr::Sub { x: stack, y: public, .. } = difference.as_ref() else {
+            let ExprView::Sum { values } = difference.view() else {
                 panic!("public boundary must subtract the indexed public value");
             };
-            assert!(matches!(stack.as_ref(), SymbolicExpr::Leaf(BaseLeaf::Input(
-                BaseInput::Main { offset: RowOffset::Current, index }
-            )) if *index == NUM_SYSTEM_COLS + NUM_DECODER_COLS + i % STACK_DEPTH));
-            assert!(matches!(public.as_ref(), SymbolicExpr::Leaf(BaseLeaf::Input(
-                BaseInput::Public(index)
-            )) if *index == i));
+            assert_eq!(values.len(), 2);
+            let stack = values.get(0).unwrap();
+            let ExprView::Neg { x: public } = values.get(1).unwrap().view() else {
+                panic!("public boundary must negate its indexed public value");
+            };
+            assert!(matches!(stack.view(), ExprView::BaseInput(
+                BaseInput::Main { row: RowOffset::Current, column }
+            ) if column == NUM_SYSTEM_COLS + NUM_DECODER_COLS + i % STACK_DEPTH));
+            assert!(matches!(public.view(), ExprView::BaseInput(
+                BaseInput::Public { index }
+            ) if index == i));
         }
     }
 }

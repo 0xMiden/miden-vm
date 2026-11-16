@@ -47,5 +47,5 @@
       "url": "https://github.com/Plonky3/Plonky3/blob/a21e3ed42905040ad49c519e402f018381c12d0c/LICENSE-APACHE"
     }
   ],
-  "adaptation": "Arithmetic and flattened serde adapted; local field-independent input addresses replace builder/variable APIs. See README.md."
+  "adaptation": "Rich arithmetic and flattened serde adapted into a unified typed expression; local field-independent input addresses replace builder/variable APIs. Native capture owns checked frames and ordered sinks. See the symbolic module's Rustdoc."
 }

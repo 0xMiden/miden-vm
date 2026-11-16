@@ -35,13 +35,11 @@ pub use algebra::{
 pub use constraints::{enforce_core_footer_rows, enforce_fused_rows};
 pub use fingerprint::{enforce_register_constraints, fill_aux_register};
 pub use lookup::{
-    EidosCompressionCols, LookupMultiplicitySign, NarrowLookupConfig, XorExpression,
-    emit_narrow_lookup_columns,
+    EidosCompressionCols, LookupMultiplicitySign, NarrowLookupConfig, emit_narrow_lookup_columns,
 };
 pub use model::{initial_working_state, low_output};
 pub use periodic::get_periodic_column_values;
 pub use schedule::{FusedStep, fused_step_at};
 pub use selectors::EidosCompressionSelectors;
-
 pub use witness::EidosWitnessError;
 pub(crate) use witness::build_aux_trace;

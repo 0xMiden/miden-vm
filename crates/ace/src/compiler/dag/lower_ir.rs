@@ -82,18 +82,18 @@
 //!   s0             First coset shift offset^N. Base for shifted evaluation points.
 //! ```
 //!
-//! # Digest-critical invariant
+//! # Deterministic traversal
 //!
-//! `DagBuilder` interning order is digest-visible. Nodes are therefore
-//! materialized by demand-driven, per-constraint recursive DFS from each
-//! constraint root in global layout order — never by IR node-id order — so the
-//! builder-call sequence replicates the symbolic-tree lowering exactly. The
-//! node-for-node differential tests in `miden-air` (`tests/ace_codegen.rs`)
-//! enforce this over all supported Miden AIRs.
+//! Nodes are materialized by demand-driven, per-constraint recursive DFS from
+//! each constraint root in global assertion order, with the left child first.
+//! This makes node interning and the resulting circuit commitment reproducible.
+//! Algebraically equivalent expressions can yield different circuit encodings;
+//! semantic tests compare their values, while current protocol pins authenticate
+//! the circuit encoding selected by the compiler.
 //!
 //! The IR's base/ext class split is erased here: every DAG value is an
 //! extension-field element, and [`Leaf::ExtBase`] lowers transparently to its
-//! wrapped subtree (mirroring the tree lowering's `ExtLeaf::Base` case). Fields
+//! wrapped subtree (mirroring the symbolic expression's explicit lift). Fields
 //! are concrete (`Felt`/`QuadFelt`), matching the capture frontend.
 
 use miden_constraint_compiler::ir::{
@@ -159,17 +159,14 @@ pub fn build_verifier_dag_from_ir(
     let q_times_v = builder.mul(quotient, vanishing);
     let root = builder.sub(acc, q_times_v);
 
-    // Compact like the symbolic-tree lowering does: interned-but-dead nodes
-    // (e.g. the folded accumulator seed) would otherwise shift every node id
-    // in the DAG's node table, breaking node-for-node parity with the tree
-    // lowering. The encoded circuit and its digest are unaffected either way.
+    // Remove interned nodes that do not contribute to the verifier root,
+    // including the accumulator seed when it was folded away.
     let mut dag = builder.build(root);
     dag.compact();
     dag
 }
 
-/// Lower one constraint expression by recursive DFS from `id`, left child
-/// before right, mirroring the symbolic-tree lowering's builder-call order.
+/// Lower one constraint expression by recursive DFS from `id`, left child before right.
 fn lower_ir_expr(
     graph: &Graph,
     id: IrNodeId,
@@ -192,8 +189,7 @@ fn lower_ir_expr(
             Leaf::IsTransition => builder.input(InputKey::IsTransition),
             Leaf::BaseConst(raw) => builder.constant(QuadFelt::from(Felt::from_u64(raw))),
             Leaf::Aux { offset, index } => {
-                // Reconstruct the extension element from its base coordinates,
-                // in the exact node order of the tree lowering.
+                // Reconstruct the extension element from its base-coordinate openings.
                 let mut acc = builder.constant(QuadFelt::ZERO);
                 for coord in 0..<QuadFelt as BasedVectorSpace<Felt>>::DIMENSION {
                     let basis = <QuadFelt as BasedVectorSpace<Felt>>::ith_basis_element(coord)

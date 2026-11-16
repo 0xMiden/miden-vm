@@ -7,10 +7,9 @@
 
 use core::array;
 
-use p3_field::Dup;
-
 use miden_core::{chiplets::eidos_compression, field::PrimeCharacteristicRing};
 use miden_stark::lookup::{Deg, LookupBatch, LookupGroup};
+use p3_field::Dup;
 
 use crate::vm::{
     constraints::{
@@ -103,14 +102,14 @@ pub(in crate::vm::constraints::lookup) fn emit_core_requests<LB, G>(
                     ),
                     Deg { v: 4, u: 5 },
                 );
-                let old_return_addr =
-                    helper0.clone() + mr_depth.clone() * cycle_len.clone() - LB::Expr::ONE;
+                let path_rows = mr_depth * cycle_len;
+                let old_return_addr = helper0.dup() + path_rows.dup() - LB::Expr::ONE;
                 b.remove(
                     "mrupdate_old_return",
                     HasherMsg::return_hash(old_return_addr, old_root),
                     Deg { v: 4, u: 5 },
                 );
-                let new_init_addr = helper0.clone() + mr_depth.clone() * cycle_len.clone();
+                let new_init_addr = helper0.dup() + path_rows.dup();
                 b.remove(
                     "mrupdate_new_init",
                     HasherMsg::merkle_new_init(
@@ -121,8 +120,7 @@ pub(in crate::vm::constraints::lookup) fn emit_core_requests<LB, G>(
                     ),
                     Deg { v: 4, u: 5 },
                 );
-                let new_return_addr =
-                    helper0 + mr_depth * (cycle_len.clone() + cycle_len) - LB::Expr::ONE;
+                let new_return_addr = helper0.dup() + path_rows.double() - LB::Expr::ONE;
                 b.remove(
                     "mrupdate_new_return",
                     HasherMsg::return_hash(new_return_addr, stk_next_word_0),
@@ -167,9 +165,7 @@ pub(in crate::vm::constraints::lookup) fn emit_core_range_checks<LB, G>(
             b.remove("mpverify_depth_scaled", RangeMsg { value: scaled_depth }, Deg { v: 5, u: 6 });
             b.remove(
                 "mpverify_merkle_y3_doubled",
-                RangeMsg {
-                    value: LB::Expr::from_u16(2) * merkle_y3.dup(),
-                },
+                RangeMsg { value: merkle_y3.double() },
                 Deg { v: 5, u: 6 },
             );
         },
@@ -187,9 +183,7 @@ pub(in crate::vm::constraints::lookup) fn emit_core_range_checks<LB, G>(
             b.remove("mrupdate_merkle_y3", RangeMsg { value: merkle_y3.dup() }, Deg { v: 4, u: 5 });
             b.remove(
                 "mrupdate_merkle_y3_doubled",
-                RangeMsg {
-                    value: LB::Expr::from_u16(2) * merkle_y3.dup(),
-                },
+                RangeMsg { value: merkle_y3.double() },
                 Deg { v: 4, u: 5 },
             );
         },
@@ -256,9 +250,10 @@ pub(in crate::vm::constraints::lookup) fn emit_chiplet_inits<LB, G>(
     // additional controller selector keeps the response gate within the degree bound.
     let merkle_gate = merkle_or_padding * hs0;
     let merkle_start: LB::Expr = ctrl.merkle_is_start();
-    let f_mp: LB::Expr = merkle_gate.clone() * hs1.not() * hs2.clone() * merkle_start.clone();
-    let f_mv: LB::Expr = merkle_gate.clone() * hs1.clone() * hs2.not() * merkle_start.clone();
-    let f_mu: LB::Expr = merkle_gate * hs1 * hs2 * merkle_start;
+    let merkle_start_gate = merkle_gate * merkle_start;
+    let f_mp = merkle_start_gate.dup() * hs1.not() * hs2.dup();
+    let f_mv = merkle_start_gate.dup() * hs1.dup() * hs2.not();
+    let f_mu = merkle_start_gate * hs1 * hs2;
     let row_addr: LB::Expr = ctrl.addr.dup();
     let block_lo: [LB::Expr; 4] = array::from_fn(|i| ctrl.state[i].dup());
     let block_hi: [LB::Expr; 4] = array::from_fn(|i| ctrl.state[4 + i].dup());
@@ -273,12 +268,11 @@ pub(in crate::vm::constraints::lookup) fn emit_chiplet_inits<LB, G>(
             name,
             flag,
             || {
-                let addr = row_addr.clone();
+                let addr = row_addr.dup();
                 let node_index: LB::Expr = ctrl.merkle_node_index();
-                let bit: LB::Expr = node_index.clone() - ctrl.merkle_node_index_next().double();
-                let one_minus_bit = bit.not();
+                let bit = node_index.dup() - ctrl.merkle_node_index_next().double();
                 let word: [LB::Expr; 4] = array::from_fn(|i| {
-                    one_minus_bit.clone() * block_lo[i].dup() + bit.clone() * block_hi[i].dup()
+                    block_lo[i].dup() + bit.dup() * (block_hi[i].dup() - block_lo[i].dup())
                 });
                 HasherMsg {
                     kind,
@@ -305,8 +299,9 @@ pub(in crate::vm::constraints::lookup) fn emit_siblings<LB, G>(
     let hs1: LB::Expr = ctrl.s1.dup();
     let hs2: LB::Expr = ctrl.s2.dup();
     let controller_flag = ctx.chiplet_active.controller.clone();
-    let f_mu_all: LB::Expr = controller_flag.clone() * hs0.clone() * hs1.clone() * hs2.clone();
-    let f_mv_all: LB::Expr = controller_flag * hs0 * hs1 * hs2.not();
+    let update_gate = controller_flag * hs0 * hs1;
+    let f_mu_all = update_gate.dup() * hs2.dup();
+    let f_mv_all = update_gate * hs2.not();
     let block_lo: [LB::Expr; 4] = array::from_fn(|i| ctrl.state[i].dup());
     let block_hi: [LB::Expr; 4] = array::from_fn(|i| ctrl.state[4 + i].dup());
     let mrupdate_id = ctrl.mrupdate_id.dup();

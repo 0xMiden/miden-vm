@@ -319,13 +319,7 @@ impl MainTrace {
     /// Constructs the i-th op code value from its individual bits.
     pub fn get_op_code(&self, i: RowIndex) -> Felt {
         let bits = &self.core_row(i).decoder.op_bits;
-        bits[0]
-            + bits[1] * Felt::from_u64(2)
-            + bits[2] * Felt::from_u64(4)
-            + bits[3] * Felt::from_u64(8)
-            + bits[4] * Felt::from_u64(16)
-            + bits[5] * Felt::from_u64(32)
-            + bits[6] * Felt::from_u64(64)
+        crate::vm::constraints::utils::horner_eval_bits(bits)
     }
 
     /// Returns a flag indicating whether the current operation induces a left shift of the operand

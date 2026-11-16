@@ -42,7 +42,7 @@ mod tests {
     use miden_core::{Felt, field::QuadFelt};
     use miden_stark::air::{
         AirSpec, Assertion, capture_from_spec,
-        symbolic::{BaseInput, BaseLeaf, RowOffset, SymbolicExpr},
+        symbolic::{BaseInput, ExprView, RowOffset},
     };
 
     use super::enforce_main;
@@ -94,17 +94,20 @@ mod tests {
             (RowOffset::Next, stack + 15),
         ];
         for (ordinal, (offset, index)) in expected.into_iter().enumerate() {
-            let Assertion::Base(SymbolicExpr::Mul { y: difference, .. }) =
-                &captured.assertions[horner_start + ordinal]
-            else {
+            let Assertion::Base(expression) = &captured.assertions[horner_start + ordinal] else {
                 panic!("Horner equality must remain a gated base assertion");
             };
-            let SymbolicExpr::Sub { x: lhs, .. } = difference.as_ref() else {
+            let ExprView::Mul { y: difference, .. } = expression.as_ref().view() else {
+                panic!("Horner equality must retain its gate");
+            };
+            let ExprView::Sum { values } = difference.view() else {
                 panic!("Horner equality must retain its lhs-minus-rhs construction");
             };
-            assert!(matches!(lhs.as_ref(), SymbolicExpr::Leaf(BaseLeaf::Input(
-                BaseInput::Main { offset: actual_offset, index: actual_index }
-            )) if *actual_offset == offset && *actual_index == index));
+            assert_eq!(values.len(), 2);
+            assert!(matches!(values.get(1).unwrap().view(), ExprView::Neg { .. }));
+            assert!(matches!(values.get(0).unwrap().view(), ExprView::BaseInput(
+                BaseInput::Main { row: actual_row, column: actual_column }
+            ) if actual_row == offset && actual_column == index));
         }
     }
 }

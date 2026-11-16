@@ -280,18 +280,17 @@ where
         // The provide multiplicities live in `v` hi's own hub cells,
         // read via `next` from `v` lo's row (the only row either merged
         // provide fires from).
-        let neg_mult: LB::Expr = LB::Expr::ZERO - next[HUB_CELL_UINTVAL_MULT].dup();
-        let neg_limbs_mult: LB::Expr = LB::Expr::ZERO - next[HUB_CELL_UINTLIMBS_MULT].dup();
+        let neg_mult = -next[HUB_CELL_UINTVAL_MULT].dup();
+        let neg_limbs_mult = -next[HUB_CELL_UINTLIMBS_MULT].dup();
 
         // Complete 8×32-bit recombined view: the lo half local (this row
         // is `v` lo), the hi half from `v` hi via `next`.
-        let two16: LB::Expr = LB::Expr::from(Felt::from(1u32 << 16));
         let recomb: [LB::Expr; 8] = array::from_fn(|k| {
             if k < 4 {
-                local[2 * k].dup() + two16.clone() * local[2 * k + 1].dup()
+                local[2 * k].dup() + local[2 * k + 1].mul_2exp_u64(16)
             } else {
                 let k = k - 4;
-                next[2 * k].dup() + two16.clone() * next[2 * k + 1].dup()
+                next[2 * k].dup() + next[2 * k + 1].mul_2exp_u64(16)
             }
         });
         // Complete 8×32-bit direct view: both halves local (this row is
@@ -469,9 +468,9 @@ impl air::LiftedAir for UintStoreAir {
         builder: &mut AB,
     ) {
         let local: &[AB::Expr; NUM_MAIN_COLS] =
-            frame.main.current[..NUM_MAIN_COLS].try_into().expect("uint main row band");
+            frame.main.current[..NUM_MAIN_COLS].try_into().expect("declared AIR row band");
         let next: &[AB::Expr; NUM_MAIN_COLS] =
-            frame.main.next[..NUM_MAIN_COLS].try_into().expect("uint main row band");
+            frame.main.next[..NUM_MAIN_COLS].try_into().expect("declared AIR row band");
 
         // Role selectors.
         let (v_lo_sel, v_hi_sel, comp_sel, bound_sel): (AB::Expr, AB::Expr, AB::Expr, AB::Expr) = {
@@ -480,12 +479,9 @@ impl air::LiftedAir for UintStoreAir {
         };
 
         // β^0 .. β^7 (challenge constants).
-        let beta: AB::ExtExpr = inputs.challenge(1);
-        let mut bp: Vec<AB::ExtExpr> = Vec::with_capacity(8);
-        bp.push(AB::ExtExpr::ONE);
-        for i in 1..8 {
-            bp.push(bp[i - 1].clone() * beta.clone());
-        }
+        let beta: AB::ExtExpr = inputs.challenges[1].dup();
+        let mut bp: [AB::ExtExpr; 8] = array::from_fn(|_| AB::ExtExpr::ZERO);
+        beta.powers().fill(&mut bp);
 
         // `id` register.
         let id: AB::ExtExpr = frame.aux.current[REGISTER_COL].dup();
@@ -498,96 +494,97 @@ impl air::LiftedAir for UintStoreAir {
         // row's own high content — since `v` hi's high content sits at
         // cells 0–7 of *its own* row, while `comp`'s high content sits at
         // cells 8–15 of the *same* row as its low content).
-        let two16: AB::Expr = AB::Expr::from(Felt::from(1u32 << 16));
-        let mut recomb_lo07 = AB::ExtExpr::ZERO;
-        let mut recomb_hi07 = AB::ExtExpr::ZERO;
-        let mut recomb_hi815 = AB::ExtExpr::ZERO;
-        let mut direct_lo = AB::ExtExpr::ZERO;
-        let mut direct_hi = AB::ExtExpr::ZERO;
-        for k in 0..4 {
-            let r07: AB::Expr = local[2 * k].dup() + two16.clone() * local[2 * k + 1].dup();
-            let r815: AB::Expr =
-                local[8 + 2 * k].dup() + two16.clone() * local[8 + 2 * k + 1].dup();
-            recomb_lo07 += bp[k].clone() * r07.clone();
-            recomb_hi07 += bp[4 + k].clone() * r07;
-            recomb_hi815 += bp[4 + k].clone() * r815;
-            direct_lo += bp[k].clone() * local[k].dup();
-            direct_hi += bp[4 + k].clone() * local[8 + k].dup();
-        }
+        let recombined_lo: [AB::Expr; 4] =
+            array::from_fn(|k| local[2 * k].dup() + local[2 * k + 1].mul_2exp_u64(16));
+        let recombined_hi: [AB::Expr; 4] =
+            array::from_fn(|k| local[8 + 2 * k].dup() + local[8 + 2 * k + 1].mul_2exp_u64(16));
+        let low_weights: &[AB::ExtExpr; 4] = bp[..4].try_into().expect("low limb weights");
+        let high_weights: &[AB::ExtExpr; 4] = bp[4..].try_into().expect("high limb weights");
+        let recomb_lo07 =
+            <AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product(low_weights, &recombined_lo);
+        let recomb_hi07 =
+            <AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product(high_weights, &recombined_lo);
+        let recomb_hi815 =
+            <AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product(high_weights, &recombined_hi);
+        let direct_lo = <AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product(
+            low_weights,
+            local[..4].try_into().expect("low bound limbs"),
+        );
+        let direct_hi = <AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product(
+            high_weights,
+            local[8..12].try_into().expect("high bound limbs"),
+        );
 
         // Carry terms: Σ c_j·(β^{j+1} − t·β^j), t = 2³², hosted on the
         // bound row — γ₀..γ₃ in cells 4–7, γ₄..γ₆ in cells 12–14.
-        let t32: AB::Expr = AB::Expr::from(Felt::new(1u64 << 32).expect("2^32 < Goldilocks p"));
-        let mut carry_lo_term = AB::ExtExpr::ZERO;
-        for j in 0..4 {
-            let weight: AB::ExtExpr = bp[j + 1].clone() - bp[j].clone() * t32.clone();
-            carry_lo_term += weight * local[CARRY_LO_BEGIN + j].dup();
-        }
-        let mut carry_hi_term = AB::ExtExpr::ZERO;
-        for j in 4..7 {
-            let weight: AB::ExtExpr = bp[j + 1].clone() - bp[j].clone() * t32.clone();
-            carry_hi_term += weight * local[CARRY_HI_BEGIN + (j - 4)].dup();
-        }
+        // Their coefficients depend only on the challenge and limb radix.
+        let carry_weights: [AB::ExtExpr; 7] =
+            array::from_fn(|j| bp[j + 1].dup() - bp[j].mul_2exp_u64(32));
+        let carry_lo_term = <AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product::<4>(
+            carry_weights[..4].try_into().expect("low carry weights"),
+            local[CARRY_LO_BEGIN..CARRY_LO_BEGIN + 4].try_into().expect("low carries"),
+        );
+        let carry_hi_term: AB::ExtExpr = (4..7)
+            .map(|j| carry_weights[j].dup() * local[CARRY_HI_BEGIN + j - 4].dup())
+            .sum();
 
-        // contrib: v/comp add (β-weighted recombine), bound subtracts
-        // (direct) and adds its carry cells — gated by role. `comp`
-        // contributes both halves from its one row; `bound` likewise.
-        let contrib: AB::ExtExpr = recomb_lo07.clone() * (v_lo_sel + comp_sel.clone())
+        // v/comp add their recombined limbs; bound subtracts its direct limbs and adds carries.
+        // Each row contributes only under its role selector.
+        let contrib: AB::ExtExpr = recomb_lo07.dup() * (v_lo_sel + comp_sel.dup())
             + recomb_hi07 * v_hi_sel
             + recomb_hi815 * comp_sel
-            + (carry_lo_term.clone() - direct_lo.clone() + carry_hi_term.clone()
-                - direct_hi.clone())
-                * bound_sel.clone();
+            + (carry_lo_term.dup() + carry_hi_term.dup() - (direct_lo.dup() + direct_hi.dup()))
+                * bound_sel.dup();
 
-        builder.when(frame.first_row()).assert_zero_ext(id.clone());
-        builder.when(frame.transition()).assert_zero_ext(id_next - id.clone() - contrib);
+        builder.when(frame.first_row()).assert_zero_ext(id.dup());
+        builder.when(frame.transition()).assert_eq_ext(id_next, id.dup() + contrib);
 
         // The closing row (`bound`) has a nonzero contribution of its
         // own — its `−direct` terms plus its carry share — so the
         // closure check folds it in directly instead of reading it back
         // from `id_next`, exactly like `UintMulAir`'s `c` row (see that
         // module for the full rationale) and `UintAddAir`'s `p` row.
-        let bound_own: AB::ExtExpr = carry_lo_term - direct_lo + carry_hi_term - direct_hi;
-        builder.assert_zero_ext((id + bound_own) * bound_sel.clone());
+        let bound_own: AB::ExtExpr = carry_lo_term + carry_hi_term - (direct_lo + direct_hi);
+        builder.when(bound_sel.dup()).assert_zero_ext(id + bound_own);
 
         // Root the bounded positive pointer-gap chain at 1. Even a maximum
         // 2³²-row trace grows by < 2⁴⁶, so it cannot wrap through 0.
-        let ptr: AB::Expr = local[COL_PTR].dup();
-        builder.when(frame.first_row()).assert_zero(ptr - AB::Expr::ONE);
+        let ptr = local[COL_PTR].dup();
+        builder.when(frame.first_row()).assert_one(ptr.dup());
 
         // Carry booleanity (the no-wrap bound needs binary carries):
         // γ₀..γ₃ in cells 4–7, γ₄..γ₆ in cells 12–14.
-        for &cell in
-            [CARRY_LO_BEGIN, CARRY_LO_BEGIN + 1, CARRY_LO_BEGIN + 2, CARRY_LO_BEGIN + 3].iter()
-        {
-            let lj: AB::Expr = local[cell].dup();
-            builder.assert_zero(bound_sel.clone() * lj.clone() * (AB::Expr::ONE - lj));
-        }
-        for &cell in [CARRY_HI_BEGIN, CARRY_HI_BEGIN + 1, CARRY_HI_BEGIN + 2].iter() {
-            let lj: AB::Expr = local[cell].dup();
-            builder.assert_zero(bound_sel.clone() * lj.clone() * (AB::Expr::ONE - lj));
-        }
+        builder.when(bound_sel.dup()).assert_bools([
+            local[CARRY_LO_BEGIN].dup(),
+            local[CARRY_LO_BEGIN + 1].dup(),
+            local[CARRY_LO_BEGIN + 2].dup(),
+            local[CARRY_LO_BEGIN + 3].dup(),
+            local[CARRY_HI_BEGIN].dup(),
+            local[CARRY_HI_BEGIN + 1].dup(),
+            local[CARRY_HI_BEGIN + 2].dup(),
+        ]);
 
         // Cycle-constancy: ptr / bound_ptr are constant within a block
         // (every row but the terminal one). The mults need no transport —
         // they live once, in the hub cells the provides read directly.
-        let not_term: AB::Expr = AB::Expr::ONE - bound_sel.clone();
+        let not_term = AB::Expr::ONE - bound_sel.dup();
         for col in [COL_PTR, COL_BOUND_PTR] {
-            let here: AB::Expr = local[col].dup();
-            let there: AB::Expr = next[col].dup();
-            builder.assert_zero(not_term.clone() * (there - here));
+            let here = local[col].dup();
+            let there = next[col].dup();
+            builder.when(not_term.dup()).assert_eq(there, here);
         }
 
         // ptr-gap tie: on a real block boundary (bound row) the witnessed
         // gap = ptr' − ptr − 1, so its Range16 forces strictly-increasing,
         // bounded-gap (hence injective) ptrs. when_transition drops the
         // cyclic last row, where the gap is left free (the prover sets 0).
-        let gap: AB::Expr = local[TERM_CELL_GAP].dup();
-        let ptr_here: AB::Expr = local[COL_PTR].dup();
-        let ptr_next: AB::Expr = next[COL_PTR].dup();
+        let gap = local[TERM_CELL_GAP].dup();
+        let ptr_here = local[COL_PTR].dup();
+        let ptr_next = next[COL_PTR].dup();
         builder
             .when(frame.transition())
-            .assert_zero(bound_sel * (gap + ptr_here + AB::Expr::ONE - ptr_next));
+            .when(bound_sel)
+            .assert_eq(gap.dup() + ptr_here.dup() + AB::Expr::ONE, ptr_next);
 
         // Phase 2: LogUp — UintVal, Range16, and UintLimbs.
         lookup::eval_lookup(self, frame, inputs, builder);

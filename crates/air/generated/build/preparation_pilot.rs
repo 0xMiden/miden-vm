@@ -32,15 +32,15 @@ pub fn generate(out: &Path) {
                 .expect("capture native renderer fixture"),
         ),
     ];
-    // Both native outputs use the same canonical authored capture, including its checked descriptor.
-    // This only emits Rust: no numerical comparison, proof, observer baseline or test is run here.
+    // Both native outputs use the same canonical authored capture, including its checked
+    // descriptor. This only emits Rust: no numerical comparison, proof, observer baseline or
+    // test is run here.
     let evaluators: Vec<_> = captured
         .iter()
         .map(|(name, label, captured)| AirEvaluator {
             name,
             air_label: label,
-            graph: captured.graph(),
-            constraints: captured.constraints(),
+            program: captured.program(),
             descriptor: captured.descriptor(),
         })
         .collect();

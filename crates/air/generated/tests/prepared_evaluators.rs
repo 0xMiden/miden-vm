@@ -1,6 +1,8 @@
 //! Compiled regression fixture for challenge preparation and row-cache substitution.
 
-use miden_constraint_compiler::ir::Graph;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use miden_constraint_compiler::{ir::Graph, testing::assert_concrete_evaluations_equal};
 use miden_core::{Felt, field::QuadFelt};
 use miden_stark::air;
 use p3_field::{Algebra, PrimeCharacteristicRing};
@@ -26,6 +28,7 @@ enum Prepared<E> {
 struct CompiledFixture {
     cached: bool,
     descriptor: air::AirDescriptor<Felt>,
+    preparations: AtomicUsize,
 }
 
 impl CompiledFixture {
@@ -35,7 +38,11 @@ impl CompiledFixture {
         } else {
             native_descriptors::descriptor_uncached()
         };
-        Self { cached, descriptor }
+        Self {
+            cached,
+            descriptor,
+            preparations: AtomicUsize::new(0),
+        }
     }
 }
 
@@ -51,6 +58,7 @@ impl air::AirKernel for CompiledFixture {
         &self,
         inputs: air::UniformInputs<'_, B, E>,
     ) -> Prepared<E> {
+        self.preparations.fetch_add(1, Ordering::Relaxed);
         if self.cached {
             Prepared::Cached(native_evaluators::precompute_cached(inputs))
         } else {
@@ -121,7 +129,10 @@ fn native_pilot_uses_exact_schedule_capacity_without_row_challenge_recomputation
 #[test]
 fn compiled_native_descriptor_and_non_copy_symbolic_kernel_match_the_simple_source() {
     use air::AirKernel;
-    use miden_constraint_compiler::ir::{capture_kernel_native_into, capture_native_into};
+    use miden_constraint_compiler::{
+        ir::{capture_kernel_native_into, capture_native_into},
+        testing::eval_graph,
+    };
 
     for cached in [false, true] {
         let source = PreparationFixture(cached);
@@ -131,13 +142,24 @@ fn compiled_native_descriptor_and_non_copy_symbolic_kernel_match_the_simple_sour
         assert_eq!(kernel.descriptor().spec(), descriptor.spec());
         assert_eq!(kernel.descriptor().analysis(), descriptor.analysis());
         assert_eq!(kernel.descriptor().fingerprint(), descriptor.fingerprint());
-        // This simple cache fixture has no reassociation rewrite. General optimized relations
-        // require polynomial-value comparisons; fingerprints need not equal their recapture.
+        // Capture also exercises generated evaluation with non-Copy symbolic carriers.
         let (generated, _) = capture_kernel_native_into(&kernel, &mut graph).unwrap();
-        assert_eq!(authored.base_roots, generated.base_roots);
-        assert_eq!(authored.ext_roots, generated.ext_roots);
         assert_eq!(authored.base_global_indices, generated.base_global_indices);
         assert_eq!(authored.ext_global_indices, generated.ext_global_indices);
+        let graph = graph.freeze();
+        let direct = air::DirectKernel::new(source).unwrap();
+        for seed in [0, 0x243f6a8885a308d3, 0x13198a2e03707344, u64::MAX] {
+            let values = eval_graph(&graph, seed);
+            for (expected, actual) in authored
+                .base_roots
+                .iter()
+                .zip(&generated.base_roots)
+                .chain(authored.ext_roots.iter().zip(&generated.ext_roots))
+            {
+                assert_eq!(values[expected.index()], values[actual.index()]);
+            }
+            assert_concrete_evaluations_equal(&direct, &kernel, seed);
+        }
     }
 }
 
@@ -189,6 +211,54 @@ fn compiled_native_sessions_preserve_known_scalar_values_and_assertion_classes()
             assert_eq!(generated.values, expected);
         }
     }
+}
+
+#[test]
+fn compiled_kernel_prepares_once_per_exact_input_session() {
+    use air::AirKernel;
+
+    let kernel = CompiledFixture::new(true);
+    let main = [Felt::from_u32(5)];
+    let auxiliary = [QuadFelt::ZERO];
+    let frame = air::AirFrame {
+        main: air::Rows { current: &main, next: &main },
+        preprocessed: air::Rows { current: &[], next: &[] },
+        aux: air::Rows { current: &auxiliary, next: &auxiliary },
+        periodic: &[],
+        selectors: air::Selectors {
+            first: Felt::ZERO,
+            last: Felt::ZERO,
+            transition: Felt::ZERO,
+        },
+    };
+    let first = [QuadFelt::ZERO, QuadFelt::from_u32(3)];
+    let second = [QuadFelt::ZERO, QuadFelt::from_u32(7)];
+    let mut sink = Collector::default();
+    let session = kernel
+        .bind(air::UniformInputs {
+            public_values: &[],
+            challenges: &first,
+            exports: &[],
+        })
+        .unwrap();
+    session.eval(&frame, &mut sink);
+    session.eval(&frame, &mut sink);
+    assert_eq!(kernel.preparations.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        sink.values,
+        [45, 32, 45, 32].map(|value| Value::Extension(QuadFelt::from_u32(value))),
+    );
+    sink.values.clear();
+    kernel
+        .bind(air::UniformInputs {
+            public_values: &[],
+            challenges: &second,
+            exports: &[],
+        })
+        .unwrap()
+        .eval(&frame, &mut sink);
+    assert_eq!(kernel.preparations.load(Ordering::Relaxed), 2);
+    assert_eq!(sink.values, [245, 348].map(|value| Value::Extension(QuadFelt::from_u32(value))),);
 }
 
 #[test]

@@ -39,9 +39,10 @@ pub(crate) fn enforce_footer_rows<AB>(
 
         let mode = local[F_MODE_COL].dup();
         let compression_multiplicity = local[F_COMPRESSION_MULTIPLICITY_COL].dup();
-        let inactive = AB::Expr::ONE - mode.clone();
-        builder.when(is_footer.clone()).assert_zero(mode.clone() * inactive);
-        builder.when(is_footer.clone()).assert_zero(mode * compression_multiplicity);
+        builder.when(is_footer.dup()).assert_bool(mode.dup());
+        builder
+            .when(is_footer.dup())
+            .assert_zero(mode.dup() * compression_multiplicity.dup());
         enforce_footer_payload::<AB>(builder, local, is_footer, &words);
 
         for footer in 0..FOOTER_ROWS {
@@ -50,11 +51,9 @@ pub(crate) fn enforce_footer_rows<AB>(
             enforce_mvm_footer_output::<AB>(builder, local, selectors, footer, packed_output);
         }
 
-        for idx in 1..4 {
-            builder
-                .when(selectors.is_footer() * local[F_MODE_COL].dup())
-                .assert_zero(local[footer_interface_tail_col(idx)].dup());
-        }
+        builder.when(selectors.is_footer() * local[F_MODE_COL].dup()).assert_zeros(
+            core::array::from_fn::<_, 3, _>(|idx| local[footer_interface_tail_col(idx + 1)].dup()),
+        );
     }
 
     // Footer transitions: carry assembled prefixes and advance the physical cycle ID.
@@ -62,12 +61,9 @@ pub(crate) fn enforce_footer_rows<AB>(
         let gate = selectors.is_footer_row(footer);
         enforce_footer_transition::<AB>(builder, local, next, gate.clone(), footer);
 
-        builder
-            .when(gate.clone())
-            .assert_zero(local[F_MODE_COL].dup() - next[F_MODE_COL].dup());
-        builder.when(gate.clone()).assert_zero(
-            local[F_COMPRESSION_MULTIPLICITY_COL].dup()
-                - next[F_COMPRESSION_MULTIPLICITY_COL].dup(),
+        builder.when(gate.dup()).assert_eq_arrays(
+            [local[F_MODE_COL].dup(), local[F_COMPRESSION_MULTIPLICITY_COL].dup()],
+            [next[F_MODE_COL].dup(), next[F_COMPRESSION_MULTIPLICITY_COL].dup()],
         );
         enforce_footer_cycle_id_transition::<AB>(builder, local, next, gate);
     }
@@ -113,8 +109,8 @@ pub(crate) fn enforce_inactive_footer_input_aux<AB>(
     AB: LiftedAirBuilder<F = Felt>,
 {
     let inactive = AB::Expr::ONE - selectors.is_footer_row(FOOTER_ROWS - 1);
-    let footer_input_aux = frame.aux.current[FOOTER_INPUT_COLUMN].dup();
-    builder.assert_zero_ext(footer_input_aux * inactive);
+    let footer_input_aux: AB::ExtExpr = frame.aux.current[FOOTER_INPUT_COLUMN].dup();
+    builder.when(inactive).assert_zero_ext(footer_input_aux);
 }
 
 /// Pins the paired AEAD-output fraction column whenever its two relations are inactive.
@@ -128,8 +124,8 @@ pub(crate) fn enforce_inactive_footer_output_aux<AB>(
 {
     let active = selectors.is_footer() * local[F_MODE_COL].dup();
     let inactive = AB::Expr::ONE - active;
-    let footer_output_aux = frame.aux.current[FOOTER_OUTPUT_COLUMN].dup();
-    builder.assert_zero_ext(footer_output_aux * inactive);
+    let footer_output_aux: AB::ExtExpr = frame.aux.current[FOOTER_OUTPUT_COLUMN].dup();
+    builder.when(inactive).assert_zero_ext(footer_output_aux);
 }
 
 fn enforce_mvm_footer_output<AB>(

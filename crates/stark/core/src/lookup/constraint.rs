@@ -537,7 +537,7 @@ mod tests {
         air::{
             AirFrame, AirSpec, Assertion, ConstraintMeta, LiftedAir, Selectors, UniformInputs,
             capture,
-            symbolic::{AuxInput, BaseLeaf, ExtLeaf, RowOffset, SymbolicExpr},
+            symbolic::{AuxInput, ExprView, RowOffset},
         },
         lookup::{LookupColumn, LookupGroup},
     };
@@ -684,19 +684,19 @@ mod tests {
         let captured = capture(&EmptyLookup).unwrap();
         assert_eq!(captured.assertions.len(), 3);
         assert_eq!(captured.descriptor.analysis().counts().ext, 3);
-        let Assertion::Extension(SymbolicExpr::Mul { x, y, .. }) = &captured.assertions[0] else {
+        let Assertion::Extension(anchor) = &captured.assertions[0] else {
+            panic!("anchor must be extension-class")
+        };
+        let ExprView::Mul { x, y, .. } = anchor.view() else {
             panic!("anchor must be acc * first")
         };
         assert!(matches!(
-            x.as_ref(),
-            SymbolicExpr::Leaf(ExtLeaf::Input(AuxInput::Trace {
-                offset: RowOffset::Current,
-                index: 0,
-            }))
+            x.view(),
+            ExprView::AuxInput(AuxInput::Trace { row: RowOffset::Current, column: 0 })
         ));
         assert!(matches!(
-            y.as_ref(),
-            SymbolicExpr::Leaf(ExtLeaf::Base(SymbolicExpr::Leaf(BaseLeaf::IsFirstRow)))
+            y.view(),
+            ExprView::Lift { value } if matches!(value.view(), ExprView::IsFirstRow)
         ));
         assert!(
             captured

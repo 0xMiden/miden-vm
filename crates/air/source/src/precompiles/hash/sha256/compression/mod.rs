@@ -192,51 +192,45 @@ pub(super) fn eval_main_with_io<AB: air::LiftedAirBuilder<F = Felt>>(
         array::from_fn(|i| local[COL_PHASE_BEGIN + i].dup());
     let last = periodic[program::COL_P32_LAST].dup();
     let block_last = last.dup() * phase_end.dup() * phases[program::PHASE_PADDING].dup();
-    builder.assert_bool(local[COL_ACT].dup());
-    builder.assert_bool(local[COL_PHASE_END].dup());
-    for i in 0..program::NUM_PHASES {
-        builder.assert_bool(local[COL_PHASE_BEGIN + i].dup());
-    }
-    builder.assert_zero(phases.iter().map(Dup::dup).sum::<AB::Expr>() - AB::Expr::ONE);
+    builder.assert_bools([local[COL_ACT].dup(), local[COL_PHASE_END].dup()]);
+    builder.assert_bools(phases.each_ref().map(Dup::dup));
+    builder.assert_one(phases.iter().map(Dup::dup).sum::<AB::Expr>());
     builder.when(frame.first_row()).assert_zero(block_id.dup());
-    builder
-        .when(frame.first_row())
-        .assert_zero(phases[program::PHASE_MASK].dup() - AB::Expr::ONE);
+    builder.when(frame.first_row()).assert_one(phases[program::PHASE_MASK].dup());
     builder.when(frame.first_row()).assert_zero(cycle.dup());
-    let phase_length: AB::Expr = phases
-        .iter()
-        .zip(program::PHASE_CYCLES)
-        .map(|(phase, length)| phase.dup() * Felt::from(length))
-        .sum();
+    let phase_length = AB::Expr::mixed_dot_product(&phases, &program::PHASE_CYCLES.map(Felt::from));
     let remaining = cycle.dup() + AB::Expr::ONE - phase_length;
-    builder.assert_zero(remaining.dup() * phase_end.dup());
-    builder.assert_zero(remaining * local[COL_PHASE_INV].dup() - (AB::Expr::ONE - phase_end.dup()));
+    builder.when(phase_end.dup()).assert_zero(remaining.dup());
+    builder.assert_eq(remaining * local[COL_PHASE_INV].dup(), AB::Expr::ONE - phase_end.dup());
     builder
         .when(frame.transition())
-        .assert_zero((AB::Expr::ONE - act.dup()) * act_next.dup());
+        .when(AB::Expr::ONE - act.dup())
+        .assert_zero(act_next.dup());
     builder
         .when(frame.transition())
-        .assert_zero((AB::Expr::ONE - block_last.dup()) * (act_next - act.dup()));
+        .when(AB::Expr::ONE - block_last.dup())
+        .assert_eq(act_next.dup(), act.dup());
     builder
         .when(frame.transition())
-        .assert_zero(next[COL_BLOCK_ID].dup() - block_id - block_last.dup());
-    builder.when(frame.transition()).assert_zero(
-        next[COL_CYCLE].dup() - cycle.dup() - last.dup()
-            + last.dup() * phase_end.dup() * (cycle.dup() + AB::Expr::ONE),
+        .assert_eq(next[COL_BLOCK_ID].dup(), block_id.dup() + block_last.dup());
+    builder.when(frame.transition()).assert_eq(
+        next[COL_CYCLE].dup(),
+        cycle.dup() + last.dup() - last.dup() * phase_end.dup() * (cycle.dup() + AB::Expr::ONE),
     );
     for i in 0..program::NUM_PHASES {
         let previous = (i + program::NUM_PHASES - 1) % program::NUM_PHASES;
-        builder.when(frame.transition()).assert_zero(
-            next[COL_PHASE_BEGIN + i].dup()
-                - phases[i].dup()
-                - last.dup() * phase_end.dup() * (phases[previous].dup() - phases[i].dup()),
+        builder.when(frame.transition()).assert_eq(
+            next[COL_PHASE_BEGIN + i].dup(),
+            phases[i].dup()
+                + last.dup() * phase_end.dup() * (phases[previous].dup() - phases[i].dup()),
         );
     }
     // Transition constraints alone would accept a truncated active block.
     builder
         .when(frame.last_row())
-        .assert_zero(act.dup() * (AB::Expr::ONE - block_last));
-    let act = act - io_act.dup();
+        .when(act.dup())
+        .assert_zero(AB::Expr::ONE - block_last);
+    let act = act.dup() - io_act.dup();
     let program_gate = AB::Expr::ONE - io_act;
 
     let word_phase = phases[program::PHASE_WORDS].dup();
@@ -245,20 +239,18 @@ pub(super) fn eval_main_with_io<AB: air::LiftedAirBuilder<F = Felt>>(
     let input_word: AB::Expr = local[COL_META_INPUT_WORD].dup();
     // Opcode lookup selectors must be Boolean before the metadata lookup is interpreted.
     // IO uses this cell only in the padding phase, where word_phase is zero.
-    builder.assert_zero(word_phase.dup() * input_word.dup() * (input_word.dup() - AB::Expr::ONE));
-    builder.assert_zero(
-        word_phase.dup()
-            * (round.dup()
-                - cycle.dup() * Felt::from(2u8)
-                - periodic[program::COL_LANE_HALF].dup()),
-    );
-    builder.assert_zero(hash_phase.dup() * (round.dup() - cycle.dup()));
+    builder.when(word_phase.dup()).assert_bool(input_word.dup());
+    builder
+        .when(word_phase.dup())
+        .assert_eq(round.dup(), cycle.double() + periodic[program::COL_LANE_HALF].dup());
+    builder.when(hash_phase.dup()).assert_eq(round.dup(), cycle.dup());
     let hold_metadata = word_phase * (AB::Expr::ONE - periodic[program::COL_WORD_LAST].dup())
         + hash_phase.dup() * (AB::Expr::ONE - last);
     for column in COL_META_T..=COL_META_K {
         builder
             .when(frame.transition())
-            .assert_zero(hold_metadata.dup() * (next[column].dup() - local[column].dup()));
+            .when(hold_metadata.dup())
+            .assert_eq(next[column].dup(), local[column].dup());
     }
 
     // Materialize the opcode, sources, and rotation parameter. Destination fanout
@@ -266,8 +258,7 @@ pub(super) fn eval_main_with_io<AB: air::LiftedAirBuilder<F = Felt>>(
     let word_last = periodic[program::COL_WORD_LAST].dup();
     let is_add: AB::Expr = local[COL_PROG_BEGIN + program::T_IS_ADD].dup();
     for field in 0..10 {
-        let mut expected = AB::Expr::ZERO;
-        for (phase, phase_selector) in phases.iter().enumerate() {
+        let values = core::array::from_fn(|phase| {
             let template = &periodic[program::TEMPLATE_BEGIN + phase * program::TEMPLATE_COLS..];
             let template_cycle = if phase == program::PHASE_WORDS {
                 cycle.dup() - AB::Expr::from(Felt::from(8u8))
@@ -289,7 +280,7 @@ pub(super) fn eval_main_with_io<AB: air::LiftedAirBuilder<F = Felt>>(
             };
             // The first 16 words use only the last lane, reading an external
             // input. Later words execute the fifteen-instruction schedule.
-            let value = if phase == program::PHASE_WORDS {
+            if phase == program::PHASE_WORDS {
                 let input_value = match field {
                     0 => word_last.dup(),
                     7 => word_last.dup() * round.dup(),
@@ -298,15 +289,18 @@ pub(super) fn eval_main_with_io<AB: air::LiftedAirBuilder<F = Felt>>(
                 value.dup() + input_word.dup() * (input_value - value)
             } else {
                 value
-            };
-            expected += phase_selector.dup() * value;
-        }
-        let residual = local[COL_PROG_BEGIN + field].dup() - expected;
+            }
+        });
+        let expected = AB::Expr::dot_product(&phases, &values);
         if field == 9 {
             // ADD uses this otherwise idle rotation cell for its carry.
-            builder.assert_zero(program_gate.dup() * (AB::Expr::ONE - is_add.dup()) * residual);
+            builder
+                .when(program_gate.dup() * (AB::Expr::ONE - is_add.dup()))
+                .assert_eq(local[COL_PROG_BEGIN + field].dup(), expected);
         } else {
-            builder.assert_zero(program_gate.dup() * residual);
+            builder
+                .when(program_gate.dup())
+                .assert_eq(local[COL_PROG_BEGIN + field].dup(), expected);
         }
     }
     let is_const: AB::Expr = local[COL_PROG_BEGIN + program::T_IS_CONST].dup();
@@ -322,22 +316,22 @@ pub(super) fn eval_main_with_io<AB: air::LiftedAirBuilder<F = Felt>>(
     let r: AB::Expr = pack_le(&local[COL_R_BEGIN..COL_R_BEGIN + 2], 1 << 16);
     let two32 = AB::Expr::from(Felt::new(1u64 << 32).unwrap());
     builder.when(program_gate * is_add.dup()).assert_bool(local[COL_CARRY].dup());
-    let carry: AB::Expr = local[COL_CARRY].dup();
-    builder.assert_zero(act.dup() * is_add * (a.dup() + b - r.dup() - two32.dup() * carry));
-    builder.assert_zero(act.dup() * is_const * (r - constant));
+    let carry = local[COL_CARRY].dup();
+    builder
+        .when(act.dup() * is_add.dup())
+        .assert_eq(a.dup() + b, r.dup() + carry.mul_2exp_u64(32));
+    builder.when(act.dup() * is_const.dup()).assert_eq(r, constant);
     // The source bus authenticates a u32: sources precede destinations, and every operation
     // preserves that range. With `k = 2^s` for `s` in 1..=30, `(a + 2^32) * k` lies in
     // `[2^33, 2^63)`, so its four range-checked u16 limbs cannot encode a field-modulus alias.
     let decomposition: AB::Expr = pack_le(&local[COL_ROT_BEGIN..COL_ROT_BEGIN + 4], 1u64 << 16);
-    builder.assert_zero(act * is_rol * ((a + two32) * k - decomposition));
+    builder.when(act * is_rol).assert_eq((a + two32) * k, decomposition);
 }
 
 /// The 32-bit left rotation encoded by a ROL row's limbs of `(x + 2^32) * k`: the low word
 /// `x << s` plus the high word `(x >> (32 - s)) + k`, less the offset's contribution `k`.
 fn rotated_word<E: Algebra<Felt>>(limbs: &[E; 4], k: E) -> E {
-    let x: [E; 4] = array::from_fn(|i| limbs[i].dup());
-    let two16 = E::from(Felt::from(1u32 << 16));
-    x[0].dup() + x[2].dup() + two16 * (x[1].dup() + x[3].dup()) - k
+    limbs[0].dup() + limbs[2].dup() + (limbs[1].dup() + limbs[3].dup()).mul_2exp_u64(16) - k
 }
 
 #[derive(Copy, Clone)]
@@ -402,11 +396,16 @@ pub(super) fn eval_lookup_group<G>(
             lookup_column_degree(index),
         ),
         1 => {
-            let reads = opcode(program::T_IS_XOR)
-                + opcode(program::T_IS_AND)
-                + opcode(program::T_IS_ANDNOT)
-                + opcode(program::T_IS_ADD)
-                + opcode(program::T_IS_ROL);
+            let reads = [
+                program::T_IS_XOR,
+                program::T_IS_AND,
+                program::T_IS_ANDNOT,
+                program::T_IS_ADD,
+                program::T_IS_ROL,
+            ]
+            .into_iter()
+            .map(opcode)
+            .sum::<G::Expr>();
             emit(group, act.dup() * reads, &[LookupKind::Sources], Deg { v: 4, u: 4 });
             emit(
                 group,
@@ -474,30 +473,32 @@ pub(super) fn eval_lookup_batch<B>(
     match kind {
         LookupKind::Destination => {
             let bid = v(COL_BLOCK_ID);
-            let phases: [B::Expr; program::NUM_PHASES] = array::from_fn(|i| v(COL_PHASE_BEGIN + i));
-            let dst_mult: B::Expr = phases
-                .iter()
-                .enumerate()
-                .map(|(phase, selector)| {
-                    let template = program::TEMPLATE_BEGIN + phase * program::TEMPLATE_COLS;
-                    let constant = if phase == program::PHASE_WORDS {
-                        p(template + program::T_DST_CONST) * (B::Expr::ONE - v(COL_META_INPUT_WORD))
-                    } else {
-                        p(template + program::T_DST_CONST)
-                    };
-                    selector.dup()
-                        * (constant
-                            + p(template + program::T_DST_W) * v(COL_META_W_MULT)
-                            + p(template + program::T_DST_A) * v(COL_META_A_MULT)
-                            + p(template + program::T_DST_E) * v(COL_META_E_MULT))
-                })
-                .sum();
-            let slot = phases
-                .iter()
-                .zip(program::PHASE_BASES)
-                .map(|(phase, base)| phase.dup() * Felt::from(base))
-                .sum::<B::Expr>()
-                + v(COL_CYCLE) * Felt::from(32u8)
+            let phases: &[B::Expr; program::NUM_PHASES] = local
+                [COL_PHASE_BEGIN..COL_PHASE_BEGIN + program::NUM_PHASES]
+                .try_into()
+                .expect("declared AIR row band");
+            let fanouts =
+                [B::Expr::ONE, v(COL_META_W_MULT), v(COL_META_A_MULT), v(COL_META_E_MULT)];
+            let weights = core::array::from_fn(|phase| {
+                let template = program::TEMPLATE_BEGIN + phase * program::TEMPLATE_COLS;
+                let constant = if phase == program::PHASE_WORDS {
+                    p(template + program::T_DST_CONST) * (B::Expr::ONE - v(COL_META_INPUT_WORD))
+                } else {
+                    p(template + program::T_DST_CONST)
+                };
+                B::Expr::dot_product(
+                    &fanouts,
+                    &[
+                        constant,
+                        p(template + program::T_DST_W),
+                        p(template + program::T_DST_A),
+                        p(template + program::T_DST_E),
+                    ],
+                )
+            });
+            let dst_mult = B::Expr::dot_product(phases, &weights);
+            let slot = B::Expr::mixed_dot_product(phases, &program::PHASE_BASES.map(Felt::from))
+                + v(COL_CYCLE).mul_2exp_u64(5)
                 + p(program::COL_LANE);
             let r: B::Expr = pack_le(&local[COL_R_BEGIN..COL_R_BEGIN + 2], 1 << 16);
             let limbs: &[B::Expr; 4] = local[COL_ROT_BEGIN..COL_ROT_BEGIN + 4]
@@ -516,7 +517,7 @@ pub(super) fn eval_lookup_batch<B>(
             let out = r.dup()
                 + logic * (x.dup() - r.dup())
                 + is_and * (a.dup() + b.dup() - x.dup() * Felt::from_u8(3)) * half.dup()
-                + is_andnot * (b - a - x) * half
+                + is_andnot * (b - (a + x)) * half
                 + is_rol * (rotated - r);
             batch.insert(
                 "dst",
@@ -592,11 +593,12 @@ pub(super) fn eval_lookup_batch<B>(
         },
         LookupKind::MetadataProvider => {
             let bid = v(COL_BLOCK_ID);
-            let phases: [B::Expr; program::NUM_PHASES] = array::from_fn(|i| v(COL_PHASE_BEGIN + i));
-            let provider = -B::Expr::from(Felt::from(2u8))
-                * act
-                * phases[program::PHASE_BOOTSTRAP].dup()
-                * p(program::COL_META_VALID);
+            let phases: &[B::Expr; program::NUM_PHASES] = local
+                [COL_PHASE_BEGIN..COL_PHASE_BEGIN + program::NUM_PHASES]
+                .try_into()
+                .expect("declared AIR row band");
+            let provider =
+                -act.double() * phases[program::PHASE_BOOTSTRAP].dup() * p(program::COL_META_VALID);
             batch.insert(
                 "provider",
                 provider,

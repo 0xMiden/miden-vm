@@ -21,6 +21,9 @@ mod randomness;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
+#[cfg(any(test, feature = "testing"))]
+pub use dag::{ProductSharing, with_product_sharing};
+
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

@@ -163,15 +163,14 @@ pub(in crate::vm::constraints::lookup) fn emit_chiplet_responses<LB>(
                             let mem_idx0: LB::Expr = mem.idx0.dup();
                             let mem_idx1: LB::Expr = mem.idx1.dup();
 
-                            let addr = mem.word_addr.dup()
-                                + mem_idx1.clone() * LB::Expr::from_u16(2)
-                                + mem_idx0.clone();
+                            let addr = mem.word_addr.dup() + mem_idx1.double() + mem_idx0.dup();
 
-                            let word: [LB::Expr; 4] = mem.values.clone();
-                            let element = word[0].clone() * mem_idx0.not() * mem_idx1.not()
-                                + word[1].clone() * mem_idx0.clone() * mem_idx1.not()
-                                + word[2].clone() * mem_idx0.not() * mem_idx1.clone()
-                                + word[3].clone() * mem_idx0 * mem_idx1;
+                            let word: [LB::Expr; 4] = mem.values.each_ref().map(Dup::dup);
+                            let lower_pair =
+                                word[0].dup() + mem_idx0.dup() * (word[1].dup() - word[0].dup());
+                            let upper_pair =
+                                word[2].dup() + mem_idx0 * (word[3].dup() - word[2].dup());
+                            let element = lower_pair.dup() + mem_idx1 * (upper_pair - lower_pair);
 
                             MemoryResponseMsg {
                                 is_read: mem_is_read,

@@ -39,7 +39,7 @@ use crate::{
 /// `log_height` is `log₂` of the committed tree's leaf count. It is `≤
 /// domain.log_lde_height()`: a tree committed below the query domain (e.g. a
 /// setup-fixed preprocessed tree) is virtually lifted with
-/// [`Lmcs::open_lifted_batch`](crate::lmcs::Lmcs::open_lifted_batch).
+/// [`Lmcs::open_lifted_batch`].
 /// Full-height groups set it to `domain.log_lde_height()`.
 #[derive(Clone, Debug)]
 pub(crate) struct CommitmentGroup<C> {

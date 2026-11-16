@@ -52,6 +52,7 @@ p3-symmetric.workspace   = true
 # Third-party
 criterion.workspace = true
 proptest.workspace  = true
+serde_json.workspace = true
 
 [features]
 concurrent = ["std", "miden-crypto/concurrent", "p3-maybe-rayon/parallel"]

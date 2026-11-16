@@ -11,12 +11,12 @@ pub(crate) fn xor_from_and<E: PrimeCharacteristicRing>(lhs: E, rhs: E, and: E) -
 
 #[inline]
 pub(crate) fn pack_u32_le<E: PrimeCharacteristicRing>(b0: E, b1: E, b2: E, b3: E) -> E {
-    b0 + E::from_u64(1 << 8) * b1 + E::from_u64(1 << 16) * b2 + E::from_u64(1 << 24) * b3
+    b0 + b1.mul_2exp_u64(8) + b2.mul_2exp_u64(16) + b3.mul_2exp_u64(24)
 }
 
 #[inline]
 pub(crate) fn pack_pair<E: PrimeCharacteristicRing>(lo: E, hi: E) -> E {
-    lo + E::from_u64(1u64 << 32) * hi
+    lo + hi.mul_2exp_u64(32)
 }
 
 /// Sum of the four B input words represented by one row's rotation-input byte fields.
@@ -25,7 +25,7 @@ where
     E: PrimeCharacteristicRing,
     A: Fn(usize) -> E,
 {
-    (0..NUM_G).fold(E::ZERO, |sum, g| sum + packed_fused_bytes(&at, G_BD_ROT_SLOT_BASE_COL, g, 0))
+    (0..NUM_G).map(|g| packed_fused_bytes(&at, G_BD_ROT_SLOT_BASE_COL, g, 0)).sum()
 }
 
 /// Reconstructs the one uncommitted rotation result from the next row's total B input and the
@@ -36,21 +36,17 @@ where
     A: Fn(usize) -> E,
     B: Fn(usize) -> E,
 {
-    let stored_results = (0..NUM_G).fold(E::ZERO, |sum, g| {
-        sum + (0..BYTES_PER_WORD).fold(E::ZERO, |lane_sum, byte| {
-            match g_bd_rot_result_col(g, byte) {
-                Some(col) => lane_sum + local(col),
-                None => lane_sum,
-            }
-        })
-    });
+    let stored_results: E = (0..NUM_G)
+        .flat_map(|g| (0..BYTES_PER_WORD).filter_map(move |byte| g_bd_rot_result_col(g, byte)))
+        .map(local)
+        .sum();
     sum_input_b(next) - stored_results
 }
 
 /// Reconstructs one of the footer's four message words from range-checked 16-bit limbs.
 pub fn footer_message_word<E: PrimeCharacteristicRing>(at: impl Fn(usize) -> E, idx: usize) -> E {
     at(footer_range_slot_col(2 * idx, 0))
-        + E::from_u64(1 << 16) * at(footer_range_slot_col(2 * idx + 1, 0))
+        + at(footer_range_slot_col(2 * idx + 1, 0)).mul_2exp_u64(16)
 }
 
 /// Returns a footer's raw initial-CV word through a linear expression.
@@ -78,18 +74,15 @@ where
         let b = packed_fused_bytes(at, G_BD_ROT_SLOT_BASE_COL, idx, 0);
         let c_new = packed_fused_bytes(at, G_BD_ROT_SLOT_BASE_COL, idx, 1);
         let input_a =
-            a_new + E::from_u64(1u64 << 32) * at(g_k3_col(idx)) - b - footer_message_word(at, idx);
+            a_new + at(g_k3_col(idx)).mul_2exp_u64(32) - (b + footer_message_word(at, idx));
         input_a + c_new - d_new_rot16(at, idx)
     } else {
         let g = idx - NUM_G;
         let storage_byte = F_CV_B_STORAGE_BYTES[g];
-        (0..BYTES_PER_WORD).fold(E::ZERO, |acc, byte| {
-            if byte == storage_byte {
-                acc
-            } else {
-                acc + E::from_u64(1 << (8 * byte)) * at(g_bd_rot_slot_col(g, byte, 0))
-            }
-        })
+        (0..BYTES_PER_WORD)
+            .filter(|&byte| byte != storage_byte)
+            .map(|byte| at(g_bd_rot_slot_col(g, byte, 0)).mul_2exp_u64((8 * byte) as u64))
+            .sum()
     }
 }
 

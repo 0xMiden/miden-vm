@@ -147,7 +147,7 @@ impl air::LiftedAir for ChunkAir {
         // wrap unconstrained.
         builder
             .when(frame.transition())
-            .assert_zero(chunk_seq_id_next - chunk_seq_id - AB::Expr::ONE);
+            .assert_eq(chunk_seq_id_next.dup(), chunk_seq_id.dup() + AB::Expr::ONE);
 
         // absorption_id chain -------------------------------------
         // Within an absorption chain (successor not a new head) it
@@ -155,19 +155,21 @@ impl air::LiftedAir for ChunkAir {
         // heads the gate vanishes and it jumps freely to the new
         // chain's Eidos cycle. This lockstep makes Eidos's absorption order
         // equal the downstream hasher's Memory64 order.
-        builder.when(frame.transition()).assert_zero(
-            (AB::Expr::ONE - is_head_next) * (absorption_id_next - absorption_id - AB::Expr::ONE),
-        );
+        builder
+            .when(frame.transition())
+            .when(AB::Expr::ONE - is_head_next)
+            .assert_eq(absorption_id_next, absorption_id + AB::Expr::ONE);
 
         // Activity ----------------------------------------------
         builder.assert_bool(local[COL_ACT].dup());
         builder
             .when(frame.transition())
-            .assert_zero((AB::Expr::ONE - act.clone()) * act_next);
+            .when(AB::Expr::ONE - act.dup())
+            .assert_zero(act_next);
 
         // Selector ----------------------------------------------
         builder.assert_bool(local[COL_IS_HEAD].dup());
-        builder.assert_zero(is_head * (AB::Expr::ONE - act));
+        builder.when(is_head.dup()).assert_eq(AB::Expr::ONE, act.dup());
 
         // Phase 2: LogUp argument via the LogUp adapter.
         lookup::eval_lookup(self, frame, inputs, builder);
@@ -216,15 +218,14 @@ where
         // Memory64 lane addresses: CHUNK_ADDR_BASE + 4·chunk_seq_id + j.
         let chunk_addr_base =
             Felt::new(CHUNK_ADDR_BASE).expect("CHUNK_ADDR_BASE fits in canonical Goldilocks");
-        let addr0 =
-            LB::Expr::from(chunk_addr_base) + LB::Expr::from(Felt::from(4u8)) * chunk_seq_id;
-        let addr1 = addr0.clone() + LB::Expr::ONE;
-        let addr2 = addr0.clone() + LB::Expr::from(Felt::from(2u8));
-        let addr3 = addr0.clone() + LB::Expr::from(Felt::from(3u8));
+        let addr0 = LB::Expr::from(chunk_addr_base) + chunk_seq_id.mul_2exp_u64(2);
+        let addr1 = addr0.dup() + LB::Expr::ONE;
+        let addr2 = addr0.dup() + LB::Expr::from(Felt::from(2u8));
+        let addr3 = addr0.dup() + LB::Expr::from(Felt::from(3u8));
 
         // Memory64 provide multiplicity (sign −, gated by act): every
         // active row provides all four lanes.
-        let neg_act: LB::Expr = LB::Expr::ZERO - act.clone();
+        let neg_act = -act.dup();
 
         // Every active row submits one complete Eidos message block. The ChunkChain relation fires
         // only at invocation heads so the semantic owner can provide the initial CV.
@@ -307,7 +308,7 @@ where
         // to pair). mult = `−act · is_head` (deg 2); message ties this
         // chain's chunk-side index to its Eidos absorption-chain head.
         // Consumed by hasher-orchestration chiplets (Keccak node, …).
-        let neg_act_head: LB::Expr = LB::Expr::ZERO - pos_act_head;
+        let neg_act_head = -pos_act_head;
         frac_col!(
             builder,
             "chunk-chain",

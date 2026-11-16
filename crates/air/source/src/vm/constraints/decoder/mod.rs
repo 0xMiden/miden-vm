@@ -70,13 +70,14 @@
 pub(crate) mod batch;
 pub mod columns;
 
+use miden_core::field::PrimeCharacteristicRing;
 use miden_stark::air::{Frame, LiftedAirBuilder};
 use p3_field::Dup;
 
 use crate::vm::{
     CoreCols, Felt, NativeMidenAirBuilder,
     constraints::{
-        constants::{F_1, F_128},
+        constants::F_1,
         decoder::columns::DecoderCols,
         op_flags::OpFlags,
         utils::{BoolNot, horner_eval_bits},
@@ -276,8 +277,7 @@ pub fn enforce_main<AB>(
     {
         let restores_caller_frame = end_flags.restores_caller_frame;
         let builder = &mut builder.when(op_flags.end());
-        builder.assert_bool(is_loop.dup());
-        builder.assert_bool(restores_caller_frame.dup());
+        builder.assert_bools([is_loop.dup(), restores_caller_frame.dup()]);
         builder.assert_zero(hasher_state[7].dup());
         builder.assert_zero(is_loop.dup() * restores_caller_frame);
     }
@@ -393,9 +393,11 @@ pub fn enforce_main<AB>(
         let op_next: AB::Expr = horner_eval_bits(op_bits_next);
 
         // When h0 is active, verify the base-128 shift.
-        let h0_shift = h0.dup() - h0_next.dup() * F_128 - op_next;
-        let h0_active = f_span + f_respan + is_push.clone() + same_group_count;
-        builder.when(frame.transition()).when(h0_active).assert_zero(h0_shift);
+        let h0_active = f_span.dup() + f_respan.dup() + is_push.dup() + same_group_count.dup();
+        builder
+            .when(frame.transition())
+            .when(h0_active.dup())
+            .assert_eq(h0.dup(), h0_next.mul_2exp_u64(7) + op_next);
 
         // Before END or RESPAN, h0 must be empty (all ops in the group consumed).
         let end_or_respan_next = op_flags.end_next() + op_flags.respan_next();

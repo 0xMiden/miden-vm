@@ -7,12 +7,13 @@
 //! Stack shifting is enforced in the general stack constraints; here we only cover explicit
 //! rewrites of stack positions for these op groups.
 
+use miden_core::field::PrimeCharacteristicRing;
 use miden_stark::air::LiftedAirBuilder;
 use p3_field::Dup;
 
 use crate::vm::{
     CoreCols, NativeMidenAirBuilder,
-    constraints::{constants::F_8, op_flags::OpFlags, utils::BoolNot},
+    constraints::{constants::F_8, op_flags::OpFlags},
 };
 
 // ENTRY POINT
@@ -119,7 +120,10 @@ pub fn enforce_main<AB>(
 
     // CSWAP / CSWAPW: conditional swaps using s0 as the selector.
     let cswap_c = s0.dup();
-    let cswap_c_inv = cswap_c.not();
+    let cswap_delta = cswap_c.dup() * (s2.dup() - s1.dup());
+    let cswapw_deltas: [AB::Expr; 4] =
+        core::array::from_fn(|i| cswap_c.dup() * (local.stack.get(i + 5) - local.stack.get(i + 1)));
+    let swapw2_or_swapdw = is_swapw2.dup() + is_swapdw.dup();
 
     // Binary constraint for the swap selector (must be 0 or 1). CSWAP and CSWAPW are
     // distinct opcodes, so at most one gate is live and the shared check is exact.
@@ -137,36 +141,38 @@ pub fn enforce_main<AB>(
     // Position 0: PAD (pushes 0, so it contributes only to flag_sum), DUP*, CLK, SWAP,
     // MOVUP*, SWAPW/SWAPW2/SWAPW3/SWAPDW, CSWAP, CSWAPW, CALLER, SDEPTH.
     {
-        let flag_sum = is_pad
-            + is_dup.clone()
-            + is_dup1.clone()
-            + is_dup2.clone()
-            + is_dup3.clone()
-            + is_dup4.clone()
-            + is_dup5.clone()
-            + is_dup6.clone()
-            + is_dup7.clone()
-            + is_dup9.clone()
-            + is_dup11.clone()
-            + is_dup13.clone()
-            + is_dup15.clone()
-            + is_clk.clone()
-            + is_swap.clone()
-            + is_movup2.clone()
-            + is_movup3.clone()
-            + is_movup4.clone()
-            + is_movup5.clone()
-            + is_movup6.clone()
-            + is_movup7.clone()
-            + is_movup8.clone()
-            + is_swapw.clone()
-            + is_swapw2.clone()
-            + is_swapw3.clone()
-            + is_swapdw.clone()
-            + is_cswap.clone()
-            + is_cswapw.clone()
-            + is_caller.clone()
-            + is_sdepth.clone();
+        let flag_sum = AB::Expr::sum_array::<30>(&[
+            is_pad,
+            is_dup.dup(),
+            is_dup1.dup(),
+            is_dup2.dup(),
+            is_dup3.dup(),
+            is_dup4.dup(),
+            is_dup5.dup(),
+            is_dup6.dup(),
+            is_dup7.dup(),
+            is_dup9.dup(),
+            is_dup11.dup(),
+            is_dup13.dup(),
+            is_dup15.dup(),
+            is_clk.dup(),
+            is_swap.dup(),
+            is_movup2.dup(),
+            is_movup3.dup(),
+            is_movup4.dup(),
+            is_movup5.dup(),
+            is_movup6.dup(),
+            is_movup7.dup(),
+            is_movup8.dup(),
+            is_swapw.dup(),
+            is_swapw2.dup(),
+            is_swapw3.dup(),
+            is_swapdw.dup(),
+            is_cswap.dup(),
+            is_cswapw.dup(),
+            is_caller.dup(),
+            is_sdepth.dup(),
+        ]);
         let expected = is_dup * s0.dup()
             + is_dup1 * s1.dup()
             + is_dup2 * s2.dup()
@@ -188,144 +194,145 @@ pub fn enforce_main<AB>(
             + is_movup6 * s6.dup()
             + is_movup7 * s7.dup()
             + is_movup8 * s8.dup()
-            + is_swapw.clone() * s4.dup()
-            + is_swapw2.clone() * s8.dup()
-            + is_swapw3.clone() * s12.dup()
-            + is_swapdw.clone() * s8.dup()
-            + is_cswap.clone() * (cswap_c.dup() * s2.dup() + cswap_c_inv.clone() * s1.dup())
-            + is_cswapw.clone() * (cswap_c.dup() * s5.dup() + cswap_c_inv.clone() * s1.dup())
-            + is_caller.clone() * fn_hash_0.dup()
+            + is_swapw.dup() * s4.dup()
+            + swapw2_or_swapdw.dup() * s8.dup()
+            + is_swapw3.dup() * s12.dup()
+            + is_cswap.dup() * (s1.dup() + cswap_delta.dup())
+            + is_cswapw.dup() * (s1.dup() + cswapw_deltas[0].dup())
+            + is_caller.dup() * fn_hash_0.dup()
             + is_sdepth * stack_depth.dup();
-        builder.assert_zero(s0_next.dup() * flag_sum - expected);
+        builder.assert_eq(s0_next.dup() * flag_sum, expected);
     }
 
     // Position 1: SWAP, SWAPW/SWAPW2/SWAPW3/SWAPDW, CSWAP, CSWAPW, CALLER.
     {
-        let flag_sum = is_swap.clone()
-            + is_swapw.clone()
-            + is_swapw2.clone()
-            + is_swapw3.clone()
-            + is_swapdw.clone()
-            + is_cswap.clone()
-            + is_cswapw.clone()
-            + is_caller.clone();
+        let flag_sum = AB::Expr::sum_array::<8>(&[
+            is_swap.dup(),
+            is_swapw.dup(),
+            is_swapw2.dup(),
+            is_swapw3.dup(),
+            is_swapdw.dup(),
+            is_cswap.dup(),
+            is_cswapw.dup(),
+            is_caller.dup(),
+        ]);
         let expected = is_swap * s0.dup()
-            + is_swapw.clone() * s5.dup()
-            + is_swapw2.clone() * s9.dup()
-            + is_swapw3.clone() * s13.dup()
-            + is_swapdw.clone() * s9.dup()
-            + is_cswap * (cswap_c.dup() * s1.dup() + cswap_c_inv.clone() * s2.dup())
-            + is_cswapw.clone() * (cswap_c.dup() * s6.dup() + cswap_c_inv.clone() * s2.dup())
-            + is_caller.clone() * fn_hash_1.dup();
-        builder.assert_zero(s1_next.dup() * flag_sum - expected);
+            + is_swapw.dup() * s5.dup()
+            + swapw2_or_swapdw.dup() * s9.dup()
+            + is_swapw3.dup() * s13.dup()
+            + is_cswap * (s2.dup() - cswap_delta)
+            + is_cswapw.dup() * (s2.dup() + cswapw_deltas[1].dup())
+            + is_caller.dup() * fn_hash_1.dup();
+        builder.assert_eq(s1_next.dup() * flag_sum, expected);
     }
 
     // Position 2: MOVDN2, SWAPW/SWAPW2/SWAPW3/SWAPDW, CSWAPW, CALLER.
     {
-        let flag_sum = is_movdn2.clone()
-            + is_swapw.clone()
-            + is_swapw2.clone()
-            + is_swapw3.clone()
-            + is_swapdw.clone()
-            + is_cswapw.clone()
-            + is_caller.clone();
+        let flag_sum = AB::Expr::sum_array::<7>(&[
+            is_movdn2.dup(),
+            is_swapw.dup(),
+            is_swapw2.dup(),
+            is_swapw3.dup(),
+            is_swapdw.dup(),
+            is_cswapw.dup(),
+            is_caller.dup(),
+        ]);
         let expected = is_movdn2 * s0.dup()
-            + is_swapw.clone() * s6.dup()
-            + is_swapw2.clone() * s10.dup()
-            + is_swapw3.clone() * s14.dup()
-            + is_swapdw.clone() * s10.dup()
-            + is_cswapw.clone() * (cswap_c.dup() * s7.dup() + cswap_c_inv.clone() * s3.dup())
-            + is_caller.clone() * fn_hash_2.dup();
-        builder.assert_zero(s2_next.dup() * flag_sum - expected);
+            + is_swapw.dup() * s6.dup()
+            + swapw2_or_swapdw.dup() * s10.dup()
+            + is_swapw3.dup() * s14.dup()
+            + is_cswapw.dup() * (s3.dup() + cswapw_deltas[2].dup())
+            + is_caller.dup() * fn_hash_2.dup();
+        builder.assert_eq(s2_next.dup() * flag_sum, expected);
     }
 
     // Position 3: MOVDN3, SWAPW/SWAPW2/SWAPW3/SWAPDW, CSWAPW, CALLER.
     {
-        let flag_sum = is_movdn3.clone()
-            + is_swapw.clone()
-            + is_swapw2.clone()
-            + is_swapw3.clone()
-            + is_swapdw.clone()
-            + is_cswapw.clone()
-            + is_caller.clone();
+        let flag_sum = AB::Expr::sum_array::<7>(&[
+            is_movdn3.dup(),
+            is_swapw.dup(),
+            is_swapw2.dup(),
+            is_swapw3.dup(),
+            is_swapdw.dup(),
+            is_cswapw.dup(),
+            is_caller.dup(),
+        ]);
         let expected = is_movdn3 * s0.dup()
-            + is_swapw.clone() * s7.dup()
-            + is_swapw2.clone() * s11.dup()
-            + is_swapw3.clone() * s15.dup()
-            + is_swapdw.clone() * s11.dup()
-            + is_cswapw.clone() * (cswap_c.dup() * s8.dup() + cswap_c_inv.clone() * s4.dup())
+            + is_swapw.dup() * s7.dup()
+            + swapw2_or_swapdw.dup() * s11.dup()
+            + is_swapw3.dup() * s15.dup()
+            + is_cswapw.dup() * (s4.dup() + cswapw_deltas[3].dup())
             + is_caller * fn_hash_3.dup();
-        builder.assert_zero(s3_next.dup() * flag_sum - expected);
+        builder.assert_eq(s3_next.dup() * flag_sum, expected);
     }
 
     // Position 4: MOVDN4, SWAPW, SWAPDW, CSWAPW.
     {
-        let flag_sum = is_movdn4.clone() + is_swapw.clone() + is_swapdw.clone() + is_cswapw.clone();
+        let flag_sum = AB::Expr::sum_array::<4>(&[
+            is_movdn4.dup(),
+            is_swapw.dup(),
+            is_swapdw.dup(),
+            is_cswapw.dup(),
+        ]);
         let expected = is_movdn4 * s0.dup()
-            + is_swapw.clone() * s0.dup()
-            + is_swapdw.clone() * s12.dup()
-            + is_cswapw.clone() * (cswap_c.dup() * s1.dup() + cswap_c_inv.clone() * s5.dup());
-        builder.assert_zero(s4_next.dup() * flag_sum - expected);
+            + is_swapw.dup() * s0.dup()
+            + is_swapdw.dup() * s12.dup()
+            + is_cswapw.dup() * (s5.dup() - cswapw_deltas[0].dup());
+        builder.assert_eq(s4_next.dup() * flag_sum, expected);
     }
 
     // Position 5: MOVDN5, SWAPW, SWAPDW, CSWAPW.
     {
-        let flag_sum = is_movdn5.clone() + is_swapw.clone() + is_swapdw.clone() + is_cswapw.clone();
+        let flag_sum = AB::Expr::sum_array::<4>(&[
+            is_movdn5.dup(),
+            is_swapw.dup(),
+            is_swapdw.dup(),
+            is_cswapw.dup(),
+        ]);
         let expected = is_movdn5 * s0.dup()
-            + is_swapw.clone() * s1.dup()
-            + is_swapdw.clone() * s13.dup()
-            + is_cswapw.clone() * (cswap_c.dup() * s2.dup() + cswap_c_inv.clone() * s6.dup());
-        builder.assert_zero(s5_next.dup() * flag_sum - expected);
+            + is_swapw.dup() * s1.dup()
+            + is_swapdw.dup() * s13.dup()
+            + is_cswapw.dup() * (s6.dup() - cswapw_deltas[1].dup());
+        builder.assert_eq(s5_next.dup() * flag_sum, expected);
     }
 
     // Position 6: MOVDN6, SWAPW, SWAPDW, CSWAPW.
     {
-        let flag_sum = is_movdn6.clone() + is_swapw.clone() + is_swapdw.clone() + is_cswapw.clone();
+        let flag_sum = AB::Expr::sum_array::<4>(&[
+            is_movdn6.dup(),
+            is_swapw.dup(),
+            is_swapdw.dup(),
+            is_cswapw.dup(),
+        ]);
         let expected = is_movdn6 * s0.dup()
-            + is_swapw.clone() * s2.dup()
-            + is_swapdw.clone() * s14.dup()
-            + is_cswapw.clone() * (cswap_c.dup() * s3.dup() + cswap_c_inv.clone() * s7.dup());
-        builder.assert_zero(s6_next.dup() * flag_sum - expected);
+            + is_swapw.dup() * s2.dup()
+            + is_swapdw.dup() * s14.dup()
+            + is_cswapw.dup() * (s7.dup() - cswapw_deltas[2].dup());
+        builder.assert_eq(s6_next.dup() * flag_sum, expected);
     }
 
     // Position 7: MOVDN7, SWAPW, SWAPDW, CSWAPW.
     {
-        let flag_sum = is_movdn7.clone() + is_swapw.clone() + is_swapdw.clone() + is_cswapw.clone();
+        let flag_sum = AB::Expr::sum_array::<4>(&[
+            is_movdn7.dup(),
+            is_swapw.dup(),
+            is_swapdw.dup(),
+            is_cswapw.dup(),
+        ]);
         let expected = is_movdn7 * s0.dup()
             + is_swapw * s3.dup()
-            + is_swapdw.clone() * s15.dup()
-            + is_cswapw * (cswap_c.dup() * s4.dup() + cswap_c_inv * s8.dup());
-        builder.assert_zero(s7_next.dup() * flag_sum - expected);
+            + is_swapdw.dup() * s15.dup()
+            + is_cswapw * (s8.dup() - cswapw_deltas[3].dup());
+        builder.assert_eq(s7_next.dup() * flag_sum, expected);
     }
 
-    // Position 8: MOVDN8, SWAPW2, SWAPDW.
-    {
-        let flag_sum = is_movdn8.clone() + is_swapw2.clone() + is_swapdw.clone();
-        let expected =
-            is_movdn8 * s0.dup() + is_swapw2.clone() * s0.dup() + is_swapdw.clone() * s0.dup();
-        builder.assert_zero(s8_next.dup() * flag_sum - expected);
-    }
+    // Position 8: MOVDN8, SWAPW2, SWAPDW all copy s0.
+    builder.when(is_movdn8 + swapw2_or_swapdw.dup()).assert_eq(s8_next, s0.dup());
 
-    // Position 9: SWAPW2, SWAPDW.
-    {
-        let flag_sum = is_swapw2.clone() + is_swapdw.clone();
-        let expected = is_swapw2.clone() * s1.dup() + is_swapdw.clone() * s1.dup();
-        builder.assert_zero(s9_next.dup() * flag_sum - expected);
-    }
-
-    // Position 10: SWAPW2, SWAPDW.
-    {
-        let flag_sum = is_swapw2.clone() + is_swapdw.clone();
-        let expected = is_swapw2.clone() * s2.dup() + is_swapdw.clone() * s2.dup();
-        builder.assert_zero(s10_next.dup() * flag_sum - expected);
-    }
-
-    // Position 11: SWAPW2, SWAPDW.
-    {
-        let flag_sum = is_swapw2.clone() + is_swapdw.clone();
-        let expected = is_swapw2 * s3.dup() + is_swapdw.clone() * s3.dup();
-        builder.assert_zero(s11_next.dup() * flag_sum - expected);
-    }
+    // Positions 9-11: SWAPW2 and SWAPDW copy the rest of the top word.
+    builder
+        .when(swapw2_or_swapdw)
+        .assert_eq_arrays([s9_next, s10_next, s11_next], [s1.dup(), s2.dup(), s3.dup()]);
 
     // Position 12: SWAPW3, SWAPDW, MSTREAM/PIPE (two-word memory cursor advances by 8).
     {
@@ -333,28 +340,28 @@ pub fn enforce_main<AB>(
         let expected = is_swapw3.clone() * s0.dup()
             + is_swapdw.clone() * s4.dup()
             + is_mstream_or_pipe * (s12.dup() + F_8);
-        builder.assert_zero(s12_next.dup() * flag_sum - expected);
+        builder.assert_eq(s12_next.dup() * flag_sum, expected);
     }
 
     // Position 13: SWAPW3, SWAPDW.
     {
-        let flag_sum = is_swapw3.clone() + is_swapdw.clone();
-        let expected = is_swapw3.clone() * s1.dup() + is_swapdw.clone() * s5.dup();
-        builder.assert_zero(s13_next.dup() * flag_sum - expected);
+        let flag_sum = is_swapw3.dup() + is_swapdw.dup();
+        let expected = is_swapw3.dup() * s1.dup() + is_swapdw.dup() * s5.dup();
+        builder.assert_eq(s13_next.dup() * flag_sum, expected);
     }
 
     // Position 14: SWAPW3, SWAPDW.
     {
-        let flag_sum = is_swapw3.clone() + is_swapdw.clone();
-        let expected = is_swapw3.clone() * s2.dup() + is_swapdw.clone() * s6.dup();
-        builder.assert_zero(s14_next.dup() * flag_sum - expected);
+        let flag_sum = is_swapw3.dup() + is_swapdw.dup();
+        let expected = is_swapw3.dup() * s2.dup() + is_swapdw.dup() * s6.dup();
+        builder.assert_eq(s14_next.dup() * flag_sum, expected);
     }
 
     // Position 15: SWAPW3, SWAPDW.
     {
         let flag_sum = is_swapw3.clone() + is_swapdw.clone();
         let expected = is_swapw3 * s3.dup() + is_swapdw * s7.dup();
-        builder.assert_zero(s15_next.dup() * flag_sum - expected);
+        builder.assert_eq(s15_next.dup() * flag_sum, expected);
     }
 }
 

@@ -43,7 +43,7 @@ use crate::domain::LiftedDomain;
 /// polynomial's coefficients dominate the proof size.
 ///
 /// The LDE blowup factor is **not** stored here — it is a structural property of the codeword
-/// being tested and is read from the [`LiftedDomain`](crate::domain::LiftedDomain) passed to
+/// being tested and is read from the [`LiftedDomain`] passed to
 /// [`num_rounds`](Self::num_rounds), [`final_poly_degree`](Self::final_poly_degree),
 /// [`FriPolys::new`](prover::FriPolys::new), and
 /// [`FriOracle::new`](verifier::FriOracle::new).

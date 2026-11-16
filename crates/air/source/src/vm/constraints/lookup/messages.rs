@@ -1,7 +1,7 @@
 //! Message structs for LogUp bus interactions.
 //!
-//! Each struct represents a reduced denominator encoding: `α + Σ βⁱ · field_i`.
-//! Fields are named for readability; the [`super::lookup::LookupMessage`] trait
+//! Each struct encodes a reduced denominator: `bus_prefix[bus] + Σ βⁱ · field_i`.
+//! Fields are named for readability; the [`LookupMessage`] trait
 //! (implemented further down in this file) provides the `encode` method that
 //! produces the extension-field value.
 //!
@@ -1126,31 +1126,26 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let bp = &challenges.beta_powers;
         let is_read = self.is_read.clone();
-        let is_write: E = E::ONE - is_read.clone();
         let is_word = self.is_word.clone();
-        let is_element: E = E::ONE - is_word.clone();
 
-        // Mux only the bus prefix; the payload (ctx, addr, clk, ...) is shared. Factored
-        // as a read/write select per access width so the four (read/write × element/word)
-        // cases stay audit-visible without blowing the polynomial degree.
-        let prefix_element = challenges.bus_prefix[BusId::MemoryReadElement as usize].clone()
-            * is_read.clone()
-            + challenges.bus_prefix[BusId::MemoryWriteElement as usize].clone() * is_write.clone();
-        let prefix_word = challenges.bus_prefix[BusId::MemoryReadWord as usize].clone() * is_read
-            + challenges.bus_prefix[BusId::MemoryWriteWord as usize].clone() * is_write;
-        let prefix = prefix_element * is_element.clone() + prefix_word * is_word.clone();
+        // Select read/write prefixes within each access width, then select the width. The
+        // prefix differences depend only on lookup challenges and can be prepared once.
+        let read_element = challenges.bus_prefix[BusId::MemoryReadElement as usize].clone();
+        let write_element = challenges.bus_prefix[BusId::MemoryWriteElement as usize].clone();
+        let read_word = challenges.bus_prefix[BusId::MemoryReadWord as usize].clone();
+        let write_word = challenges.bus_prefix[BusId::MemoryWriteWord as usize].clone();
+        let prefix_element =
+            write_element.clone() + (read_element - write_element) * is_read.clone();
+        let prefix_word = write_word.clone() + (read_word - write_word) * is_read;
+        let prefix = prefix_element.clone() + (prefix_word - prefix_element) * is_word.clone();
 
-        let mut acc = prefix;
-        acc += bp[0].clone() * self.ctx.clone();
-        acc += bp[1].clone() * self.addr.clone();
-        acc += bp[2].clone() * self.clk.clone();
-
-        // Element payload (gated by is_element) vs word payload (gated by is_word).
-        acc += bp[3].clone() * self.element.clone() * is_element;
-        acc += challenges.inner_product_at(3, self.word.as_slice()) * is_word;
-        acc
+        let shared_payload = challenges
+            .inner_product_at(0, &[self.ctx.clone(), self.addr.clone(), self.clk.clone()]);
+        let element_payload = challenges.beta_powers[3].clone() * self.element.clone();
+        let word_payload = challenges.inner_product_at(3, self.word.as_slice());
+        let payload = element_payload.clone() + (word_payload - element_payload) * is_word;
+        prefix + shared_payload + payload
     }
 }
 

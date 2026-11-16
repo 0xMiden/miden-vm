@@ -35,7 +35,7 @@ use crate::vm::{
     NativeMidenAirBuilder,
     constraints::{
         chiplets::{columns::AceCols, selectors::ChipletSelectors},
-        constants::{F_1, F_4},
+        constants::F_1,
         ext_field::{NativeQuadFeltAirBuilder, QuadFeltExpr},
         utils::BoolNot,
     },
@@ -77,9 +77,8 @@ pub fn enforce_ace_constraints_all_rows<AB>(
 
     // When ACE is active, section flags must be boolean.
     {
-        let builder = &mut builder.when(ace_flag.clone());
-        builder.assert_bool(local.s_start.dup());
-        builder.assert_bool(local.s_block.dup());
+        let builder = &mut builder.when(ace_flag.dup());
+        builder.assert_bools([local.s_start.dup(), local.s_block.dup()]);
     }
 
     let f_eval = local.s_block.dup();
@@ -120,12 +119,12 @@ pub fn enforce_ace_constraints_all_rows<AB>(
         let builder = &mut builder.when(ace_transition.clone() * s_transition);
 
         // clk and ctx are stable
-        builder.assert_eq(next.ctx.dup(), local.ctx.dup());
-        builder.assert_eq(next.clk.dup(), local.clk.dup());
+        builder
+            .assert_eq_arrays([next.ctx.dup(), next.clk.dup()], [local.ctx.dup(), local.clk.dup()]);
 
         // Memory pointer increments: +4 in READ, +1 in EVAL
         // ptr' = ptr + 4 * f_read + f_eval
-        let expected_ptr: AB::Expr = local.ptr.dup() + f_read.clone() * F_4 + f_eval.dup();
+        let expected_ptr = local.ptr.dup() + f_read.mul_2exp_u64(2) + f_eval.dup();
         builder.assert_eq(next.ptr.dup(), expected_ptr);
 
         // Node ID decrements: -2 in READ, -1 in EVAL

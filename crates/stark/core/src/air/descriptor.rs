@@ -1,4 +1,4 @@
-//! Checked relation metadata and versioned structural identity.
+//! Checked source metadata and ordered structural identity.
 
 use alloc::{string::String, vec::Vec};
 
@@ -81,6 +81,12 @@ impl<F: Field> AirDescriptor<F> {
         &self.analysis
     }
 
+    /// Identity of the current ordered source structure and AIR configuration.
+    ///
+    /// Constants, operand domains, and operation parameters contribute to this identity;
+    /// allocation sharing, diagnostics, and the phantom capture extension parameter do not.
+    /// Equivalent polynomials may have different fingerprints. This local setup association
+    /// neither authenticates arbitrary kernel code nor replaces a protocol circuit digest.
     pub fn fingerprint(&self) -> [u8; 32] {
         self.fingerprint
     }
@@ -103,7 +109,7 @@ pub struct Capture<F: Field, EF: ExtensionField<F> = F> {
 ///
 /// # Field encoding contract
 ///
-/// The internal `miden-native-air-structure-v1` identity frames field order and byte width, then
+/// The internal `miden.native-air.source` identity frames field order and byte width, then
 /// uses `Field::into_bytes` for constants and periodic data. A custom field implementation must
 /// supply an injective, canonical, deterministic, target-stable encoding of exactly `NUM_BYTES`
 /// bytes, including an agreed basis for nonprime fields. `RawDataSerializable` alone does not
@@ -161,20 +167,17 @@ fn finish_capture<F: Field, EF: ExtensionField<F>>(
 
 #[cfg(test)]
 mod tests {
-    use alloc::{borrow::Cow, sync::Arc, vec};
+    use alloc::{borrow::Cow, vec};
 
-    use p3_field::PrimeCharacteristicRing;
+    use p3_field::{Dup, PrimeCharacteristicRing};
 
     use super::*;
     use crate::{
         air::{
-            AirAnalysis, DegreeProfile,
-            symbolic::{
-                BaseInput, BaseLeaf, RowOffset, SymbolicExpr, SymbolicExpression,
-                SymbolicExpressionExt,
-            },
+            AirAnalysis, DegreeProfile, LiftedAirBuilder,
+            symbolic::{BaseInput, RowOffset, SymbolicExpression, SymbolicExpressionExt},
         },
-        testing::configs::Felt,
+        testing::configs::{Felt, QuadFelt},
     };
 
     fn raw(expression: SymbolicExpression<Felt>) -> RawCapture<Felt> {
@@ -194,17 +197,19 @@ mod tests {
     }
 
     fn input(offset: RowOffset) -> SymbolicExpression<Felt> {
-        SymbolicExpression::input(BaseInput::Main { offset, index: 0 })
+        SymbolicExpression::input(BaseInput::Main { row: offset, column: 0 })
     }
 
     fn square(cache: usize, shared: bool) -> SymbolicExpression<Felt> {
-        let x = Arc::new(input(RowOffset::Current));
+        let x = input(RowOffset::Current) + Felt::ONE;
         let y = if shared {
-            Arc::clone(&x)
+            x.dup()
         } else {
-            Arc::new(input(RowOffset::Current))
+            input(RowOffset::Current) + Felt::ONE
         };
-        SymbolicExpr::Mul { x, y, degree_multiple: cache }
+        let mut expression = x * y;
+        expression.set_cached_degree_for_test(cache);
+        expression
     }
 
     #[test]
@@ -222,6 +227,35 @@ mod tests {
     }
 
     #[test]
+    fn source_identity_ignores_unused_clones_during_additive_construction() {
+        for constant_tail in [false, true] {
+            let construct = |retain_clone: bool| {
+                capture_from_spec::<Felt, Felt>(
+                    raw(SymbolicExpression::ZERO).spec,
+                    |frame, _, sink| {
+                        let x = frame.main.current[0].dup();
+                        let prefix = x.dup() + Felt::ONE;
+                        let retained = retain_clone.then(|| prefix.dup());
+                        let tail = if constant_tail { SymbolicExpression::TWO } else { x };
+                        let root = prefix + tail;
+                        drop(retained);
+                        sink.assert_zero(root);
+                    },
+                )
+                .unwrap()
+                .descriptor
+            };
+            let original = construct(false);
+            let with_clone = construct(true);
+            assert_eq!(original.fingerprint(), with_clone.fingerprint());
+            assert_eq!(
+                original.analysis().degree_profile(),
+                with_clone.analysis().degree_profile()
+            );
+        }
+    }
+
+    #[test]
     fn identity_binds_schema_periodic_values_addresses_classes_and_global_order() {
         let reference = finish_capture(raw(input(RowOffset::Current))).unwrap().descriptor;
         let mut cases = vec![];
@@ -232,7 +266,7 @@ mod tests {
         changed.spec.periodic_columns.to_mut()[0].swap(0, 1);
         cases.push(changed);
         cases.push(raw(input(RowOffset::Next)));
-        cases.push(raw(SymbolicExpression::input(BaseInput::Public(0))));
+        cases.push(raw(SymbolicExpression::input(BaseInput::Public { index: 0 })));
         let mut changed = raw(input(RowOffset::Current));
         changed.assertions[0] =
             Assertion::Extension(SymbolicExpressionExt::from(input(RowOffset::Current)));
@@ -253,6 +287,47 @@ mod tests {
         assert_ne!(
             finish_capture(first).unwrap().descriptor.fingerprint(),
             finish_capture(second).unwrap().descriptor.fingerprint()
+        );
+    }
+
+    #[test]
+    fn source_identity_ignores_capture_field_but_binds_actual_extension_coefficients() {
+        fn source_identity<EF: ExtensionField<Felt>>() -> [u8; 32] {
+            capture_from_spec::<Felt, EF>(
+                raw(SymbolicExpression::ZERO).spec,
+                |frame, inputs, sink| {
+                    sink.named("source")
+                        .assert_zero(frame.main.current[0].dup() + Felt::from_u64(7));
+                    sink.assert_zero_ext(inputs.challenge(0) * frame.main.next[0].dup());
+                },
+            )
+            .unwrap()
+            .descriptor
+            .fingerprint()
+        }
+        assert_eq!(
+            source_identity::<Felt>(),
+            source_identity::<QuadFelt>(),
+            "the capture extension parameter is not part of source identity",
+        );
+
+        let constant_identity = |coefficient| {
+            let value =
+                SymbolicExpressionExt::<Felt, QuadFelt>::extension_constant(QuadFelt::new([
+                    Felt::ONE,
+                    coefficient,
+                ]));
+            capture_from_spec::<Felt, QuadFelt>(raw(SymbolicExpression::ZERO).spec, |_, _, sink| {
+                sink.assert_zero_ext(value);
+            })
+            .unwrap()
+            .descriptor
+            .fingerprint()
+        };
+        assert_ne!(
+            constant_identity(Felt::from_u64(2)),
+            constant_identity(Felt::from_u64(3)),
+            "actual extension coefficients remain part of source identity",
         );
     }
 
@@ -294,8 +369,7 @@ mod tests {
 
     #[test]
     fn repeated_zero_emissions_are_still_part_of_the_relation_identity() {
-        let one =
-            finish_capture(raw(SymbolicExpression::Leaf(BaseLeaf::Constant(Felt::ZERO)))).unwrap();
+        let one = finish_capture(raw(SymbolicExpression::constant(Felt::ZERO))).unwrap();
         let mut repeated = raw(SymbolicExpression::ZERO);
         repeated.assertions.push(Assertion::Base(SymbolicExpression::ZERO));
         repeated.labels.push(None);

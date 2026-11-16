@@ -511,6 +511,63 @@ fn mixed_air_periods_use_one_shared_basis() {
 }
 
 #[test]
+fn multi_air_preserves_zero_accumulators_after_negation_normalization() {
+    #[derive(Clone, Copy)]
+    struct ZeroAir(bool);
+
+    impl air::LiftedAir for ZeroAir {
+        type F = F;
+
+        fn spec(&self) -> air::AirSpec<'_, F> {
+            air::AirSpec {
+                main_width: 1,
+                aux_width: 0,
+                num_public_values: 0,
+                num_challenges: 2,
+                num_exports: 0,
+                preprocessed: None,
+                periodic_columns: Cow::Borrowed(&[]),
+            }
+        }
+
+        fn eval<AB: air::LiftedAirBuilder<F = F>>(
+            &self,
+            _frame: &air::Frame<'_, AB>,
+            _inputs: air::Inputs<'_, AB>,
+            builder: &mut AB,
+        ) {
+            if self.0 {
+                builder.assert_zero(AB::Expr::ZERO);
+            }
+        }
+    }
+
+    let config = AceConfig {
+        num_quotient_chunks: 1,
+        layout: LayoutKind::Masm,
+    };
+    for emit_zero in [false, true] {
+        let air = ZeroAir(emit_zero);
+        let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+        assert!(matches!(artifacts.dag.nodes()[artifacts.dag.root().index()], NodeKind::Neg(_)));
+
+        let circuit = build_canonical_multi_air_ace_circuit(&[air, air], config, 2).unwrap();
+        let mut inputs = vec![EF::ZERO; circuit.layout().total_inputs];
+        for (key, value) in [
+            (InputKey::Weight0, 7),
+            (InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 }, 2),
+            (InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 1 }, 3),
+            (InputKey::ZPowN, 19),
+        ] {
+            set_input(&circuit, &mut inputs, key, ef(value));
+        }
+        // Both accumulators are zero: 0 - 7 * (2 + 3u) * (19 - 1).
+        assert_eq!(circuit.eval(&inputs).unwrap(), -EF::new([F::from_u64(252), F::from_u64(378)]));
+        circuit.to_ace().expect("normalized negation root remains final and encodable");
+    }
+}
+
+#[test]
 fn multi_air_rejects_empty_airs_and_invalid_alignment() {
     let config = AceConfig {
         num_quotient_chunks: 1,
@@ -593,7 +650,7 @@ fn test_verifier_dag_matches_manual_eval() {
 /// `eval_periodic_values` reference (dense IDFT + Horner) for a column pair chosen
 /// so one column resolves via the sparse Lagrange path (period 128, 3/128 nonzero)
 /// and the other via the dense Horner path (period 8, fully dense) — see
-/// `build_periodic_nodes` in `dag/lower.rs`.
+/// `build_periodic_nodes` in `dag/periodic.rs`.
 #[test]
 fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
     let air = MockPeriodicAir;

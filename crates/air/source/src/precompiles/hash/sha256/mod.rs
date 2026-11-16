@@ -112,12 +112,11 @@ impl air::LiftedAir for Sha256Air {
             .expect("SHA-256 composed IO periodic band");
         let io_act: AB::Expr = local[COL_IO_ACT].dup();
         builder.assert_bool(local[COL_IO_ACT].dup());
-        builder.assert_zero(
-            io_act.dup()
-                - local[compression::COL_ACT].dup()
-                    * local[compression::COL_PHASE_BEGIN + compression::program::PHASE_PADDING]
-                        .dup()
-                    * local[compression::COL_PHASE_END].dup(),
+        builder.assert_eq(
+            io_act.dup(),
+            local[compression::COL_ACT].dup()
+                * local[compression::COL_PHASE_BEGIN + compression::program::PHASE_PADDING].dup()
+                * local[compression::COL_PHASE_END].dup(),
         );
         compression::eval_main_with_io(frame, builder, 0, 0, io_act.dup());
         let io_local = IO_COLUMNS.map(|column| local[column].dup());

@@ -171,11 +171,9 @@ fn enforce_interface_constraints<AB: air::LiftedAirBuilder<F = Felt>>(
     // Continuation keys carry the head ID. Without an incoming link, the head is this cycle.
     // Canonical physical IDs leave no provider before cycle zero or consumer after the last
     // cycle, so exact link balance also closes both physical boundaries.
-    builder.assert_zero(
-        footer2
-            * (AB::Expr::ONE - is_continuation)
-            * (next[COL_CHAIN_HEAD_ID].dup() - compression_id),
-    );
+    builder
+        .when(footer2 * (AB::Expr::ONE - is_continuation))
+        .assert_eq(next[COL_CHAIN_HEAD_ID].dup(), compression_id);
 
     // The initial-CV lookup uses footer 2. Bind its two additional CV words to footer 3,
     // where the compression core checks their byte representation and canonicality.
@@ -368,7 +366,7 @@ where
 }
 
 fn pack_pair<E: PrimeCharacteristicRing>(lo: E, hi: E) -> E {
-    lo + E::from_u64(1u64 << 32) * hi
+    lo + hi.mul_2exp_u64(32)
 }
 
 const _: () = assert!(EIDOS_COMPRESSION_CYCLE_LEN == 32);

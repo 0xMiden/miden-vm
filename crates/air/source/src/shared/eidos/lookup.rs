@@ -48,8 +48,6 @@ pub struct NarrowLookupConfig {
     pub range_check_bus: usize,
     /// Sign of byte-table and range-check multiplicities.
     pub table_multiplicity_sign: LookupMultiplicitySign,
-    /// Algebraic form used to reconstruct XOR.
-    pub xor_expression: XorExpression,
     /// Diagnostic label for a paired lookup column.
     pub pair_name: &'static str,
 }
@@ -74,16 +72,6 @@ pub enum LookupMultiplicitySign {
     Positive,
     /// Emit the negated multiplicity.
     Negative,
-}
-
-/// Expression used to reconstruct XOR from an AND witness.
-#[derive(Copy, Clone, Debug)]
-#[doc(hidden)]
-pub enum XorExpression {
-    /// Encode `a xor b` as `a + b - 2(a and b)`.
-    DoubleAnd,
-    /// Encode `a xor b` as `a + b - (a and b) - (a and b)`.
-    RepeatedSubtraction,
 }
 
 /// Emits the 16 byte, range, and rotation lookup columns shared by both wrappers.
@@ -219,7 +207,7 @@ where
             LB::Expr::ZERO
         };
     encoded += group.bus_prefix(config.range_check_bus) * (LB::Expr::ONE - activity);
-    let fields = narrow_slot_fields::<LB>(local, next, slot, config);
+    let fields = narrow_slot_fields::<LB>(local, next, slot);
     for (idx, field) in fields.into_iter().enumerate() {
         encoded += group.beta_powers()[idx].clone() * field;
     }
@@ -230,7 +218,6 @@ fn narrow_slot_fields<LB>(
     local: &EidosCompressionCols<LB::Expr>,
     next: &EidosCompressionCols<LB::Expr>,
     slot: usize,
-    config: NarrowLookupConfig,
 ) -> [LB::Expr; 3]
 where
     LB: LookupBuilder<F = Felt>,
@@ -242,12 +229,7 @@ where
             let b = local.columns[base + 1].dup();
             let stored = local.columns[base + 2].dup();
             let value = if slot <= 15 {
-                match config.xor_expression {
-                    XorExpression::DoubleAnd => xor_from_and(a.clone(), b.clone(), stored),
-                    XorExpression::RepeatedSubtraction => {
-                        a.clone() + b.clone() - stored.clone() - stored
-                    },
-                }
+                xor_from_and(a.dup(), b.dup(), stored)
             } else {
                 eidos_lookup::normalize(slot % BYTES_PER_WORD, stored)
             };
