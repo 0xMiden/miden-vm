@@ -30,7 +30,6 @@ testing = ["arbitrary"]
 miden-ace.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
-miden-utils-indexing.workspace = true
 miden-precompiles.workspace = true
 miden-utils-sync.workspace = true
 miden-stark.workspace = true
@@ -39,12 +38,10 @@ ruint.workspace = true
 # External dependencies
 p3-field.workspace = true
 p3-challenger.workspace = true
-p3-security.workspace = true
 proptest = { workspace = true, optional = true }
 thiserror.workspace = true
 
 [dev-dependencies]
-p3-matrix.workspace = true
 insta.workspace = true
 miden-ace = { workspace = true, features = ["testing"] }
 miden-test-serialization-macros.workspace = true
