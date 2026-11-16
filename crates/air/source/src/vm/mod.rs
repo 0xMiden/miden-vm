@@ -1,4 +1,22 @@
 //! Authored Miden VM AIRs, trace schemas, public inputs, and relation boundaries.
+//!
+//! The VM is a four-AIR statement:
+//!
+//! - [`CoreAir`] contains the [decoder], operand [stack], and system constraints.
+//! - [`ChipletsAir`] contains the stacked hash controller, bitwise, memory, ACE, and kernel-ROM
+//!   chiplets.
+//! - [`EidosCompressionAir`] proves the 32-row Eidos compression computations requested by the hash
+//!   controller.
+//! - [`And8LookupAir`] is a fixed byte-pair table for byte AND, Eidos compression rotation
+//!   contributions, and [16-bit range checks].
+//!
+//! Typed LogUp relations tie these AIRs and their internal components together. The constraints are
+//! described in the VM [design documentation].
+//!
+//! [decoder]: https://docs.miden.xyz/miden-vm/design/decoder
+//! [stack]: https://docs.miden.xyz/miden-vm/design/stack
+//! [16-bit range checks]: https://docs.miden.xyz/miden-vm/design/range
+//! [design documentation]: https://docs.miden.xyz/miden-vm/design
 
 mod airs;
 mod constraints;

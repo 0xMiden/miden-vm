@@ -2,7 +2,7 @@
 name = "miden-vm-stark"
 version.workspace = true
 description = "Miden VM relation STARK backend"
-readme = "README.md"
+readme = false
 documentation = "https://docs.rs/miden-vm-stark"
 license.workspace = true
 authors.workspace = true

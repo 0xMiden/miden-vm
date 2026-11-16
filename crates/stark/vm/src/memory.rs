@@ -1,4 +1,22 @@
 //! Memory budgets for the production VM relation.
+//!
+//! Low-level processor callers supply a budget before trace construction:
+//!
+//! ```rust,ignore
+//! let budget = miden_vm_stark::memory::canonical_budget(max_prover_memory_bytes);
+//! let trace = miden_processor::trace::build_trace(vm_witness, &budget)?;
+//! let hash_lde_blocks = false;
+//! let proof = miden_vm_stark::prover::prove(trace, hash_function, hash_lde_blocks)?;
+//! ```
+//!
+//! Set `hash_lde_blocks` to `true` to hash completed blocks during the final trace LDE when the
+//! commitment scheme supports it.
+//!
+//! [`default_budget`] uses a 64 GiB limit. The supplied value carries a shared
+//! [`ProverMemoryModel`] and the caller's byte limit. The processor applies an early chiplet cap, a
+//! raw fragment-buffer check, a padded-height check, and a streaming hasher cap. The model
+//! estimates dominant VM proving allocations, including preprocessing and hash scratch. It does not
+//! bound total process memory, concurrent proofs, or cached setups for other configurations.
 
 use miden_air::vm::{MIDEN_AIR_COUNT, MidenMultiAir};
 use miden_core::{Felt, field::QuadFelt};
