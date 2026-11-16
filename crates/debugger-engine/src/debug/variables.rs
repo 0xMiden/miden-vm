@@ -105,8 +105,7 @@ impl DebugVarTracker {
     pub fn current_invocation(&self) -> Option<InvocationId> {
         self.current_invocation
     }
-#[allow(dead_code)] // retained for test/feature-gated users
-
+    #[allow(dead_code)] // retained for test/feature-gated users
     pub(crate) fn has_invocation(&self, invocation: InvocationId) -> bool {
         self.invocations.contains_key(&invocation)
     }
