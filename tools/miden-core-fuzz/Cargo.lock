@@ -1517,7 +1517,6 @@ name = "miden-ace"
 version = "1.0.0-rc.2"
 dependencies = [
  "miden-crypto",
- "thiserror",
 ]
 
 [[package]]
