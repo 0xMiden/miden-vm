@@ -36,7 +36,8 @@ No test, observer or benchmark has been executed during authoring. No new
 numerical baseline has been captured. The ignored print-only observer has no
 file-writing or environment-controlled regeneration mode. Its eventual baseline
 must come from the first independently authored observer commit
-`881521641a737e7f656a156ebd6dff440aaf81c4`, before any production equation/API
+`aae9815060a1f558d89969215333b050d29bc5af` (the signed publication of original local commit
+`881521641a737e7f656a156ebd6dff440aaf81c4`), before any production equation/API
 migration, with that exact commit, toolchain and lock hash recorded. Execution requires
 separate authorization and the user's power guards; the standing no-tests
 request remains active. Never regenerate expectations from a later migrated

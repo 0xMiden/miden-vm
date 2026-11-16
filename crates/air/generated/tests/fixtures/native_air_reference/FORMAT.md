@@ -112,8 +112,9 @@ The observer is read-only: it has no fixture overwrite or environment-controlled
 regeneration mode. The ignored recording target prints the newly framed report;
 it never writes an expected result. A reproducible baseline must be captured
 from the first independently authored observer commit
-`881521641a737e7f656a156ebd6dff440aaf81c4`, whose production sources remain at the fixed
-base, only after explicit execution authorization and required power checks.
+`aae9815060a1f558d89969215333b050d29bc5af`, the signed publication of original local commit
+`881521641a737e7f656a156ebd6dff440aaf81c4`. Its production sources remain at the fixed
+base. Capture requires explicit execution authorization and required power checks.
 Record that exact commit ID, toolchain and lock hash alongside the snapshot.
 Do not capture an expected baseline from later equation/kernel changes.
 
