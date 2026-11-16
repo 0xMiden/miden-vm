@@ -144,7 +144,8 @@ pub fn prove_and_verify_statement<MA>(prover_statement: ProverStatement<Felt, Qu
 where
     MA: MultiAir<Felt, QuadFelt>,
     MA::Air: native::ProverAir<QuadFelt> + native::LiftedAir<F = Felt>,
-    <MA::Air as native::AirKernel>::Prepared<PackedFelt, PackedQuadFelt>: Sync,
+    <MA::Air as native::AirKernel>::Prepared<PackedFelt, PackedQuadFelt>:
+        crate::prover::PackedPreparation,
 {
     let config = test_config();
 

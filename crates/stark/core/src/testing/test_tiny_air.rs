@@ -7,10 +7,9 @@ use core::convert::Infallible;
 use p3_field::{Dup, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
-use crate::air::native::LiftedAirBuilder as _;
 use crate::{
     ProverInstance, VerifierError, VerifierInstance,
-    air::{InstanceError, ProverStatement, Statement, native},
+    air::{InstanceError, ProverStatement, Statement, native, native::LiftedAirBuilder as _},
     domain::DomainError,
     order::{ShapeError, TraceOrder},
     proof::{TranscriptData, TranscriptError},
@@ -285,6 +284,25 @@ fn malformed_transcript_is_rejected() {
         .verify(&bad_proof, test_challenger())
         .expect_err("extra transcript data should fail verification");
     assert!(matches!(err, VerifierError::Transcript(TranscriptError::TrailingData)));
+}
+
+#[test]
+fn prover_instance_rejects_insufficient_blowup_without_fixed_data() {
+    let mut config = test_config();
+    config.pcs = crate::pcs::params::PcsParams::new(1, 2, 2, 0, 0, 2, 0).unwrap();
+    let prover_statement = tiny_prover_statement(
+        vec![TinyAir::new([])],
+        vec![trace_of_height(4)],
+        vec![(0, vec![Felt::from_u64(START)])],
+    )
+    .unwrap();
+
+    assert!(matches!(
+        ProverInstance::new(&config, prover_statement, None),
+        Err(crate::ProverError::Plan(crate::PlanError::Domain(
+            DomainError::ConstraintDegreeTooHigh { log_blowup: 1, .. }
+        )))
+    ));
 }
 
 #[test]

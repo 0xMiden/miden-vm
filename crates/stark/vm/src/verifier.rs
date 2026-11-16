@@ -12,7 +12,7 @@ use miden_core::{
 use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
     PreprocessedValidationError, SetupIdentity, StarkConfig, VerifierInstance,
-    air::Statement,
+    air::{InstanceError, Statement},
     config::{blake3_256_config, keccak_config, observe_protocol_params},
     lmcs::Lmcs,
     proof::StarkProofData,
@@ -141,8 +141,7 @@ where
         MidenMultiAir::new(),
         vec![(0, public_values.to_vec())],
         aux_inputs.to_vec(),
-    )
-    .map_err(|error| VerificationError::Verifier(VerifierError::from(error)))?;
+    )?;
 
     VerifierInstance::new(
         config,
@@ -166,6 +165,8 @@ pub enum VerificationError {
     Deserialization(#[from] wincode::error::ReadError),
     #[error("STARK proof is too large: {size} bytes exceeds the {max} byte limit")]
     ProofTooLarge { size: usize, max: usize },
+    #[error(transparent)]
+    Statement(#[from] InstanceError),
     #[error(transparent)]
     Verifier(#[from] VerifierError),
     #[error(transparent)]

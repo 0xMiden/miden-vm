@@ -16,8 +16,7 @@ pub mod trace;
 mod tests;
 
 pub use airs::{
-    And8LookupAir, ChipletsAir, CoreAir, EidosCompressionAir, LOGUP_AUX_TRACE_WIDTH, MidenAir,
-    NativeMidenAirBuilder,
+    And8LookupAir, ChipletsAir, CoreAir, EidosCompressionAir, MidenAir, NativeMidenAirBuilder,
 };
 pub use constraints::{
     and8_lookup,

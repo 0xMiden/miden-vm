@@ -20,6 +20,7 @@ use p3_matrix::{Matrix, bitrev::BitReversedMatrixView, dense::RowMajorMatrixView
 use p3_maybe_rayon::prelude::*;
 use packed_row_bitrev::collect_vertically_packed_row_pair_bitrev_into;
 
+use super::PackedPreparation;
 use crate::{
     air::native::{self, AirKernel, ConstraintLayout},
     domain::{Coset, EvaluationDomain},
@@ -98,7 +99,7 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
     EF: ExtensionField<F>,
     PackedExt<F, EF>: Algebra<EF> + Algebra<PackedVal<F>> + BasedVectorSpace<PackedVal<F>>,
     A: AirKernel<F = F>,
-    A::Prepared<PackedVal<F>, PackedExt<F, EF>>: Sync,
+    A::Prepared<PackedVal<F>, PackedExt<F, EF>>: PackedPreparation,
 {
     type P<F> = PackedVal<F>;
     type PE<F, EF> = PackedExt<F, EF>;

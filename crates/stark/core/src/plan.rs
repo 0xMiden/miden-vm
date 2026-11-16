@@ -1,6 +1,6 @@
 //! Shared proof-height validation and quotient allocation before transcript work.
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 use p3_field::TwoAdicField;
 use thiserror::Error;
@@ -32,6 +32,10 @@ pub enum PlanError {
 /// Own numeric metadata only; descriptors remain in the independently owned statement kernels.
 pub(crate) struct ExecutionPlan<F: TwoAdicField> {
     pub order: TraceOrder,
+    /// AIR instance index for each fixed-data leaf, in committed proof order.
+    pub preprocessed_trace_to_air: Vec<u8>,
+    /// Fixed-data leaf index for each AIR, or `None` for AIRs without fixed data.
+    pub air_to_preprocessed_trace: Vec<Option<usize>>,
     /// Quotient allocations in proof order, retaining safe over-allocation.
     pub log_quotient_degrees: Vec<u8>,
     pub max_log_quotient_degree: u8,
@@ -46,6 +50,11 @@ impl<F: TwoAdicField> ExecutionPlan<F> {
         log_blowup: u8,
     ) -> Result<Self, PlanError> {
         let order = TraceOrder::from_log_heights(airs, log_heights)?;
+        let preprocessed_trace_to_air = order.preprocessed_air_for_trace_index(airs);
+        let mut air_to_preprocessed_trace = vec![None; airs.len()];
+        for (trace, &air) in preprocessed_trace_to_air.iter().enumerate() {
+            air_to_preprocessed_trace[air as usize] = Some(trace);
+        }
         let mut log_degrees = Vec::with_capacity(airs.len());
         for (air, kernel) in airs.iter().enumerate() {
             if kernel.descriptor().spec().aux_width == 0 {
@@ -79,6 +88,8 @@ impl<F: TwoAdicField> ExecutionPlan<F> {
         let log_quotient_degrees = order.to_proof_order(&log_degrees);
         Ok(Self {
             order,
+            preprocessed_trace_to_air,
+            air_to_preprocessed_trace,
             log_quotient_degrees,
             max_log_quotient_degree,
             max_lde_domain,

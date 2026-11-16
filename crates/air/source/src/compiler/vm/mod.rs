@@ -7,11 +7,9 @@ use alloc::vec::Vec;
 
 use miden_ace::AceError;
 pub use miden_ace::compiler::{CapturedAir, CompiledRelation, LayoutKind};
-use miden_core::{Felt, field::QuadFelt};
-use miden_stark::security::{AirShape, LookupShape};
 use miden_stark::{
     air::native::DescriptorError,
-    lookup::{ProverLookupBuilder, native::LookupAir},
+    security::{AirShape, LookupShape},
 };
 
 pub use self::{
@@ -43,15 +41,10 @@ pub fn derive_air_shape() -> Result<AirShape, DescriptorError> {
 }
 
 fn lookup_shape() -> LookupShape {
-    type ShapeBuilder<'a> = ProverLookupBuilder<'a, Felt, QuadFelt>;
     LookupShape {
         fractions_per_row: AIRS
             .iter()
-            .map(|air| {
-                <MidenAir as LookupAir<ShapeBuilder<'_>>>::column_shape(air)
-                    .iter()
-                    .sum::<usize>()
-            })
+            .map(|air| air.column_shape().iter().sum::<usize>())
             .sum::<usize>() as u32,
         max_message_width: MIDEN_MAX_MESSAGE_WIDTH as u32,
     }

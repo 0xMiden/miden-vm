@@ -30,12 +30,13 @@ pub mod labels {
     };
 }
 
-use crate::pcs::PcsParams;
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, PrimeField64, QuadFelt},
     proof::HashFunction,
 };
+
+use crate::pcs::PcsParams;
 
 const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 
@@ -49,6 +50,8 @@ pub const LOOKUP_POW_BITS: u32 = 0;
 /// Verifiers construct these only after checking the proof and authenticating its statement.
 /// Applications select an estimator and acceptance policy. Public fields also support planning;
 /// manually constructed or modified parameters do not carry verification provenance.
+/// Unsupported heights, invalid field-size encodings, empty declared rounds, inconsistent lookup
+/// geometry and unrepresentable PCS counts produce zero-security reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProofSecurityParameters {
     /// The validated PCS configuration used to verify the proof, including its final degree.
@@ -107,6 +110,19 @@ fn project_pcs(params: &PcsParams) -> Option<budget::ProtocolParams> {
 
 impl ProofSecurityParameters {
     fn numerical_inputs(&self) -> Option<NumericalInputs> {
+        // Validate shared arithmetic preconditions before either estimator runs. In particular,
+        // boundary corrections need an existing, nonempty per-row lookup round and a u64 height.
+        if self.instance_shape.cap() == 0
+            || self.instance_shape.log_max_height >= u64::BITS
+            || self.air_shape.num_deep_terms == Some(0)
+        {
+            return None;
+        }
+        match self.air_shape.lookup {
+            Some(LookupShape { fractions_per_row: 0, .. }) => return None,
+            None if self.num_lookup_boundary_terms != 0 => return None,
+            _ => (),
+        }
         Some(NumericalInputs {
             protocol_params: project_pcs(&self.pcs_params)?,
             log_final_degree: u32::from(self.pcs_params.log_final_degree()),

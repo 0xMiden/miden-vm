@@ -207,8 +207,8 @@ fn optimized_native_renderer_uses_all_namespaces_and_compiles_typed_arithmetic()
     assert_eq!(embedded.fingerprint(), descriptor.fingerprint());
     assert_eq!(embedded.label(0), Some("renderer/base-dot"));
     let (generated, _) = capture_native_into_with(&source, &mut builder, |frame, inputs, sink| {
-        let terms = native_evaluators::precompute_renderer(inputs);
-        assert_eq!(terms.len(), native_evaluators::RENDERER_PREPARED_TERMS);
+        let terms: [_; native_evaluators::RENDERER_PREPARED_TERMS] =
+            native_evaluators::precompute_renderer(inputs);
         native_evaluators::eval_renderer(frame, inputs, sink, &terms);
     })
     .unwrap();

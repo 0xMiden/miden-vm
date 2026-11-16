@@ -31,11 +31,6 @@ pub use eidos_compression::EidosCompressionAir;
 pub trait NativeMidenAirBuilder: miden_stark::air::native::LiftedAirBuilder<F = Felt> {}
 impl<T: miden_stark::air::native::LiftedAirBuilder<F = Felt>> NativeMidenAirBuilder for T {}
 
-/// Combined LogUp width used by constraint test harnesses: 4 core columns, 4 chiplet
-/// columns, and the byte-pair table column. Standalone Eidos compression tests size their aux
-/// matrix from the AIR directly.
-pub const LOGUP_AUX_TRACE_WIDTH: usize = 9;
-
 // MIDEN AIR
 // ================================================================================================
 
@@ -53,7 +48,7 @@ pub enum MidenAir {
 }
 
 macro_rules! with_source {
-    ($self:ident, |$air:ident| $body:expr) => {
+    ($self:ident, | $air:ident | $body:expr) => {
         match $self {
             MidenAir::Core => {
                 let $air = &CoreAir;

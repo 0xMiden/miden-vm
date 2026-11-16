@@ -59,12 +59,11 @@ use thiserror::Error;
 use crate::{
     StarkConfig,
     air::{
-        InstanceError, MultiAir, ReductionError, Statement,
+        MultiAir, ReductionError, Statement,
         native::{self, AirKernel},
     },
-    domain::{Coset, DomainError},
+    domain::Coset,
     lmcs::Lmcs,
-    order::ShapeError,
     pcs::verifier::{CommitmentGroup, PcsError, verify_aligned},
     plan::{ExecutionPlan, PlanError},
     preprocessed::{PreprocessedValidationError, SetupIdentity, validate_setup_identity},
@@ -162,12 +161,6 @@ pub enum VerifierError {
     #[error(transparent)]
     Plan(#[from] PlanError),
     #[error(transparent)]
-    Instance(#[from] InstanceError),
-    #[error(transparent)]
-    Shape(#[from] ShapeError),
-    #[error(transparent)]
-    Domain(#[from] DomainError),
-    #[error(transparent)]
     Pcs(#[from] PcsError),
     #[error(transparent)]
     Transcript(#[from] TranscriptError),
@@ -260,10 +253,8 @@ where
     )?;
     let trace_order = &plan.order;
 
-    // Preprocessed trace↔AIR mappings (instance order), reconstructed from the
-    // heights — the same ones the prover used.
-    let preprocessed_trace_to_air = trace_order.preprocessed_air_for_trace_index(statement.airs());
-    let air_to_preprocessed_trace = trace_order.preprocessed_trace_index_for_air(statement.airs());
+    let preprocessed_trace_to_air = &plan.preprocessed_trace_to_air;
+    let air_to_preprocessed_trace = &plan.air_to_preprocessed_trace;
 
     let air_refs: Vec<&MA::Air> = statement.airs().iter().collect();
     let proof_ordered_airs = trace_order.to_proof_order(&air_refs);

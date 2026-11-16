@@ -88,10 +88,10 @@ use tracing::{info_span, instrument};
 use crate::{
     StarkConfig,
     air::{
-        InstanceError, MultiAir, ProverStatement, ReductionError, Statement, log2_strict_u8,
+        MultiAir, ProverStatement, ReductionError, Statement, log2_strict_u8,
         native::{self, AirKernel},
     },
-    domain::{Coset, DomainError},
+    domain::Coset,
     lmcs::Lmcs,
     pcs::prover::open_with_channel,
     plan::{ExecutionPlan, PlanError},
@@ -102,6 +102,23 @@ use crate::{
     transcript::{Channel, ProverChannel, ProverTranscript},
 };
 
+/// Prepared state shared by packed constraint evaluation.
+///
+/// Concurrent proving shares one evaluation session across worker threads and therefore requires
+/// `Sync`. Serial proving keeps that session on the calling thread and imposes no such bound.
+#[cfg(feature = "concurrent")]
+pub trait PackedPreparation: Sync {}
+
+#[cfg(feature = "concurrent")]
+impl<T: Sync> PackedPreparation for T {}
+
+/// Prepared state used by serial packed constraint evaluation.
+#[cfg(not(feature = "concurrent"))]
+pub trait PackedPreparation {}
+
+#[cfg(not(feature = "concurrent"))]
+impl<T> PackedPreparation for T {}
+
 // ============================================================================
 // ProverInstance
 // ============================================================================
@@ -109,10 +126,9 @@ use crate::{
 /// Prover-side bundle containing a [`StarkConfig`], a statement with owned main
 /// traces, and optional borrowed [`Preprocessed`] data.
 ///
-/// Construction validates preprocessed presence parity (and, when present, the
-/// bundle's shape against the AIRs and STARK config), so holding a
-/// `ProverInstance` is a guarantee its preprocessed shape is consistent;
-/// proving never re-checks it.
+/// Construction validates the execution plan and preprocessed presence/shape against the AIRs,
+/// trace heights and STARK config. The instance owns that checked plan, which proving reuses
+/// without repeating preflight validation.
 pub struct ProverInstance<'a, F, EF, MA, SC>
 where
     F: TwoAdicField,
@@ -124,6 +140,7 @@ where
     statement: Statement<F, EF, MA>,
     traces: Vec<RowMajorMatrix<F>>,
     preprocessed: Option<&'a Preprocessed<F, SC::Lmcs>>,
+    plan: ExecutionPlan<F>,
 }
 
 impl<'a, F, EF, MA, SC> ProverInstance<'a, F, EF, MA, SC>
@@ -138,27 +155,35 @@ where
     /// `preprocessed` must be `Some` exactly when some AIR declares preprocessed
     /// columns; otherwise this errors with
     /// [`PreprocessedValidationError::PresenceMismatch`]. When both hold, the
-    /// bundle's raw and committed shapes are validated against the AIRs and
-    /// config.
+    /// bundle's raw and committed shapes are validated against the AIRs and config. Execution
+    /// allocation, actual-height degree capacity and LDE domains are also checked here, even
+    /// when no preprocessed data is declared.
     pub fn new(
         config: &'a SC,
         prover_statement: ProverStatement<F, EF, MA>,
         preprocessed: Option<&'a Preprocessed<F, SC::Lmcs>>,
-    ) -> Result<Self, PreprocessedValidationError> {
-        let expected = prover_statement
-            .statement()
-            .airs()
-            .iter()
-            .any(|a| a.descriptor().spec().preprocessed.is_some());
+    ) -> Result<Self, ProverError> {
+        let (statement, traces) = prover_statement.into_parts();
+        let plan = ExecutionPlan::new(
+            statement.airs(),
+            traces.iter().map(|trace| log2_strict_u8(trace.height())).collect(),
+            config.pcs().log_blowup(),
+        )?;
+        let expected = !plan.preprocessed_trace_to_air.is_empty();
         let actual = preprocessed.is_some();
         if expected != actual {
-            return Err(PreprocessedValidationError::PresenceMismatch { expected, actual });
+            return Err(PreprocessedValidationError::PresenceMismatch { expected, actual }.into());
         }
         if let Some(p) = preprocessed {
-            validate_preprocessed(config, &prover_statement, p)?;
+            validate_preprocessed::<F, EF, _, _>(config, statement.airs(), &plan, p)?;
         }
-        let (statement, traces) = prover_statement.into_parts();
-        Ok(Self { config, statement, traces, preprocessed })
+        Ok(Self {
+            config,
+            statement,
+            traces,
+            preprocessed,
+            plan,
+        })
     }
 
     /// Consume this instance and return the proof with its verifier statement.
@@ -168,7 +193,7 @@ where
     ) -> Result<(StarkOutput<F, EF, SC>, Statement<F, EF, MA>), ProverError>
     where
         MA::Air: native::ProverAir<EF> + native::LiftedAir<F = F>,
-        <MA::Air as AirKernel>::Prepared<F::Packing, EF::ExtensionPacking>: Sync,
+        <MA::Air as AirKernel>::Prepared<F::Packing, EF::ExtensionPacking>: PackedPreparation,
     {
         prove(self, challenger)
     }
@@ -211,12 +236,12 @@ where
 ///
 /// # Trust contract
 ///
-/// `prove` validates ONLY untrusted runtime inputs and returns typed
-/// [`ProverError`] on failure. AIR structural correctness is the
-/// implementer's contract — call [`crate::debug::assert_prover_setup`]
+/// Instance construction validates untrusted runtime inputs before proving. Auxiliary witness
+/// construction and external assertion failures return typed [`ProverError`]. AIR structural
+/// correctness is the implementer's contract — call [`crate::debug::assert_prover_setup`]
 /// from your test harness to enforce it in debug builds.
 ///
-/// ## Validated
+/// ## Validated before proving
 /// - per AIR: `air.num_public_values() == statement.air_inputs()[i].len()`
 /// - `statement.aux_inputs().len() <= multi_air.max_aux_inputs()`
 /// - `prover_statement.traces().len() == statement.airs().len()` and `<= u8::MAX + 1`
@@ -229,10 +254,8 @@ where
 ///   construction
 ///
 /// ## Trusted (NOT validated)
-/// - AIR structural shape (positive `aux_width`, power-of-two periodic columns, window size 2)
-/// - [`crate::air::ProverStatement::build_aux_traces`] output dimensions — a malformed output is
-///   caught by the LDE/commit (panic) or by verification, since the verifier re-derives these
-///   shapes.
+/// - Authored equations and their correspondence with the checked descriptor.
+/// - Auxiliary witness output dimensions, which the prover asserts before commitment.
 ///
 /// # Arguments
 /// - `instance`: the config, the validated prover statement (AIRs, per-AIR `air_inputs`, and
@@ -252,25 +275,19 @@ where
     SC: StarkConfig<F, EF>,
     MA: MultiAir<F, EF>,
     MA::Air: native::ProverAir<EF> + native::LiftedAir<F = F>,
-    <MA::Air as AirKernel>::Prepared<F::Packing, EF::ExtensionPacking>: Sync,
+    <MA::Air as AirKernel>::Prepared<F::Packing, EF::ExtensionPacking>: PackedPreparation,
 {
-    let ProverInstance { config, statement, traces, preprocessed } = instance;
+    let ProverInstance {
+        config,
+        statement,
+        traces,
+        preprocessed,
+        plan,
+    } = instance;
     let airs = statement.airs();
     let air_inputs = statement.air_inputs();
-    let plan = ExecutionPlan::new(
-        airs,
-        traces.iter().map(|trace| log2_strict_u8(trace.height())).collect(),
-        config.pcs().log_blowup(),
-    )?;
     let trace_order = &plan.order;
-
-    // Map each AIR to its preprocessed trace index. Only used when a preprocessed
-    // tree is present.
-    let air_to_preprocessed_trace = if preprocessed.is_some() {
-        trace_order.preprocessed_trace_index_for_air(airs)
-    } else {
-        Vec::new()
-    };
+    let air_to_preprocessed_trace = &plan.air_to_preprocessed_trace;
 
     // Borrow each AIR and trace, then reorder both into ascending-height (proof)
     // order. AIRs are passed as `&MA::Air` (the existing constraint code expects
@@ -593,15 +610,13 @@ where
 pub enum ProverError {
     #[error(transparent)]
     Plan(#[from] PlanError),
+    #[error(transparent)]
+    Preprocessed(#[from] PreprocessedValidationError),
     #[error("AIR {air}: auxiliary witness construction failed: {source}")]
     Auxiliary {
         air: usize,
         source: Box<dyn core::error::Error + Send + Sync>,
     },
-    #[error(transparent)]
-    Instance(#[from] InstanceError),
-    #[error(transparent)]
-    Domain(#[from] DomainError),
     #[error("external assertion evaluation failed: {0}")]
     Reduction(ReductionError),
     #[error("external assertion {assertion} is non-zero")]

@@ -291,21 +291,6 @@ impl TraceOrder {
             .filter(|&i| has_preprocessed(i as usize))
             .collect()
     }
-
-    /// Preprocessed trace index for each AIR, or `None` when the AIR declares no
-    /// preprocessed columns. Length is [`Self::len`]; the inverse of
-    /// [`Self::preprocessed_air_for_trace_index`].
-    pub(crate) fn preprocessed_trace_index_for_air<K: AirKernel>(
-        &self,
-        airs: &[K],
-    ) -> Vec<Option<usize>> {
-        let air_for_preprocessed_trace = self.preprocessed_air_for_trace_index(airs);
-        let mut v = alloc::vec![None; airs.len()];
-        for (preprocessed_trace_idx, &air_idx) in air_for_preprocessed_trace.iter().enumerate() {
-            v[air_idx as usize] = Some(preprocessed_trace_idx);
-        }
-        v
-    }
 }
 
 // ============================================================================
@@ -358,9 +343,10 @@ pub enum ShapeError {
 mod tests {
     use alloc::{vec, vec::Vec};
 
+    use p3_goldilocks::Goldilocks;
+
     use super::*;
     use crate::{air::native::DirectKernel, testing::airs::miden::DummyMidenAir};
-    use p3_goldilocks::Goldilocks;
 
     type TF = Goldilocks;
 
@@ -465,9 +451,11 @@ mod tests {
 
     #[test]
     fn checked_native_metadata_uses_the_same_order_and_fixed_subset() {
-        use crate::air::native::{self, AirSpec, PreprocessedSpec};
         use alloc::borrow::Cow;
+
         use p3_field::PrimeCharacteristicRing;
+
+        use crate::air::native::{self, AirSpec, PreprocessedSpec};
         let specs = [
             AirSpec {
                 main_width: 1,

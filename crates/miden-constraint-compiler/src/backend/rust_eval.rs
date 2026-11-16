@@ -25,7 +25,8 @@
 //! Challenge-only expressions can be prepared once and reused across row evaluations. Shared IR
 //! analysis identifies their dependencies; a native preparation plan assigns cached results to
 //! slots. Preparation and row emission consume that same plan.
-//! [`emit_native_optimized_module`] also specializes single-use arithmetic while preserving cached terms.
+//! [`emit_native_optimized_module`] also specializes single-use arithmetic while preserving cached
+//! terms.
 
 use std::fmt::Write as _;
 
@@ -99,10 +100,7 @@ fn emit_air(eval: &GraphEvaluator<'_>, out: &mut String, optimized: bool) {
     let plan = PreparationPlan::new(eval.graph, eval.constraints);
     let terms = plan.terms();
     let mut preparation = Emitter::new(EmissionMode::Preparation(&plan));
-    let values: Vec<_> = terms
-        .iter()
-        .map(|&id| as_expr(&preparation.token(id), preparation.types()))
-        .collect();
+    let values: Vec<_> = terms.iter().map(|&id| operand(&preparation.token(id))).collect();
     writeln!(
         out,
         "\npub const {}_PREPARED_TERMS: usize = {};",
@@ -210,7 +208,7 @@ const NATIVE_FN_PROLOGUE: &str = r"    let m0 = frame.main.current;
     let m1 = frame.main.next;
     let a0 = frame.aux.current;
     let a1 = frame.aux.next;
-    let _ = (&m0, &m1, &a0, &a1, &inputs);";
+    let _ = (&m0, &m1, &a0, &a1, &inputs, &terms);";
 
 const NATIVE_PREPROCESSED_PROLOGUE: &str = r"    let p0 = frame.preprocessed.current;
     let p1 = frame.preprocessed.next;
@@ -230,16 +228,12 @@ struct ExprTypes {
     ext: &'static str,
 }
 
-/// Every native row leaf already owns an expression; reuse it by Dup.
-fn as_expr(t: &Token, _types: ExprTypes) -> String {
-    format!("{}.dup()", t.code)
-}
-
 fn lift_base_to_ext(t: &Token, types: ExprTypes) -> String {
     debug_assert!(matches!(t.class, Class::Base));
     format!("{}::from({}.dup())", types.ext, t.code)
 }
 
+/// Every native operand already owns an expression; reuse it by Dup.
 fn operand(t: &Token) -> String {
     format!("{}.dup()", t.code)
 }
@@ -310,8 +304,7 @@ impl<'g> Emitter<'g> {
     }
 
     /// Emit `let h{n} = expr;` — or `let h{n}: ty = expr;` when `ty` is given —
-    /// with a fresh `h{n}` name that it returns. A `Var` leaf passes no `ty` so
-    /// its type is inferred from the trace-window read and stays `Copy`.
+    /// with a fresh `h{n}` name that it returns.
     fn hoist(&mut self, ty: Option<&str>, expr: String) -> String {
         let name = format!("h{}", self.hoisted);
         self.hoisted += 1;
@@ -423,33 +416,26 @@ impl<'g> Emitter<'g> {
         let types = self.types();
         let rhs = match class {
             Class::Base => match &yt {
-                None => format!("-{}", as_expr(&xt, types)),
+                None => format!("-{}", operand(&xt)),
                 Some(yt) => format!("{} {} {}", operand(&xt), sym(op), operand(yt)),
             },
             Class::Ext => match &yt {
                 None => match xt.class {
-                    Class::Ext => format!("-{}", as_expr(&xt, types)),
+                    Class::Ext => format!("-{}", operand(&xt)),
                     Class::Base => format!("-{}", lift_base_to_ext(&xt, types)),
                 },
                 Some(yt) => match (xt.class, yt.class) {
                     // The ext operand drives; the other side is rendered as an
                     // `Expr` in its own class (`AB::ExtExpr: Algebra<AB::Expr>`
                     // consumes a base `Expr`).
-                    (Class::Ext, _) => {
-                        format!("{} {} {}", as_expr(&xt, types), sym(op), as_expr(yt, types))
-                    },
+                    (Class::Ext, _) => format!("{} {} {}", operand(&xt), sym(op), operand(yt)),
                     // Commutative ops flip so the ext operand drives the
                     // mixed-op impl; subtraction promotes the base operand.
                     (Class::Base, Class::Ext) if op != OpKind::Sub => {
-                        format!("{} {} {}", as_expr(yt, types), sym(op), as_expr(&xt, types))
+                        format!("{} {} {}", operand(yt), sym(op), operand(&xt))
                     },
                     (Class::Base, _) => {
-                        format!(
-                            "{} {} {}",
-                            lift_base_to_ext(&xt, types),
-                            sym(op),
-                            as_expr(yt, types)
-                        )
+                        format!("{} {} {}", lift_base_to_ext(&xt, types), sym(op), operand(yt))
                     },
                 },
             },
@@ -473,7 +459,7 @@ impl<'g> Emitter<'g> {
         if class == Class::Ext && token.class == Class::Base {
             lift_base_to_ext(&token, self.types())
         } else {
-            as_expr(&token, self.types())
+            operand(&token)
         }
     }
 
@@ -645,7 +631,7 @@ fn emit_evaluator(
         "with each node's `let` placed at its first use."
     };
     let signature = format!(
-        "pub fn eval_{}<AB: LiftedAirBuilder<F = Felt>>(frame: &Frame<'_, AB>, inputs: Inputs<'_, AB>, sink: &mut AB, terms: &[AB::ExtExpr]) {{",
+        "pub fn eval_{}<AB: LiftedAirBuilder<F = Felt>>(frame: &Frame<'_, AB>, inputs: Inputs<'_, AB>, sink: &mut AB, terms: &[AB::ExtExpr; {term_count}]) {{",
         eval.name
     );
     writeln!(
@@ -659,7 +645,6 @@ fn emit_evaluator(
         eval.air_label,
     )
     .unwrap();
-    writeln!(out, "    assert_eq!(terms.len(), {term_count});").unwrap();
     writeln!(out, "{}", NATIVE_FN_PROLOGUE).unwrap();
     if eval
         .graph

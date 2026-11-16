@@ -5,7 +5,8 @@
 //! constraint folders. Preprocessed content is served through
 //! native source factories; the prover bundles it via
 //! [`Preprocessed::build`] + [`ProverInstance::new`], and the verifier receives
-//! a trusted setup identity via [`VerifierInstance::new`] and native table heights from descriptors.
+//! a trusted setup identity via [`VerifierInstance::new`] and native table heights from
+//! descriptors.
 
 use alloc::{borrow::Cow, sync::Arc, vec, vec::Vec};
 use core::{
@@ -16,14 +17,16 @@ use core::{
 use p3_field::{Algebra, Dup, Field, PackedValue, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
-use crate::air::native::LiftedAirBuilder as _;
 use crate::{
-    Preprocessed, PreprocessedValidationError, ProverInstance, ShapeError, VerifierError,
-    VerifierInstance,
-    air::{MultiAir, ProverStatement, Statement, log2_strict_u8, native},
+    PlanError, Preprocessed, PreprocessedValidationError, ProverError, ProverInstance, ShapeError,
+    VerifierError, VerifierInstance,
+    air::{
+        MultiAir, ProverStatement, Statement, log2_strict_u8, native, native::LiftedAirBuilder as _,
+    },
     check_constraints,
     pcs::params::PcsParams,
     proof::{StarkOutput, StarkProof},
+    prover::PackedPreparation,
     testing::configs::goldilocks_poseidon2::{
         Felt, Lmcs, PackedFelt, PackedQuadFelt, QuadFelt, TestConfig, test_challenger, test_config,
     },
@@ -291,7 +294,7 @@ fn prove_with_preprocessed<MA>(
 where
     MA: MultiAir<Felt, QuadFelt>,
     MA::Air: native::ProverAir<QuadFelt> + native::LiftedAir<F = Felt>,
-    <MA::Air as native::AirKernel>::Prepared<PackedFelt, PackedQuadFelt>: Sync,
+    <MA::Air as native::AirKernel>::Prepared<PackedFelt, PackedQuadFelt>: PackedPreparation,
 {
     let preprocessed = Preprocessed::build(ps.statement(), config)
         .expect("valid fixed setup")
@@ -328,7 +331,7 @@ fn prove_verify_reparse<MA>(ps: ProverStatement<Felt, QuadFelt, MA>)
 where
     MA: MultiAir<Felt, QuadFelt>,
     MA::Air: native::ProverAir<QuadFelt> + native::LiftedAir<F = Felt>,
-    <MA::Air as native::AirKernel>::Prepared<PackedFelt, PackedQuadFelt>: Sync,
+    <MA::Air as native::AirKernel>::Prepared<PackedFelt, PackedQuadFelt>: PackedPreparation,
 {
     let config = test_config();
     let (output, preprocessed, statement) = prove_with_preprocessed(&config, ps);
@@ -412,11 +415,11 @@ fn rejects_height_mismatch() {
     assert!(
         matches!(
             result,
-            Err(PreprocessedValidationError::Shape(ShapeError::PreprocessedHeightMismatch {
+            Err(ProverError::Plan(PlanError::Shape(ShapeError::PreprocessedHeightMismatch {
                 air: 0,
                 log_trace_height: 3,
                 log_preprocessed_height: 2,
-            }))
+            })))
         ),
         "main trace height must match the AIR's fixed preprocessing height",
     );
@@ -432,7 +435,10 @@ fn rejects_setup_with_different_preprocessed_height() {
     let ps = row_counter_statement(vec![row_index_trace(8)]);
     assert!(matches!(
         ProverInstance::new(&config, ps, Some(&setup)),
-        Err(PreprocessedValidationError::FingerprintMismatch { air: 0, .. })
+        Err(ProverError::Preprocessed(PreprocessedValidationError::FingerprintMismatch {
+            air: 0,
+            ..
+        }))
     ));
 }
 
@@ -451,7 +457,10 @@ fn rejects_log_blowup_mismatch() {
     assert!(
         matches!(
             result,
-            Err(PreprocessedValidationError::BlowupMismatch { expected: 2, actual: 3 })
+            Err(ProverError::Preprocessed(PreprocessedValidationError::BlowupMismatch {
+                expected: 2,
+                actual: 3
+            }))
         ),
         "expected BlowupMismatch before inspecting cached LDE dimensions",
     );
@@ -797,9 +806,12 @@ impl native::ProverAir<QuadFelt> for CountedAir {
 }
 
 // Owns expressions and per-binding state; no Default or Clone implementation is required.
+// Serial builds deliberately make this state non-Sync, exercising the actual prover call below.
 struct CountedPrepared<E> {
     value: E,
     evaluations: AtomicUsize,
+    #[cfg(not(feature = "concurrent"))]
+    _single_threaded: core::marker::PhantomData<core::cell::Cell<()>>,
 }
 
 struct CountingKernel {
@@ -830,6 +842,8 @@ impl native::AirKernel for CountingKernel {
         CountedPrepared {
             value: counted_value(inputs),
             evaluations: AtomicUsize::new(0),
+            #[cfg(not(feature = "concurrent"))]
+            _single_threaded: core::marker::PhantomData,
         }
     }
 
@@ -985,8 +999,8 @@ fn capture_counting_kernel(
 fn native_counted_kernel_preserves_source_setup_borrows_and_binding_lifecycle() {
     use native::AirKernel;
 
-    fn assert_sync<T: Sync>() {}
-    assert_sync::<CountedPrepared<PackedQuadFelt>>();
+    fn assert_prepared<T: PackedPreparation>() {}
+    assert_prepared::<CountedPrepared<PackedQuadFelt>>();
 
     for (inner, main, base_indices, ext_indices) in [
         (MixedAir::Constant(ConstantAir), squaring_trace(4), vec![1], vec![0, 2]),

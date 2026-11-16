@@ -3,12 +3,10 @@
 use std::{fmt, str::FromStr};
 
 use clap::{Parser, ValueEnum};
+use miden_stark::testing::airs::miden::{NUM_AUX_COLS, TRACE1_LOG_HEIGHT, TRACE1_WIDTH};
 
 const DEFAULT_NUM_QUERIES: usize = 100;
 const DEFAULT_POW_BITS: usize = 16;
-
-pub(crate) const DEFAULT_MIDEN_WIDTH: usize = 51;
-pub(crate) const DEFAULT_MIDEN_AUX_COLS: usize = 8;
 
 /// Prove and verify dummy Miden AIR instances with the lifted STARK prover.
 ///
@@ -16,7 +14,8 @@ pub(crate) const DEFAULT_MIDEN_AUX_COLS: usize = 8;
 /// Pass -v for the full hierarchical tracing tree.
 ///
 /// Trace spec format: `miden:LOG_HEIGHT[:WIDTH[:AUX_COLS]]` (alias: `m`).
-/// WIDTH and AUX_COLS default to 51 and 8. Main width must be at least 9.
+/// The synthetic workload defaults to 51 main columns and 8 auxiliary columns; the production
+/// VM's AIR layouts are defined separately. Main width must be at least 9.
 ///
 /// Examples:
 ///
@@ -108,6 +107,7 @@ impl fmt::Display for HashFn {
 
 // ─── Trace spec parsing ──────────────────────────────────────────────────────
 
+/// Shape of one synthetic workload instance.
 #[derive(Clone)]
 pub(crate) struct TraceSpec {
     pub(crate) log_height: u8,
@@ -120,9 +120,9 @@ pub(crate) struct TraceSpec {
 impl Default for TraceSpec {
     fn default() -> Self {
         Self {
-            log_height: 18,
-            width: DEFAULT_MIDEN_WIDTH,
-            num_aux_cols: DEFAULT_MIDEN_AUX_COLS,
+            log_height: TRACE1_LOG_HEIGHT,
+            width: TRACE1_WIDTH,
+            num_aux_cols: NUM_AUX_COLS,
         }
     }
 }
@@ -146,13 +146,13 @@ impl FromStr for TraceSpec {
         let width = if parts.len() > 2 {
             parts[2].parse().map_err(|_| format!("invalid width '{}'", parts[2]))?
         } else {
-            DEFAULT_MIDEN_WIDTH
+            TRACE1_WIDTH
         };
 
         let num_aux_cols = if parts.len() > 3 {
             parts[3].parse().map_err(|_| format!("invalid aux_cols '{}'", parts[3]))?
         } else {
-            DEFAULT_MIDEN_AUX_COLS
+            NUM_AUX_COLS
         };
 
         if width < 9 {

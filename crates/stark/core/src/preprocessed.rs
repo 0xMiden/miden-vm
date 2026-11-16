@@ -18,12 +18,12 @@ use tracing::info_span;
 use crate::{
     StarkConfig,
     air::{
-        MultiAir, ProverStatement, Statement, log2_strict_u8,
+        MultiAir, Statement, log2_strict_u8,
         native::{AirKernel, LiftedAir, PreprocessedSpec},
     },
     domain::{DomainError, LiftedDomain},
     lmcs::{Lmcs, LmcsError, LmcsTree, tree_indices::TreeIndices},
-    order::{ShapeError, TraceOrder},
+    plan::ExecutionPlan,
     prover::commit::Committed,
 };
 
@@ -334,21 +334,20 @@ fn validate_raw_trace<F: TwoAdicField>(
     Ok(Some(height))
 }
 
-/// Validate cached fixed data and its identity against a prover statement/configuration.
+/// Validate cached fixed data and its identity against the retained execution plan and kernels.
 /// Aggregate optional setup presence is checked by the outer instance constructor.
-pub(crate) fn validate_preprocessed<F, EF, MA, SC>(
+pub(crate) fn validate_preprocessed<F, EF, K, SC>(
     config: &SC,
-    prover_statement: &ProverStatement<F, EF, MA>,
+    airs: &[K],
+    plan: &ExecutionPlan<F>,
     preprocessed: &Preprocessed<F, SC::Lmcs>,
 ) -> Result<(), PreprocessedValidationError>
 where
     F: TwoAdicField,
     EF: ExtensionField<F>,
-    MA: MultiAir<F, EF>,
+    K: AirKernel<F = F>,
     SC: StarkConfig<F, EF>,
 {
-    let airs = prover_statement.statement().airs();
-    let main_traces = prover_statement.traces();
     let log_blowup = config.pcs().log_blowup();
     validate_setup_identity::<EF, _, _>(config, airs, &preprocessed.identity)?;
 
@@ -367,11 +366,8 @@ where
         });
     }
 
-    // ProverStatement already checks raw main storage before exposing these height reads.
-    let heights: Vec<usize> = main_traces.iter().map(Matrix::height).collect();
-    let trace_order = TraceOrder::from_trace_heights(airs, &heights)?;
-    let preprocessed_trace_to_air = trace_order.preprocessed_air_for_trace_index(airs);
-    let air_to_preprocessed_trace = trace_order.preprocessed_trace_index_for_air(airs);
+    let preprocessed_trace_to_air = &plan.preprocessed_trace_to_air;
+    let air_to_preprocessed_trace = &plan.air_to_preprocessed_trace;
     for (air, (kernel, matrix)) in airs.iter().zip(&preprocessed.traces).enumerate() {
         validate_raw_trace(
             air,
@@ -401,7 +397,7 @@ where
                 actual: actual_width,
             });
         }
-        let main_height = main_traces[air].height();
+        let main_height = 1usize << plan.order.log_heights()[air];
         let expected_lde_height = main_height.checked_shl(u32::from(log_blowup)).ok_or(
             PreprocessedValidationError::LdeHeightOverflow { air, main: main_height, log_blowup },
         )?;
@@ -438,8 +434,6 @@ pub enum PreprocessedValidationError {
         #[source]
         source: DomainError,
     },
-    #[error(transparent)]
-    Shape(#[from] ShapeError),
     #[error(
         "preprocessed setup presence mismatch: AIRs declare preprocessed columns = {expected}, setup supplied = {actual}"
     )]
@@ -501,20 +495,24 @@ pub enum PreprocessedValidationError {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{sync::Arc, vec};
+    use core::sync::atomic::{AtomicUsize, Ordering};
+
+    use p3_field::PrimeCharacteristicRing;
+    use p3_goldilocks::Goldilocks;
+
+    use super::*;
     use crate::{
-        air::native::{self, DirectKernel},
+        air::{
+            ProverStatement,
+            native::{self, DirectKernel},
+        },
         pcs::PcsParams,
         testing::{
             airs::miden::DummyMidenAir,
             configs::goldilocks_poseidon2::{Felt, QuadFelt, test_config},
         },
     };
-    use alloc::{sync::Arc, vec};
-    use core::sync::atomic::{AtomicUsize, Ordering};
-    use p3_field::PrimeCharacteristicRing;
-    use p3_goldilocks::Goldilocks;
-
-    use super::*;
 
     #[test]
     fn raw_storage_is_checked_before_matrix_height_division() {
@@ -617,6 +615,11 @@ mod tests {
         let config = test_config();
         let setup = Preprocessed::build(&statement, &config).unwrap().unwrap();
         assert!(counters.iter().all(|counter| counter.load(Ordering::Relaxed) == 1));
+        let plan =
+            ExecutionPlan::new(statement.airs(), vec![3, 4, 2, 2], config.pcs().log_blowup())
+                .unwrap();
+        assert_eq!(plan.preprocessed_trace_to_air, vec![2, 3, 0]);
+        assert_eq!(plan.air_to_preprocessed_trace, vec![Some(2), None, Some(0), Some(1)]);
         assert_eq!(setup.raw_traces().len(), 4);
         assert!(setup.raw_traces()[1].is_none());
         assert_eq!(setup.raw_traces()[2].as_ref().unwrap().values, vec![Felt::ONE; 8]);
@@ -732,10 +735,24 @@ mod tests {
         let prover =
             ProverStatement::new(statement, vec![RowMajorMatrix::new(vec![Felt::ZERO; 36], 9)])
                 .unwrap();
-        validate_preprocessed(&config, &prover, &setup).unwrap();
+        let plan =
+            ExecutionPlan::new(prover.statement().airs(), vec![2], config.pcs().log_blowup())
+                .unwrap();
+        validate_preprocessed::<Felt, QuadFelt, _, _>(
+            &config,
+            prover.statement().airs(),
+            &plan,
+            &setup,
+        )
+        .unwrap();
         setup.traces[0].as_mut().unwrap().width = 0;
         assert!(matches!(
-            validate_preprocessed(&config, &prover, &setup),
+            validate_preprocessed::<Felt, QuadFelt, _, _>(
+                &config,
+                prover.statement().airs(),
+                &plan,
+                &setup,
+            ),
             Err(PreprocessedValidationError::RawMatrixShape { air: 0, width: 0, .. })
         ));
         assert_eq!(counters[0].load(Ordering::Relaxed), 1);

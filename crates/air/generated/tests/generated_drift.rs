@@ -3,7 +3,6 @@
 //! polynomial assignments remain separate comparisons. The ignored timing case is manual only.
 
 use miden_air::vm::AIRS;
-use miden_constraint_compiler::ir::{Graph, capture_kernel_native_into, capture_native_into};
 use miden_stark::air::native::DirectKernel;
 
 const SEEDS: [u64; 4] =
@@ -16,22 +15,6 @@ mod native_registration;
 fn production_dispatch_preserves_each_authored_relation() {
     for air in AIRS {
         native_registration::assert_native_registration(&air.0, &air, &SEEDS);
-    }
-}
-
-/// Preserve the production-specific routing guard: these optimized evaluators have structurally
-/// distinct roots. Accidentally capturing their Source forwarding method would compare itself.
-#[test]
-fn authored_and_prepared_execution_are_distinct_captures() {
-    for air in AIRS {
-        let mut builder = Graph::builder();
-        let (authored, _) = capture_native_into(&air.0, &mut builder).unwrap();
-        let (generated, _) = capture_kernel_native_into(&air, &mut builder).unwrap();
-        assert!(
-            authored.base_roots != generated.base_roots
-                || authored.ext_roots != generated.ext_roots,
-            "{air:?}: authored and generated captures unexpectedly coincide"
-        );
     }
 }
 

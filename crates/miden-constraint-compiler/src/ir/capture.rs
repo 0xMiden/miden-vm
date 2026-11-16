@@ -300,7 +300,7 @@ mod tests {
     use miden_core::utils::RowMajorMatrix;
     use miden_crypto::field::PrimeCharacteristicRing;
     use miden_stark::air::native::LiftedAirBuilder as _;
-    use p3_field::Dup;
+    use p3_field::{Algebra, Dup};
 
     use super::*;
 
@@ -406,8 +406,54 @@ mod tests {
     }
 
     #[test]
-    fn shared_graph_kernel_comparison_retains_root_and_global_indices() {
-        let kernel = native::DirectKernel::new(Source).unwrap();
+    fn kernel_capture_prepares_and_evaluates_without_source_forwarding() {
+        struct Kernel(AirDescriptor<Felt>);
+
+        impl native::LiftedAir for Kernel {
+            type F = Felt;
+
+            fn spec(&self) -> native::AirSpec<'_, Felt> {
+                self.0.spec().as_borrowed()
+            }
+
+            fn eval<S: native::LiftedAirBuilder<F = Felt>>(
+                &self,
+                _frame: &native::Frame<'_, S>,
+                _inputs: native::Inputs<'_, S>,
+                _sink: &mut S,
+            ) {
+                panic!("kernel comparison must not capture the source forwarding method")
+            }
+        }
+
+        impl AirKernel for Kernel {
+            type F = Felt;
+            type Prepared<B: Algebra<Felt>, E: Algebra<B>> = bool;
+
+            fn descriptor(&self) -> &AirDescriptor<Felt> {
+                &self.0
+            }
+
+            fn prepare<B: Algebra<Felt>, E: Algebra<B>>(
+                &self,
+                _inputs: native::UniformInputs<'_, B, E>,
+            ) -> bool {
+                true
+            }
+
+            fn eval_row<S: native::LiftedAirBuilder<F = Felt>>(
+                &self,
+                frame: &native::Frame<'_, S>,
+                inputs: native::Inputs<'_, S>,
+                prepared: &bool,
+                sink: &mut S,
+            ) {
+                assert!(*prepared, "kernel comparison must retain preparation");
+                relation(frame, inputs, sink);
+            }
+        }
+
+        let kernel = Kernel(native::capture_with::<_, EF>(&Source).unwrap().descriptor);
         let mut builder = GraphBuilder::new();
         let (source, source_descriptor) = capture_native_into(&Source, &mut builder).unwrap();
         let (prepared, observed_descriptor) =
