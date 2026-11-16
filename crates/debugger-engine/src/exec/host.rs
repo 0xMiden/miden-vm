@@ -64,7 +64,7 @@ where
     ///
     /// Mutations are only recorded for live event handling; nothing is recorded while an event
     /// replay queue is being consumed.
-    pub fn with_event_advice_mutations_recording(mut self) -> Self {
+    pub(crate) fn with_event_advice_mutations_recording(mut self) -> Self {
         self.event_recording = Some(Vec::new());
         self
     }

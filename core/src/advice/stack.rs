@@ -73,7 +73,7 @@ impl AdviceStack {
     /// Prepends raw elements ordered from top to bottom.
     ///
     /// The first element in `values` becomes the next element consumed by advice operations.
-    pub fn prepend_elements<I>(&mut self, values: I) -> &mut Self
+    pub(crate) fn prepend_elements<I>(&mut self, values: I) -> &mut Self
     where
         I: IntoIterator<Item = Felt>,
     {

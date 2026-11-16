@@ -93,7 +93,7 @@ pub struct DebuggerConfig {
             help_heading = "Debugging"
         )
     )]
-    pub source_path_prefixes: Vec<PathBuf>,
+    pub(crate) source_path_prefixes: Vec<PathBuf>,
     /// Replay a recorded execution snapshot in the TUI debugger.
     ///
     /// FILE is a snapshot written during a recorded debug session (e.g.
@@ -154,10 +154,10 @@ pub struct DebuggerConfig {
     /// Do not auto-load the project-local `.miden-debug.py` file.
     #[cfg(feature = "python")]
     #[cfg_attr(feature = "std", arg(long, help_heading = "Scripting"))]
-    pub no_user_python_init: bool,
+    pub(crate) no_user_python_init: bool,
     /// Profiler configuration.
     #[cfg_attr(feature = "std", command(flatten))]
-    pub profiler_cli_args: ProfilerCliArgs,
+    pub(crate) profiler_cli_args: ProfilerCliArgs,
 }
 
 /// ColorChoice represents the color preferences of an end user.

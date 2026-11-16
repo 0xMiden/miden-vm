@@ -91,7 +91,7 @@ mod uint_value_admission;
 #[cfg(test)]
 pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
 #[cfg(test)]
-pub mod statements;
+pub(crate) mod statements;
 pub mod strategies;
 #[cfg(test)]
 pub use miden_air::precompiles::ChipletAir;
@@ -469,7 +469,7 @@ impl Session {
     /// combines + negs) — a chain-cost diagnostic, e.g. to compare
     /// addition-chain [`strategies`]. Not a DAG quantity.
     #[cfg(test)]
-    pub fn msm_expr_count(&self) -> usize {
+    pub(crate) fn msm_expr_count(&self) -> usize {
         self.msm.expr_count()
     }
 
@@ -478,7 +478,7 @@ impl Session {
     /// eval resolve seam binds the value in-circuit. Panics if the value is
     /// the point at infinity.
     #[cfg(test)]
-    pub fn msm_value_coords(&self, expr: EcExprPtr) -> (U256, U256) {
+    pub(crate) fn msm_value_coords(&self, expr: EcExprPtr) -> (U256, U256) {
         let val = self.msm.value(expr);
         let (_, coords) = self.ec.store.point_params(val);
         let (x, y) = coords.expect("MSM value is the point at infinity");
@@ -506,7 +506,7 @@ impl Session {
     /// `Hash(… Hash(Hash(0, h₀), h₁) …, hₙ)`. `assert_and_fold(keccaks)`
     /// reproduces the left-leaning spine.
     #[cfg(test)]
-    pub fn assert_and_fold(&mut self, handles: impl IntoIterator<Item = Truthy>) -> Truthy {
+    pub(crate) fn assert_and_fold(&mut self, handles: impl IntoIterator<Item = Truthy>) -> Truthy {
         let mut acc = self.zero();
         for h in handles {
             acc = self.assert_and(acc, h);
@@ -692,7 +692,7 @@ impl SessionTraces {
 
     /// The transcript root committed by the eval chip.
     #[cfg(test)]
-    pub fn public_root(&self) -> EidosDigest {
+    pub(crate) fn public_root(&self) -> EidosDigest {
         self.public_root
     }
 }

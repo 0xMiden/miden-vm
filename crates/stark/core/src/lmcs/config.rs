@@ -59,10 +59,10 @@ pub struct LmcsConfig<
     const SALT_ELEMS: usize = 0,
 > {
     /// Stateful sponge for hashing matrix rows into leaf hashes.
-    pub sponge: H,
+    pub(crate) sponge: H,
     /// 2-to-1 compression function for building internal tree nodes.
-    pub compress: C,
-    pub(crate) _phantom: PhantomData<(PF, PD)>,
+    pub(crate) compress: C,
+    _phantom: PhantomData<(PF, PD)>,
 }
 
 impl<PF, PD, H, C, const WIDTH: usize, const DIGEST: usize, const SALT_ELEMS: usize>
@@ -70,7 +70,7 @@ impl<PF, PD, H, C, const WIDTH: usize, const DIGEST: usize, const SALT_ELEMS: us
 {
     /// Create a new LMCS configuration.
     #[inline]
-    pub const fn new(sponge: H, compress: C) -> Self {
+    pub(crate) const fn new(sponge: H, compress: C) -> Self {
         Self { sponge, compress, _phantom: PhantomData }
     }
 }
@@ -595,7 +595,7 @@ mod tests {
 
         use crate::testing::configs::goldilocks_poseidon2::Felt;
 
-        pub type Blake3_192 = TruncatingHasher<Blake3, 32, 24>;
+        pub(crate) type Blake3_192 = TruncatingHasher<Blake3, 32, 24>;
 
         type Sponge = ChainingHasher<Blake3_192>;
         type Compress = CompressionFunctionFromHasher<Blake3_192, 2, 24>;

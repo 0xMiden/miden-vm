@@ -73,7 +73,7 @@ impl Log for DebugLogger {
 
 impl DebugLogger {
     /// Returns an error if the global logger was already initialized.
-    pub fn install_with_max_level(
+    pub(crate) fn install_with_max_level(
         inner: Box<dyn Log>,
         max_level: LevelFilter,
     ) -> Result<(), log::SetLoggerError> {
@@ -113,7 +113,8 @@ impl DebugLogger {
     }
 
     /// Clones all of the log entries in the buffer which match `predicate`.
-    pub fn select_matching<F>(&self, mut predicate: F) -> Vec<LogEntry>
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn select_matching<F>(&self, mut predicate: F) -> Vec<LogEntry>
     where
         F: FnMut(&LogEntry) -> bool,
     {

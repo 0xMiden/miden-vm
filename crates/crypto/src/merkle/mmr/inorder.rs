@@ -52,8 +52,8 @@ impl InOrderIndex {
     }
 
     /// Returns true if this note is a left child of its parent.
-    pub fn is_left_child(&self) -> bool {
-        self.parent().left_child() == *self
+    pub(crate) fn is_left_child(self) -> bool {
+        self.parent().left_child() == self
     }
 
     /// Returns the level of the index.
@@ -67,7 +67,7 @@ impl InOrderIndex {
     ///
     /// # Panics:
     /// If the index corresponds to a leaf.
-    pub fn left_child(&self) -> InOrderIndex {
+    pub(crate) fn left_child(self) -> InOrderIndex {
         // The left child is itself a parent, with an index that splits its left/right subtrees. To
         // go from the parent index to its left child, it is only necessary to subtract the count
         // of elements on the child's right subtree + 1.
@@ -79,7 +79,7 @@ impl InOrderIndex {
     ///
     /// # Panics:
     /// If the index corresponds to a leaf.
-    pub fn right_child(&self) -> InOrderIndex {
+    pub(crate) fn right_child(self) -> InOrderIndex {
         // To compute the index of the parent of the right subtree it is sufficient to add the size
         // of its left subtree + 1.
         let els = 1 << (self.level() - 1);

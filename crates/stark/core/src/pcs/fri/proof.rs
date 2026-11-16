@@ -13,20 +13,21 @@ use crate::{
 /// Structured view of a single FRI folding round.
 pub struct FriRoundProof<F, EF, Commitment> {
     /// Commitment to the folded evaluation matrix for this round.
-    pub commitment: Commitment,
+    pub(crate) commitment: Commitment,
     /// Proof-of-work witness sampled before `beta`.
-    pub pow_witness: F,
+    pub(crate) pow_witness: F,
     /// Folding challenge `β` for this round.
-    pub beta: EF,
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) beta: EF,
 }
 
 /// Structured view of the full FRI sub-proof.
 pub struct FriProof<F, EF, Commitment> {
     /// Per-round commitments and challenges.
-    pub rounds: Vec<FriRoundProof<F, EF, Commitment>>,
+    pub(crate) rounds: Vec<FriRoundProof<F, EF, Commitment>>,
     /// Coefficients of the final low-degree polynomial in descending degree order
     /// `[cₙ, ..., c₁, c₀]`, ready for direct Horner evaluation.
-    pub final_poly: Vec<EF>,
+    pub(crate) final_poly: Vec<EF>,
 }
 
 impl<F, EF, Commitment> FriProof<F, EF, Commitment>

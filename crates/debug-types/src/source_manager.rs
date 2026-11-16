@@ -135,7 +135,11 @@ impl SourceManagerError {
         Self::Custom { error_msg: message.into(), source: None }
     }
 
-    pub fn custom_with_source(message: String, source: impl Error + Send + Sync + 'static) -> Self {
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn custom_with_source(
+        message: String,
+        source: impl Error + Send + Sync + 'static,
+    ) -> Self {
         Self::Custom {
             error_msg: message.into(),
             source: Some(Box::new(source)),

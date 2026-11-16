@@ -19,19 +19,19 @@ use miden_processor::{
 // Only the debugger cares about `READONLY_MIDEN_DEBUG_*` events.
 
 /// Marks the start of a debug trace frame.
-pub const READONLY_MIDEN_DEBUG_FRAME_START: EventName =
+pub(crate) const READONLY_MIDEN_DEBUG_FRAME_START: EventName =
     EventName::new("readonly::miden_debug::frame_start");
 /// Marks the end of a debug trace frame.
-pub const READONLY_MIDEN_DEBUG_FRAME_END: EventName =
+pub(crate) const READONLY_MIDEN_DEBUG_FRAME_END: EventName =
     EventName::new("readonly::miden_debug::frame_end");
 /// Emitted when an assertion in a debug trace fails.
-pub const READONLY_MIDEN_DEBUG_ASSERTION_FAILED: EventName =
+pub(crate) const READONLY_MIDEN_DEBUG_ASSERTION_FAILED: EventName =
     EventName::new("readonly::miden_debug::assertion_failed");
 /// Emitted for an unrecognized debug trace event.
-pub const READONLY_MIDEN_DEBUG_UNKNOWN: EventName =
+pub(crate) const READONLY_MIDEN_DEBUG_UNKNOWN: EventName =
     EventName::new("readonly::miden_debug::unknown");
 /// Emitted by the Rust sdk's `println`.
-pub const READONLY_MIDEN_DEBUG_PRINTLN: EventName =
+pub(crate) const READONLY_MIDEN_DEBUG_PRINTLN: EventName =
     EventName::new("readonly::miden_debug::println");
 
 struct ReadonlyNoopHandler;

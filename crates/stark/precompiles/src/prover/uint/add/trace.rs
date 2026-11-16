@@ -75,7 +75,7 @@ pub struct UintAddRequires {
 
 impl UintAddRequires {
     #[cfg(test)]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -147,7 +147,7 @@ impl UintAddRequires {
     /// shared modulus the identity is exactly value equality — the EC
     /// group law's `x₁ = x₂` / `y₁ = y₂` case ties.
     #[cfg(test)]
-    pub fn record_eq(&mut self, a: UintPtr, c: UintPtr, bound: UintPtr, mult: ProvideMult) {
+    pub(crate) fn record_eq(&mut self, a: UintPtr, c: UintPtr, bound: UintPtr, mult: ProvideMult) {
         self.push(AddOp { a, b: None, c: Some(c), bound, nz: false }, mult);
     }
 

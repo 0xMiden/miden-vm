@@ -90,7 +90,7 @@ mod multi_forest_node_iterator;
 pub(crate) use multi_forest_node_iterator::*;
 
 mod node_builder_utils;
-pub use node_builder_utils::build_node_with_remapped_ids;
+pub(crate) use node_builder_utils::build_node_with_remapped_ids;
 
 mod sparse;
 pub use sparse::{MastForestId, SparseMastForest, SparseMastForestBuilder, VisitKind};
@@ -216,7 +216,7 @@ impl MastForest {
         Self::from_parts_with_id_map(parts).map(|(forest, _remapping)| forest)
     }
 
-    pub(crate) fn from_parts_with_id_map(
+    fn from_parts_with_id_map(
         parts: MastForestParts,
     ) -> Result<(Self, DenseIdMap<MastNodeId, MastNodeId>), MastForestError> {
         validate_mast_forest_parts_bounds(&parts)?;
@@ -239,9 +239,7 @@ impl MastForest {
         Ok((forest, id_remapping))
     }
 
-    pub(in crate::mast) fn from_trusted_deserialization_parts(
-        parts: MastForestParts,
-    ) -> Result<Self, MastForestError> {
+    fn from_trusted_deserialization_parts(parts: MastForestParts) -> Result<Self, MastForestError> {
         validate_mast_forest_parts_bounds(&parts)?;
         // Trusted dense serialization is expected to have checked this already. Re-check the
         // cheap ordering invariant here as a precaution before accepting the finalized forest.
@@ -690,7 +688,7 @@ impl MastForest {
 
 /// Validation methods
 impl MastForest {
-    pub(in crate::mast) fn validate_dense_node_order(&self) -> Result<(), MastForestError> {
+    fn validate_dense_node_order(&self) -> Result<(), MastForestError> {
         validate_dense_node_order(&self.nodes)
     }
 
@@ -921,10 +919,7 @@ impl MastNodeId {
     /// ```
     ///
     /// Since it is less safe than [`Self::from_u32_safe`] and usually not needed it is not public.
-    pub(super) fn from_u32_with_node_count(
-        id: u32,
-        node_count: usize,
-    ) -> Result<Self, DeserializationError> {
+    fn from_u32_with_node_count(id: u32, node_count: usize) -> Result<Self, DeserializationError> {
         if (id as usize) < node_count {
             Ok(Self(id))
         } else {

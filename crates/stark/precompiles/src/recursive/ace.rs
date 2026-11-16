@@ -39,7 +39,7 @@ pub fn proof_order_from_log_heights(log_heights: &[u8; NUM_CHIPLETS]) -> [usize;
 /// moved to either end, and a deterministic random sample. The sample includes non-involutions,
 /// where the source and destination permutations differ.
 #[cfg(test)]
-pub(crate) fn structured_orders() -> Vec<[usize; NUM_CHIPLETS]> {
+fn structured_orders() -> Vec<[usize; NUM_CHIPLETS]> {
     let identity: [usize; NUM_CHIPLETS] = core::array::from_fn(|i| i);
     let mut orders = Vec::new();
     orders.push(identity);

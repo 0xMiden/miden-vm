@@ -78,7 +78,7 @@ mod test_builders;
 pub use proptest;
 pub use test_builders::{IntoAdviceStackInput, advice_stack_from};
 
-pub fn module_source(path: impl AsRef<Path>, source: impl ToString) -> String {
+pub(crate) fn module_source(path: impl AsRef<Path>, source: impl ToString) -> String {
     let source = source.to_string();
     if source.trim_start().starts_with("namespace ") {
         source
@@ -296,7 +296,7 @@ impl Test {
     }
 
     /// Adds kernel source to this test so it is assembled and linked during compilation.
-    pub fn with_kernel_source(
+    pub(crate) fn with_kernel_source(
         mut self,
         kernel_name: impl Into<String>,
         kernel_source: impl ToString,
@@ -374,12 +374,12 @@ impl Test {
     ///
     /// The host registry applies the event name rules (not empty, not reserved, not a duplicate)
     /// when the test builds the host, so a rejected name panics there.
-    pub fn add_event_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn EventHandler>)>) {
+    pub(crate) fn add_event_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn EventHandler>)>) {
         self.handlers.extend(handlers);
     }
 
     /// Add a trace handler for a specific event when running the `Host`.
-    pub fn add_trace_handler(&mut self, event: EventName, handler: impl TraceHandler) {
+    pub(crate) fn add_trace_handler(&mut self, event: EventName, handler: impl TraceHandler) {
         self.add_trace_handlers(vec![(event, Arc::new(handler))]);
     }
 
@@ -387,7 +387,7 @@ impl Test {
     ///
     /// The host registry applies the event name rules (not empty, not reserved, not a duplicate)
     /// when the test builds the host, so a rejected name panics there.
-    pub fn add_trace_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn TraceHandler>)>) {
+    pub(crate) fn add_trace_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn TraceHandler>)>) {
         self.trace_handlers.extend(handlers);
     }
 
@@ -580,7 +580,7 @@ impl Test {
     /// [`execute`](Self::execute).
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
-    pub fn execute_with_stack_inputs(
+    pub(crate) fn execute_with_stack_inputs(
         &self,
         stack_inputs: &[u64],
     ) -> Result<VmTrace, ExecutionError> {
@@ -1004,7 +1004,7 @@ fn stack_outputs_as_int_vec(outputs: &StackOutputs) -> Vec<u64> {
     outputs.iter().map(Felt::as_canonical_u64).collect()
 }
 
-pub fn resize_to_min_stack_depth(values: &[u64]) -> Vec<u64> {
+pub(crate) fn resize_to_min_stack_depth(values: &[u64]) -> Vec<u64> {
     let mut result: Vec<u64> = values.to_vec();
     result.resize(MIN_STACK_DEPTH, 0);
     result

@@ -35,7 +35,8 @@ pub fn seeded_felts_array<const N: usize>(seed: u8) -> [Felt; N] {
 /// the values. The elements use the full internal u64 range (possibly
 /// non-canonical representations — fine for these hash oracles, unlike the
 /// field crate's canonical-only `Standard` distribution).
-pub fn seeded_felts(seed: u8, n: usize) -> alloc::vec::Vec<Felt> {
+#[allow(dead_code)] // retained for test/feature-gated users
+pub(crate) fn seeded_felts(seed: u8, n: usize) -> alloc::vec::Vec<Felt> {
     use rand::Rng;
     let mut rng = seeded_rng([seed; 32]);
     (0..n)

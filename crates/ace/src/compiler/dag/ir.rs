@@ -20,7 +20,7 @@ impl DagId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NodeId {
     pub(super) dag_id: DagId,
-    pub(super) index: usize,
+    index: usize,
 }
 
 impl NodeId {

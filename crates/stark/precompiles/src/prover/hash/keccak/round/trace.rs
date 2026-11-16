@@ -142,7 +142,7 @@ fn push_row(
 /// `check_constraints` (the `BytePairLut` interaction is a cross-AIR bus
 /// concern, checked separately by the session-level bus-balance tests).
 #[cfg(test)]
-pub fn generate_trace_from_states(
+pub(crate) fn generate_trace_from_states(
     states: &[[u64; 25]],
     rcs: &[u64; NUM_ROUNDS],
 ) -> RowMajorMatrix<Felt> {
@@ -248,7 +248,7 @@ fn generate_trace_from_states_inner(
 /// slot 103 (ι output), the other 24 lanes at slots 104..128 in
 /// row-major lane index order.
 #[cfg(test)]
-pub fn extract_outputs(states: &[[u64; 25]], rcs: &[u64; NUM_ROUNDS]) -> Vec<[u64; 25]> {
+pub(crate) fn extract_outputs(states: &[[u64; 25]], rcs: &[u64; NUM_ROUNDS]) -> Vec<[u64; 25]> {
     assert!(!states.is_empty(), "at least one perm required");
     let num_perms = states.len();
     let active_rows_per_cycle = NUM_ROUNDS * ROUND_PERIOD;
@@ -315,7 +315,7 @@ pub fn extract_outputs(states: &[[u64; 25]], rcs: &[u64; NUM_ROUNDS]) -> Vec<[u6
 
 /// Single-perm convenience wrapper around [`extract_outputs`].
 #[cfg(test)]
-pub fn extract_output(state: &[u64; 25], rcs: &[u64; NUM_ROUNDS]) -> [u64; 25] {
+pub(crate) fn extract_output(state: &[u64; 25], rcs: &[u64; NUM_ROUNDS]) -> [u64; 25] {
     extract_outputs(core::slice::from_ref(state), rcs)
         .into_iter()
         .next()

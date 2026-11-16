@@ -25,9 +25,9 @@ where
     /// DEEP sub-proof (evals, PoW witness, challenges).
     pub deep_proof: DeepProof<L::F, EF>,
     /// FRI sub-proof (round commitments/challenges, final polynomial).
-    pub fri_proof: FriProof<L::F, EF, L::Commitment>,
+    pub(crate) fri_proof: FriProof<L::F, EF, L::Commitment>,
     /// Proof-of-work witness for query sampling.
-    pub query_pow_witness: L::F,
+    pub(crate) query_pow_witness: L::F,
     /// Query indices in sampling order (original domain indices, may contain duplicates).
     pub query_indices: Vec<usize>,
     /// Batch witness per committed group (leaf data + Merkle witness).
@@ -37,7 +37,7 @@ where
     /// group's depth.
     pub deep_witnesses: Vec<L::BatchProof>,
     /// Batch witness per FRI round (leaf data + Merkle witness).
-    pub fri_witnesses: Vec<L::BatchProof>,
+    pub(crate) fri_witnesses: Vec<L::BatchProof>,
 }
 
 impl<EF, L> PcsProof<EF, L>

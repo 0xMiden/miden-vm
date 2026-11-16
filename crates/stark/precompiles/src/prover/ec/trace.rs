@@ -174,7 +174,7 @@ impl Default for EcStoreRequires {
 
 impl EcStoreRequires {
     #[cfg(test)]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -197,7 +197,7 @@ impl EcStoreRequires {
     /// (its PAI rides [`add_pai`](Self::add_pai)'s own per-group dedup).
     /// Returns the group's handle.
     #[cfg(test)]
-    pub fn create_group(&mut self, a: UintPtr, b: UintPtr, bound: UintPtr) -> EcGroupPtr {
+    pub(crate) fn create_group(&mut self, a: UintPtr, b: UintPtr, bound: UintPtr) -> EcGroupPtr {
         if let Some(&existing) = self.by_curve.get(&(a, b, bound)) {
             return existing;
         }
@@ -379,7 +379,9 @@ impl EcStoreRequires {
 /// Callers must record all cross-chiplet requirements before consuming the
 /// accumulator here.
 #[cfg(test)]
-pub fn generate_traces(requires: EcStoreRequires) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+pub(crate) fn generate_traces(
+    requires: EcStoreRequires,
+) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
     (groups_trace(&requires), points_trace(&requires))
 }
 

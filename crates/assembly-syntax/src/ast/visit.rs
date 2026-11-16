@@ -334,7 +334,7 @@ where
 }
 
 #[inline(always)]
-pub fn visit_constant_ref<V, T>(_visitor: &mut V, _path: &Span<Arc<Path>>) -> ControlFlow<T>
+pub(crate) fn visit_constant_ref<V, T>(_visitor: &mut V, _path: &Span<Arc<Path>>) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
@@ -384,7 +384,7 @@ where
     ControlFlow::Continue(())
 }
 
-pub fn visit_enum<V, T>(visitor: &mut V, ty: &EnumType) -> ControlFlow<T>
+pub(crate) fn visit_enum<V, T>(visitor: &mut V, ty: &EnumType) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
@@ -516,7 +516,10 @@ where
     }
 }
 
-pub fn visit_system_event<V, T>(_visitor: &mut V, _node: Span<&SystemEventNode>) -> ControlFlow<T>
+pub(crate) fn visit_system_event<V, T>(
+    _visitor: &mut V,
+    _node: Span<&SystemEventNode>,
+) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
@@ -532,7 +535,7 @@ where
 }
 
 #[inline]
-pub fn visit_call<V, T>(visitor: &mut V, target: &InvocationTarget) -> ControlFlow<T>
+pub(crate) fn visit_call<V, T>(visitor: &mut V, target: &InvocationTarget) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
@@ -556,7 +559,10 @@ where
 }
 
 #[inline(always)]
-pub fn visit_invoke_target<V, T>(_visitor: &mut V, _target: &InvocationTarget) -> ControlFlow<T>
+pub(crate) fn visit_invoke_target<V, T>(
+    _visitor: &mut V,
+    _target: &InvocationTarget,
+) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
@@ -564,7 +570,7 @@ where
 }
 
 #[inline(always)]
-pub fn visit_immediate_u8<V, T>(_visitor: &mut V, _imm: &Immediate<u8>) -> ControlFlow<T>
+pub(crate) fn visit_immediate_u8<V, T>(_visitor: &mut V, _imm: &Immediate<u8>) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
@@ -572,7 +578,7 @@ where
 }
 
 #[inline(always)]
-pub fn visit_immediate_u16<V, T>(_visitor: &mut V, _imm: &Immediate<u16>) -> ControlFlow<T>
+pub(crate) fn visit_immediate_u16<V, T>(_visitor: &mut V, _imm: &Immediate<u16>) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
@@ -580,7 +586,7 @@ where
 }
 
 #[inline(always)]
-pub fn visit_immediate_u32<V, T>(_visitor: &mut V, _imm: &Immediate<u32>) -> ControlFlow<T>
+pub(crate) fn visit_immediate_u32<V, T>(_visitor: &mut V, _imm: &Immediate<u32>) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
@@ -588,7 +594,7 @@ where
 }
 
 #[inline(always)]
-pub fn visit_immediate_felt<V, T>(_visitor: &mut V, _imm: &Immediate<Felt>) -> ControlFlow<T>
+pub(crate) fn visit_immediate_felt<V, T>(_visitor: &mut V, _imm: &Immediate<Felt>) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
@@ -618,7 +624,10 @@ where
 }
 
 #[inline(always)]
-pub fn visit_immediate_error_message<V, T>(_visitor: &mut V, _imm: &ErrorMsg) -> ControlFlow<T>
+pub(crate) fn visit_immediate_error_message<V, T>(
+    _visitor: &mut V,
+    _imm: &ErrorMsg,
+) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
@@ -845,7 +854,7 @@ where
 }
 
 #[inline(always)]
-pub fn visit_mut_import<V, T>(_visitor: &mut V, _import: &mut Import) -> ControlFlow<T>
+pub(crate) fn visit_mut_import<V, T>(_visitor: &mut V, _import: &mut Import) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
 {
@@ -901,7 +910,10 @@ where
 }
 
 #[inline(always)]
-pub fn visit_mut_constant_ref<V, T>(_visitor: &mut V, _path: &mut Span<Arc<Path>>) -> ControlFlow<T>
+pub(crate) fn visit_mut_constant_ref<V, T>(
+    _visitor: &mut V,
+    _path: &mut Span<Arc<Path>>,
+) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
 {
@@ -944,7 +956,10 @@ where
 }
 
 #[inline(always)]
-pub fn visit_mut_type_ref<V, T>(_visitor: &mut V, _path: &mut Span<Arc<Path>>) -> ControlFlow<T>
+pub(crate) fn visit_mut_type_ref<V, T>(
+    _visitor: &mut V,
+    _path: &mut Span<Arc<Path>>,
+) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
 {
@@ -961,7 +976,7 @@ where
     ControlFlow::Continue(())
 }
 
-pub fn visit_mut_enum_variant<V, T>(visitor: &mut V, variant: &mut Variant) -> ControlFlow<T>
+pub(crate) fn visit_mut_enum_variant<V, T>(visitor: &mut V, variant: &mut Variant) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
 {
@@ -1141,7 +1156,10 @@ where
 }
 
 #[inline(always)]
-pub fn visit_mut_immediate_u8<V, T>(_visitor: &mut V, _imm: &mut Immediate<u8>) -> ControlFlow<T>
+pub(crate) fn visit_mut_immediate_u8<V, T>(
+    _visitor: &mut V,
+    _imm: &mut Immediate<u8>,
+) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
 {
@@ -1149,7 +1167,10 @@ where
 }
 
 #[inline(always)]
-pub fn visit_mut_immediate_u16<V, T>(_visitor: &mut V, _imm: &mut Immediate<u16>) -> ControlFlow<T>
+pub(crate) fn visit_mut_immediate_u16<V, T>(
+    _visitor: &mut V,
+    _imm: &mut Immediate<u16>,
+) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
 {
@@ -1157,7 +1178,10 @@ where
 }
 
 #[inline(always)]
-pub fn visit_mut_immediate_u32<V, T>(_visitor: &mut V, _imm: &mut Immediate<u32>) -> ControlFlow<T>
+pub(crate) fn visit_mut_immediate_u32<V, T>(
+    _visitor: &mut V,
+    _imm: &mut Immediate<u32>,
+) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
 {

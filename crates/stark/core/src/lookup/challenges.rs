@@ -35,7 +35,8 @@ use miden_crypto::field::PrimeCharacteristicRing;
 ///
 /// [`LookupAir`]: crate::lookup::LookupAir
 pub struct Challenges<EF: PrimeCharacteristicRing> {
-    pub alpha: EF,
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) alpha: EF,
     pub beta_powers: Box<[EF]>,
     /// Per-bus domain separation: `bus_prefix[i] = alpha + (i+1) * gamma`
     /// where `gamma = beta^max_message_width`.

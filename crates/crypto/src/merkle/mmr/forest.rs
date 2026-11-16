@@ -118,7 +118,7 @@ impl Forest {
     /// This relies on the `Forest` invariant that `num_leaves() <= Forest::MAX_LEAVES`.
     /// The internal assertion is a defensive check and should be unreachable for values created
     /// through validated constructors/deserializers.
-    pub const fn num_nodes(self) -> usize {
+    pub(crate) const fn num_nodes(self) -> usize {
         assert!(self.0 <= Self::MAX_LEAVES);
         if self.0 <= usize::MAX / 2 {
             self.0 * 2 - self.num_trees()
@@ -139,7 +139,7 @@ impl Forest {
     /// # Panics
     ///
     /// This will panic if the forest is empty.
-    pub fn largest_tree_height_unchecked(self) -> usize {
+    pub(crate) fn largest_tree_height_unchecked(self) -> usize {
         // ilog2 is computed with leading zeros, which itself is computed with the intrinsic ctlz.
         // [Rust 1.67.0] x86 uses the `bsr` instruction. AArch64 uses the `clz` instruction.
         self.0.ilog2() as usize
@@ -163,7 +163,7 @@ impl Forest {
     /// # Panics
     ///
     /// This will panic if the forest is empty.
-    pub fn largest_tree_unchecked(self) -> Self {
+    pub(crate) fn largest_tree_unchecked(self) -> Self {
         Self::with_height(self.largest_tree_height_unchecked())
     }
 
@@ -183,7 +183,7 @@ impl Forest {
     /// # Panics
     ///
     /// This will panic if the forest is empty.
-    pub fn smallest_tree_height_unchecked(self) -> usize {
+    pub(crate) fn smallest_tree_height_unchecked(self) -> usize {
         // Trailing_zeros is computed with the intrinsic cttz. [Rust 1.67.0] x86 uses the `bsf`
         // instruction. AArch64 uses the `rbit clz` instructions.
         self.0.trailing_zeros() as usize
@@ -208,7 +208,7 @@ impl Forest {
     /// # Panics
     ///
     /// This will panic if the forest is empty.
-    pub fn smallest_tree_unchecked(self) -> Self {
+    pub(crate) fn smallest_tree_unchecked(self) -> Self {
         Self::with_height(self.smallest_tree_height_unchecked())
     }
 
@@ -255,7 +255,7 @@ impl Forest {
     /// exactly one tree.
     ///
     /// For a non-panicking version of this function, see [`Forest::all_smaller_trees()`].
-    pub fn all_smaller_trees_unchecked(self) -> Self {
+    pub(crate) fn all_smaller_trees_unchecked(self) -> Self {
         debug_assert_eq!(self.num_trees(), 1);
         Self::new(self.0 - 1).expect("forest size exceeds maximum")
     }
@@ -265,7 +265,8 @@ impl Forest {
     ///
     /// If the forest cannot have more or less than one tree, use
     /// [`Forest::all_smaller_trees_unchecked()`] for performance.
-    pub fn all_smaller_trees(self) -> Option<Forest> {
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn all_smaller_trees(self) -> Option<Forest> {
         if self.num_trees() != 1 {
             return None;
         }
@@ -297,7 +298,7 @@ impl Forest {
     }
 
     /// Remove the single-node tree if present in the forest.
-    pub fn without_single_leaf(self) -> Self {
+    pub(crate) fn without_single_leaf(self) -> Self {
         // Clearing the lowest bit does not add leaves.
         Self(self.0 & (usize::MAX - 1))
     }
@@ -309,13 +310,13 @@ impl Forest {
     }
 
     /// Returns index of the forest tree for a specified leaf index.
-    pub fn tree_index(&self, leaf_idx: usize) -> usize {
+    pub(crate) fn tree_index(self, leaf_idx: usize) -> usize {
         let root = self
             .leaf_to_corresponding_tree(leaf_idx)
             .expect("position must be part of the forest");
         let smaller_tree_mask =
             Self::new(2_usize.pow(root) - 1).expect("forest size exceeds maximum");
-        let num_smaller_trees = (*self & smaller_tree_mask).num_trees();
+        let num_smaller_trees = (self & smaller_tree_mask).num_trees();
         self.num_trees() - num_smaller_trees - 1
     }
 
@@ -343,7 +344,7 @@ impl Forest {
     /// # Panics
     ///
     /// This will panic if the forest is empty, which has no trees and therefore no root index.
-    pub fn root_in_order_index_unchecked(&self) -> InOrderIndex {
+    pub(crate) fn root_in_order_index_unchecked(self) -> InOrderIndex {
         assert!(!self.is_empty(), "the empty forest has no root in-order index");
 
         // Count total size of all trees in the forest.
@@ -381,7 +382,7 @@ impl Forest {
     ///
     /// This will panic if the forest is empty, which has no elements and therefore no rightmost
     /// index.
-    pub fn rightmost_in_order_index_unchecked(&self) -> InOrderIndex {
+    pub(crate) fn rightmost_in_order_index_unchecked(self) -> InOrderIndex {
         assert!(!self.is_empty(), "the empty forest has no rightmost in-order index");
 
         // Count total size of all trees in the forest.

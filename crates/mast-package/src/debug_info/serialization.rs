@@ -189,7 +189,7 @@ impl PackageDebugInfo {
     /// its memory and processing costs. This method still checks the wire format and honors the
     /// reader's remaining input and allocation budget. Use [`Self::read_from`] for potentially
     /// adversarial input with the standard fixed limits.
-    pub fn read_from_unmetered<R: ByteReader>(
+    pub(crate) fn read_from_unmetered<R: ByteReader>(
         source: &mut R,
     ) -> Result<Self, DeserializationError> {
         Self::read_from_with_limits(source, PackageDebugInfoDecodeLimits::UNMETERED)

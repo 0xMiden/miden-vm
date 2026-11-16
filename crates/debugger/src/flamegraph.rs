@@ -105,7 +105,7 @@ impl FlamegraphProfile {
     /// Record `cycles` against a stack of frame names.
     ///
     /// Frame names are sanitized for folded stack output, then joined with `;`.
-    pub fn record_stack<I, S>(&mut self, frames: I, cycles: usize)
+    pub(crate) fn record_stack<I, S>(&mut self, frames: I, cycles: usize)
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
@@ -115,7 +115,7 @@ impl FlamegraphProfile {
     }
 
     /// Record `cycles` against an already formatted folded-stack path.
-    pub fn record_stack_path(&mut self, stack_path: impl Into<String>, cycles: usize) {
+    pub(crate) fn record_stack_path(&mut self, stack_path: impl Into<String>, cycles: usize) {
         if cycles == 0 {
             return;
         }
@@ -132,12 +132,12 @@ impl FlamegraphProfile {
         self.total_cycles
     }
 
-    pub fn unique_stack_paths(&self) -> usize {
+    pub(crate) fn unique_stack_paths(&self) -> usize {
         self.samples.len()
     }
 
     /// Write this profile as an SVG when `path` ends in `.svg`, otherwise as folded stack text.
-    pub fn write_to_path(&self, path: impl AsRef<Path>) -> Result<FlamegraphOutput, Report> {
+    pub(crate) fn write_to_path(&self, path: impl AsRef<Path>) -> Result<FlamegraphOutput, Report> {
         let path = path.as_ref();
         if is_svg_path(path) {
             self.write_svg(path)?;

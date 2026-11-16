@@ -307,7 +307,8 @@ impl MerkleStore {
     /// - The provided `tree_depth` is greater than 64.
     /// - The provided `root_index` has depth greater than `tree_depth`.
     /// - A lone node at depth `tree_depth` is not a leaf node.
-    pub fn find_lone_leaf(
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn find_lone_leaf(
         &self,
         root: Word,
         root_index: NodeIndex,

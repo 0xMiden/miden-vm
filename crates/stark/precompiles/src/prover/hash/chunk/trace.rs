@@ -174,7 +174,7 @@ impl ChunkRequires {
 
 /// Builds the main trace at its natural height.
 #[cfg(test)]
-pub fn generate_trace(requires: ChunkRequires) -> RowMajorMatrix<Felt> {
+pub(crate) fn generate_trace(requires: ChunkRequires) -> RowMajorMatrix<Felt> {
     generate_trace_padded_to(requires, 0)
 }
 

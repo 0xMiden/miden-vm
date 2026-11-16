@@ -365,7 +365,7 @@ impl ZeroizeOnDrop for SecretKey {}
 // IES IMPLEMENTATION
 // ================================================================================================
 
-pub struct XChaCha;
+pub(crate) struct XChaCha;
 
 impl AeadScheme for XChaCha {
     const KEY_SIZE: usize = SK_SIZE_BYTES;

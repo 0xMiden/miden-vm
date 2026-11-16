@@ -129,7 +129,8 @@ impl TestContext {
     /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
     /// valid.
     #[track_caller]
-    pub fn parse_program(&self, source: Arc<SourceFile>) -> Result<Box<Module>, Report> {
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn parse_program(&self, source: Arc<SourceFile>) -> Result<Box<Module>, Report> {
         source.parse(self.assembler.warnings_as_errors(), self.source_manager())
     }
 
@@ -156,13 +157,18 @@ impl TestContext {
     /// Add `module` to the [Assembler] constructed by this context, making it available to
     /// other modules.
     #[track_caller]
-    pub fn add_module(&mut self, module: impl Parse) -> Result<(), Report> {
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn add_module(&mut self, module: impl Parse) -> Result<(), Report> {
         self.assembler.compile_and_statically_link(module).map(|_| ())
     }
 
     /// Add the modules of `library` to the [Assembler] constructed by this context.
     #[track_caller]
-    pub fn add_library(&mut self, package: Arc<miden_mast_package::Package>) -> Result<(), Report> {
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn add_library(
+        &mut self,
+        package: Arc<miden_mast_package::Package>,
+    ) -> Result<(), Report> {
         self.assembler.link_package(package, miden_project::Linkage::Dynamic)
     }
 
@@ -223,25 +229,30 @@ mod package_features {
     }
 
     impl TestRegistry {
-        pub fn add_package(&mut self, package: Arc<Package>) -> Version {
+        #[allow(dead_code)] // retained for test/feature-gated users
+        pub(crate) fn add_package(&mut self, package: Arc<Package>) -> Version {
             let version = Version::new(package.version.clone(), package.dependency_commitment());
             self.publish_package(package).expect("failed to add test package");
             version
         }
 
-        pub fn loaded_packages(&self) -> Vec<String> {
+        #[allow(dead_code)] // retained for test/feature-gated users
+        pub(crate) fn loaded_packages(&self) -> Vec<String> {
             self.loads.lock().unwrap().clone()
         }
 
-        pub fn cached_packages(&self) -> Vec<String> {
+        #[allow(dead_code)] // retained for test/feature-gated users
+        pub(crate) fn cached_packages(&self) -> Vec<String> {
             self.caches.lock().unwrap().clone()
         }
 
-        pub fn clear_loaded_packages(&self) {
+        #[allow(dead_code)] // retained for test/feature-gated users
+        pub(crate) fn clear_loaded_packages(&self) {
             self.loads.lock().unwrap().clear();
         }
 
-        pub fn remove_package(
+        #[allow(dead_code)] // retained for test/feature-gated users
+        pub(crate) fn remove_package(
             &mut self,
             package: &PackageId,
             version: &Version,
@@ -249,7 +260,8 @@ mod package_features {
             self.packages.remove(&(package.clone(), version.clone()))
         }
 
-        pub fn replace_semver_package(&mut self, package: Arc<Package>) -> Version {
+        #[allow(dead_code)] // retained for test/feature-gated users
+        pub(crate) fn replace_semver_package(&mut self, package: Arc<Package>) -> Version {
             let version = Version::new(package.version.clone(), package.dependency_commitment());
             self.packages.retain(|(name, existing), _| {
                 name != &package.name || existing.version != package.version
@@ -366,11 +378,13 @@ mod package_features {
             &self.registry
         }
 
-        pub fn registry_mut(&mut self) -> &mut TestRegistry {
+        #[allow(dead_code)] // retained for test/feature-gated users
+        pub(crate) fn registry_mut(&mut self) -> &mut TestRegistry {
             &mut self.registry
         }
 
-        pub fn project_assembler_for_path<'a>(
+        #[allow(dead_code)] // retained for test/feature-gated users
+        pub(crate) fn project_assembler_for_path<'a>(
             &'a mut self,
             manifest_path: impl AsRef<std::path::Path>,
         ) -> Result<crate::ProjectAssembler<'a, TestRegistry>, Report> {
@@ -435,7 +449,8 @@ mod package_features {
         ///     add
         /// end
         /// ```
-        pub fn assemble_library_package_with_export<'a>(
+        #[allow(dead_code)] // retained for test/feature-gated users
+        pub(crate) fn assemble_library_package_with_export<'a>(
             &self,
             name: &str,
             version: &str,

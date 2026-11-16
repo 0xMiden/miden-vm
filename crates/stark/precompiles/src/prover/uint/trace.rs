@@ -159,7 +159,7 @@ impl UintStoreRequires {
     /// protocol addresses, so they must land before any equal value can
     /// be interned canonically onto them.
     #[cfg(test)]
-    pub fn intern_pinned(&mut self, addr: u32, value: U256, bound: UintPtr) -> UintPtr {
+    pub(crate) fn intern_pinned(&mut self, addr: u32, value: U256, bound: UintPtr) -> UintPtr {
         let ptr = UintPtr(addr);
         assert!(value <= self.uint(bound).value, "value exceeds its modulus bound");
         self.insert_pinned(ptr, value, bound, false);
@@ -295,7 +295,7 @@ fn bound_value(requires: &UintStoreRequires, u: &Uint, is_pad: bool) -> U256 {
 
 /// Builds the main trace at its natural height.
 #[cfg(test)]
-pub fn generate_trace(
+pub(crate) fn generate_trace(
     requires: UintStoreRequires,
     bpl: &mut BytePairLutRequires,
 ) -> RowMajorMatrix<Felt> {

@@ -101,7 +101,7 @@ impl EidosRandomCoin {
     ///
     /// Panics if output generation requires another block after the `u64` block counter is
     /// exhausted.
-    pub fn draw_basefield(&mut self) -> Felt {
+    pub(crate) fn draw_basefield(&mut self) -> Felt {
         // Reject noncanonical values to avoid bias from reducing candidates modulo the field.
         loop {
             if let Ok(felt) = Felt::new(self.random::<u64>()) {
@@ -132,7 +132,8 @@ impl EidosRandomCoin {
     ///
     /// The current output-block counter is bound into the new state. Any buffered output is
     /// discarded, and the block counter is reset to zero.
-    pub fn reseed(&mut self, data: Word) {
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn reseed(&mut self, data: Word) {
         let input = [
             self.state[0],
             self.state[1],

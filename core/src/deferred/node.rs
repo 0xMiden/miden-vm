@@ -297,7 +297,7 @@ impl Node {
     ///
     /// Returns [`DeferredError::InvalidPayload`] if the encoded Felt length does not fit in a
     /// `u32`.
-    pub fn try_chunks_from_bytes(bytes: &[u8]) -> Result<Self, DeferredError> {
+    pub(crate) fn try_chunks_from_bytes(bytes: &[u8]) -> Result<Self, DeferredError> {
         let frame = Self::chunks_frame_for_byte_len(bytes.len())?;
         let mut felts = bytes_to_packed_u32_elements(bytes);
         let n_chunks = felts.len().div_ceil(Self::DATA_CHUNK_FELT_LEN).max(1);
@@ -379,7 +379,7 @@ impl Node {
         }
     }
 
-    pub(super) fn require_precompile_frame(frame: EidosFrame) -> Result<EidosFrame, DeferredError> {
+    fn require_precompile_frame(frame: EidosFrame) -> Result<EidosFrame, DeferredError> {
         if frame.domain() == DeferredAndDomain::TAG || frame.domain() == DeferredChunksDomain::TAG {
             return Err(DeferredError::InvalidFrame);
         }
@@ -432,7 +432,7 @@ impl Node {
     }
 
     /// Appends this node's canonical external representation to `target`.
-    pub fn write_into_felts(&self, target: &mut Vec<Felt>) {
+    pub(crate) fn write_into_felts(&self, target: &mut Vec<Felt>) {
         let frame = self.frame.map(EidosFrame::as_word).unwrap_or_default();
         target.extend_from_slice(&frame.into_elements());
         for chunk in self.payload.as_chunks() {

@@ -569,7 +569,7 @@ impl GFp5 {
     }
 
     #[inline]
-    pub(crate) fn set_add(&mut self, rhs: &Self) {
+    fn set_add(&mut self, rhs: &Self) {
         self.0[0] += rhs.0[0];
         self.0[1] += rhs.0[1];
         self.0[2] += rhs.0[2];
@@ -578,7 +578,7 @@ impl GFp5 {
     }
 
     #[inline]
-    pub(crate) fn set_sub(&mut self, rhs: &Self) {
+    fn set_sub(&mut self, rhs: &Self) {
         self.0[0] -= rhs.0[0];
         self.0[1] -= rhs.0[1];
         self.0[2] -= rhs.0[2];
@@ -604,7 +604,7 @@ impl GFp5 {
     }
 
     #[inline]
-    pub(crate) fn set_half(&mut self) {
+    fn set_half(&mut self) {
         self.0[0] = self.0[0].half();
         self.0[1] = self.0[1].half();
         self.0[2] = self.0[2].half();
@@ -621,7 +621,7 @@ impl GFp5 {
     }
 
     #[inline]
-    pub(crate) fn set_double(&mut self) {
+    fn set_double(&mut self) {
         self.0[0] = self.0[0].double();
         self.0[1] = self.0[1].double();
         self.0[2] = self.0[2].double();
@@ -638,7 +638,7 @@ impl GFp5 {
     }
 
     #[inline]
-    pub(crate) fn set_mul_small(&mut self, rhs: u32) {
+    fn set_mul_small(&mut self, rhs: u32) {
         self.0[0] = self.0[0].mul_small(rhs);
         self.0[1] = self.0[1].mul_small(rhs);
         self.0[2] = self.0[2].mul_small(rhs);
@@ -656,7 +656,7 @@ impl GFp5 {
     }
 
     #[inline]
-    pub(crate) fn set_mul_small_k1(&mut self, rhs: u32) {
+    fn set_mul_small_k1(&mut self, rhs: u32) {
         let d0 = self.0[4].mul_small(rhs * 3);
         let d1 = self.0[0].mul_small(rhs);
         let d2 = self.0[1].mul_small(rhs);
@@ -679,7 +679,7 @@ impl GFp5 {
     }
 
     #[inline]
-    pub(crate) fn set_mul_small_kn01(&mut self, v0: u32, v1: u32) {
+    fn set_mul_small_kn01(&mut self, v0: u32, v1: u32) {
         let d0 = self.0[4].mul_small(3 * v1) - self.0[0].mul_small(v0);
         let d1 = self.0[0].mul_small(v1) - self.0[1].mul_small(v0);
         let d2 = self.0[1].mul_small(v1) - self.0[2].mul_small(v0);
@@ -701,7 +701,7 @@ impl GFp5 {
     }
 
     #[inline]
-    pub(crate) fn set_mul_k0(&mut self, rhs: GFp) {
+    fn set_mul_k0(&mut self, rhs: GFp) {
         self.0[0] *= rhs;
         self.0[1] *= rhs;
         self.0[2] *= rhs;
@@ -790,7 +790,7 @@ impl GFp5 {
     }
 
     #[inline]
-    pub(crate) fn set_mul(&mut self, rhs: &Self) {
+    fn set_mul(&mut self, rhs: &Self) {
         let d0 = self.mul_to_k0(rhs);
         let d1 = self.mul_to_k1(rhs);
         let d2 = self.mul_to_k2(rhs);
@@ -867,7 +867,7 @@ impl GFp5 {
     }
 
     #[inline]
-    pub(crate) fn set_square(&mut self) {
+    fn set_square(&mut self) {
         let d0 = self.square_to_k0();
         let d1 = self.square_to_k1();
         let d2 = self.square_to_k2();
@@ -890,7 +890,7 @@ impl GFp5 {
     }
 
     #[inline]
-    pub(crate) fn set_msquare(&mut self, n: u32) {
+    fn set_msquare(&mut self, n: u32) {
         for _ in 0..n {
             self.set_square();
         }
@@ -947,7 +947,7 @@ impl GFp5 {
         r
     }
 
-    pub(crate) fn set_invert(&mut self) {
+    fn set_invert(&mut self) {
         // We are using the method first described by Itoh and Tsujii.
         //
         // Let r = 1 + p + p^2 + p^3 + p^4.
@@ -993,7 +993,7 @@ impl GFp5 {
     }
 
     #[inline]
-    pub(crate) fn set_div(&mut self, rhs: &Self) {
+    fn set_div(&mut self, rhs: &Self) {
         let mut d = *rhs;
         d.set_invert();
         self.set_mul(&d);
@@ -1035,7 +1035,7 @@ impl GFp5 {
         (r, c)
     }
 
-    pub(crate) fn set_sqrt(&mut self) -> u64 {
+    fn set_sqrt(&mut self) -> u64 {
         // Let r = 1 + p + p^2 + p^3 + p^4. For x != 0, we have:
         //   x = (x^r) / (x^(r-1))
         // and r-1 is even, therefore:

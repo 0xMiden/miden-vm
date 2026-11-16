@@ -24,8 +24,8 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 
 pub const COMMITMENT_ALIGNMENT: usize = miden_crypto::hash::eidos::BLOCK_LEN;
 pub const COLLISION_RESISTANCE: u32 = HashFunction::Eidos.collision_resistance();
-pub const OOD_POW_BITS: u32 = 0;
-pub const LOOKUP_POW_BITS: u32 = 0;
+pub(crate) const OOD_POW_BITS: u32 = 0;
+pub(crate) const LOOKUP_POW_BITS: u32 = 0;
 
 /// Security parameters of a verified Miden STARK proof.
 ///
