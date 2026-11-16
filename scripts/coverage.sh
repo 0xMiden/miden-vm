@@ -93,13 +93,21 @@ if (( COVERAGE_COLLECTION_STATUS != 0 )); then
 fi
 "${report[@]}" --json --output-path "$output/diagnostic/coverage.json" 2>> "$output/coverage-warnings.log"
 "${report[@]}" --cobertura --output-path "$output/diagnostic/coverage.xml" 2>> "$output/coverage-warnings.log"
-"${report[@]}" > "$output/diagnostic/summary.txt" 2>> "$output/coverage-warnings.log"
-if grep -q 'functions have mismatched data' "$output/coverage-warnings.log"; then
+# Serialize LLVM's diagnostic dump, which writes from the report worker threads.
+LLVM_COV_FLAGS="${LLVM_COV_FLAGS:-} -dump -num-threads=1" \
+    "${report[@]}" > "$output/diagnostic/summary.txt" 2>> "$output/coverage-warnings.log"
+# Rust emits zero-hash mappings for unused functions. In doctest executables these can
+# conflict with the same functions' measured profiles without losing their coverage.
+# Keep those warnings visible, but reject other mismatches and missing diagnostics.
+mismatches=$(grep -c '^hash-mismatch:' "$output/coverage-warnings.log" || true)
+unused_mismatches=$(grep -c '^hash-mismatch:.* with hash = 0x0$' "$output/coverage-warnings.log" || true)
+if grep -q 'functions have mismatched data' "$output/coverage-warnings.log" &&
+    (( mismatches == 0 || mismatches != unused_mismatches )); then
     title=INCOMPLETE-profile-mismatches
 fi
 LLVM_COV_FLAGS="${LLVM_COV_FLAGS:-} -project-title=$title" \
     "${report[@]}" --html --output-dir "$output/diagnostic" 2>> "$output/coverage-warnings.log"
-if grep -q 'functions have mismatched data' "$output/coverage-warnings.log"; then
+if [[ $title == INCOMPLETE-profile-mismatches ]]; then
     echo 'Profile mappings disagree; retaining diagnostic reports instead of accepting a baseline.' >&2
     exit 1
 fi
