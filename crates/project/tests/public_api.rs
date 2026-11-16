@@ -1,14 +1,12 @@
-use miden_project::{SemVer, Version, VersionReq, VersionRequirement};
-
 #[test]
 fn version_paths_preserve_registry_identities() {
-    let semver: SemVer = "1.2.3".parse().unwrap();
+    let semver: miden_project::SemVer = "1.2.3".parse().unwrap();
     let _: &miden_package_registry::SemVer = &semver;
-    let version: Version = semver.into();
+    let version: miden_project::Version = semver.into();
     let _: &miden_package_registry::Version = &version;
-    let requirement: VersionReq = "^1.2".parse().unwrap();
+    let requirement: miden_project::VersionReq = "^1.2".parse().unwrap();
     let _: &miden_package_registry::VersionReq = &requirement;
-    let requirement = VersionRequirement::from(requirement);
+    let requirement = miden_project::VersionRequirement::from(requirement);
     let _: &miden_package_registry::VersionRequirement = &requirement;
     assert!(version.satisfies(&requirement));
 }
