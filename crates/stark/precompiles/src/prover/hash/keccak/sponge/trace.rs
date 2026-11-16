@@ -375,7 +375,7 @@ fn compute_block_snapshots(inv: &Invocation, layout: &InvocationLayout) -> Vec<B
 
 /// Builds the main trace at its natural height.
 #[cfg(test)]
-pub fn generate_trace(requires: SpongeRequires) -> RowMajorMatrix<Felt> {
+pub(crate) fn generate_trace(requires: SpongeRequires) -> RowMajorMatrix<Felt> {
     generate_trace_padded_to(requires, 0)
 }
 

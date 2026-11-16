@@ -423,7 +423,7 @@ impl Deserializable for SmtLeaf {
 // ================================================================================================
 
 /// Converts a key-value tuple to an iterator of `Felt`s
-pub(crate) fn kv_to_elements((key, value): (Word, Word)) -> impl Iterator<Item = Felt> {
+fn kv_to_elements((key, value): (Word, Word)) -> impl Iterator<Item = Felt> {
     let key_elements = key.into_iter();
     let value_elements = value.into_iter();
 

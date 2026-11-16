@@ -230,7 +230,7 @@ where
 /// # Returns
 /// `Ok((StarkOutput { digest, proof }, statement))`, or a [`ProverError`] if validation fails.
 #[instrument(name = "prove", skip_all)]
-pub(crate) fn prove<F, EF, MA, SC>(
+fn prove<F, EF, MA, SC>(
     instance: ProverInstance<'_, F, EF, MA, SC>,
     mut challenger: SC::Challenger,
 ) -> Result<(StarkOutput<F, EF, SC>, Statement<F, EF, MA>), ProverError>

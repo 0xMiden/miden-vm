@@ -408,7 +408,7 @@ impl AnalysisContext {
             .any(|err| matches!(err.severity().unwrap_or(Severity::Error), Severity::Error))
     }
 
-    pub fn has_failed(&mut self) -> Result<(), SyntaxError> {
+    pub(crate) fn has_failed(&mut self) -> Result<(), SyntaxError> {
         if self.has_errors() {
             Err(SyntaxError {
                 source_file: self.source_file.clone(),

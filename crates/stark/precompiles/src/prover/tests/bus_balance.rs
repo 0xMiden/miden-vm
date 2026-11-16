@@ -200,7 +200,7 @@ where
 }
 
 /// Fold verifier-side fixed-environment boundary consumes into the accumulator.
-pub(crate) fn fold_fixed_boundary_external_balance(
+fn fold_fixed_boundary_external_balance(
     challenges: &Challenges<QuadFelt>,
     net: &mut HashMap<QuadFelt, (Felt, String)>,
 ) {

@@ -37,7 +37,7 @@ impl Plan {
 
     /// Set the iteration count for `name`, removing the entry entirely when `n == 0` so that
     /// `iters() == 0` is equivalent to the entry being absent.
-    pub fn set(&mut self, name: &'static str, n: u64) {
+    pub(crate) fn set(&mut self, name: &'static str, n: u64) {
         if n == 0 {
             self.entries.remove(name);
         } else {

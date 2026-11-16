@@ -34,9 +34,9 @@ pub struct Proof<F, C, const SALT_ELEMS: usize = 0> {
 /// authentication path queries. Indices here are leaf indices after any virtual-lift folding.
 pub struct BatchProof<F, C, const SALT_ELEMS: usize = 0> {
     /// Opened leaf data keyed by leaf index.
-    pub openings: BTreeMap<usize, LeafOpening<F, SALT_ELEMS>>,
+    pub(crate) openings: BTreeMap<usize, LeafOpening<F, SALT_ELEMS>>,
     /// Reconstructed Merkle authentication structure.
-    pub witness: MerkleWitness<C>,
+    pub(crate) witness: MerkleWitness<C>,
 }
 
 /// Accessor trait for batch proof data.
@@ -90,9 +90,9 @@ impl<F, C: Clone, const SALT_ELEMS: usize> BatchProofView<F, C> for BatchProof<F
 /// Opened rows and optional salt for a single leaf.
 pub struct LeafOpening<F, const SALT_ELEMS: usize = 0> {
     /// Opened rows for this query.
-    pub rows: RowList<F>,
+    pub(crate) rows: RowList<F>,
     /// Salt for this leaf (zero-sized when the configuration is non-hiding).
-    pub salt: [F; SALT_ELEMS],
+    pub(crate) salt: [F; SALT_ELEMS],
 }
 
 impl<F, const SALT_ELEMS: usize> LeafOpening<F, SALT_ELEMS> {
@@ -100,7 +100,7 @@ impl<F, const SALT_ELEMS: usize> LeafOpening<F, SALT_ELEMS> {
     ///
     /// Reads `sum(widths)` field elements as a flat row, then `SALT_ELEMS` salt elements.
     /// When `SALT_ELEMS == 0`, the salt read is a no-op.
-    pub fn read_from_channel<Ch>(
+    pub(crate) fn read_from_channel<Ch>(
         widths: Vec<usize>,
         channel: &mut Ch,
     ) -> Result<Self, TranscriptError>

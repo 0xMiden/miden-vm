@@ -36,7 +36,7 @@ pub struct CapabilitiesEventBody {
 #[serde(rename_all = "camelCase")]
 pub struct ContinuedEventBody {
     /// The thread which was continued.
-    pub thread_id: i64,
+    pub(crate) thread_id: i64,
     /// If `allThreadsContinued` is true, a debug adapter can announce that all threads have
     /// continued.
     pub all_threads_continued: Option<bool>,
@@ -220,7 +220,7 @@ pub struct ProgressStartEventBody {
     /// request until the request has been either completed or cancelled.
     /// If the request ID is omitted, the progress report is assumed to be
     /// related to some general activity of the debug adapter.
-    pub request_id: Option<i64>,
+    pub(crate) request_id: Option<i64>,
     /// If true, the request that reports progress may be cancelled with a
     /// `cancel` request.
     /// So this property basically controls whether the client should use UX that

@@ -421,7 +421,8 @@ impl Poseidon2Permutation256 {
     ///
     /// This delegates to the Poseidon2 implementation.
     #[inline(always)]
-    pub fn apply_permutation(state: &mut [Felt; STATE_WIDTH]) {
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn apply_permutation(state: &mut [Felt; STATE_WIDTH]) {
         Poseidon2::apply_permutation(state);
     }
 }

@@ -122,7 +122,7 @@ pub fn generate_trace(requires: KeccakNodeRequires) -> RowMajorMatrix<Felt> {
 /// Generates a trace from explicit invocations for standalone keccak-node tests. The local AIR
 /// constraints do not depend on which higher-level component supplied the digest bytes.
 #[cfg(test)]
-pub fn generate_trace_from_invocations(
+pub(crate) fn generate_trace_from_invocations(
     invocations: &[KeccakNodeInvocation],
 ) -> RowMajorMatrix<Felt> {
     let height = invocations.len().next_power_of_two().max(2);

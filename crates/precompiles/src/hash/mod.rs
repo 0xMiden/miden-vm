@@ -48,9 +48,9 @@ const ASSERT_DISC: u32 = 0;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HashAssertNode {
     /// Declared preimage length in bytes.
-    pub n_bytes: u32,
+    pub(crate) n_bytes: u32,
     /// Structural digest of the preimage chunk-list child.
-    pub preimage_digest: Digest,
+    pub(crate) preimage_digest: Digest,
     /// Structural digest of the expected-digest chunk-list child.
     pub expected_digest: Digest,
 }
@@ -108,7 +108,10 @@ impl<H: HashFunction> HashPrecompile<H> {
     ///
     /// Returns `Ok(None)` when `node` belongs to another precompile. Owned nodes return their
     /// structural join child digests directly from the payload.
-    pub fn decode_assert_node(node: &Node) -> Result<Option<HashAssertNode>, PrecompileError> {
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn decode_assert_node(
+        node: &Node,
+    ) -> Result<Option<HashAssertNode>, PrecompileError> {
         let Some(frame) = node.frame() else {
             return Ok(None);
         };

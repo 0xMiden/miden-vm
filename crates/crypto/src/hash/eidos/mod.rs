@@ -72,7 +72,7 @@ pub type PackedChainingValue = [PackedFelt; DIGEST_WIDTH];
 pub type PackedDigest = PackedChainingValue;
 
 /// One packed Eidos message block, with one independent block per logical packed lane.
-pub type PackedBlock = [PackedFelt; BLOCK_LEN];
+pub(crate) type PackedBlock = [PackedFelt; BLOCK_LEN];
 
 /// Arrange scalar digests into one packed batch.
 #[inline]

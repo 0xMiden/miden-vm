@@ -417,7 +417,7 @@ impl OperationError {
     ///
     /// Unlike [`Self::with_context`], this resolves source metadata from package debug sections
     /// keyed by a source/debug MAST occurrence rather than by the reduced execution MAST node.
-    pub fn with_package_source_context(
+    pub(crate) fn with_package_source_context(
         self,
         context: PackageSourceDebugContext<'_>,
         host: &(dyn BaseHost + '_),

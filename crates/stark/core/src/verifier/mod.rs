@@ -140,7 +140,7 @@ where
     }
 
     /// Borrow the preprocessed commitment, if any.
-    pub fn preprocessed_commitment(&self) -> Option<&<SC::Lmcs as Lmcs>::Commitment> {
+    pub(crate) fn preprocessed_commitment(&self) -> Option<&<SC::Lmcs as Lmcs>::Commitment> {
         self.preprocessed_commitment.as_ref()
     }
 }
@@ -224,7 +224,7 @@ pub enum VerifierError {
 ///
 /// ## Trusted (NOT validated)
 /// - AIR structural shape (same list as in [`prove`](crate::ProverInstance::prove))
-pub(crate) fn verify<F, EF, MA, SC>(
+fn verify<F, EF, MA, SC>(
     instance: &VerifierInstance<'_, F, EF, MA, SC>,
     proof: &StarkProofData<F, EF, SC>,
     mut challenger: SC::Challenger,

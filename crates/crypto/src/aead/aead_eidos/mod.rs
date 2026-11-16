@@ -34,26 +34,26 @@ pub mod expanded;
 mod tests;
 
 /// Number of field elements in an Eidos AEAD secret key.
-pub const SECRET_KEY_SIZE: usize = 4;
+pub(crate) const SECRET_KEY_SIZE: usize = 4;
 
 /// Serialized size of an Eidos AEAD secret key.
-pub const SK_SIZE_BYTES: usize = SECRET_KEY_SIZE * Felt::NUM_BYTES;
+pub(crate) const SK_SIZE_BYTES: usize = SECRET_KEY_SIZE * Felt::NUM_BYTES;
 
 /// Number of field elements in an Eidos AEAD nonce.
-pub const NONCE_SIZE: usize = 4;
+pub(crate) const NONCE_SIZE: usize = 4;
 
 /// Serialized size of an Eidos AEAD nonce.
-pub const NONCE_SIZE_BYTES: usize = NONCE_SIZE * Felt::NUM_BYTES;
+pub(crate) const NONCE_SIZE_BYTES: usize = NONCE_SIZE * Felt::NUM_BYTES;
 
 /// Number of field elements in an Eidos AEAD authentication tag.
-pub const AUTH_TAG_SIZE: usize = 2;
+pub(crate) const AUTH_TAG_SIZE: usize = 2;
 
 /// Maximum number of base-field elements in the padded polynomial-MAC input.
 ///
 /// This count includes the nonce, associated data, expanded ciphertext, encoded lengths, and
 /// padding. It limits each authentication polynomial to at most `2^27` quadratic-extension
 /// coefficients.
-pub const MAX_AUTHENTICATED_INPUT_FELTS: usize = 1 << 28;
+pub(crate) const MAX_AUTHENTICATED_INPUT_FELTS: usize = 1 << 28;
 
 /// Degree budget for failed and pending MAC verification attempts under one key.
 ///
@@ -554,7 +554,7 @@ impl Deserializable for EncryptedData {
 }
 
 /// Eidos authenticated-encryption implementation.
-pub struct AeadEidos;
+pub(crate) struct AeadEidos;
 
 impl AeadScheme for AeadEidos {
     const KEY_SIZE: usize = SK_SIZE_BYTES;

@@ -96,7 +96,7 @@ impl RelatedLabel {
         self.with_label(Label::new((range.start as usize)..(range.end as usize), message))
     }
 
-    pub fn with_label(mut self, label: Label) -> Self {
+    pub(crate) fn with_label(mut self, label: Label) -> Self {
         self.labels.push(label);
         self
     }
@@ -164,7 +164,7 @@ impl RelatedError {
     }
 
     #[inline(always)]
-    pub fn as_diagnostic(&self) -> &dyn Diagnostic {
+    pub(crate) fn as_diagnostic(&self) -> &dyn Diagnostic {
         self.0.as_ref()
     }
 }

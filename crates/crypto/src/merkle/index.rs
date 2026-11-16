@@ -92,7 +92,7 @@ impl NodeIndex {
     }
 
     /// Returns left child index of the current node.
-    pub const fn left_child(mut self) -> Self {
+    pub(crate) const fn left_child(mut self) -> Self {
         self.depth += 1;
         self.position <<= 1;
         self
@@ -135,7 +135,7 @@ impl NodeIndex {
     ///
     /// - [`MerkleError::DepthTooBig`] if the depth is 64 or greater, as the resulting index would
     ///   overflow.
-    pub const fn to_scalar_index(&self) -> Result<u64, MerkleError> {
+    pub(crate) const fn to_scalar_index(self) -> Result<u64, MerkleError> {
         if self.depth >= 64 {
             return Err(MerkleError::DepthTooBig(self.depth as u64));
         }
@@ -158,7 +158,7 @@ impl NodeIndex {
     }
 
     /// Returns `true` if the n-th node on the path points to a right child.
-    pub const fn is_nth_bit_odd(&self, n: u8) -> bool {
+    pub(crate) const fn is_nth_bit_odd(&self, n: u8) -> bool {
         (self.position >> n) & 1 == 1
     }
 
@@ -171,7 +171,7 @@ impl NodeIndex {
     // --------------------------------------------------------------------------------------------
 
     /// Traverses one level towards the root, decrementing the depth by `1`.
-    pub fn move_up(&mut self) {
+    pub(crate) fn move_up(&mut self) {
         self.depth = self.depth.saturating_sub(1);
         self.position >>= 1;
     }

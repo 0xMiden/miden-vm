@@ -129,7 +129,7 @@ impl UintPrecompile {
     pub const NAME: &'static str = "uint256";
 
     /// Operation discriminants owned by this precompile.
-    pub const VALUE_OP_ID: u64 = 0;
+    pub(crate) const VALUE_OP_ID: u64 = 0;
     pub const ADD_OP_ID: u64 = 1;
     pub const SUB_OP_ID: u64 = 2;
     pub const MUL_OP_ID: u64 = 3;
@@ -197,9 +197,7 @@ impl UintPrecompile {
         }))
     }
 
-    pub(crate) fn limbs_from_typed_value_node(
-        node: &Node,
-    ) -> Result<(UintDomain, Limbs), DeferredError> {
+    fn limbs_from_typed_value_node(node: &Node) -> Result<(UintDomain, Limbs), DeferredError> {
         let Some(frame) = node.frame() else {
             return Err(DeferredError::InvalidPayload);
         };
@@ -317,7 +315,7 @@ impl Precompile for UintPrecompile {
     }
 }
 
-pub(crate) fn decode_limbs(felts: &[Felt; 8]) -> Result<Limbs, DeferredError> {
+fn decode_limbs(felts: &[Felt; 8]) -> Result<Limbs, DeferredError> {
     let mut limbs = [0u32; 8];
     for (i, felt) in felts.iter().enumerate() {
         let v = felt.as_canonical_u64();

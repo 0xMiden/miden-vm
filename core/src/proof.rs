@@ -76,7 +76,7 @@ impl HashFunction {
 #[derive(Debug, thiserror::Error)]
 #[error("invalid hash function '{hash_function}'. Valid options are: blake3-256, keccak, eidos")]
 pub struct InvalidHashFunctionError {
-    pub hash_function: String,
+    pub(crate) hash_function: String,
 }
 
 impl TryFrom<u8> for HashFunction {

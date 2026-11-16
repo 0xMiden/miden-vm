@@ -108,6 +108,7 @@ pub struct TestHost<S: SourceManager = DefaultSourceManager> {
     snapshots: BTreeMap<u64, Vec<ProcessorStateSnapshot>>,
 
     /// Process state snapshots captured at trace checkpoints.
+    #[allow(dead_code)] // retained for test/feature-gated users
     trace_snapshots: BTreeMap<u64, Vec<ProcessorStateSnapshot>>,
 
     /// MAST forest store for external node resolution
@@ -131,7 +132,8 @@ impl TestHost {
     }
 
     /// Creates a new TestHost with a kernel forest for full consistency testing.
-    pub fn with_kernel_forest(kernel_forest: Arc<MastForest>) -> Self {
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn with_kernel_forest(kernel_forest: Arc<MastForest>) -> Self {
         let mut store = MemMastForestStore::default();
         store.insert(kernel_forest);
         Self {
@@ -150,7 +152,8 @@ impl TestHost {
     }
 
     /// Gets the processor state snapshots captured at trace checkpoints.
-    pub fn trace_snapshots(&self) -> &BTreeMap<u64, Vec<ProcessorStateSnapshot>> {
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn trace_snapshots(&self) -> &BTreeMap<u64, Vec<ProcessorStateSnapshot>> {
         &self.trace_snapshots
     }
 }

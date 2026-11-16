@@ -18,7 +18,7 @@ pub const AEAD_EIDOS_DECRYPT_EVENT_NAME: EventName =
 /// `[key(4), nonce(4), src_ptr, dst_ptr, num_felts, scratch_ptr, ...]`. `src_ptr` addresses
 /// `2 * num_felts` ciphertext limbs. The MASM decryption procedure checks the tag before
 /// emitting this event, then re-encrypts the returned plaintext and compares every ciphertext limb.
-pub fn handle_aead_eidos_decrypt(
+pub(crate) fn handle_aead_eidos_decrypt(
     process: &ProcessorState<'_>,
 ) -> Result<Vec<AdviceMutation>, EventError> {
     const KEY_OFFSET: usize = 1;

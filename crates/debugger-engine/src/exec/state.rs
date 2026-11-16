@@ -50,7 +50,8 @@ pub struct DebugExecutor {
     /// The set of contexts allocated during execution so far
     pub contexts: BTreeSet<ContextId>,
     /// The root context
-    pub root_context: ContextId,
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) root_context: ContextId,
     /// The current context: the one after the last cycle a step completed without error, which
     /// after a limit trip is the cycle before `cycle`
     pub current_context: ContextId,
@@ -61,7 +62,7 @@ pub struct DebugExecutor {
     /// Debug variable tracker for source-level variable inspection
     pub debug_vars: DebugVarTracker,
     /// Number of debug variable location records observed during the most recent step.
-    pub last_debug_var_count: usize,
+    pub(crate) last_debug_var_count: usize,
     /// A sliding window of the last 5 operations successfully executed by the VM
     pub recent: VecDeque<Operation>,
     /// The current clock cycle: the stepper's, mirrored after each step so that a session that
@@ -76,7 +77,7 @@ pub struct DebugExecutor {
     /// execution sets it itself. Once set, a step does nothing
     pub stopped: bool,
     /// The profiler used by this executor
-    pub profiler: Profiler,
+    pub(crate) profiler: Profiler,
 }
 
 impl super::query::DebugQuery for DebugExecutor {
@@ -212,7 +213,8 @@ impl DebugExecutor {
     /// step after a panic that unwound through a step, which only a caller that catches panics
     /// can make, returns the stepper's error once and `Ok(None)` after that. Otherwise like
     /// [`Self::step`].
-    pub fn step_with(
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn step_with(
         &mut self,
         on_cycle: impl FnOnce(&CycleInfo<'_>),
     ) -> Result<Option<CallFrame>, ExecutionError> {

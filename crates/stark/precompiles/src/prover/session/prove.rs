@@ -48,7 +48,7 @@ impl SessionTraces {
 
     /// Checks each AIR and the cross-chiplet assertion with the lightweight test configuration.
     #[cfg(test)]
-    pub fn check(&self) {
+    pub(crate) fn check(&self) {
         check_constraints(&self.prover_statement(), test_challenger());
     }
 

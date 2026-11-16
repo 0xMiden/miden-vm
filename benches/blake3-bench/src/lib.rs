@@ -42,11 +42,11 @@ const PROGRAM_RELATIVE_PATH: &str = "miden-vm/masm-examples/hashing/blake3_1to1/
 
 #[derive(Clone)]
 pub struct Blake3Fixture {
-    pub program: Program,
-    pub stack_inputs: StackInputs,
+    pub(crate) program: Program,
+    pub(crate) stack_inputs: StackInputs,
     pub advice_inputs: AdviceInputs,
-    pub debug_info: Option<PackageDebugInfo>,
-    pub entrypoint_source_node: Option<DebugSourceNodeId>,
+    pub(crate) debug_info: Option<PackageDebugInfo>,
+    pub(crate) entrypoint_source_node: Option<DebugSourceNodeId>,
     source_manager: Arc<DefaultSourceManager>,
 }
 
@@ -90,7 +90,7 @@ pub fn repo_root_from_manifest() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-pub fn execution_options() -> ExecutionOptions {
+pub(crate) fn execution_options() -> ExecutionOptions {
     ExecutionOptions::new(
         Some(ExecutionOptions::MAX_CYCLES),
         64,
@@ -99,7 +99,7 @@ pub fn execution_options() -> ExecutionOptions {
     .expect("CLI-compatible Blake3 execution options should be valid")
 }
 
-pub fn default_host() -> DefaultHost {
+pub(crate) fn default_host() -> DefaultHost {
     DefaultHost::default()
         .with_library(&CoreLibrary::default())
         .expect("failed to load core library into host")
@@ -152,7 +152,7 @@ pub fn execute_program(fixture: &Blake3Fixture) -> ExecutionOutput {
         .expect("failed to execute Blake3 benchmark")
 }
 
-pub fn prove_program(fixture: &Blake3Fixture) {
+pub(crate) fn prove_program(fixture: &Blake3Fixture) {
     let _span = tracing::info_span!("prove_program_sync").entered();
     prove_trace(execute_for_proving(fixture));
 }
@@ -188,10 +188,10 @@ pub fn build_trace(witness: ExecutionWitness) -> VmTrace {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SpanRecord {
-    pub id: u64,
-    pub parent_id: Option<u64>,
+    pub(crate) id: u64,
+    pub(crate) parent_id: Option<u64>,
     pub name: String,
-    pub target: String,
+    pub(crate) target: String,
     pub path: String,
     pub duration_ms: f64,
 }

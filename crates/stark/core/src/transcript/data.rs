@@ -35,7 +35,8 @@ impl<F, C> TranscriptData<F, C> {
     }
 
     /// Consume and return the underlying vectors.
-    pub fn into_parts(self) -> (Vec<F>, Vec<C>) {
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn into_parts(self) -> (Vec<F>, Vec<C>) {
         (self.fields, self.commitments)
     }
 

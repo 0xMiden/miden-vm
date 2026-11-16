@@ -33,16 +33,17 @@ pub struct StorageUpdateParts {
     /// Leaf updates indexed by their position in the tree.
     ///
     /// `Some(leaf)` indicates an insertion or update, while `None` indicates deletion.
-    pub leaf_updates: Map<u64, Option<SmtLeaf>>,
+    pub(crate) leaf_updates: Map<u64, Option<SmtLeaf>>,
 
     /// Vector of subtree storage operations (Store or Delete) to be applied atomically.
-    pub subtree_updates: Vec<SubtreeUpdate>,
+    pub(crate) subtree_updates: Vec<SubtreeUpdate>,
 
     /// Net change in the count of non-empty leaves.
     ///
     /// Positive values indicate more leaves were added than removed,
     /// negative values indicate more leaves were removed than added.
-    pub leaf_count_delta: isize,
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) leaf_count_delta: isize,
 
     /// Net change in the total number of key-value entries across all leaves.
     ///

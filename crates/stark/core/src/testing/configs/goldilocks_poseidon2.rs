@@ -24,31 +24,31 @@ use crate::{
 // =============================================================================
 
 /// Poseidon2 permutation width.
-pub const WIDTH: usize = 12;
+pub(crate) const WIDTH: usize = 12;
 
 /// Sponge rate (elements absorbed per permutation).
-pub const RATE: usize = 8;
+pub(crate) const RATE: usize = 8;
 
 /// Digest size in field elements.
-pub const DIGEST: usize = 4;
+pub(crate) const DIGEST: usize = 4;
 
 /// Poseidon2 permutation.
-pub type Perm = Poseidon2Goldilocks<WIDTH>;
+pub(crate) type Perm = Poseidon2Goldilocks<WIDTH>;
 
 /// Stateful sponge for hashing (can be used for LMCS).
-pub type Sponge = miden_crypto::hash::stateful::StatefulSponge<Perm, WIDTH, RATE, DIGEST>;
+pub(crate) type Sponge = miden_crypto::hash::stateful::StatefulSponge<Perm, WIDTH, RATE, DIGEST>;
 
 /// Truncated permutation for 2-to-1 compression.
-pub type Compress = TruncatedPermutation<Perm, 2, DIGEST, WIDTH>;
+pub(crate) type Compress = TruncatedPermutation<Perm, 2, DIGEST, WIDTH>;
 
 /// Commitment type (truncated permutation output).
 pub type Commitment = Hash<Felt, Felt, DIGEST>;
 
 /// Duplex challenger for Fiat-Shamir.
-pub type Challenger = DuplexChallenger<Felt, Perm, WIDTH, RATE>;
+pub(crate) type Challenger = DuplexChallenger<Felt, Perm, WIDTH, RATE>;
 
 /// Create the permutation with standard seed.
-pub fn create_perm() -> Perm {
+pub(crate) fn create_perm() -> Perm {
     let mut rng = SmallRng::seed_from_u64(TEST_SEED);
     Perm::new_from_rng_128(&mut rng)
 }
@@ -56,7 +56,8 @@ pub fn create_perm() -> Perm {
 /// Create standard test components with a consistent seed.
 ///
 /// Returns the permutation, sponge, and compressor for Merkle tree construction.
-pub fn test_components() -> (Perm, Sponge, Compress) {
+#[allow(dead_code)] // retained for test/feature-gated users
+pub(crate) fn test_components() -> (Perm, Sponge, Compress) {
     let perm = create_perm();
     let sponge = Sponge::new(perm.clone());
     let compress = Compress::new(perm.clone());
@@ -64,7 +65,7 @@ pub fn test_components() -> (Perm, Sponge, Compress) {
 }
 
 /// Create a standard challenger for Fiat-Shamir.
-pub fn test_challenger() -> Challenger {
+pub(crate) fn test_challenger() -> Challenger {
     Challenger::new(create_perm())
 }
 
@@ -73,13 +74,14 @@ pub fn test_challenger() -> Challenger {
 // =============================================================================
 
 /// LMCS configured with Goldilocks + Poseidon2.
-pub type Lmcs =
+pub(crate) type Lmcs =
     crate::lmcs::config::LmcsConfig<PackedFelt, PackedFelt, Sponge, Compress, WIDTH, DIGEST>;
 
 crate::testing::define_lmcs_test_helpers!();
 
 /// Create a test LMCS instance.
-pub fn test_lmcs() -> Lmcs {
+#[allow(dead_code)] // retained for test/feature-gated users
+pub(crate) fn test_lmcs() -> Lmcs {
     let (_, sponge, compress) = test_components();
     crate::lmcs::config::LmcsConfig::new(sponge, compress)
 }
@@ -89,7 +91,8 @@ pub fn test_lmcs() -> Lmcs {
 // =============================================================================
 
 /// Generate a matrix of LDE evaluations for random low-degree polynomials.
-pub fn random_lde_matrix<V>(
+#[allow(dead_code)] // retained for test/feature-gated users
+pub(crate) fn random_lde_matrix<V>(
     rng: &mut SmallRng,
     log_poly_degree: u8,
     log_blowup: u8,
@@ -115,11 +118,15 @@ where
 // STARK layer
 // =============================================================================
 
-pub type Dft = Radix2DitParallel<Felt>;
+#[allow(dead_code)] // retained for test/feature-gated users
+pub(crate) type Dft = Radix2DitParallel<Felt>;
 
-pub type TestConfig = crate::config::GenericStarkConfig<Felt, QuadFelt, Lmcs, Dft, Challenger>;
+#[allow(dead_code)] // retained for test/feature-gated users
+pub(crate) type TestConfig =
+    crate::config::GenericStarkConfig<Felt, QuadFelt, Lmcs, Dft, Challenger>;
 
-pub fn test_config() -> TestConfig {
+#[allow(dead_code)] // retained for test/feature-gated users
+pub(crate) fn test_config() -> TestConfig {
     crate::config::GenericStarkConfig::new(
         crate::testing::params::TEST_PCS_PARAMS,
         test_lmcs(),
@@ -129,7 +136,8 @@ pub fn test_config() -> TestConfig {
 }
 
 /// Generate a power-of-4 chain trace: `[start, start⁴, start¹⁶, start⁶⁴, ...]`
-pub fn generate_pow4_trace(start: Felt, height: usize) -> RowMajorMatrix<Felt> {
+#[allow(dead_code)] // retained for test/feature-gated users
+pub(crate) fn generate_pow4_trace(start: Felt, height: usize) -> RowMajorMatrix<Felt> {
     let mut values = Vec::with_capacity(height);
     let mut current = start;
     for _ in 0..height {
@@ -140,7 +148,8 @@ pub fn generate_pow4_trace(start: Felt, height: usize) -> RowMajorMatrix<Felt> {
 }
 
 /// Run the full prove → verify → transcript-reparse cycle.
-pub fn prove_and_verify_statement<MA>(prover_statement: ProverStatement<Felt, QuadFelt, MA>)
+#[allow(dead_code)] // retained for test/feature-gated users
+pub(crate) fn prove_and_verify_statement<MA>(prover_statement: ProverStatement<Felt, QuadFelt, MA>)
 where
     MA: MultiAir<Felt, QuadFelt>,
     <MA::Air as LiftedAir<Felt, QuadFelt>>::EvalData<PackedFelt, PackedQuadFelt>: Sync,
@@ -169,11 +178,12 @@ where
 /// Minimal [`MultiAir`] wrapper for tests: a list of AIRs, each building its own
 /// aux trace via [`LiftedAir::build_aux_trace`].
 pub struct TestMultiAir<A> {
-    pub airs: Vec<A>,
+    pub(crate) airs: Vec<A>,
 }
 
 impl<A> TestMultiAir<A> {
-    pub fn new(airs: Vec<A>) -> Self {
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn new(airs: Vec<A>) -> Self {
         Self { airs }
     }
 }
@@ -190,7 +200,8 @@ where
 }
 
 /// Prove and verify multiple traces sharing one AIR.
-pub fn prove_and_verify<A>(air: &A, air_inputs: &[Felt], traces: &[RowMajorMatrix<Felt>])
+#[allow(dead_code)] // retained for test/feature-gated users
+pub(crate) fn prove_and_verify<A>(air: &A, air_inputs: &[Felt], traces: &[RowMajorMatrix<Felt>])
 where
     A: LiftedAir<Felt, QuadFelt> + Clone,
     A::EvalData<PackedFelt, PackedQuadFelt>: Sync,

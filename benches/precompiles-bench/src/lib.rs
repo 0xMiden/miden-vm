@@ -14,9 +14,9 @@ mod input_generation;
 pub use input_generation::PrecompileWorkload;
 
 pub struct PrecompileFixture {
-    pub program: Program,
-    pub stack_inputs: StackInputs,
-    pub advice_inputs: AdviceInputs,
+    pub(crate) program: Program,
+    pub(crate) stack_inputs: StackInputs,
+    pub(crate) advice_inputs: AdviceInputs,
     /// Admission limits for exporting and proving this fixture's deferred witness.
     pub verification_limits: PrecompileLimits,
     execution_options: ExecutionOptions,

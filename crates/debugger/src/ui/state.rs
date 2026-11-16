@@ -48,12 +48,13 @@ fn clone_event_replay_queue(event_replay: &[Vec<AdviceMutation>]) -> VecDeque<Ve
 pub struct State {
     pub source_manager: Arc<dyn SourceManager>,
     pub config: Box<DebuggerConfig>,
-    pub input_mode: InputMode,
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) input_mode: InputMode,
     pub breakpoints: Vec<Breakpoint>,
-    pub breakpoints_hit: Vec<Breakpoint>,
-    pub next_breakpoint_id: u8,
+    pub(crate) breakpoints_hit: Vec<Breakpoint>,
+    pub(crate) next_breakpoint_id: u8,
     pub stopped: bool,
-    pub debug_mode: DebugMode,
+    pub(crate) debug_mode: DebugMode,
     finish_targets: BTreeMap<(u8, usize), ReturnTarget>,
     selected_stack_frame: usize,
     session: SessionState,
@@ -65,6 +66,7 @@ pub enum InputMode {
     Normal,
     #[allow(dead_code)]
     Insert,
+    #[allow(dead_code)] // retained for test/feature-gated users
     Command,
 }
 
@@ -416,7 +418,8 @@ impl State {
     }
 
     /// Resume local execution until the VM terminates, errors, or a breakpoint is hit.
-    pub fn run_until_stopped(&mut self) {
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn run_until_stopped(&mut self) {
         // Breakpoints can be deleted between resumes. Keep invocation ownership tied to the
         // original breakpoint, including its creation cycle when an identifier is reused.
         self.finish_targets.retain(|&(id, cycle), _| {
@@ -685,7 +688,7 @@ impl State {
         }
     }
 
-    pub fn executor_mut(&mut self) -> &mut DebugExecutor {
+    pub(crate) fn executor_mut(&mut self) -> &mut DebugExecutor {
         match &mut self.session {
             SessionState::Local(local) => &mut local.executor,
             #[cfg(feature = "dap")]
@@ -742,11 +745,13 @@ impl State {
         Ok(())
     }
 
-    pub fn reset_stack_selection(&mut self) {
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn reset_stack_selection(&mut self) {
         self.selected_stack_frame = 0;
     }
 
-    pub fn select_older_stack_frame(&mut self) {
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn select_older_stack_frame(&mut self) {
         let last = self.logical_stack_frames().len().saturating_sub(1);
         self.selected_stack_frame = self.selected_stack_frame.saturating_add(1).min(last);
     }
@@ -770,6 +775,7 @@ impl State {
     /// makes it suitable for matching source-level (line/file) breakpoints: a
     /// statement that calls into `::intrinsics::*` helpers mid-line still reads
     /// as a single visit to that line.
+    #[allow(dead_code)] // retained for test/feature-gated users
     fn current_user_source_location(&self) -> Option<ResolvedLocation> {
         for frame in self.executor().callstack.frames().iter().rev() {
             for detail in frame.recent().iter().rev() {
@@ -795,12 +801,14 @@ impl State {
     /// statement calling into helpers reads as a single visit to its line; this accessor is the
     /// counterpart that lets breakpoints explicitly targeting internal sources keep firing —
     /// compiler intrinsics remain debuggable like any other MASM.
+    #[allow(dead_code)] // retained for test/feature-gated users
     fn current_internal_source_location(&self) -> Option<ResolvedLocation> {
         self.current_location()
             .filter(|loc| crate::debug::is_internal_source_uri(loc.source_file.uri()))
     }
 
-    pub fn is_next_source_line(
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn is_next_source_line(
         start_proc: Option<&str>,
         start_loc: Option<&ResolvedLocation>,
         current_proc: Option<&str>,
@@ -836,11 +844,8 @@ impl State {
         }
     }
 
-    pub(crate) fn minimum_source_line_for_proc(
-        &self,
-        procedure: &str,
-        source_path: &str,
-    ) -> Option<u32> {
+    #[allow(dead_code)] // retained for test/feature-gated users
+    fn minimum_source_line_for_proc(&self, procedure: &str, source_path: &str) -> Option<u32> {
         let executor = self.executor();
         let ctx = executor.resume_ctx()?;
         let mast_forest = ctx.current_forest();
@@ -937,7 +942,8 @@ impl State {
         None
     }
 
-    pub fn should_defer_called_breakpoint(
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn should_defer_called_breakpoint(
         &self,
         proc: &str,
         current_loc: Option<&ResolvedLocation>,
@@ -985,7 +991,8 @@ impl State {
             .map_err(|err| format!("failed to decode program result: {err}"))
     }
 
-    pub fn set_execution_failed(&mut self, error: miden_processor::ExecutionError) {
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn set_execution_failed(&mut self, error: miden_processor::ExecutionError) {
         match &mut self.session {
             SessionState::Local(local) => local.execution_failed = Some(error),
             #[cfg(feature = "dap")]
@@ -1284,6 +1291,7 @@ impl State {
     }
 }
 
+#[allow(dead_code)] // retained for test/feature-gated users
 fn is_internal_procedure(proc: &str) -> bool {
     proc.contains("::intrinsics::")
 }

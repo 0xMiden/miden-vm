@@ -160,7 +160,7 @@ impl PythonScriptSession {
     }
 
     /// Register a Python-backed custom debugger command.
-    pub fn add_custom_command(&self, name: &str, function_path: &str) -> Result<(), String> {
+    pub(crate) fn add_custom_command(&self, name: &str, function_path: &str) -> Result<(), String> {
         validate_custom_command_name(name)?;
         Python::attach(|py| {
             self.with_globals(py, |globals| {
@@ -173,12 +173,12 @@ impl PythonScriptSession {
     }
 
     /// Return registered custom command names.
-    pub fn custom_commands(&self) -> Vec<String> {
+    pub(crate) fn custom_commands(&self) -> Vec<String> {
         self.custom_commands.borrow().keys().cloned().collect()
     }
 
     /// Delete a registered custom command.
-    pub fn delete_custom_command(&self, name: &str) -> Result<(), String> {
+    pub(crate) fn delete_custom_command(&self, name: &str) -> Result<(), String> {
         if self.custom_commands.borrow_mut().remove(name).is_some() {
             Ok(())
         } else {
@@ -219,7 +219,11 @@ impl PythonScriptSession {
     }
 
     /// Register a Python callback for a breakpoint id.
-    pub fn add_breakpoint_callback(&self, id: u8, function_path: &str) -> Result<(), String> {
+    pub(crate) fn add_breakpoint_callback(
+        &self,
+        id: u8,
+        function_path: &str,
+    ) -> Result<(), String> {
         let exists = self.debugger.borrow().breakpoints().iter().any(|bp| bp.id == id);
         if !exists {
             return Err(format!("no breakpoint with id {id}"));
@@ -236,12 +240,12 @@ impl PythonScriptSession {
     }
 
     /// Return breakpoint ids with registered Python callbacks.
-    pub fn breakpoint_callbacks(&self) -> Vec<u8> {
+    pub(crate) fn breakpoint_callbacks(&self) -> Vec<u8> {
         self.breakpoint_callbacks.borrow().keys().copied().collect()
     }
 
     /// Delete one breakpoint callback, or all callbacks when `id` is `None`.
-    pub fn delete_breakpoint_callback(&self, id: Option<u8>) -> Result<(), String> {
+    pub(crate) fn delete_breakpoint_callback(&self, id: Option<u8>) -> Result<(), String> {
         match id {
             Some(id) => {
                 if self.breakpoint_callbacks.borrow_mut().remove(&id).is_some() {
@@ -258,7 +262,7 @@ impl PythonScriptSession {
     }
 
     /// Evaluate callbacks for the current hit breakpoints.
-    pub fn should_continue_after_breakpoint_callbacks(&self) -> Result<bool, String> {
+    pub(crate) fn should_continue_after_breakpoint_callbacks(&self) -> Result<bool, String> {
         let hit_breakpoints = self.debugger.borrow().hit_breakpoints();
         if hit_breakpoints.is_empty() {
             return Ok(false);

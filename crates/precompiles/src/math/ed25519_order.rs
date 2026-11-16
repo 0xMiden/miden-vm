@@ -13,7 +13,7 @@ impl Ed25519Order {
     pub const ID: Felt = Felt::new_unchecked(6);
 
     /// Full Ed25519 group order `8*l`, little-endian u32 limbs.
-    pub const MODULUS: Limbs = [
+    pub(crate) const MODULUS: Limbs = [
         0xe7ae_9f68,
         0xc093_18d2,
         0x17bc_e6b2,

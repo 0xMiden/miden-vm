@@ -41,7 +41,7 @@ pub const EXTENSION_DEGREE: usize = 2;
 /// Base-field elements in an LMCS digest.
 pub const DIGEST_WIDTH: usize = 4;
 /// Base-field elements in one fold-4 quadratic-extension opening.
-pub const OPENING_ROW_WIDTH: usize = FOLD_ARITY * EXTENSION_DEGREE;
+pub(crate) const OPENING_ROW_WIDTH: usize = FOLD_ARITY * EXTENSION_DEGREE;
 
 const MIN_NUM_QUERIES: usize = 2; // both domain boundaries
 

@@ -188,7 +188,7 @@ pub struct UintMulRequires {
 
 impl UintMulRequires {
     #[cfg(test)]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 

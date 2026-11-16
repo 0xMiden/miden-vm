@@ -86,6 +86,7 @@ pub struct DebugVarTracker {
     processed_up_to: RowIndex,
 }
 
+#[allow(dead_code)] // retained for test/feature-gated users
 impl DebugVarTracker {
     /// Create a new tracker using the given shared event store.
     pub fn new(events: DebugVarEvents) -> Self {
@@ -104,8 +105,9 @@ impl DebugVarTracker {
     pub fn current_invocation(&self) -> Option<InvocationId> {
         self.current_invocation
     }
+#[allow(dead_code)] // retained for test/feature-gated users
 
-    pub fn has_invocation(&self, invocation: InvocationId) -> bool {
+    pub(crate) fn has_invocation(&self, invocation: InvocationId) -> bool {
         self.invocations.contains_key(&invocation)
     }
 
@@ -121,7 +123,7 @@ impl DebugVarTracker {
 
     /// Observe the operation's owner and declarations before executing it. Only observed active
     /// invocations acquire variable state; recovered ancestors do not inherit a callee's locals.
-    pub fn observe_execution(
+    pub(crate) fn observe_execution(
         &mut self,
         live_ids: impl IntoIterator<Item = InvocationId>,
         current: Option<InvocationId>,
@@ -241,7 +243,8 @@ impl DebugVarTracker {
     }
 
     /// Record debug variable events after freezing transient stack-backed values.
-    pub fn record_events_with_stack(
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn record_events_with_stack(
         &self,
         clk: RowIndex,
         mut infos: Vec<DebugVarInfo>,

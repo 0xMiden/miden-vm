@@ -235,6 +235,7 @@ pub struct ProjectFile {
 
 /// Parsing
 #[cfg(feature = "serde")]
+#[allow(dead_code)] // retained for test/feature-gated users
 impl ProjectFile {
     /// Parse a [ProjectFile] from the provided TOML source file, generally `miden-project.toml`
     ///
@@ -272,8 +273,9 @@ impl ProjectFile {
 
         Ok(package)
     }
+#[allow(dead_code)] // retained for test/feature-gated users
 
-    pub fn get_or_inherit_version(
+    pub(crate) fn get_or_inherit_version(
         &self,
         source: Arc<SourceFile>,
         workspace: Option<&WorkspaceFile>,
@@ -309,8 +311,9 @@ impl ProjectFile {
             },
         }
     }
+#[allow(dead_code)] // retained for test/feature-gated users
 
-    pub fn get_or_inherit_description(
+    pub(crate) fn get_or_inherit_description(
         &self,
         source: Arc<SourceFile>,
         workspace: Option<&WorkspaceFile>,
@@ -335,8 +338,9 @@ impl ProjectFile {
             },
         }
     }
+#[allow(dead_code)] // retained for test/feature-gated users
 
-    pub fn extract_dependencies(
+    pub(crate) fn extract_dependencies(
         &self,
         source: Arc<SourceFile>,
         workspace: Option<&WorkspaceFile>,

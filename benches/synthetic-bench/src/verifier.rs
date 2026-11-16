@@ -17,15 +17,15 @@ use std::fmt::{self, Display};
 use crate::snapshot::TraceShape;
 
 /// Reporting tolerance for unpadded totals; never used for pass/fail.
-pub const PER_COMPONENT_TOLERANCE: f64 = 0.02;
+pub(crate) const PER_COMPONENT_TOLERANCE: f64 = 0.02;
 
 /// Result of comparing an emitted program's measured shape against the snapshot target.
 #[derive(Debug, Clone)]
 pub struct VerificationReport {
-    pub target: TraceShape,
-    pub actual: TraceShape,
-    pub total_deltas: Vec<ComponentDelta>,
-    pub breakdown_deltas: Vec<ComponentDelta>,
+    pub(crate) target: TraceShape,
+    pub(crate) actual: TraceShape,
+    pub(crate) total_deltas: Vec<ComponentDelta>,
+    pub(crate) breakdown_deltas: Vec<ComponentDelta>,
 }
 
 /// How a row-count entry participates in the verifier's reporting.
@@ -40,16 +40,16 @@ pub enum DeltaStatus {
 /// Per-row-count comparison.
 #[derive(Debug, Clone, Copy)]
 pub struct ComponentDelta {
-    pub name: &'static str,
-    pub target: u64,
-    pub actual: u64,
-    pub delta_pct: f64,
-    pub within_tolerance: bool,
-    pub status: DeltaStatus,
+    pub(crate) name: &'static str,
+    pub(crate) target: u64,
+    pub(crate) actual: u64,
+    pub(crate) delta_pct: f64,
+    pub(crate) within_tolerance: bool,
+    pub(crate) status: DeltaStatus,
 }
 
 impl VerificationReport {
-    pub fn new(target: TraceShape, actual: TraceShape) -> Self {
+    pub(crate) fn new(target: TraceShape, actual: TraceShape) -> Self {
         let total_rows: &[(&'static str, u64, u64, DeltaStatus)] = &[
             (
                 "core_rows",
@@ -106,7 +106,7 @@ impl VerificationReport {
     }
 
     /// True when all available padded proxies match their targets exactly.
-    pub fn brackets_match(&self) -> bool {
+    pub(crate) fn brackets_match(&self) -> bool {
         self.target.totals.padded_core() == self.actual.totals.padded_core()
             && self.target.totals.padded_and8_lookup() == self.actual.totals.padded_and8_lookup()
             && self.target.totals.padded_chiplets() == self.actual.totals.padded_chiplets()

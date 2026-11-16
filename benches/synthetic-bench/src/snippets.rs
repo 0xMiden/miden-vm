@@ -37,11 +37,11 @@ pub enum Component {
 pub struct Snippet {
     pub name: &'static str,
     /// Runs once, outside the `repeat.N ... end` block.
-    pub setup: &'static str,
+    pub(crate) setup: &'static str,
     /// Runs N times inside the repeat block. Must be stack-balanced.
-    pub body: &'static str,
+    pub(crate) body: &'static str,
     /// Runs once, outside the repeat block.
-    pub cleanup: &'static str,
+    pub(crate) cleanup: &'static str,
     /// The primary component this snippet drives.
     pub dominant: Component,
 }
@@ -83,14 +83,14 @@ pub const SNIPPETS: &[Snippet] = &[
 
 /// Look up a snippet by name. Only used by tests.
 #[cfg(test)]
-pub(crate) fn find(name: &str) -> Option<&'static Snippet> {
+fn find(name: &str) -> Option<&'static Snippet> {
     SNIPPETS.iter().find(|s| s.name == name)
 }
 
 /// Assemble a single snippet into a complete program body: the setup, followed by
 /// `repeat.iters body end`, followed by the cleanup. Returned text has no `begin`/`end` wrapping --
 /// caller composes multiple snippets.
-pub fn render(snippet: &Snippet, iters: u64) -> String {
+pub(crate) fn render(snippet: &Snippet, iters: u64) -> String {
     use std::fmt::Write;
     let mut out = String::new();
     if !snippet.setup.is_empty() {
@@ -108,7 +108,7 @@ pub fn render(snippet: &Snippet, iters: u64) -> String {
 }
 
 /// Wrap a snippet fragment into a complete executable program.
-pub fn wrap_program(body: &str) -> String {
+pub(crate) fn wrap_program(body: &str) -> String {
     format!("begin\n{body}end\n")
 }
 
@@ -125,7 +125,7 @@ const MEMORY_COUNTER_STRIDE: u64 = 262_148;
 const U32_MAX: u64 = u32::MAX as u64;
 
 /// Maximum iterations of `memory` before the address counter would exceed `u32::MAX`.
-pub fn memory_max_iters() -> u64 {
+pub(crate) fn memory_max_iters() -> u64 {
     (U32_MAX - MEMORY_COUNTER_START) / MEMORY_COUNTER_STRIDE
 }
 

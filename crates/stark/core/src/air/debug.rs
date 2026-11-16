@@ -34,7 +34,7 @@ use crate::air::{LiftedAir, LiftedAirBuilder, MultiAir, WindowAccess, log2_stric
 ///
 /// Panics on any violation. An empty [`MultiAir`] is a malformed trusted AIR
 /// definition, not a typed [`Statement::new`](crate::air::Statement::new) error.
-pub fn assert_multi_air_valid<F, EF, MA>(multi_air: &MA)
+pub(crate) fn assert_multi_air_valid<F, EF, MA>(multi_air: &MA)
 where
     F: Field,
     EF: ExtensionField<F>,

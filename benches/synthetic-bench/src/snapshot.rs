@@ -70,28 +70,28 @@ pub struct TraceBreakdown {
 /// In-memory bundle used by the solver and verifier; not serialized.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TraceShape {
-    pub totals: TraceTotals,
-    pub breakdown: TraceBreakdown,
+    pub(crate) totals: TraceTotals,
+    pub(crate) breakdown: TraceBreakdown,
 }
 
 impl TraceTotals {
     /// Padded power-of-two bracket for the core AIR.
-    pub fn padded_core(&self) -> u64 {
+    pub(crate) fn padded_core(&self) -> u64 {
         self.core_rows.next_power_of_two().max(MIN_TRACE_LEN)
     }
 
     /// Padded power-of-two bracket for the fixed And8 byte-pair lookup AIR.
-    pub fn padded_and8_lookup(&self) -> u64 {
+    pub(crate) fn padded_and8_lookup(&self) -> u64 {
         self.byte_pair_lookup_rows.next_power_of_two().max(MIN_TRACE_LEN)
     }
 
     /// Padded power-of-two bracket for the chiplets side of the trace.
-    pub fn padded_chiplets(&self) -> u64 {
+    pub(crate) fn padded_chiplets(&self) -> u64 {
         self.chiplets_rows.next_power_of_two().max(MIN_TRACE_LEN)
     }
 
     /// Padded power-of-two bracket for the Eidos compression trace.
-    pub fn padded_eidos_compression(&self) -> u64 {
+    pub(crate) fn padded_eidos_compression(&self) -> u64 {
         self.eidos_compression_rows.next_power_of_two().max(MIN_TRACE_LEN)
     }
 
@@ -110,7 +110,7 @@ impl TraceTotals {
 impl TraceBreakdown {
     /// Sum of all chiplet sub-traces plus the mandatory +1 padding row, matching
     /// `ChipletsLengths::trace_len` in the processor. Panics if the sum exceeds `u64`.
-    pub fn chiplets_sum(&self) -> u64 {
+    pub(crate) fn chiplets_sum(&self) -> u64 {
         self.checked_chiplets_sum().expect("chiplet row total overflow")
     }
 
@@ -124,7 +124,7 @@ impl TraceBreakdown {
     }
 
     /// Advisory memory-like rows: snapshot memory plus ACE and kernel ROM.
-    pub fn memory_target(&self) -> u64 {
+    pub(crate) fn memory_target(&self) -> u64 {
         self.memory_rows + self.kernel_rom_rows + self.ace_rows
     }
 
@@ -136,7 +136,7 @@ impl TraceBreakdown {
 }
 
 impl TraceShape {
-    pub fn new(totals: TraceTotals, breakdown: TraceBreakdown) -> Self {
+    pub(crate) fn new(totals: TraceTotals, breakdown: TraceBreakdown) -> Self {
         Self { totals, breakdown }
     }
 }

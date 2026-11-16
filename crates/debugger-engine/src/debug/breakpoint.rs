@@ -255,7 +255,7 @@ pub enum OperationMatcher {
 }
 
 impl OperationMatcher {
-    pub fn should_break_for(&self, op: &miden_core::operations::Operation) -> bool {
+    pub(crate) fn should_break_for(&self, op: &miden_core::operations::Operation) -> bool {
         use miden_core::operations::Operation;
         match self {
             Self::Asm(_) => false,

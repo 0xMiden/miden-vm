@@ -43,7 +43,7 @@ impl MemoryStorage {
     }
 
     /// Converts this storage into a read-only snapshot.
-    pub fn into_snapshot(self) -> MemoryStorageSnapshot {
+    pub(crate) fn into_snapshot(self) -> MemoryStorageSnapshot {
         MemoryStorageSnapshot(self)
     }
 }

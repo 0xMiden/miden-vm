@@ -106,7 +106,7 @@ pub struct LiftedMerkleTree<F, D, M, const DIGEST_ELEMS: usize, const SALT_ELEMS
     ///
     /// Openings read their rows from these matrices and rehash them to rebuild the digest
     /// layers the tree does not store.
-    pub(crate) leaves: Vec<M>,
+    leaves: Vec<M>,
 
     /// Stored hash layers (digest arrays) in top-down order: index 0 is the root (one hash).
     ///
@@ -114,13 +114,13 @@ pub struct LiftedMerkleTree<F, D, M, const DIGEST_ELEMS: usize, const SALT_ELEMS
     /// `digest_layers[d]` has `2^d` entries, so `digest_layers[node.depth()][node.position()]`
     /// gives direct access. The lowest `min(PRUNED_LAYERS, depth)` layers, leaf hashes included,
     /// are not stored; openings rebuild the parts they need from `leaves` and `salt`.
-    pub(crate) digest_layers: Vec<Vec<[D; DIGEST_ELEMS]>>,
+    digest_layers: Vec<Vec<[D; DIGEST_ELEMS]>>,
 
     /// Salt matrix for hiding commitment. Each row contains `SALT_ELEMS` random field elements.
     /// `None` when `SALT_ELEMS = 0` (non-hiding mode).
-    pub(crate) salt: Option<RowMajorMatrix<F>>,
+    salt: Option<RowMajorMatrix<F>>,
     /// Column alignment used for transcript proofs.
-    pub(crate) alignment: usize,
+    alignment: usize,
 }
 
 impl<F, D, M, const DIGEST_ELEMS: usize, const SALT_ELEMS: usize>

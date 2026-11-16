@@ -410,7 +410,7 @@ fn check_witness_packed(
 
     // compress_pending_buffer: an untagged compression only if the witness filled the buffer.
     if packed_len == BLOCK_LEN {
-        packed_cv = Eidos::compress_packed(packed_cv, packed_buffer);
+        packed_cv = Eidos::compress_packed(&packed_cv, &packed_buffer);
         packed_buffer = [[ZERO; PACKED_LANES]; BLOCK_LEN];
         packed_len = 0;
     }
@@ -418,7 +418,7 @@ fn check_witness_packed(
     // refill_output_word (Absorbing branch): tagged compression producing the fresh output word.
     let tag = transition_tag(packed_len);
     packed_cv[3] = packed_cv[3].map(|word| word + tag);
-    let output = Eidos::compress_packed(packed_cv, packed_buffer);
+    let output = Eidos::compress_packed(&packed_cv, &packed_buffer);
 
     // sample_felt then sample_bits: the first sample off a freshly refilled word is output[0].
     core::array::from_fn(|lane| (output[0][lane].as_canonical_u64() & mask) == 0)

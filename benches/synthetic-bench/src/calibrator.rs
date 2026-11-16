@@ -13,14 +13,14 @@ use crate::{
     snippets::{self, Component, SNIPPETS},
 };
 
-pub const CALIBRATION_ITERS: u64 = 1000;
+pub(crate) const CALIBRATION_ITERS: u64 = 1000;
 
 // MEASUREMENT
 // ------------------------------------------------------------------------
 
 /// Assemble and execute `source`, returning the shape of the resulting execution trace. Wraps
 /// assembler + fast processor + trace builder.
-pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
+pub(crate) fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
     let program = Assembler::default()
         .assemble_program("program", source)
         .map_err(|e| MeasurementError::Assembly(format!("{e}")))?
@@ -111,7 +111,7 @@ pub struct IterCost {
 }
 
 impl IterCost {
-    pub fn get(&self, component: Component) -> f64 {
+    pub(crate) fn get(&self, component: Component) -> f64 {
         match component {
             Component::Core => self.core,
             Component::EidosCompression => self.eidos_compression,

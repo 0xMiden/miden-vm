@@ -364,7 +364,8 @@ impl<S: SmtStorageReader> LargeSmt<S> {
     pub const EMPTY_ROOT: Word = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
 
     /// Subtree depths for the subtrees stored in storage.
-    pub const SUBTREE_DEPTHS: [u8; 6] = [56, 48, 40, 32, 24, 16];
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) const SUBTREE_DEPTHS: [u8; 6] = [56, 48, 40, 32, 24, 16];
 
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
@@ -492,7 +493,7 @@ impl<S: SmtStorageReader> LargeSmt<S> {
     }
 
     // Triggers copy-on-write: clones the shared node array only if other references exist.
-    pub(crate) fn in_memory_nodes_mut(&mut self) -> &mut [Word] {
+    fn in_memory_nodes_mut(&mut self) -> &mut [Word] {
         Arc::make_mut(&mut self.in_memory_nodes)
     }
 
@@ -521,7 +522,7 @@ impl<S: SmtStorageReader> LargeSmt<S> {
     // --------------------------------------------------------------------------------------------
 
     #[cfg(test)]
-    pub(crate) fn in_memory_nodes(&self) -> &[Word] {
+    fn in_memory_nodes(&self) -> &[Word] {
         &self.in_memory_nodes
     }
 }

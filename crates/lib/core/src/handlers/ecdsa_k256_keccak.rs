@@ -39,7 +39,7 @@ const SCALAR_LIMBS: usize = 8;
 /// must be word-aligned and address `R_LE_U32[8] || S_LE_U32[8] || V`, where `V` is 27 or 28. This
 /// native memory format is distinct from external EVM wire bytes, whose scalar components are
 /// fixed-width big-endian byte strings.
-pub fn handle_ecdsa_k256_keccak_recover(
+pub(crate) fn handle_ecdsa_k256_keccak_recover(
     process: &ProcessorState<'_>,
 ) -> Result<Vec<AdviceMutation>, EventError> {
     let digest_ptr = process.get_stack_item(1).as_canonical_u64();

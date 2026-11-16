@@ -32,7 +32,7 @@ pub(crate) const STATE_WIDTH: usize = 12;
 
 /// The rate portion of the state is located in elements 0 through 7.
 pub(crate) const RATE_RANGE: Range<usize> = 0..8;
-pub(crate) const RATE_WIDTH: usize = RATE_RANGE.end - RATE_RANGE.start;
+const RATE_WIDTH: usize = RATE_RANGE.end - RATE_RANGE.start;
 
 /// The first and second 4-element words of the rate portion.
 pub(crate) const RATE0_RANGE: Range<usize> = 0..4;

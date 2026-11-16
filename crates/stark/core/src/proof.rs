@@ -167,19 +167,22 @@ where
     /// [`from_data`](Self::from_data). Read its data through
     /// [`log_trace_heights`](Self::log_trace_heights) and
     /// [`air_order`](Self::air_order).
-    pub(crate) trace_order: TraceOrder,
+    trace_order: TraceOrder,
     /// Main trace commitment.
-    pub main_commit: L::Commitment,
+    pub(crate) main_commit: L::Commitment,
     /// Randomness sampled for auxiliary traces.
-    pub randomness: Vec<EF>,
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) randomness: Vec<EF>,
     /// Auxiliary trace commitment.
-    pub aux_commit: L::Commitment,
+    pub(crate) aux_commit: L::Commitment,
     /// Aux values per AIR instance, in the proof's AIR ordering.
     pub all_aux_values: Vec<Vec<EF>>,
     /// Constraint folding challenge alpha.
-    pub alpha: EF,
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) alpha: EF,
     /// AIR accumulation challenge beta.
-    pub beta: EF,
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) beta: EF,
     /// Quotient polynomial commitment.
     pub quotient_commit: L::Commitment,
     /// Out-of-domain evaluation point z.

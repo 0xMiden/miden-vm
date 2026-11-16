@@ -102,7 +102,7 @@ impl ExecutionTrace {
 
     /// Read the element at the given Miden memory address, under `ctx`, at cycle `clk`
     #[track_caller]
-    pub fn read_memory_element_in_context(
+    pub(crate) fn read_memory_element_in_context(
         &self,
         addr: u32,
         ctx: ContextId,
@@ -116,7 +116,8 @@ impl ExecutionTrace {
 
     /// Read a raw byte vector from `addr`, under `ctx`, at cycle `clk`, sufficient to hold a value
     /// of type `ty`
-    pub fn read_bytes_for_type_in_context(
+    #[allow(dead_code)] // retained for test/feature-gated users
+    pub(crate) fn read_bytes_for_type_in_context(
         &self,
         addr: NativePtr,
         ty: &miden_assembly_syntax::ast::types::Type,

@@ -75,7 +75,7 @@ impl SyntaxTestContext {
     /// This does not run semantic analysis, or construct a [Module] from the parsed
     /// forms, and is largely intended for low-level testing of the parser.
     #[track_caller]
-    pub fn parse_forms(&self, source: Arc<SourceFile>) -> Result<Vec<Form>, Report> {
+    pub(crate) fn parse_forms(&self, source: Arc<SourceFile>) -> Result<Vec<Form>, Report> {
         crate::parser::parse_forms(source)
     }
 
@@ -84,7 +84,7 @@ impl SyntaxTestContext {
     /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
     /// valid.
     #[track_caller]
-    pub fn parse_program(&self, source: &str) -> Result<Box<Module>, Report> {
+    pub(crate) fn parse_program(&self, source: &str) -> Result<Box<Module>, Report> {
         let mut parser = Module::parser(Some(ModuleKind::Executable));
         parser.set_warnings_as_errors(self.warnings_as_errors);
         parser.parse_str(Some(Path::EXEC), source, self.source_manager())
@@ -95,7 +95,7 @@ impl SyntaxTestContext {
     /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
     /// valid.
     #[track_caller]
-    pub fn parse_program_source_file(
+    pub(crate) fn parse_program_source_file(
         &self,
         source_file: Arc<SourceFile>,
     ) -> Result<Box<Module>, Report> {
@@ -109,6 +109,7 @@ impl SyntaxTestContext {
     /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
     /// valid.
     #[track_caller]
+    #[allow(dead_code)] // retained for test/feature-gated users
     pub fn parse_kernel(&self, source: &str) -> Result<Box<Module>, Report> {
         let mut parser = Module::parser(Some(ModuleKind::Kernel));
         parser.set_warnings_as_errors(self.warnings_as_errors);
@@ -131,7 +132,7 @@ impl SyntaxTestContext {
     /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
     /// valid.
     #[track_caller]
-    pub fn parse_module_source_file(
+    pub(crate) fn parse_module_source_file(
         &self,
         source_file: Arc<SourceFile>,
     ) -> Result<Box<Module>, Report> {

@@ -128,7 +128,7 @@ pub enum CachedConstantValue<'a> {
 }
 
 impl CachedConstantValue<'_> {
-    pub fn into_expr(self) -> ConstantExpr {
+    pub(crate) fn into_expr(self) -> ConstantExpr {
         match self {
             Self::Hit(value) => value.clone().into(),
             Self::Miss(expr) => expr.clone(),

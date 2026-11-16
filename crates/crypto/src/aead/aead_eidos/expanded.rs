@@ -60,7 +60,7 @@ pub fn derive_mac_key(key: Word, nonce: Word) -> Word {
 ///
 /// The compression block is `[counter, 0, 0, 0, 0, 0, 0, 0]`, and all sixteen XOF lanes form the
 /// keystream block.
-pub fn keystream_block(ctr_key: Word, counter: u32) -> [u32; 16] {
+pub(crate) fn keystream_block(ctr_key: Word, counter: u32) -> [u32; 16] {
     let mut counter_block = [Felt::ZERO; 8];
     counter_block[0] = Felt::from_u32(counter);
 
@@ -194,7 +194,7 @@ pub fn auth_tag_expanded(
 /// Panics if the plaintext requires more than `2^32` counter blocks, if the expanded ciphertext
 /// length overflows `usize`, or if the padded MAC input exceeds
 /// [`MAX_AUTHENTICATED_INPUT_FELTS`].
-pub fn encrypt_felts_expanded_authenticated(
+pub(crate) fn encrypt_felts_expanded_authenticated(
     key: Word,
     nonce: Word,
     associated_data: &[Felt],
@@ -217,7 +217,7 @@ pub fn encrypt_felts_expanded_authenticated(
 ///
 /// Returns `None` without producing plaintext if the input lengths or limbs are invalid, or if the
 /// supplied tag does not match `(key, nonce, associated_data, ciphertext)`.
-pub fn decrypt_felts_expanded_authenticated(
+pub(crate) fn decrypt_felts_expanded_authenticated(
     key: Word,
     nonce: Word,
     associated_data: &[Felt],
