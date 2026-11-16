@@ -2,14 +2,13 @@
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{Algebra, BasedVectorSpace, PrimeCharacteristicRing};
-use miden_stark::air::{self, AirKernel};
+use miden_stark::air::{
+    self, AirKernel, Assertion,
+    symbolic::{AuxInput, BaseInput, ExprView},
+};
 use p3_field::{PackedField, PackedValue};
 
 use crate::ir::{CapturedProgram, Graph, Leaf, Node, OpKind};
-use miden_stark::air::{
-    Assertion,
-    symbolic::{AuxInput, BaseInput, ExprView},
-};
 
 /// Degree of every assertion in each class, preserving its local order. This
 /// uses the builder's symbolic degree rules independently of the optimizer IR.
@@ -37,9 +36,7 @@ fn assertion_degrees(captured: air::Capture<Felt, QuadFelt>) -> [Vec<usize>; 2] 
     for assertion in captured.assertions {
         match assertion {
             air::Assertion::Base(expression) => classes[0].push(expression.degree_multiple()),
-            air::Assertion::Extension(expression) => {
-                classes[1].push(expression.degree_multiple())
-            },
+            air::Assertion::Extension(expression) => classes[1].push(expression.degree_multiple()),
         }
     }
     classes

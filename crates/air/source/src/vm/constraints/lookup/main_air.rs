@@ -78,7 +78,8 @@ impl<'a, E> MainBusContext<'a, E> {
 /// range checks + log-deferred capacity + range-table response; the second unions block-hash queue
 /// and op-group table; the third hosts the decoder's chiplet requests and U32DIV remainder-bound
 /// range checks; the fourth hosts the stack overflow table. The chiplet-trace half of the argument
-/// lives in [`super::chiplet_air::ChipletLookupAir`].
+/// is emitted by [`super::chiplet_air::emit_chiplet_lookup_columns`] for
+/// [`crate::vm::ChipletsAir`].
 #[derive(Copy, Clone, Debug, Default)]
 pub(crate) struct MainLookupAir;
 

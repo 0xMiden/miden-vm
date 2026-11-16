@@ -209,10 +209,19 @@ impl DegreeProfile {
 
     /// Derive a sound quotient capacity for this actual trace height.
     ///
+    /// Trace cells and boundary selectors have degree `height - 1`, transition has degree one,
+    /// and a periodic column of period `p` has degree `height - height/p`; uniform inputs have
+    /// zero.
+    ///
     /// If the numerator degree is `d`, division by the degree-`n` vanishing polynomial requires
     /// chunk count `D` with `D*n > d-n`. Equivalently, round
     /// `max(1, ceil(max(0,d-(n-1))/n))` up to a power of two. The ceiling below avoids the usual
     /// potentially overflowing `value + divisor - 1` expression.
+    ///
+    /// # Errors
+    /// Returns [`AnalysisError::InvalidHeight`] for unsupported heights,
+    /// [`AnalysisError::IncompatiblePeriod`] for incompatible periods, and
+    /// [`AnalysisError::Overflow`] for unrepresentable degree arithmetic or chunk counts.
     pub fn at_height(&self, height: usize) -> Result<DegreeBound, AnalysisError> {
         if height < 2 || !height.is_power_of_two() {
             return Err(AnalysisError::InvalidHeight { height });

@@ -5,10 +5,11 @@
 
 use std::{collections::HashMap, fmt::Write as _};
 
-use crate::ir::{CapturedProgram, Class, Leaf, Node, OpKind, index::ExpressionIndex};
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::BasedVectorSpace;
 use miden_stark::air::symbolic::{AuxInput, BaseInput, ExprView};
+
+use crate::ir::{CapturedProgram, Class, Leaf, Node, OpKind, index::ExpressionIndex};
 
 mod plan;
 mod products;
@@ -309,6 +310,10 @@ pub struct AirEvaluator<'a> {
 /// regions to the scalar optimizer. Products, powers, and linear combinations
 /// retain their structured operation boundaries.
 ///
+/// Preparation is generic over `B: Algebra<Felt>` and `E: Algebra<B>`; row emission uses the
+/// builder's corresponding expression types. These bounds provide only base-algebra embeddings,
+/// so extension literals must be representable through the base algebra.
+///
 /// # Panics
 /// Panics if source roots, classes, global positions, or addresses disagree with the descriptor,
 /// the capture violates its domain/arity invariants, or an extension constant is unavailable
@@ -549,8 +554,10 @@ impl Preparation {
     }
 }
 
-// A native scheduling recipe only: operands remain references to the original source index.
-// Exact ordered IDs include Neg nodes, so opposite signs and source domains cannot alias.
+/// Schedule ordered, typed sum fragments of at most [`MAX_TERMS`] operands.
+/// Production row fragments become eligible after two observed occurrences; uniform extension
+/// fragments may be prepared from one. Operands remain source references, including signs and
+/// domains, while unmatched runs remain available to normal arithmetic and dot planning.
 fn sum_fragments(
     graph: &ExpressionIndex<'_>,
     materialized: &[usize],
@@ -1304,8 +1311,9 @@ mod tests {
     fn descriptor(
         assertions: &[Assertion<Felt, QuadFelt>],
     ) -> miden_stark::air::AirDescriptor<Felt> {
-        use miden_stark::air::{self, LiftedAirBuilder};
         use std::borrow::Cow;
+
+        use miden_stark::air::{self, LiftedAirBuilder};
 
         let index = ExpressionIndex::new(assertions);
         let mut spec = air::AirSpec {

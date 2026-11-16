@@ -81,7 +81,7 @@ const PRUNED_LAYERS: usize = 4;
 /// ## Transcript Hints
 ///
 /// `prove_batch` streams exact transcript hints in the format expected by
-/// [`Lmcs::open_batch`](crate::lmcs::Lmcs::open_batch):
+/// [`Lmcs::open_batch`]:
 /// - For each unique tree index **in sorted tree index order** (ascending, deduplicated): one row
 ///   per committed matrix (in committed matrix order), then `SALT_ELEMS` field elements of salt.
 /// - Each row is padded with explicit zeros to the LMCS alignment. This allows verifiers to absorb
@@ -110,7 +110,7 @@ pub struct LiftedMerkleTree<F, D, M, const DIGEST_ELEMS: usize, const SALT_ELEMS
 
     /// Stored hash layers (digest arrays) in top-down order: index 0 is the root (one hash).
     ///
-    /// This matches the top-down depth convention of [`NodeId`](crate::lmcs::node_id::NodeId):
+    /// This matches the top-down depth convention of [`NodeId`]:
     /// `digest_layers[d]` has `2^d` entries, so `digest_layers[node.depth()][node.position()]`
     /// gives direct access. The lowest `min(PRUNED_LAYERS, depth)` layers, leaf hashes included,
     /// are not stored; openings rebuild the parts they need from `leaves` and `salt`.

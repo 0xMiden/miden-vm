@@ -22,7 +22,9 @@ pub struct ConstraintMeta<'a> {
 ///
 /// The sink has no trace windows or concrete extension field. Expressions may be non-`Copy`.
 /// Every emission is significant, including duplicates and assertions gated by zero; consumers
-/// must preserve its class and global position. Diagnostic metadata never changes the relation.
+/// must preserve its class and global position. Array helpers emit each obligation independently
+/// in element order; they do not combine residuals into a single constraint. Diagnostic metadata
+/// never changes the relation.
 pub trait LiftedAirBuilder: Sized {
     type F: Field;
     type Expr: Algebra<Self::F>;
@@ -52,18 +54,21 @@ pub trait LiftedAirBuilder: Sized {
         self.assert_zero(value.bool_check());
     }
 
+    /// Apply [`Self::assert_bool`] independently to each element, in element order.
     fn assert_bools<const N: usize, I: Into<Self::Expr>>(&mut self, values: [I; N]) {
         for value in values {
             self.assert_bool(value);
         }
     }
 
+    /// Emit one base zero assertion per element, preserving element order.
     fn assert_zeros<const N: usize, I: Into<Self::Expr>>(&mut self, values: [I; N]) {
         for value in values {
             self.assert_zero(value);
         }
     }
 
+    /// Assert `left[i] == right[i]` independently in the base class, in increasing index order.
     fn assert_eq_arrays<const N: usize, I: Into<Self::Expr>, J: Into<Self::Expr>>(
         &mut self,
         left: [I; N],
@@ -86,12 +91,15 @@ pub trait LiftedAirBuilder: Sized {
         self.assert_eq_ext(value, Self::ExtExpr::ONE);
     }
 
+    /// Emit one extension zero assertion per element, preserving element order.
     fn assert_zeros_ext<const N: usize, I: Into<Self::ExtExpr>>(&mut self, values: [I; N]) {
         for value in values {
             self.assert_zero_ext(value);
         }
     }
 
+    /// Assert `left[i] == right[i]` independently in the extension class, in increasing index
+    /// order.
     fn assert_eq_ext_arrays<const N: usize, I: Into<Self::ExtExpr>, J: Into<Self::ExtExpr>>(
         &mut self,
         left: [I; N],
@@ -102,6 +110,10 @@ pub trait LiftedAirBuilder: Sized {
         }
     }
 
+    /// Multiply every base or extension residual by `condition`, retaining its class and position.
+    ///
+    /// A zero condition still emits every assertion, and nested conditions multiply. This method
+    /// adds no Boolean constraint on the condition.
     fn when<I: Into<Self::Expr>>(&mut self, condition: I) -> Filtered<'_, Self> {
         Filtered { inner: self, condition: condition.into() }
     }

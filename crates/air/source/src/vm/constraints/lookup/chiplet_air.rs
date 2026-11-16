@@ -32,8 +32,13 @@ use crate::vm::{
 // NATIVE CHIPLET LOOKUP BUILDER
 // ================================================================================================
 
-/// Activity construction over immutable expression rows. Explicit adapter implementations preserve
+/// Extension of [`lookup::LookupBuilder`] required by the chiplet trace's
+/// [`lookup::LookupAir`] declarations.
+///
+/// Activity construction uses immutable expression rows. Explicit adapter implementations preserve
 /// the source-specific override seam; the concrete prover uses the same polynomial default.
+/// This hook builds one shared [`ChipletActiveFlags`] snapshot for the four chiplet-trace bus
+/// emitters, like [`super::main_air::NativeMainLookupBuilder`] does for main-trace flags.
 pub(crate) trait NativeChipletLookupBuilder: lookup::LookupBuilder<F = Felt> {
     fn build_chiplet_active(
         &self,
@@ -82,7 +87,8 @@ pub(crate) const CHIPLET_COLUMN_SHAPE: [usize; 4] = [
 
 /// Emit the chiplet-trace LogUp columns.
 ///
-/// Driven by `ChipletsAir`'s [`LookupAir`] impl.
+/// Used by [`crate::vm::ChipletsAir`] during source evaluation and by the
+/// [`lookup::LookupAir`] dispatch on [`crate::vm::MidenAir`].
 pub(crate) fn emit_chiplet_lookup_columns<LB: NativeChipletLookupBuilder>(
     frame: &lookup::LookupFrame<'_, LB::Expr>,
     builder: &mut LB,

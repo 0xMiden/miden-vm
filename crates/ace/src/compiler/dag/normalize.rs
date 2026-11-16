@@ -3,12 +3,11 @@
 use std::collections::{HashMap, HashSet};
 
 use miden_crypto::field::Field;
+#[cfg(any(test, feature = "testing"))]
+pub use products::{ProductSharing, with_product_sharing};
 
 use super::{AceDag, DagBuilder, NodeId, NodeKind, ir::DagId};
 use crate::{compiler::encode::StreamGeometry, encode::BASE_FELTS_PER_EF};
-
-#[cfg(any(test, feature = "testing"))]
-pub use products::{ProductSharing, with_product_sharing};
 
 /// Normalize identities that depend on final node fanout.
 ///
@@ -125,9 +124,10 @@ fn rebuild<EF: Field>(planned: &[NodeKind<EF>], root: NodeId) -> AceDag<EF> {
     // A reused pair can be discovered after its consumer. Rebuild in dependency order rather
     // than source order. Every replacement dependency has strictly smaller fully expanded
     // original expression-tree size than its parent: a rotation removes one positive-size term,
-    // factor extraction removes the duplicated factor, and sum fragments contain only proper parts of their owning region. This is a well-founded rank even
-    // with shared nodes, so planned rewrites cannot introduce a cycle. The iterative traversal
-    // also keeps deep constraint folds off the Rust call stack.
+    // factor extraction removes the duplicated factor, and sum fragments contain only proper parts
+    // of their owning region. This is a well-founded rank even with shared nodes, so planned
+    // rewrites cannot introduce a cycle. The iterative traversal also keeps deep constraint
+    // folds off the Rust call stack.
     let mut builder = DagBuilder::new();
     let mut mapped: Vec<Option<NodeId>> = vec![None; planned.len()];
     let mut stack = vec![root.index()];
@@ -361,7 +361,7 @@ fn stream_cost<EF: Field>(dag: &AceDag<EF>) -> (usize, usize) {
                 constants.insert(EF::ZERO);
                 operations += 1;
             },
-            NodeKind::Add(_, _) | NodeKind::Sub(_, _) | NodeKind::Mul(_, _) => operations += 1,
+            NodeKind::Add(..) | NodeKind::Sub(..) | NodeKind::Mul(..) => operations += 1,
         }
     }
     if operations == 0 && constants.is_empty() {
@@ -583,6 +583,10 @@ mod products {
     /// Factor order is canonical only inside these arithmetic regions. Negation, sums and shared
     /// multiplication nodes are atoms. Replacing factors with their product preserves arbitrary
     /// extension-field inputs; no Boolean/selector or witness assumptions are used.
+    ///
+    /// Accept the rebuilt DAG only when it has fewer nodes and a lower lexicographic
+    /// `(aligned stream felts, raw EVAL operations)` cost. Equal stream sizes require fewer
+    /// operations; a smaller stream may trade against the operation count.
     pub(super) fn share_product_fragments<EF: Field>(
         dag: AceDag<EF>,
         mode: ProductSharing,

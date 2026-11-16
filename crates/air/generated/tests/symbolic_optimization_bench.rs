@@ -1,4 +1,16 @@
 //! Manual release-mode row evaluator and ACE size comparison.
+//!
+//! `MIDEN_FOLD_POLICIES` selects generated alternatives at build time. Runtime sample counts use
+//! `MIDEN_EVAL_ITERATIONS` and `MIDEN_EVAL_REPEATS`. The folding comparison prepares both sessions
+//! before timing, shares inputs and output allocation, warms both evaluators, alternates timed
+//! order, and reports scalar and packed calls separately. Build first, then run the executable:
+//!
+//! ```sh
+//! MIDEN_FOLD_POLICIES=production,cancel cargo test --release -p miden-air \
+//!   --features symbolic-experiments --test symbolic_optimization_bench --no-run
+//! MIDEN_EVAL_ITERATIONS=16384 MIDEN_EVAL_REPEATS=11 \
+//!   /path/to/built-test --ignored --exact folding_variants --nocapture
+//! ```
 use miden_ace::compiler::{CapturedAir, CompiledRelation, LayoutKind};
 use miden_air::{precompiles::ChipletAir, vm::AIRS};
 use miden_core::field::QuadFelt;
@@ -54,10 +66,9 @@ fn run<A: miden_stark::air::AirKernel<F = miden_core::Felt>>(
     if repeat == 0 {
         for seed in [0, 42, u64::MAX] {
             if group == "vm" {
-                let source = miden_stark::air::DirectKernel::new(
-                    miden_air_definitions::vm::AIRS[index],
-                )
-                .unwrap();
+                let source =
+                    miden_stark::air::DirectKernel::new(miden_air_definitions::vm::AIRS[index])
+                        .unwrap();
                 miden_constraint_compiler::testing::assert_concrete_evaluations_equal(
                     &source, air, seed,
                 );

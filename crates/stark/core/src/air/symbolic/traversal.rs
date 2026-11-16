@@ -1,7 +1,9 @@
 //! Borrowed inspection and memoized traversal of the shared symbolic representation.
-use super::{AuxInput, BaseInput, ExpressionDomain, ExpressionError, Op, RawExpr};
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+
 use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
+
+use super::{AuxInput, BaseInput, ExpressionDomain, ExpressionError, Op, RawExpr};
 
 /// A borrowed expression independent of its compile-time domain marker.
 #[derive(Debug)]
@@ -89,6 +91,7 @@ pub enum ExprView<'a, F, EF> {
         power_log: usize,
     },
     /// Multiply by `2^exponent`; negative exponents divide by powers of two.
+    /// The magnitude is at most `u64::MAX`; negative exponents require invertible two.
     ScalePow2 {
         x: ExprRef<'a, F, EF>,
         exponent: i128,
@@ -109,6 +112,7 @@ impl<'a, F, EF> ExprRef<'a, F, EF> {
             _ => None,
         }
     }
+    /// Return the structural diagnostic described by [`super::Expr::degree_multiple`].
     pub fn degree_multiple(self) -> usize {
         self.raw.degree_multiple()
     }
@@ -210,6 +214,11 @@ impl<'a, F, EF> ExprRef<'a, F, EF> {
         })
         .expect("symbolic degree overflow")
     }
+    /// Compute a diagnostic structural degree bound from a height and periodic lengths.
+    ///
+    /// Missing periods default to `trace_len`; larger periods are clamped to it. This helper
+    /// checks degree arithmetic, not AIR dimensions or periodic compatibility. Runtime quotient
+    /// capacity uses the descriptor's [`crate::air::DegreeProfile`].
     pub fn checked_poly_degree(
         self,
         trace_len: usize,

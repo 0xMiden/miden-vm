@@ -4,11 +4,10 @@
 //!
 //! ## Organization
 //!
-//! - **Main trace constraints** are evaluated by [`enforce_main`] and cover system / stack /
-//!   decoder / chiplets transitions.
-//! - **LogUp lookup-argument constraints** are evaluated separately through the closure-based
-//!   `LookupAir` impls on the per-trace AIRs, wired in from each AIR's `eval` via
-//!   [`miden_stark::lookup::ConstraintLookupBuilder`].
+//! - **Main trace constraints** use [`enforce_core`] and [`enforce_chiplets`], covering system,
+//!   stack, decoder, and chiplet transitions.
+//! - **LogUp lookup-argument constraints** use the declarations selected by [`crate::vm::MidenAir`]
+//!   and are wired into each AIR's `eval` through [`miden_stark::lookup::ConstraintLookupBuilder`].
 
 use chiplets::selectors::ChipletSelectors;
 use miden_stark::air::Frame;

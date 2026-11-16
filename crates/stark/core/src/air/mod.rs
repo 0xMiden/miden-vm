@@ -5,6 +5,11 @@
 //! inputs. [`MultiAir`] defines the trusted collection and cross-AIR hooks; [`Statement`] and
 //! [`ProverStatement`] validate each proof's caller inputs and main traces. Fixed matrices are
 //! constructed by setup, not by source capture or row evaluation.
+//!
+//! [`AirKernel`] executes the relation through an [`EvaluationSession`] and can prepare uniform
+//! expressions once. [`Frame`] and [`Inputs`] borrow expression values independently of the
+//! [`LiftedAirBuilder`] assertion sink. Checked capture entrypoints construct symbolic inputs and
+//! descriptors; [`symbolic`] owns their algebra and borrowed inspection.
 
 mod analysis;
 mod builder;

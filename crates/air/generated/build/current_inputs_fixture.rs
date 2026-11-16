@@ -3,9 +3,7 @@
 use std::borrow::Cow;
 
 use miden_core::Felt;
-use miden_stark::air::{
-    AirSpec, Frame, Inputs, LiftedAir, LiftedAirBuilder, PreprocessedSpec,
-};
+use miden_stark::air::{AirSpec, Frame, Inputs, LiftedAir, LiftedAirBuilder, PreprocessedSpec};
 use p3_field::{Dup, PrimeCharacteristicRing};
 
 #[derive(Clone, Copy, Debug)]

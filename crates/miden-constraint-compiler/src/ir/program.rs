@@ -469,9 +469,7 @@ impl Lowering<'_> {
 #[cfg(test)]
 mod tests {
     use miden_crypto::field::Algebra;
-    use miden_stark::air::symbolic::{
-        RowOffset, SymbolicExpression, SymbolicExpressionExt,
-    };
+    use miden_stark::air::symbolic::{RowOffset, SymbolicExpression, SymbolicExpressionExt};
 
     use super::*;
     use crate::{

@@ -55,7 +55,7 @@ pub const AND8_LOOKUP_TRACE_HEIGHT: usize = 1 << LOG_AND8_LOOKUP_TRACE_HEIGHT;
 /// Dynamic byte-pair table columns.
 ///
 /// The six relation multiplicities follow
-/// [`BytePairRelation`](crate::vm::trace::and8_lookup::BytePairRelation)'s discriminant order. The
+/// [`BytePairRelation`]'s discriminant order. The
 /// final column serves the `RangeCheck` bus by interpreting `(a, b)` as `256 * a + b`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]

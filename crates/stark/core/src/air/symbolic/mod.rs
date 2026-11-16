@@ -49,12 +49,12 @@ use core::{
     marker::PhantomData,
     ops,
 };
-use p3_field::{Algebra, Dup, ExtensionField, Field, InjectiveMonomial, PrimeCharacteristicRing};
-use serde::{Deserialize, Serialize};
 
 pub use expression::SymbolicExpression;
 pub use expression_ext::SymbolicExpressionExt;
 pub use input::{AuxInput, BaseInput, RowOffset};
+use p3_field::{Algebra, Dup, ExtensionField, Field, InjectiveMonomial, PrimeCharacteristicRing};
+use serde::{Deserialize, Serialize};
 pub use traversal::{ExprChildren, ExprList, ExprRef, ExprView};
 
 /// Source algebra of an expression. Base polynomials may evaluate in an extension at OOD points.
@@ -365,6 +365,9 @@ impl<F: Field, EF: ExtensionField<F>, D: Domain> Expr<F, EF, D> {
         Arc::get_mut(node).expect("test operation is uniquely owned").degree_multiple = degree;
     }
 
+    /// Return the cached structural degree multiple, independent of trace height.
+    /// Executable quotient capacity is checked through the descriptor's
+    /// [`crate::air::DegreeProfile`] at the actual height.
     pub fn degree_multiple(&self) -> usize {
         self.raw.degree_multiple()
     }
@@ -374,6 +377,7 @@ impl<F: Field, EF: ExtensionField<F>, D: Domain> Expr<F, EF, D> {
     pub fn poly_degree(&self, trace_len: usize, periodic_periods: &[usize]) -> usize {
         self.as_ref().poly_degree(trace_len, periodic_periods)
     }
+    /// Apply the diagnostic leaf rules of [`ExprRef::checked_poly_degree`], checking overflow.
     pub fn checked_poly_degree(
         &self,
         trace_len: usize,

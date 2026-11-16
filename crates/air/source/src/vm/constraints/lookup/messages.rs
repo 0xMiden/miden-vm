@@ -1,7 +1,7 @@
 //! Message structs for LogUp bus interactions.
 //!
-//! Each struct represents a reduced denominator encoding: `α + Σ βⁱ · field_i`.
-//! Fields are named for readability; the [`super::lookup::LookupMessage`] trait
+//! Each struct encodes a reduced denominator: `bus_prefix[bus] + Σ βⁱ · field_i`.
+//! Fields are named for readability; the [`LookupMessage`] trait
 //! (implemented further down in this file) provides the `encode` method that
 //! produces the extension-field value.
 //!

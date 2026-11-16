@@ -205,8 +205,8 @@ fn multi_air_ace_circuit_has_aligned_trace_regions_and_per_air_slots() {
 fn assert_ace_matches_authored<A: LiftedAir<F = Felt>>(air: &A, label: &str) {
     const SEEDS: [u64; 4] =
         [0x243f6a8885a308d3, 0x13198a2e03707344, 0xa4093822299f31d0, 0x082efa98ec4e6c89];
-    let captured = miden_stark::air::capture_with::<_, QuadFelt>(air)
-        .expect("checked authored source");
+    let captured =
+        miden_stark::air::capture_with::<_, QuadFelt>(air).expect("checked authored source");
     let constraint_layout = captured.descriptor.analysis().layout();
     let spec = air.spec();
     for layout_kind in [LayoutKind::Native, LayoutKind::Masm] {

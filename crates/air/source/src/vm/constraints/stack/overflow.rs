@@ -26,7 +26,7 @@
 //!    - On right shift: b1' = clk (record when an item was pushed)
 //!    - On CALL/SYSCALL/DYNCALL: b1' = 0 (start with an empty overflow table)
 //!    - On operations which do not modify or restore the overflow table: b1' = b1
-//!    - On a left shift or DYNCALL at depth 16: stack[15]' = 0
+//!    - On a left shift or DYNCALL at depth 16: `stack[15]' = 0`
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_stark::air::{Frame, LiftedAirBuilder};
@@ -151,7 +151,7 @@ fn enforce_stack_depth_constraints<AB>(
 /// 1. On a right shift: b1' = clk (record the clock cycle of the overflow row)
 /// 2. On CALL/SYSCALL/DYNCALL: b1' = 0 (start the new context with no overflow)
 /// 3. On operations which do not modify or restore the overflow table: b1' = b1
-/// 4. When position 15 must be refilled at depth 16: stack[15]' = 0
+/// 4. When position 15 must be refilled at depth 16: `stack[15]' = 0`
 fn enforce_overflow_index_constraints<AB>(
     frame: &Frame<'_, AB>,
     builder: &mut AB,

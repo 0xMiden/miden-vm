@@ -116,7 +116,7 @@ pub const SLOT_IOTA: usize = 103;
 /// `state[idx] = lane at SLOT_CHI_XOR_BEGIN + idx − 1`.
 pub const SLOT_CHI_XOR_BEGIN: usize = 104;
 
-/// Slot of the C[x] output (the last step of x's linear parity fold).
+/// Slot of the `C[x]` output (the last step of x's linear parity fold).
 const fn slot_c(x: usize) -> usize {
     SLOT_C_BEGIN + 4 * x + 3
 }
@@ -126,7 +126,7 @@ const fn slot_d_rol(x: usize) -> usize {
     SLOT_D_ROL_BEGIN + x
 }
 
-/// Slot of D[x] (D-XOR output).
+/// Slot of `D[x]` (D-XOR output).
 const fn slot_d(x: usize) -> usize {
     SLOT_D_XOR_BEGIN + x
 }
@@ -144,7 +144,7 @@ const fn slot_lane_prev(x: usize, y: usize) -> usize {
     }
 }
 
-/// Slot of B[x][y] (the ρπ-rotated value for output lane (x, y)) in
+/// Slot of `B[x][y]` (the ρπ-rotated value for output lane (x, y)) in
 /// the current round.
 ///
 /// **Convention**: the index `(x, y)` is the *post-π* lane position.
@@ -192,7 +192,7 @@ const fn pi_inverse(out_x: usize, out_y: usize) -> (usize, usize) {
     ((3 * out_y + out_x) % 5, out_x)
 }
 
-/// Slot of t[x][y] (the χ ANDNOT output for lane (x, y)).
+/// Slot of `t[x][y]` (the χ ANDNOT output for lane (x, y)).
 const fn slot_t(x: usize, y: usize) -> usize {
     SLOT_CHI_ANDNOT_BEGIN + (x + 5 * y)
 }

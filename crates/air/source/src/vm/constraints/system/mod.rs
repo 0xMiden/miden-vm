@@ -5,7 +5,7 @@
 //!
 //! ## System Columns
 //!
-//! - `clk`: VM execution clock (clk[0] = 0, clk' = clk + 1)
+//! - `clk`: VM execution clock (`clk[0] = 0`, `clk' = clk + 1`)
 //! - `ctx`: Execution context ID (determines memory context isolation)
 //! - `fn_hash` (four elements): Current function digest (identifies executing procedure)
 //!

@@ -127,6 +127,10 @@ impl<'a> ExpressionIndex<'a> {
     pub(crate) fn challenge_dependencies(&self) -> Vec<bool> {
         self.preparation_dependencies(false)
     }
+    /// Mark computations independent of the row: constants, public values, challenges and exports.
+    /// Trace values, including preprocessed columns, periodic values and row selectors remain
+    /// row-dependent. Eligibility follows dependencies rather than degree; this classification
+    /// does not itself assign preparation slots.
     pub(crate) fn uniform_dependencies(&self) -> Vec<bool> {
         self.preparation_dependencies(true)
     }
@@ -260,9 +264,10 @@ pub(crate) fn left_flattenable_sum_identities(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use miden_crypto::field::PrimeCharacteristicRing;
     use miden_stark::air::symbolic::{RowOffset, SymbolicExpression, SymbolicExpressionExt};
+
+    use super::*;
 
     type B = SymbolicExpression<Felt, QuadFelt>;
     type E = SymbolicExpressionExt<Felt, QuadFelt>;

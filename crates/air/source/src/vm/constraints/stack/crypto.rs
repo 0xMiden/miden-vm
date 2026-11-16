@@ -133,10 +133,12 @@ fn enforce_aead_stream_constraints<AB>(
 /// The constraints below bind those helpers to the expected Horner steps.
 ///
 /// Stack layout:
+/// ```text
 ///   s[0..8]    c0..c7       base-field coefficients (c0 = alpha^7 term, c7 = constant)
 ///   s[8..13]   (unused)     not affected by this operation
 ///   s[13]      alpha_ptr    address of the word [alpha0, alpha1, 0, 0]
 ///   s[14..16]  (acc0, acc1) accumulator (quadratic extension element)
+/// ```
 ///
 /// Preservation of s[0..14] is enforced by the general stack transition constraints
 /// (HORNERBASE is a no-shift op at depths 0..14); only the accumulator update is
@@ -204,6 +206,7 @@ fn enforce_hornerbase_constraints<AB>(
 /// so only alpha^2 is needed.
 ///
 /// Stack layout:
+/// ```text
 ///   s[0..2]    (c0_0, c0_1)  highest-degree coefficient (alpha^3 term)
 ///   s[2..4]    (c1_0, c1_1)  alpha^2 term
 ///   s[4..6]    (c2_0, c2_1)  alpha term
@@ -211,6 +214,7 @@ fn enforce_hornerbase_constraints<AB>(
 ///   s[8..13]   (unused)       not affected by this operation
 ///   s[13]      alpha_ptr      address of the word [alpha0, alpha1, 0, 0]
 ///   s[14..16]  (acc0, acc1)   accumulator (quadratic extension element)
+/// ```
 ///
 /// Helper registers:
 ///   h[0..2]    (alpha0, alpha1) evaluation point
@@ -304,6 +308,7 @@ fn enforce_hornerext_constraints<AB>(
 /// ## Register map
 ///
 /// Input stack (current trace row):
+/// ```text
 ///   s[0..2]    (q0_0, q0_1)  leaf value q0
 ///   s[2..4]    (q2_0, q2_1)  leaf value q2
 ///   s[4..6]    (q1_0, q1_1)  leaf value q1
@@ -314,8 +319,10 @@ fn enforce_hornerext_constraints<AB>(
 ///   s[11..13]  prev_eval     previous layer's folded value (for consistency check)
 ///   s[13..15]  (alpha0, alpha1) verifier challenge for this FRI layer
 ///   s[15]      layer_ptr     memory address of current FRI layer data
+/// ```
 ///
 /// Output stack (next trace row; first 8 positions are degree-reduction intermediates):
+/// ```text
 ///   s'[0..2]   fold_mid0       first fold2 intermediate result
 ///   s'[2..4]   fold_mid1       second fold2 intermediate result
 ///   s'[4..7]   coset_flag[1..3]  nonzero natural coset flags
@@ -326,12 +333,15 @@ fn enforce_hornerext_constraints<AB>(
 ///   s'[11]     folded_pos        copied from input
 ///   s'[12..14] fold_result       final fold4 output
 ///   s'[14]     layer_ptr + 8     copy used by the next fold input
+/// ```
 ///
 /// Helper registers (nondeterministic, provided by prover):
+/// ```text
 ///   h[0..2]    eval_point        folding parameter = alpha / domain_point
 ///   h[2..4]    eval_point_sq     eval_point^2 (for the final fold2 round)
 ///   h[4]       domain_point      x = poe * tau_factor
 ///   h[5]       domain_point_inv  1/x
+/// ```
 ///
 /// Fold4 pairs conjugate points: (q0, q2) and (q1, q3).
 fn enforce_frie2f4_constraints<AB>(

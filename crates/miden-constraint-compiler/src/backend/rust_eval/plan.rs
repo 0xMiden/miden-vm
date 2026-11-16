@@ -1,9 +1,17 @@
-//! Rust-only, typed evaluation choices. The captured graph remains authoritative
-//! for ACE and constraint metadata; this plan only changes arithmetic scheduling.
+//! Rust-only, typed scheduling over a borrowed source-expression index.
+//!
+//! The source capture defines domains, degree bounds and assertion order. This plan changes
+//! arithmetic scheduling without changing that capture or its derived ACE graph.
+//!
+//! Synthesized scalar dots may absorb single-use base scales; identity, doubling and halving
+//! alone do not justify one. Scale-containing regions retain specialized products plus a sum
+//! when the algebra's linear-combination chunk hint is below four, and use a mixed dot otherwise.
+//! Literal-only dots and authored linear combinations retain their existing dispatch.
 
-use crate::ir::{Class, OpKind, index::ExpressionIndex};
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_stark::air::symbolic::ExprView;
+
+use crate::ir::{Class, OpKind, index::ExpressionIndex};
 
 // Bound array sizes and live ranges. Longer sums retain a materialized prefix.
 pub(super) const MAX_TERMS: usize = 16;
