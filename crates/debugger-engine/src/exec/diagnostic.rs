@@ -2,8 +2,8 @@ use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{Word, events::EventId, program::Program};
 use miden_processor::{
-    BaseHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, Felt,
-    FutureMaybeSend, Host, LoadedMastForest, ProcessorState, StackInputs,
+    AsyncForestLoader, BaseHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
+    Felt, FutureMaybeSend, Host, LoadedMastForest, ProcessorState, StackInputs,
     advice::{AdviceInputs, AdviceMutation},
     event::{EventError, TraceError},
     trace::RowIndex,
@@ -81,6 +81,10 @@ impl<H: Host> BaseHost for DiagnosticHostWrapper<'_, H> {
 }
 
 impl<H: Host> Host for DiagnosticHostWrapper<'_, H> {
+    fn forest_loader(&self) -> Option<&dyn AsyncForestLoader> {
+        self.inner.forest_loader()
+    }
+
     fn get_mast_forest(
         &self,
         node_digest: &Word,

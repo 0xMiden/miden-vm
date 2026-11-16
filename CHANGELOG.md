@@ -6,7 +6,7 @@
 
 #### Changes
 
-- Added fallible MAST forest loading through separate `FallibleHost` and `FallibleSyncHost` traits. Execution and witness generation can preserve loading errors with the requested procedure root and source context ([#4216](https://github.com/0xMiden/miden-vm/pull/4216)).
+- [BREAKING] Replaced `FallibleHost`, `FallibleSyncHost`, `FallibleProgramExecutor`, and the four fallible execution methods with optional `Host::forest_loader()` and `SyncHost::forest_loader()` capabilities. Implement `AsyncForestLoader` or `SyncForestLoader` and advertise it through the host. Existing execution, witness generation, and stepping methods preserve loading errors with the requested procedure root and source context ([#4216](https://github.com/0xMiden/miden-vm/pull/4216)).
 
 #### Fixes
 

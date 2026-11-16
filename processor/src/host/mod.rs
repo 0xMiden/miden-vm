@@ -21,7 +21,10 @@ pub mod handlers;
 use handlers::{EventError, TraceError};
 
 pub(crate) mod extensions;
-pub use extensions::{FallibleHost, FallibleSyncHost, MastForestLoadError, MastForestLoadResult};
+pub use extensions::{
+    AsyncForestLoader, MastForestLoadError, MastForestLoadFuture, MastForestLoadResult,
+    SyncForestLoader,
+};
 
 mod mast_forest_store;
 pub use mast_forest_store::{LoadedMastForest, MastForestStore, MemMastForestStore};
@@ -118,6 +121,12 @@ impl<T: BaseHost + ?Sized> BaseHost for &mut T {
 
 /// Defines a synchronous interface by which the VM can interact with the host during execution.
 pub trait SyncHost: BaseHost {
+    /// Advertises optional fallible loading. `None` uses the legacy lookup.
+    #[inline]
+    fn forest_loader(&self) -> Option<&dyn SyncForestLoader> {
+        None
+    }
+
     /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
     /// this digest could not be found in this host.
     fn get_mast_forest(&self, node_digest: &Word) -> Option<LoadedMastForest>;
@@ -159,6 +168,12 @@ pub trait SyncHost: BaseHost {
 /// This mirrors the historic async host surface while allowing the sync-first core to depend on
 /// [`BaseHost`].
 pub trait Host: BaseHost {
+    /// Advertises optional fallible loading. `None` uses the legacy lookup.
+    #[inline]
+    fn forest_loader(&self) -> Option<&dyn AsyncForestLoader> {
+        None
+    }
+
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
 
@@ -208,6 +223,11 @@ impl<T> Host for T
 where
     T: SyncHost,
 {
+    #[inline]
+    fn forest_loader(&self) -> Option<&dyn AsyncForestLoader> {
+        SyncHost::forest_loader(self).map(|loader| loader as &dyn AsyncForestLoader)
+    }
+
     fn get_mast_forest(
         &self,
         node_digest: &Word,

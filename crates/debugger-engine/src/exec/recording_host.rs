@@ -1,9 +1,10 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 use miden_core::Word;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
-    BaseHost, FutureMaybeSend, Host, LoadedMastForest, ProcessorState,
+    AsyncForestLoader, BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestLoadFuture,
+    ProcessorState,
     advice::AdviceMutation,
     event::{EventError, EventId, EventName, TraceError},
 };
@@ -14,6 +15,7 @@ use super::{EventMutationRecorder, MastForestRecorder, advice::clone_advice_muta
 /// be replayed later from a [`ReplaySnapshot`](super::ReplaySnapshot).
 ///
 /// A recorder left unset is not recorded into.
+#[doc = include_str!("recording_host/idet_example.md")]
 pub struct RecordingHost<'a, H> {
     inner: &'a mut H,
     /// When set, the advice mutations produced by each `on_event` invocation of the inner host
@@ -52,7 +54,31 @@ impl<H: Host> BaseHost for RecordingHost<'_, H> {
     }
 }
 
+impl<H: Host> AsyncForestLoader for RecordingHost<'_, H> {
+    fn load<'a>(&'a self, root: &'a Word) -> MastForestLoadFuture<'a> {
+        let recorder = self.forest_recorder.clone();
+        let future = match self.inner.forest_loader() {
+            Some(loader) => loader.load(root),
+            None => {
+                let future = self.inner.get_mast_forest(root);
+                Box::pin(async move { Ok(future.await) })
+            },
+        };
+        Box::pin(async move {
+            let forest = future.await?;
+            if let (Some(recorder), Some(forest)) = (&recorder, &forest) {
+                recorder.record(forest.clone());
+            }
+            Ok(forest)
+        })
+    }
+}
+
 impl<H: Host> Host for RecordingHost<'_, H> {
+    fn forest_loader(&self) -> Option<&dyn AsyncForestLoader> {
+        self.inner.forest_loader().map(|_| self as &dyn AsyncForestLoader)
+    }
+
     fn get_mast_forest(
         &self,
         node_digest: &Word,

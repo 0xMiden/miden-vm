@@ -38,8 +38,8 @@ use rstest::rstest;
 
 use super::*;
 use crate::{
-    AdviceInputs, BaseHost, DefaultHost, FallibleHost, FallibleSyncHost, LoadedMastForest,
-    MastForestLoadResult, ProcessorState, ProgramExecutor, SyncHost,
+    AdviceInputs, BaseHost, DefaultHost, LoadedMastForest, MastForestLoadResult, ProcessorState,
+    ProgramExecutor, SyncForestLoader, SyncHost,
     advice::{AdviceMap, AdviceMutation},
     event::EventError,
     operation::OperationError,
@@ -2166,6 +2166,10 @@ impl BaseHost for FailingMastForestHost {
 }
 
 impl SyncHost for FailingMastForestHost {
+    fn forest_loader(&self) -> Option<&dyn SyncForestLoader> {
+        Some(self)
+    }
+
     fn get_mast_forest(&self, _node_digest: &Word) -> Option<LoadedMastForest> {
         None
     }
@@ -2175,19 +2179,9 @@ impl SyncHost for FailingMastForestHost {
     }
 }
 
-impl FallibleSyncHost for FailingMastForestHost {
-    fn try_get_mast_forest(&self, _: &Word) -> MastForestLoadResult {
+impl SyncForestLoader for FailingMastForestHost {
+    fn load_sync(&self, _: &Word) -> MastForestLoadResult {
         self.result.clone().map_err(Into::into)
-    }
-}
-
-impl FallibleHost for FailingMastForestHost {
-    fn try_get_mast_forest(
-        &self,
-        root: &Word,
-    ) -> impl crate::FutureMaybeSend<MastForestLoadResult> {
-        let result = FallibleSyncHost::try_get_mast_forest(self, root);
-        async move { result }
     }
 }
 
@@ -2198,7 +2192,7 @@ fn external_mast_forest_load_error_is_propagated_sync() {
     let mut host = FailingMastForestHost::new();
 
     let err = FastProcessor::new(StackInputs::default())
-        .execute_fallible_sync(&program, &mut host)
+        .execute_sync(&program, &mut host)
         .unwrap_err();
 
     let ExecutionError::MastForestError { root_digest, error, .. } = &err else {
@@ -2228,14 +2222,14 @@ async fn external_mast_forest_absence_reports_procedure_not_found(
     let processor = FastProcessor::new(StackInputs::default());
     let err = if proving {
         if run_async {
-            processor.execute_for_proving_fallible(&program, &mut host).await.unwrap_err()
+            processor.execute_for_proving(&program, &mut host).await.unwrap_err()
         } else {
-            processor.execute_for_proving_fallible_sync(&program, &mut host).unwrap_err()
+            processor.execute_for_proving_sync(&program, &mut host).unwrap_err()
         }
     } else if run_async {
-        processor.execute_fallible(&program, &mut host).await.unwrap_err()
+        processor.execute(&program, &mut host).await.unwrap_err()
     } else {
-        processor.execute_fallible_sync(&program, &mut host).unwrap_err()
+        processor.execute_sync(&program, &mut host).unwrap_err()
     };
 
     assert_matches!(
@@ -2289,15 +2283,15 @@ async fn fallible_loader_can_supply_a_forest(
     let processor = FastProcessor::new(StackInputs::default());
     let stack = if proving {
         let witness = if run_async {
-            processor.execute_for_proving_fallible(&program, &mut host).await.unwrap()
+            processor.execute_for_proving(&program, &mut host).await.unwrap()
         } else {
-            processor.execute_for_proving_fallible_sync(&program, &mut host).unwrap()
+            processor.execute_for_proving_sync(&program, &mut host).unwrap()
         };
         *witness.claim().stack_outputs()
     } else if run_async {
-        processor.execute_fallible(&program, &mut host).await.unwrap().stack
+        processor.execute(&program, &mut host).await.unwrap().stack
     } else {
-        processor.execute_fallible_sync(&program, &mut host).unwrap().stack
+        processor.execute_sync(&program, &mut host).unwrap().stack
     };
     assert_eq!(stack.get_element(0), Some(Felt::from_u32(2)));
 }
@@ -2324,16 +2318,14 @@ async fn package_source_debug_load_error_preserves_source_span(
     let processor = FastProcessor::new(StackInputs::default()).with_debug_info(package_debug_info);
     let err = if proving {
         if run_async {
-            processor.execute_for_proving_fallible(&program, &mut host).await.unwrap_err()
+            processor.execute_for_proving(&program, &mut host).await.unwrap_err()
         } else {
-            processor.execute_for_proving_fallible_sync(&program, &mut host).unwrap_err()
+            processor.execute_for_proving_sync(&program, &mut host).unwrap_err()
         }
     } else if run_async {
-        crate::FallibleProgramExecutor::execute_fallible(processor, &program, &mut host)
-            .await
-            .unwrap_err()
+        ProgramExecutor::execute(processor, &program, &mut host).await.unwrap_err()
     } else {
-        processor.execute_fallible_sync(&program, &mut host).unwrap_err()
+        processor.execute_sync(&program, &mut host).unwrap_err()
     };
 
     assert!(err.source().unwrap().downcast_ref::<TestMastForestLoadError>().is_some());
@@ -2352,7 +2344,7 @@ async fn package_source_debug_load_error_preserves_source_span(
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn legacy_execution_does_not_query_opted_in_loaders() {
+async fn ordinary_execution_queries_opted_in_loaders() {
     let root = Word::from([ONE, ONE, ONE, ONE]);
     let program = program_calling_external_procedures([root, Word::default()]);
     let mut host = FailingMastForestHost::new();
@@ -2364,7 +2356,7 @@ async fn legacy_execution_does_not_query_opted_in_loaders() {
         .await
         .unwrap_err();
     for error in [sync_error, async_error] {
-        assert_matches!(error, ExecutionError::ProcedureNotFound { root_digest, .. } if root_digest == root);
+        assert_matches!(error, ExecutionError::MastForestError { root_digest, .. } if root_digest == root);
     }
 }
 

@@ -14,6 +14,59 @@ use crate::exec::{DebuggerHost, EventMutationRecorder};
 struct PushSeven;
 
 #[test]
+fn dap_wrapper_preserves_loader_errors_without_legacy_lookup() {
+    use miden_processor::{MastForestLoadResult, SyncForestLoader, SyncHost};
+
+    struct LoaderHost;
+
+    impl BaseHost for LoaderHost {
+        fn get_label_and_source_file(
+            &self,
+            _: &Location,
+        ) -> (miden_debug_types::SourceSpan, Option<Arc<miden_debug_types::SourceFile>>) {
+            (miden_debug_types::SourceSpan::UNKNOWN, None)
+        }
+    }
+
+    impl SyncHost for LoaderHost {
+        fn forest_loader(&self) -> Option<&dyn SyncForestLoader> {
+            Some(self)
+        }
+
+        fn get_mast_forest(&self, _: &Word) -> Option<LoadedMastForest> {
+            panic!("the wrapper must preserve the advertised loader")
+        }
+
+        fn on_event(&mut self, _: &ProcessorState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl SyncForestLoader for LoaderHost {
+        fn load_sync(&self, _: &Word) -> MastForestLoadResult {
+            Err(std::io::Error::other("store unavailable").into())
+        }
+    }
+
+    let program = miden_assembly::Assembler::default()
+        .assemble_program("program", "begin dynexec end")
+        .unwrap()
+        .unwrap_program();
+    let forests = MastForestRecorder::new();
+    let mut host = LoaderHost;
+    let mut wrapper = DapHostWrapper::new(&mut host, None, Some(forests.clone()));
+    let error = poll_immediately(
+        FastProcessor::new(StackInputs::default()).execute(&program, &mut wrapper),
+    )
+    .unwrap_err();
+    let ExecutionError::MastForestError { error, .. } = error else {
+        panic!("expected the store error");
+    };
+    assert!(error.downcast_ref::<std::io::Error>().is_some());
+    assert!(forests.snapshot().is_empty());
+}
+
+#[test]
 fn trace_handler_errors_preserve_the_registered_name_through_dap() {
     use miden_processor::{DefaultHost, event::TraceError};
 
