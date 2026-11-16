@@ -172,6 +172,41 @@ class RawExportControls(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "inventories disagree"):
             self.parse(''.join(self.records[:2]))
 
+    def test_jointly_omitted_source_file_is_rejected(self):
+        baseline = (copy.deepcopy(self.llvm), ''.join(self.records))
+        self.llvm["data"][0]["files"].pop()
+        self.llvm["data"][0]["functions"][0]["regions"].pop()
+        with self.assertRaisesRegex(ValueError, "instrumented binary"):
+            locations(self.llvm, ''.join(self.records[:2]), Path('/workspace'),
+                      self.sources, mapping_baseline=baseline)
+
+    def test_omitted_region_is_rejected_when_files_and_lines_still_agree(self):
+        baseline = copy.deepcopy(self.llvm)
+        baseline["data"][0]["functions"][0]["regions"].append([10, 9, 10, 12, 0, 0, 0, 0])
+        with self.assertRaisesRegex(ValueError, "Coverage regions mappings.*instrumented binary"):
+            locations(self.llvm, ''.join(self.records), Path('/workspace'),
+                      self.sources, mapping_baseline=(baseline, ''.join(self.records)))
+
+    def test_omitted_line_is_rejected_when_native_totals_still_agree(self):
+        self.llvm["data"][0]["functions"][0]["regions"][0][2] = 12
+        self.llvm["data"][0]["files"][0]["summary"]["lines"]["count"] = 2
+        text = ''.join(self.records).replace('LF:1\n', 'LF:2\n', 1)
+        baseline_text = text.replace('DA:10,1\n', 'DA:10,1\nDA:11,0\n', 1)
+        with self.assertRaisesRegex(ValueError, "Coverage lines mappings.*instrumented binary"):
+            locations(self.llvm, text, Path('/workspace'), self.sources,
+                      mapping_baseline=(copy.deepcopy(self.llvm), baseline_text))
+
+    def test_empty_profile_counts_do_not_change_mapping_inventory(self):
+        baseline = copy.deepcopy(self.llvm)
+        for file in baseline["data"][0]["files"]:
+            file["summary"]["lines"]["covered"] = 0
+        for region in baseline["data"][0]["functions"][0]["regions"]:
+            region[4] = 0
+        baseline_text = ''.join(self.records).replace('DA:10,1', 'DA:10,0').replace('LH:1', 'LH:0')
+        result = locations(self.llvm, ''.join(self.records), Path('/workspace'),
+                           self.sources, mapping_baseline=(baseline, baseline_text))
+        self.assertEqual(len(result["covered_lines"]), 3)
+
     def test_missing_region_file_is_rejected(self):
         self.llvm["data"][0]["functions"][0]["regions"].pop()
         with self.assertRaisesRegex(ValueError, "inventories disagree"):

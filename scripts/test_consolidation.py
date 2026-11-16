@@ -103,7 +103,7 @@ def excluded_point(source, line, column):
                for sl, sc, el, ec in source["excluded_spans"])
 
 
-def locations(llvm, lcov, root, sources):
+def locations(llvm, lcov, root, sources, *, mapping_baseline=None, allow_uncovered=False):
     if llvm.get("type") != "llvm.coverage.json.export" or len(llvm.get("data", [])) != 1:
         raise ValueError("Expected one complete LLVM coverage export")
     data = llvm["data"][0]
@@ -171,7 +171,7 @@ def locations(llvm, lcov, root, sources):
                 covered_lines.add(key)
     if active:
         raise ValueError("LCOV record has no end_of_record marker")
-    if not covered_lines or not covered_regions:
+    if not allow_uncovered and (not covered_lines or not covered_regions):
         raise ValueError("No covered production lines or regions")
     measured_files = {key[0] for key in mapped_lines}
     region_files = {key[0] for key in mapped_regions}
@@ -181,10 +181,18 @@ def locations(llvm, lcov, root, sources):
     required = {"crates/field/src/word/mod.rs", "crates/field/src/native/mod.rs"}
     if not required <= measured_files:
         raise ValueError("Required field source mappings are missing")
-    return {
+    result = {
         "mapped_lines": sorted(mapped_lines), "covered_lines": sorted(covered_lines),
         "mapped_regions": sorted(mapped_regions), "covered_regions": sorted(covered_regions),
     }
+    if mapping_baseline is not None:
+        # Both measured exports can omit the same function or file. Read the
+        # expected denominator from the binary without consulting its profiles.
+        expected = locations(*mapping_baseline, root, sources, allow_uncovered=True)
+        for kind in ("lines", "regions"):
+            if result[f"mapped_{kind}"] != expected[f"mapped_{kind}"]:
+                raise ValueError(f"Coverage {kind} mappings differ from the instrumented binary")
+    return result
 
 
 def compare(before, after):
@@ -289,6 +297,14 @@ def collect(args):
         if len(suites) != 1 or suites[0]["kind"] != "lib" or suites[0]["package-name"] != "miden-field":
             raise ValueError("Expected exactly the field library test binary")
         write_json(output / "tests.json", tests)
+        llvm_cov = env.get("LLVM_COV") or str(
+            Path(run(["rustc", "--print", "target-libdir"], capture=True).strip()).parent / "bin/llvm-cov")
+        configuration["mapping_inventory_tool"] = run([llvm_cov, "--version"], capture=True).strip()
+        # An empty profile retains unexecuted mappings and cannot inherit a
+        # missing record from the measured profile data.
+        for flags, name in (([], "mapping-baseline.json"), (["--format=lcov"], "mapping-baseline.lcov")):
+            exported = run([llvm_cov, "export", suites[0]["binary-path"], "--empty-profile", *flags], capture=True)
+            (output / name).write_text(exported)
         env["LLVM_PROFILE_FILE"] = str(output / "build" / "coverage-%p-%m.profraw")
         phase = time.monotonic()
         run(["cargo", "nextest", "run", *selection, "--no-fail-fast", "--no-tests=fail"])
@@ -312,7 +328,10 @@ def collect(args):
         "schema": SCHEMA, "complete": True, "configuration": configuration,
         "production_sources": {name: value["production_sha256"] for name, value in sources.items()},
         "source_inventory": sources,
-        "locations": locations(llvm, (output / "coverage.lcov").read_text(), root, sources),
+        "locations": locations(
+            llvm, (output / "coverage.lcov").read_text(), root, sources,
+            mapping_baseline=(json.loads((output / "mapping-baseline.json").read_text()),
+                              (output / "mapping-baseline.lcov").read_text())),
         "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip(),
         "elapsed_seconds": time.monotonic() - started,
         "timings": timings,
