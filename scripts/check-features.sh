@@ -21,7 +21,9 @@ cargo hack check \
 
 # Dev-dependencies can enable std and hide broken library feature configurations.
 # Exclude packages that have no library target from this pass.
-cargo hack check \
+# cargo-hack temporarily removes dev-dependencies, leaving valid workspace declarations unused.
+# Enforce Cargo warnings in the complete pass above and rustc warnings in both passes.
+CARGO_BUILD_WARNINGS=warn cargo hack check \
     --workspace \
     --exclude miden-bench \
     --exclude miden-debug-lit-support \
