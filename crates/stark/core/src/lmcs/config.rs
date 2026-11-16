@@ -70,7 +70,7 @@ impl<PF, PD, H, C, const WIDTH: usize, const DIGEST: usize, const SALT_ELEMS: us
 {
     /// Create a new LMCS configuration.
     #[inline]
-    pub(crate) const fn new(sponge: H, compress: C) -> Self {
+    pub const fn new(sponge: H, compress: C) -> Self {
         Self { sponge, compress, _phantom: PhantomData }
     }
 }

@@ -273,8 +273,7 @@ impl ProjectFile {
 
         Ok(package)
     }
-#[allow(dead_code)] // retained for test/feature-gated users
-
+    #[allow(dead_code)] // retained for test/feature-gated users
     pub(crate) fn get_or_inherit_version(
         &self,
         source: Arc<SourceFile>,
@@ -311,8 +310,7 @@ impl ProjectFile {
             },
         }
     }
-#[allow(dead_code)] // retained for test/feature-gated users
-
+    #[allow(dead_code)] // retained for test/feature-gated users
     pub(crate) fn get_or_inherit_description(
         &self,
         source: Arc<SourceFile>,
@@ -338,8 +336,7 @@ impl ProjectFile {
             },
         }
     }
-#[allow(dead_code)] // retained for test/feature-gated users
-
+    #[allow(dead_code)] // retained for test/feature-gated users
     pub(crate) fn extract_dependencies(
         &self,
         source: Arc<SourceFile>,

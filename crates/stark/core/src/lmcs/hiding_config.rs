@@ -86,8 +86,7 @@ impl<PF, PD, H, C, R, const WIDTH: usize, const DIGEST: usize, const SALT: usize
     ///
     /// Fails to compile if `SALT == 0`. Use [`LmcsConfig`] for non-hiding commitments.
     #[inline]
-    #[allow(dead_code)] // retained for test/feature-gated users
-    pub(crate) fn new(sponge: H, compress: C, rng: R) -> Self {
+    pub fn new(sponge: H, compress: C, rng: R) -> Self {
         const { assert!(SALT > 0) }
         Self {
             inner: LmcsConfig::new(sponge, compress),
