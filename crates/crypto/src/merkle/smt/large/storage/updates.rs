@@ -42,7 +42,7 @@ pub struct StorageUpdateParts {
     ///
     /// Positive values indicate more leaves were added than removed,
     /// negative values indicate more leaves were removed than added.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(any(feature = "rocksdb", feature = "persistent-forest"))]
     pub(crate) leaf_count_delta: isize,
 
     /// Net change in the total number of key-value entries across all leaves.
@@ -210,6 +210,7 @@ impl StorageUpdates {
         StorageUpdateParts {
             leaf_updates: self.leaf_updates,
             subtree_updates: self.subtree_updates,
+            #[cfg(any(feature = "rocksdb", feature = "persistent-forest"))]
             leaf_count_delta: self.leaf_count_delta,
             entry_count_delta: self.entry_count_delta,
         }

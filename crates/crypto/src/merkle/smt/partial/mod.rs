@@ -293,7 +293,7 @@ impl PartialSmt {
     /// Note that if a partial SMT does not track leaves, its root is not necessarily the empty SMT
     /// root, since it could have been constructed from a different root but without tracking any
     /// leaves.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn tracks_leaves(&self) -> bool {
         !self.leaves.is_empty()
     }

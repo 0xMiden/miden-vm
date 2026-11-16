@@ -97,7 +97,6 @@ pub struct SetFunctionBreakpointsArguments {
 #[cfg_attr(feature = "client", derive(Serialize))]
 #[derive(Deserialize, Debug, Default, Clone)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)] // retained for test/feature-gated users
 pub struct LaunchRequestArguments {
     /// If true, the launch request should launch the program without enabling
     /// debugging.
@@ -108,32 +107,27 @@ pub struct LaunchRequestArguments {
     ///
     /// Rust-specific: this data must be a string. Server requiring storing binary data should use
     /// an encoding that is suitable for string (e.g. base85 or similar).
-    #[allow(dead_code)] // retained for test/feature-gated users
     #[serde(rename = "__restart")]
-    pub(crate) restart_data: Option<Value>,
+    pub restart_data: Option<Value>,
     /// The request may include additional implementation specific attributes.
-    #[allow(dead_code)] // retained for test/feature-gated users
     #[serde(flatten)]
-    pub(crate) additional_data: Option<Value>,
+    pub additional_data: Option<Value>,
 }
 
 /// Arguments for an Attach request.
 #[cfg_attr(feature = "client", derive(Serialize))]
 #[derive(Deserialize, Debug, Default, Clone)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)] // retained for test/feature-gated users
 pub struct AttachRequestArguments {
     /// Arbitrary data from the previous, restarted session.
     /// The data is sent as the `restart` attribute of the `terminated` event.
-    #[allow(dead_code)] // retained for test/feature-gated users
     /// The client should leave the data intact.
     #[serde(rename = "__restart")]
-    pub(crate) restart_data: Option<Value>,
+    pub restart_data: Option<Value>,
 
-    #[allow(dead_code)] // retained for test/feature-gated users
     /// The request may include additional implementation specific attributes.
     #[serde(flatten)]
-    pub(crate) additional_data: Option<Value>,
+    pub additional_data: Option<Value>,
 }
 
 /// Union of Attach and Launch arguments for the Restart request.
@@ -546,7 +540,7 @@ impl Request {
     /// Create a cancellation response for the given request. The sequence number will be copied
     /// from the request, message will be [`ResponseMessage::Cancelled`], `success` will be false,
     /// and `body` will be `None`.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn cancellation(self) -> Response {
         Response {
             request_seq: self.seq,

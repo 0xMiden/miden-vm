@@ -122,7 +122,7 @@ pub fn parse_inline_masm(source: Arc<SourceFile>, bounds: Option<SourceSpan>) ->
 ///
 /// This is primarily intended for tests and ad hoc helpers. Production callers should prefer
 /// [`parse_source_file`] so diagnostics and spans remain attached to a real [`SourceFile`].
-#[allow(dead_code)] // retained for test/feature-gated users
+#[cfg(test)]
 pub(crate) fn parse_inline_masm_text(
     input: &str,
     bounds: Option<core::ops::Range<usize>>,

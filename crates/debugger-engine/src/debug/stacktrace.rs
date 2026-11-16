@@ -78,7 +78,7 @@ pub struct LogicalStackFrame {
     name: Arc<str>,
     kind: LogicalFrameKind,
     location: Option<LogicalFrameLocation>,
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     physical_index: Option<usize>,
     origin: Option<miden_processor::DebugFrameOrigin>,
     invocation: Option<InvocationId>,
@@ -156,7 +156,7 @@ impl LogicalStackFrame {
         self.kind
     }
 
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn physical_index(&self) -> Option<usize> {
         self.physical_index
     }
@@ -332,6 +332,8 @@ impl CallStack {
         }
         let mut logical = Vec::new();
         for (physical_index, frame) in self.frames.iter().enumerate() {
+            // `physical_index` is only kept in test builds.
+            let _ = physical_index;
             let current_location = frame.last_logical_location();
             let location = frame
                 .inline_frames
@@ -342,6 +344,7 @@ impl CallStack {
                 name: frame.procedure(strip_prefix).unwrap_or_else(|| Arc::from("<unknown>")),
                 kind: LogicalFrameKind::Physical,
                 location,
+                #[cfg(test)]
                 physical_index: Some(physical_index),
                 origin: None,
                 invocation: None,
@@ -361,6 +364,7 @@ impl CallStack {
                     name: Arc::from(inline.display_name().into_boxed_str()),
                     kind: LogicalFrameKind::Inline,
                     location,
+                    #[cfg(test)]
                     physical_index: Some(physical_index),
                     origin: None,
                     invocation: None,

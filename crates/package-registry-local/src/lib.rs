@@ -274,7 +274,7 @@ impl LocalPackageRegistry {
     }
 
     /// Get the path in the artifact store for `package` at `version`
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn artifact_path(&self, package: &PackageId, version: &Version) -> Option<PathBuf> {
         self.artifact_path_for_summary(package, version)
     }

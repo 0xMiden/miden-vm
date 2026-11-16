@@ -179,7 +179,7 @@ impl Stepper {
     }
 
     /// Number of source nodes currently open.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn open_source_nodes(&self) -> usize {
         self.tracker.open_nodes()
     }

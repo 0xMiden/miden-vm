@@ -28,7 +28,7 @@ pub(crate) const PRECOMPILE_RELATION_DIGEST: RelationDigest = {
 };
 
 /// Default commitment hash for precompile proofs.
-#[allow(dead_code)] // retained for test/feature-gated users
+#[cfg(all(test, feature = "prover"))]
 pub(crate) const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
     miden_core::proof::HashFunction::Eidos;
 

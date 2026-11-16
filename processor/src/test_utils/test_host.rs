@@ -5,12 +5,13 @@ use miden_debug_types::{
     DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
 };
 
+#[cfg(test)]
+use crate::mast::MastForest;
 use crate::{
     BaseHost, LoadedMastForest, MastForestLoadError, MastForestStore, MemMastForestStore,
     ProcessorState, SyncHost, Word,
     advice::AdviceMutation,
     event::{EventError, TraceError},
-    mast::MastForest,
 };
 
 /// A snapshot of the processor state for consistency checking between processors.
@@ -108,7 +109,6 @@ pub struct TestHost<S: SourceManager = DefaultSourceManager> {
     snapshots: BTreeMap<u64, Vec<ProcessorStateSnapshot>>,
 
     /// Process state snapshots captured at trace checkpoints.
-    #[allow(dead_code)] // retained for test/feature-gated users
     trace_snapshots: BTreeMap<u64, Vec<ProcessorStateSnapshot>>,
 
     /// MAST forest store for external node resolution
@@ -132,7 +132,7 @@ impl TestHost {
     }
 
     /// Creates a new TestHost with a kernel forest for full consistency testing.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn with_kernel_forest(kernel_forest: Arc<MastForest>) -> Self {
         let mut store = MemMastForestStore::default();
         store.insert(kernel_forest);
@@ -152,7 +152,7 @@ impl TestHost {
     }
 
     /// Gets the processor state snapshots captured at trace checkpoints.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn trace_snapshots(&self) -> &BTreeMap<u64, Vec<ProcessorStateSnapshot>> {
         &self.trace_snapshots
     }

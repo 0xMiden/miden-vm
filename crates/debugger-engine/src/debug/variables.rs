@@ -86,7 +86,6 @@ pub struct DebugVarTracker {
     processed_up_to: RowIndex,
 }
 
-#[allow(dead_code)] // retained for test/feature-gated users
 impl DebugVarTracker {
     /// Create a new tracker using the given shared event store.
     pub fn new(events: DebugVarEvents) -> Self {
@@ -105,7 +104,7 @@ impl DebugVarTracker {
     pub fn current_invocation(&self) -> Option<InvocationId> {
         self.current_invocation
     }
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(any(feature = "dap", test))]
     pub(crate) fn has_invocation(&self, invocation: InvocationId) -> bool {
         self.invocations.contains_key(&invocation)
     }
@@ -242,7 +241,7 @@ impl DebugVarTracker {
     }
 
     /// Record debug variable events after freezing transient stack-backed values.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn record_events_with_stack(
         &self,
         clk: RowIndex,

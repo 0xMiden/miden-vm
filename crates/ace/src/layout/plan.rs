@@ -129,7 +129,7 @@ impl InputLayout {
     /// Number of quotient coordinate READ slots, including committed row padding.
     ///
     /// The logical quotient chunk count remains `counts.num_quotient_chunks`.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(feature = "compiler")]
     pub(crate) fn quotient_width(&self) -> usize {
         self.regions.quotient_curr.width
     }

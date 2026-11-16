@@ -17,8 +17,7 @@ pub struct FriRoundProof<F, EF, Commitment> {
     /// Proof-of-work witness sampled before `beta`.
     pub(crate) pow_witness: F,
     /// Folding challenge `β` for this round.
-    #[allow(dead_code)] // retained for test/feature-gated users
-    pub(crate) beta: EF,
+    pub beta: EF,
 }
 
 /// Structured view of the full FRI sub-proof.

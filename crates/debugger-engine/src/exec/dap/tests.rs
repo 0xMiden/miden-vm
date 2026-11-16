@@ -148,7 +148,7 @@ fn function_breakpoint_waits_for_entry_variables() {
         },
         &mut debug_state,
     );
-    assert!(matches!(result, StepResult::Breakpoint(_)));
+    assert!(matches!(result, StepResult::Breakpoint));
     let variable = debug_state.debug_vars.get_variable("n").expect("entry variable");
     assert_eq!(variable.info.value_location(), &DebugVarLocation::Const(Felt::from(5u32)));
 }
@@ -193,7 +193,7 @@ fn function_breakpoints_match_rust_symbols_without_source_path_fallback() {
                     },
                     &mut variables,
                 ),
-                StepResult::Breakpoint(_)
+                StepResult::Breakpoint
             ),
             "{pattern}"
         );

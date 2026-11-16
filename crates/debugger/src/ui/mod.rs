@@ -29,7 +29,6 @@ use self::{action::Action, app::App};
 use crate::config::DebuggerConfig;
 
 #[cfg(feature = "tui")]
-#[allow(dead_code)]
 pub fn run(config: Box<DebuggerConfig>, logger: Box<dyn log::Log>) -> Result<(), Report> {
     run_with_log_level(config, logger, LevelFilter::Trace)
 }
@@ -102,7 +101,6 @@ pub fn run_replay_and_log_level(
 }
 
 #[cfg(feature = "tui")]
-#[allow(dead_code)]
 pub async fn start_ui(
     config: Box<DebuggerConfig>,
     logger: Box<dyn log::Log>,

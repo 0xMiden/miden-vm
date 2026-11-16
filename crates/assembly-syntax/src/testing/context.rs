@@ -103,18 +103,6 @@ impl SyntaxTestContext {
         parser.parse(None, source_file, self.source_manager())
     }
 
-    /// Parse the given source file into a kernel [Module].
-    ///
-    /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
-    /// valid.
-    #[track_caller]
-    #[allow(dead_code)] // retained for test/feature-gated users
-    pub fn parse_kernel(&self, source: &str) -> Result<Box<Module>, Report> {
-        let mut parser = Module::parser(Some(ModuleKind::Kernel));
-        parser.set_warnings_as_errors(self.warnings_as_errors);
-        parser.parse_str(None, source, self.source_manager())
-    }
-
     /// Parse the given source file into an anonymous library [Module].
     ///
     /// This runs semantic analysis, and the returned module is guaranteed to be syntactically

@@ -58,22 +58,18 @@ pub struct CycleInfo<'a> {
     /// guess: a block that is both a procedure's root and an arm elsewhere is attributed to
     /// the procedure whichever ran. A consumer that must not guess skips inferred records
     /// past the first cycle.
-    #[allow(dead_code)] // retained for test/feature-gated users
-    pub(crate) source_node_inferred: bool,
+    pub source_node_inferred: bool,
     /// The operation the step executes; `None` on a control-flow cycle.
     pub op: Option<Operation>,
     /// The padded index of `op` within its basic block, the index the debug-info rows are
     /// keyed by. On a `RESPAN` cycle it is the index of the first operation of the next batch.
-    #[allow(dead_code)] // retained for test/feature-gated users
-    pub(crate) op_idx: Option<u32>,
+    pub op_idx: Option<u32>,
     /// The control-flow operation of the cycle, when it is one the call stack tracks.
     pub control: Option<ControlFlowOp>,
     /// The source node this step starts, if it starts one.
-    #[allow(dead_code)] // retained for test/feature-gated users
-    pub(crate) node_start: Option<NodeStart>,
+    pub node_start: Option<NodeStart>,
     /// The inline call frames active for the step, innermost first.
-    #[allow(dead_code)] // retained for test/feature-gated users
-    pub(crate) inline_frames: &'a [InlineCallFrame],
+    pub inline_frames: &'a [InlineCallFrame],
 }
 
 /// A start of a source node together with the node that started it.
@@ -162,7 +158,7 @@ impl SourceTracker {
     }
 
     /// Number of source nodes currently open; boundaries are not counted.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub fn open_nodes(&self) -> usize {
         self.open.iter().filter(|entry| matches!(entry, Entry::Node { .. })).count()
     }

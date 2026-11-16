@@ -592,7 +592,7 @@ impl SourceContent {
     ///
     /// Returns `None` if the given span is out of bounds
     #[inline(always)]
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn byte_slice(&self, span: impl Into<Range<ByteIndex>>) -> Option<&[u8]> {
         let Range { start, end } = span.into();
         self.as_bytes().get(start.to_usize()..end.to_usize())

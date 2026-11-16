@@ -265,7 +265,7 @@ impl Forest {
     ///
     /// If the forest cannot have more or less than one tree, use
     /// [`Forest::all_smaller_trees_unchecked()`] for performance.
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(test)]
     pub(crate) fn all_smaller_trees(self) -> Option<Forest> {
         if self.num_trees() != 1 {
             return None;

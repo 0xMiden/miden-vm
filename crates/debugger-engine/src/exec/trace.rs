@@ -1,3 +1,4 @@
+#[cfg(all(test, feature = "std"))]
 use alloc::vec::Vec;
 
 use miden_core::Word;
@@ -116,7 +117,7 @@ impl ExecutionTrace {
 
     /// Read a raw byte vector from `addr`, under `ctx`, at cycle `clk`, sufficient to hold a value
     /// of type `ty`
-    #[allow(dead_code)] // retained for test/feature-gated users
+    #[cfg(all(test, feature = "std"))]
     pub(crate) fn read_bytes_for_type_in_context(
         &self,
         addr: NativePtr,

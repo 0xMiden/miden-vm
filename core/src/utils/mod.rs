@@ -1,5 +1,7 @@
 use alloc::vec::Vec;
-use core::ops::{Bound, Range};
+#[cfg(test)]
+use core::ops::Bound;
+use core::ops::Range;
 
 // RE-EXPORTS
 // ================================================================================================
@@ -84,7 +86,7 @@ pub const fn range(start: usize, len: usize) -> Range<usize> {
 ///
 /// Returns `None` if the bound cannot be represented as an inclusive `u64` (e.g. an excluded start
 /// bound at `u64::MAX` or an excluded end bound at `0`).
-#[allow(dead_code)] // retained for test/feature-gated users
+#[cfg(test)]
 pub(crate) fn bound_into_included_u64<I>(bound: Bound<&I>, is_start: bool) -> Option<u64>
 where
     I: Clone + Into<u64>,
