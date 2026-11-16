@@ -1,6 +1,6 @@
 [package]
 name = "miden-event-handler-abi"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 description = "ABI contract between the Miden VM host and Wasm-compiled event handlers"
 documentation = "https://docs.rs/miden-event-handler-abi"
 readme = "README.md"
