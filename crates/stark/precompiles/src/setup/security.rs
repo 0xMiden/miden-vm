@@ -12,12 +12,10 @@
 use miden_core::proof::HashFunction;
 #[cfg(test)]
 use miden_stark::security::COMMITMENT_ALIGNMENT;
-use miden_stark::security::{CHALLENGE_FIELD_BITS, protocol_params};
-pub use miden_stark::{
+use miden_stark::{
     pcs::PcsParams,
     security::{
-        AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams,
-        ProvenSecurityReport, SecurityReport, SecurityTerm,
+        AirShape, CHALLENGE_FIELD_BITS, InstanceShape, ProofSecurityParameters, protocol_params,
     },
 };
 
@@ -87,6 +85,7 @@ pub mod testing;
 mod tests {
     use miden_air::precompiles::policy::precompile_pcs_params;
     use miden_air_definitions::precompiles::geometry::derive_air_shape;
+    use miden_stark::security::{ProtocolParams, ProvenSecurityReport};
     use p3_security::budget::report::{LOOKUP_LABEL, QUERY_LABEL};
 
     use super::{testing::*, *};

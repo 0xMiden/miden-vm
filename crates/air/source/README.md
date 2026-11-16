@@ -21,6 +21,8 @@ relation compilation, and generation tooling in `compiler::vm` and `compiler::pr
 dependencies and embed compiled ACE instructions. Without default features, the authored AIRs
 support `no_std` with `alloc`.
 
+For breaking API changes and replacement imports, see the [ACE, AIR, and STARK migration guide](../../../docs/ACE_AIR_MIGRATION.md).
+
 ## Testing AIRs
 
 Test standalone and composed AIRs through their complete evaluators on valid traces with active

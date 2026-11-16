@@ -57,6 +57,11 @@ pub struct AceArtifacts<EF> {
 /// The constraints are captured from `air.eval`: callers producing production
 /// artifacts must pass an AIR whose `eval` routes to the hand-written
 /// definitions (e.g. `miden_air_definitions::vm::MidenAir`).
+///
+/// # Panics
+///
+/// Panics if `config.num_quotient_chunks` is zero or the AIR violates the capture requirements
+/// of [`CapturedAir::new`].
 pub fn build_ace_circuit_for_air<A>(air: &A, config: AceConfig) -> AceCircuit<QuadFelt>
 where
     A: LiftedAir<Felt, QuadFelt>,
@@ -67,7 +72,7 @@ where
 
 /// Build a verifier-equivalent DAG and layout for the provided AIR.
 ///
-/// See [`build_ace_circuit_for_air`] for the capture invariant on `air`.
+/// See [`build_ace_circuit_for_air`] for capture requirements and panic conditions.
 pub fn build_ace_dag_for_air<A>(air: &A, config: AceConfig) -> AceArtifacts<QuadFelt>
 where
     A: LiftedAir<Felt, QuadFelt>,
@@ -171,6 +176,11 @@ fn reemit_air_root(
 /// those offsets and stage `beta^(N - 1 - k)` for the AIR at proof position `k`, where `N =
 /// airs.len()`. Trace widths are padded to `trace_width_alignment` base-field elements before
 /// concatenation.
+///
+/// # Panics
+///
+/// Panics if `config.num_quotient_chunks` is zero, an AIR violates [`CapturedAir::new`]'s capture
+/// requirements, or the relation violates [`CompiledRelation::from_captured`]'s requirements.
 pub fn build_canonical_multi_air_ace_circuit<A>(
     airs: &[A],
     config: AceConfig,

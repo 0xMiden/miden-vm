@@ -3,11 +3,14 @@
 use alloc::{string::ToString, vec::Vec};
 
 use miden_core::{
-    WORD_SIZE, Word,
+    Felt, WORD_SIZE, Word,
     field::{PrimeCharacteristicRing, QuadFelt},
     program::{KernelDescriptor, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
 };
-use miden_stark::lookup::Challenges;
+use miden_stark::{
+    air::{BaseAir, ConstraintDegrees, LiftedAir},
+    lookup::Challenges,
+};
 use p3_challenger::CanObserve;
 
 use super::{

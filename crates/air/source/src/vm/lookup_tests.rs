@@ -1,6 +1,7 @@
 //! VM lookup integration checks for the shared LogUp framework.
 
 use miden_core::{
+    Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
@@ -10,8 +11,6 @@ use miden_stark::{
         Challenges, accumulate_slow, build_logup_aux_trace, build_logup_aux_trace_with_width,
     },
 };
-
-use crate::vm::Felt;
 
 /// The chunked driver, over an AIR whose lookup reads a separate preprocessed window, matches
 /// slow accumulation of the same fractions. The And8 lookup's 2^16-row trace spans many

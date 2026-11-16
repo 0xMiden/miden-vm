@@ -31,10 +31,13 @@
 //! on the last row. Gates that include current-row activity therefore vanish there. Next-row
 //! activity is raw membership and can be nonzero on the cyclic last-to-first opening.
 
-use miden_core::field::{Algebra, PrimeCharacteristicRing};
+use miden_core::{
+    Felt,
+    field::{Algebra, PrimeCharacteristicRing},
+};
 use miden_stark::air::AirBuilder;
 
-use crate::vm::{ChipletCols, Felt, MidenAirBuilder, constraints::utils::BoolNot};
+use crate::vm::{ChipletCols, MidenAirBuilder, constraints::utils::BoolNot};
 
 // CHIPLET FLAGS
 // ================================================================================================

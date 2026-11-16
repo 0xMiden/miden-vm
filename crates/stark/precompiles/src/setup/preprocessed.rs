@@ -13,11 +13,11 @@ use miden_core::{Felt, field::QuadFelt};
 use miden_stark::{
     Preprocessed, StarkConfig,
     air::{BaseAir, Statement},
-    config::{Blake3Config, KeccakConfig, blake3_256_config, keccak_config},
+    config::{Blake3Config, EidosConfig, KeccakConfig, blake3_256_config, keccak_config},
     lmcs::Lmcs,
 };
 
-use crate::setup::config::{EidosConfig, PRECOMPILE_RELATION_DIGEST, eidos_config};
+use crate::setup::config::{PRECOMPILE_RELATION_DIGEST, eidos_config};
 
 /// Either a process-cached (`std`) or freshly built (`no_std`) bundle;
 /// callers dereference to the underlying [`Preprocessed`] either way.

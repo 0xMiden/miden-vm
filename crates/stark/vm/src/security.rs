@@ -16,12 +16,11 @@ use miden_air_definitions::shared::geometry::NUM_OOD_POINTS;
 use miden_core::proof::HashFunction;
 #[cfg(test)]
 use miden_stark::security::security_report_with_hash;
-use miden_stark::security::{CHALLENGE_FIELD_BITS, protocol_params};
-pub use miden_stark::{
+use miden_stark::{
     pcs::PcsParams,
     security::{
-        AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams,
-        ProvenSecurityReport, SecurityReport, SecurityTerm,
+        AirShape, CHALLENGE_FIELD_BITS, InstanceShape, ProofSecurityParameters, ProtocolParams,
+        protocol_params,
     },
 };
 #[cfg(test)]
@@ -109,6 +108,7 @@ pub mod testing;
 
 #[cfg(test)]
 mod tests {
+    use miden_stark::security::{LookupShape, ProvenSecurityReport, SecurityReport};
     use p3_security::{ErrorBits, fixed};
 
     use super::{testing::*, *};

@@ -7,7 +7,7 @@ pub mod ace;
 
 pub mod config {
     use miden_core::program::domain::STARK_TRANSCRIPT;
-    pub use miden_stark::{
+    use miden_stark::{
         config::{EidosConfig, RelationDigest},
         pcs::PcsParams,
     };

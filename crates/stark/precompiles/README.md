@@ -33,3 +33,5 @@ and regeneration commands.
 Generic configuration factories and transcript observation come from `miden_stark::config`.
 The accepted PVM PCS preset comes from `miden_air::precompiles::policy`; the backend's
 `setup::config::eidos_config` supplies the PVM transcript domain.
+
+For breaking API changes and replacement imports, see the [ACE, AIR, and STARK migration guide](../../../docs/ACE_AIR_MIGRATION.md).

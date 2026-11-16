@@ -1,6 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_core::{
+    Felt,
     field::{Field, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
@@ -28,7 +29,7 @@ use super::{
         generate_felt_trace_block_with_cycle_id,
     },
 };
-use crate::vm::{Felt, MidenAir, constraints::and8_lookup::eidos::normalize};
+use crate::vm::{MidenAir, constraints::and8_lookup::eidos::normalize};
 
 struct ConstraintEvalBuilder {
     main: RowMajorMatrix<Felt>,

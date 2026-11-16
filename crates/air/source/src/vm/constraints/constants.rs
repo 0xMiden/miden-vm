@@ -1,8 +1,6 @@
 //! Shared field constants for constraint code.
 
-use miden_core::field::PrimeCharacteristicRing;
-
-use crate::vm::Felt;
+use miden_core::{Felt, field::PrimeCharacteristicRing};
 
 pub const F_1: Felt = Felt::ONE;
 pub const F_2: Felt = Felt::TWO;

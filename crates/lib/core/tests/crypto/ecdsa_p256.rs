@@ -6,6 +6,7 @@ use miden_core::{
     deferred::{DeferredError, PrecompileError},
     events::EventName,
     mast::error_code_from_msg,
+    proof::HashFunction,
     utils::bytes_to_packed_u32_elements,
 };
 use miden_core_lib::{
@@ -21,10 +22,7 @@ use miden_precompiles::{
     CurveId, CurvePoint, Limbs, ONE_LIMBS, P256Base, P256Scalar, UintDomain, UintPrecompile,
     ZERO_LIMBS,
 };
-use miden_precompiles_stark::{
-    prover::{HashFunction, prove_precompiles},
-    verifier::verify_deferred,
-};
+use miden_precompiles_stark::{prover::prove_precompiles, verifier::verify_deferred};
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, MemoryError,
     ProcessorState, StackInputs,

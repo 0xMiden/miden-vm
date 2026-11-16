@@ -2,19 +2,17 @@
 
 use core::borrow::Borrow;
 
-use miden_core::field::PrimeCharacteristicRing;
+use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_stark::{
     air::WindowAccess,
     lookup::{Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, LookupMessage},
 };
 
 use super::messages::{BytePairLookupMsg, EidosRotationMsg, RangeMsg};
-use crate::vm::{
-    Felt,
-    constraints::and8_lookup::{
-        columns::{And8LookupCols, And8LookupPreprocessedCols},
-        eidos::{self, BytePairRelation},
-    },
+use crate::vm::constraints::and8_lookup::{
+    columns::{And8LookupCols, And8LookupPreprocessedCols},
+    eidos,
+    eidos::BytePairRelation,
 };
 
 /// Extension trait required by the byte-pair table [`LookupAir`](miden_stark::lookup::LookupAir).

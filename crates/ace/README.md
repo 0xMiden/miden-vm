@@ -8,5 +8,7 @@ The default API is `no_std` and contains encoded circuit data, input layouts, pr
 
 Authored PVM constraints and height rules live in `miden_air_definitions::precompiles::relation`; the production AIR crate owns protocol configuration and identity pins. Cargo compiles native evaluators and canonical ACE streams into `OUT_DIR`; the recursive verifier parameter generators regenerate MASM explicitly. Relation identities and verifier roots remain explicit pins checked independently.
 
+For breaking API changes and replacement imports, see the [ACE, AIR, and STARK migration guide](../../docs/ACE_AIR_MIGRATION.md).
+
 ## License
 This project is dual-licensed under the [MIT](http://opensource.org/licenses/MIT) and [Apache 2.0](https://opensource.org/license/apache-2-0) licenses.

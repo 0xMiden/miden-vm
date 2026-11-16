@@ -13,11 +13,3 @@ pub mod recursive;
 pub mod security;
 pub mod setup;
 pub mod verifier;
-
-pub use miden_air_definitions::vm::VmTrace;
-pub use miden_core::{
-    Word,
-    advice::AdviceInputs,
-    program::ExecutionClaim,
-    proof::{ExecutionProof, HashFunction, VmProof},
-};

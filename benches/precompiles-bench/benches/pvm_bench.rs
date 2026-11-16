@@ -6,10 +6,9 @@ use codspeed_criterion_compat::{
     BatchSize, Criterion, SamplingMode, criterion_group, criterion_main,
 };
 use miden_air::precompiles::ChipletAir;
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{Felt, field::QuadFelt, proof::HashFunction};
 use miden_precompiles_stark::prover::{
-    DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES, HashFunction,
-    prove_precompiles_with_limits_and_budget, testing,
+    DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES, prove_precompiles_with_limits_and_budget, testing,
 };
 use miden_stark::air::{BaseAir, LiftedAir};
 use miden_vm::Verifier;

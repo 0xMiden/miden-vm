@@ -30,5 +30,7 @@ If you'd like to learn more about AIR, the following blog posts from StarkWare a
 * [Arithmetization II](https://medium.com/starkware/arithmetization-ii-403c3b3f4355)
 * [StarkDEX Deep Dive: the STARK Core Engine](https://medium.com/starkware/starkdex-deep-dive-the-stark-core-engine-497942d0f0ab)
 
+For breaking API changes and replacement imports, see the [ACE, AIR, and STARK migration guide](../../../docs/ACE_AIR_MIGRATION.md).
+
 ## License
 This project is dual-licensed under the [MIT](http://opensource.org/licenses/MIT) and [Apache 2.0](https://opensource.org/license/apache-2-0) licenses.

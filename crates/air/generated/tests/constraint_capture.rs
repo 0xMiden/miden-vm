@@ -7,10 +7,10 @@
 //! carries no dev-dependency on `miden-air`, keeping the release order acyclic:
 //! `miden-constraint-compiler` → `miden-ace` → `miden-air`.
 
-use miden_air_definitions::vm::{AIRS, BaseAir, Felt};
+use miden_air_definitions::vm::AIRS;
 use miden_constraint_compiler::ir::{Class, Graph, Leaf, Node, capture, capture_into, op_counts};
-use miden_core::field::QuadFelt;
-use miden_stark::air::LiftedAir;
+use miden_core::{Felt, field::QuadFelt};
+use miden_stark::air::{BaseAir, LiftedAir};
 
 #[test]
 fn generated_adapter_preserves_authored_air_layout() {

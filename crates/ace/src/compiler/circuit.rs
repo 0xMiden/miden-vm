@@ -47,6 +47,12 @@ impl<EF: Field> AceCircuit<EF> {
     }
 
     /// Evaluate the circuit against the provided input vector.
+    ///
+    /// Inputs follow [`Self::layout`]; the caller supplies every input referenced by the circuit.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a referenced input is missing.
     pub fn eval(&self, inputs: &[EF]) -> EF {
         let mut op_values = vec![EF::ZERO; self.operations.len()];
         for (idx, op) in self.operations.iter().enumerate() {
@@ -76,6 +82,8 @@ impl<EF: Field> AceCircuit<EF> {
 }
 
 /// Emit an ACE circuit from the DAG and input layout.
+///
+/// # Panics
 ///
 /// Panics if the layout omits a DAG input.
 pub fn emit_circuit<EF>(dag: &AceDag<EF>, layout: InputLayout) -> AceCircuit<EF>

@@ -2,7 +2,8 @@
 
 use miden_air::vm::{config, security as metadata};
 use miden_core::program::KernelDescriptor;
-use miden_vm_stark::security::{self, ProofSecurityParameters};
+use miden_stark::security::ProofSecurityParameters;
+use miden_vm_stark::security;
 use p3_security::{
     budget::{
         AirShape, LookupShape, ProtocolParams, SecurityReport,

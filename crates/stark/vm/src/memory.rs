@@ -2,8 +2,10 @@
 
 use miden_air::vm::{MIDEN_AIR_COUNT, MidenMultiAir};
 use miden_core::{Felt, field::QuadFelt};
-pub use miden_stark::memory::{ProverMemoryModel, ProvingBudget};
-use miden_stark::pcs::PcsParams;
+use miden_stark::{
+    memory::{ProverMemoryModel, ProvingBudget},
+    pcs::PcsParams,
+};
 
 /// Derives the shared STARK model from generated production AIR metadata.
 pub fn memory_model(params: &PcsParams) -> Option<ProverMemoryModel<MIDEN_AIR_COUNT>> {

@@ -5,8 +5,10 @@ use alloc::vec::Vec;
 #[cfg(feature = "testing")]
 pub use deferred::session::testing;
 pub use deferred::session::{SessionInputError, WitnessLocation};
-use miden_core::deferred::{PrecompileLimits, PrecompileWitness};
-pub use miden_core::proof::{HashFunction, PrecompileProof, StarkProof};
+use miden_core::{
+    deferred::{PrecompileLimits, PrecompileWitness},
+    proof::{HashFunction, PrecompileProof},
+};
 use miden_precompiles::default_verification_precompile_limits;
 
 pub(crate) mod ec;

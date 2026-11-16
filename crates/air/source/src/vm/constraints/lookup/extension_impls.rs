@@ -16,7 +16,7 @@
 //! `build_chiplet_active` stays on the default; the chiplet selectors produce
 //! only six outputs via four subtractions, so the boolean shortcut is noise.
 
-use miden_core::field::ExtensionField;
+use miden_core::{Felt, field::ExtensionField};
 use miden_stark::{
     air::LiftedAirBuilder,
     lookup::{ConstraintLookupBuilder, ProverLookupBuilder},
@@ -26,7 +26,7 @@ use super::{
     and8_lookup_air::And8LookupBuilder, buses::LookupOpFlags, chiplet_air::ChipletLookupBuilder,
     main_air::MainLookupBuilder,
 };
-use crate::vm::{CoreCols, Felt};
+use crate::vm::CoreCols;
 
 // CONSTRAINT PATH
 // ================================================================================================

@@ -70,11 +70,12 @@
 pub(crate) mod batch;
 pub mod columns;
 
+use miden_core::Felt;
 use miden_stark::air::AirBuilder;
 use p3_field::Dup;
 
 use crate::vm::{
-    CoreCols, Felt, MidenAirBuilder,
+    CoreCols, MidenAirBuilder,
     constraints::{
         constants::{F_1, F_128},
         decoder::columns::DecoderCols,

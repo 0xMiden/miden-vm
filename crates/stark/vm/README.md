@@ -42,3 +42,5 @@ at runtime.
 constants live in `miden_air::vm::security`; this backend's `security` module constructs the
 VM-specific inputs to the shared estimator. Generic configuration factories and security estimators
 live in `miden_stark::{config,security}`.
+
+For breaking API changes and replacement imports, see the [ACE, AIR, and STARK migration guide](../../../docs/ACE_AIR_MIGRATION.md).

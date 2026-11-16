@@ -1,6 +1,7 @@
 //! Tests for the common MVM/PVM recursive security estimator.
 
 use miden_air::vm::security as vm_metadata;
+use miden_stark::security::LookupShape;
 
 use super::{
     EXAMPLE_FIB_SMALL, fib_stack_inputs, generate_recursive_verifier_data, vm_verify_proof_program,
@@ -292,7 +293,7 @@ fn native_level(descriptor: &SecurityDescriptor) -> u64 {
     params.air_shape.num_composed_constraints = descriptor.num_composed_constraints as u32;
     params.air_shape.max_constraint_degree = descriptor.max_constraint_degree as u32;
     params.air_shape.num_deep_terms = Some(descriptor.num_deep_terms as u32);
-    params.air_shape.lookup = Some(security::LookupShape {
+    params.air_shape.lookup = Some(LookupShape {
         fractions_per_row: descriptor.lookup_fractions_per_row as u32,
         max_message_width: descriptor.max_message_width as u32,
     });

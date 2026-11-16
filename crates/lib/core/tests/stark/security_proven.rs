@@ -2,9 +2,10 @@
 
 use miden_air::vm::{config, security::COMMITMENT_ALIGNMENT};
 use miden_core::proof::HashFunction;
+use miden_stark::security::{LookupShape, ProofSecurityParameters};
 use miden_vm_stark::security;
 
-fn vm_parameters(height: u32) -> security::ProofSecurityParameters {
+fn vm_parameters(height: u32) -> ProofSecurityParameters {
     security::proof_security_parameters(
         &config::pcs_params(),
         height,
@@ -14,7 +15,7 @@ fn vm_parameters(height: u32) -> security::ProofSecurityParameters {
     )
 }
 
-fn descriptor(parameters: &security::ProofSecurityParameters) -> [u64; 12] {
+fn descriptor(parameters: &ProofSecurityParameters) -> [u64; 12] {
     let protocol = &parameters.protocol_params;
     let air = &parameters.air_shape;
     let lookup = air.lookup.unwrap();
@@ -34,7 +35,7 @@ fn descriptor(parameters: &security::ProofSecurityParameters) -> [u64; 12] {
     ]
 }
 
-fn run_estimator(parameters: &security::ProofSecurityParameters) -> u64 {
+fn run_estimator(parameters: &ProofSecurityParameters) -> u64 {
     let source = "
         use miden::core::stark::security
         begin
@@ -56,7 +57,7 @@ fn deployed_preset_selects_the_complete_list_decoding_bound() {
     assert_eq!(run_estimator(&parameters), 57);
 }
 
-fn pvm_parameters(height: u32) -> security::ProofSecurityParameters {
+fn pvm_parameters(height: u32) -> ProofSecurityParameters {
     miden_precompiles_stark::setup::security::proof_security_parameters(
         &miden_air::precompiles::policy::precompile_pcs_params(),
         height,
@@ -67,7 +68,7 @@ fn pvm_parameters(height: u32) -> security::ProofSecurityParameters {
 
 /// Batch calls into one execution so the matrix checks arithmetic and search boundaries without
 /// recompiling a separate VM program at every cell. Every descriptor comes from a native builder.
-fn run_estimators(parameters: &[security::ProofSecurityParameters]) -> Vec<u64> {
+fn run_estimators(parameters: &[ProofSecurityParameters]) -> Vec<u64> {
     // Limit each program to stay within the assembler's block size. Collect every cycle count
     // before checking the budget so a regression reports the worst case, not the first one.
     let results: Vec<_> = parameters.chunks(256).flat_map(run_estimator_batch).collect();
@@ -81,7 +82,7 @@ fn run_estimators(parameters: &[security::ProofSecurityParameters]) -> Vec<u64> 
     results.into_iter().map(|(level, _)| level).collect()
 }
 
-fn run_estimator_batch(parameters: &[security::ProofSecurityParameters]) -> Vec<(u64, u64)> {
+fn run_estimator_batch(parameters: &[ProofSecurityParameters]) -> Vec<(u64, u64)> {
     use std::fmt::Write;
 
     use miden_core::Felt;
@@ -120,7 +121,7 @@ fn run_estimator_batch(parameters: &[security::ProofSecurityParameters]) -> Vec<
 
 /// Independent reference: exact coefficients rounded to Q16, enumerating every permissible m.
 /// It shares none of the MASM's logarithm approximation, query bound, or search.
-fn exhaustive_level(parameters: &security::ProofSecurityParameters) -> u64 {
+fn exhaustive_level(parameters: &ProofSecurityParameters) -> u64 {
     const ONE: i64 = 1 << 16;
     let upper_log = |value: f64| (value.log2() * ONE as f64).ceil() as i64;
     let protocol = &parameters.protocol_params;
@@ -239,7 +240,7 @@ fn envelope_without_batching_remains_conservative() {
             parameters.air_shape.num_quotient_chunks =
                 degree.saturating_sub(1).max(1).next_power_of_two();
             parameters.air_shape.num_deep_terms = Some(1);
-            parameters.air_shape.lookup = Some(security::LookupShape {
+            parameters.air_shape.lookup = Some(LookupShape {
                 fractions_per_row: 1,
                 max_message_width: 255,
             });
@@ -266,7 +267,7 @@ fn list_scaled_lookup_stays_in_range_at_the_envelope_corner() {
         .into_iter()
         .map(|h| {
             let mut parameters = vm_parameters(h);
-            parameters.air_shape.lookup = Some(security::LookupShape {
+            parameters.air_shape.lookup = Some(LookupShape {
                 fractions_per_row: 1,
                 max_message_width: 65534,
             });

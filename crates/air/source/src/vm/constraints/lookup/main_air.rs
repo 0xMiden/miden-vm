@@ -18,6 +18,7 @@
 
 use core::borrow::Borrow;
 
+use miden_core::Felt;
 use miden_stark::{
     air::WindowAccess,
     lookup::{LookupAir, LookupBuilder},
@@ -33,7 +34,7 @@ use super::{
         stack_overflow::{self, emit_stack_overflow},
     },
 };
-use crate::vm::{CoreCols, Felt, constraints::columns::NUM_CORE_COLS};
+use crate::vm::{CoreCols, constraints::columns::NUM_CORE_COLS};
 
 // MAIN LOOKUP BUILDER
 // ================================================================================================

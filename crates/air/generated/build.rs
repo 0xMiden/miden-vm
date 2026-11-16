@@ -62,7 +62,7 @@ fn main() {
             circuit
                 .instructions()
                 .iter()
-                .map(miden_air_definitions::vm::Felt::as_canonical_u64)
+                .map(miden_core::Felt::as_canonical_u64)
                 .collect::<Vec<_>>()
         ),
     );

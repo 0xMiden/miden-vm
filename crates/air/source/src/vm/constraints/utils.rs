@@ -1,11 +1,8 @@
 //! Utility extension traits for constraint code.
 
-use miden_core::field::PrimeCharacteristicRing;
+use miden_core::{Felt, field::PrimeCharacteristicRing};
 
-use crate::vm::{
-    Felt,
-    constraints::constants::{TWO_POW_8, TWO_POW_16, TWO_POW_24},
-};
+use crate::vm::constraints::constants::{TWO_POW_8, TWO_POW_16, TWO_POW_24};
 
 /// Extension trait adding `.not()` for boolean negation (`1 - self`).
 pub trait BoolNot: PrimeCharacteristicRing {

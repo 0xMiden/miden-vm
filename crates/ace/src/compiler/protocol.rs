@@ -23,8 +23,13 @@ pub struct CapturedAir {
 }
 
 impl CapturedAir {
-    /// Captures a code-owned AIR. Panics if its randomness or periodic-column declarations
-    /// violate the compiler's conventions.
+    /// Captures a code-owned AIR for evaluator and circuit generation.
+    ///
+    /// # Panics
+    ///
+    /// Panics unless the AIR declares two randomness values, every periodic column has a positive
+    /// power-of-two length, and `max_periodic_length` matches those columns. The row-offset
+    /// restrictions of [`capture`] also apply.
     pub fn new<A: LiftedAir<Felt, QuadFelt>>(air: &A) -> Self {
         assert_eq!(air.num_randomness(), 2, "AIR must declare alpha and beta challenges");
         let periodic_columns = air.periodic_columns().into_owned();
@@ -274,6 +279,11 @@ pub struct CompiledRelation<'a> {
 
 impl<'a> CompiledRelation<'a> {
     /// Derives a relation from nonempty, code-owned AIRs and a nonzero trace alignment.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `airs` is empty, `trace_alignment` is zero, or an aligned auxiliary row contains
+    /// an odd number of base-field coordinates.
     pub fn from_captured(airs: &[&'a CapturedAir], trace_alignment: usize) -> Self {
         Self::with_quotient_chunks(airs, trace_alignment, None)
     }

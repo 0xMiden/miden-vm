@@ -14,6 +14,7 @@
 //! [`ChipletLookupBuilder`] builds the shared active flags from the chiplet selector columns.
 //! Adapters may override the default construction while preserving those flag semantics.
 
+use miden_core::Felt;
 use miden_stark::lookup::LookupBuilder;
 
 use super::buses::{
@@ -22,7 +23,7 @@ use super::buses::{
     hasher_returns::{self, emit_hasher_returns},
     wiring::{self, emit_v_wiring},
 };
-use crate::vm::{ChipletCols, Felt, constraints::chiplets::selectors::ChipletActiveFlags};
+use crate::vm::{ChipletCols, constraints::chiplets::selectors::ChipletActiveFlags};
 
 // CHIPLET LOOKUP BUILDER
 // ================================================================================================

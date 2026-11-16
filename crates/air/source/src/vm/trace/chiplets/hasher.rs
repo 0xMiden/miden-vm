@@ -12,7 +12,6 @@
 
 use core::ops::Range;
 
-pub use miden_core::Word;
 use miden_core::chiplets::hasher as core_hasher;
 
 use super::{Felt, ONE, ZERO};

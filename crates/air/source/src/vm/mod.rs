@@ -39,19 +39,5 @@ pub use constraints::{
 };
 pub use execution_trace::{ChipletsLengths, TraceLenSummary, TraceLenSummaryError, VmTrace};
 pub use inputs::{NUM_PUBLIC_VALUES, PublicInputs};
-pub use miden_core::{
-    Felt,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
-    utils::ToElements,
-};
-pub use miden_stark::{
-    StarkConfig,
-    air::{
-        AirBuilder, BaseAir, ConstraintCounts, ConstraintDegrees, ExtensionBuilder, LiftedAir,
-        LiftedAirBuilder, MultiAir, PermutationAirBuilder, ProverStatement, Statement,
-    },
-    debug,
-    pcs::PcsParams,
-};
 pub use proof_order::{AIRS, MIDEN_AIR_COUNT};
 pub use statement::hash_kernel_digests;

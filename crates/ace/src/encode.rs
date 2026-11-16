@@ -34,6 +34,8 @@ pub struct EncodedCircuit {
 }
 
 /// Encoded recursive-verifier circuit and the metadata consumed by MASM.
+///
+/// VM and precompile relations share this runtime representation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecursiveAceCircuit {
     /// Number of ACE READ variables, including constants and padding.

@@ -9,10 +9,13 @@ use miden_ace::{
         },
     },
 };
-use miden_air_definitions::vm::{AIRS, BaseAir, LiftedAir, MIDEN_AIR_COUNT, MidenAir};
+use miden_air_definitions::vm::{AIRS, MIDEN_AIR_COUNT, MidenAir};
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{Field, PrimeCharacteristicRing};
-use miden_stark::air::symbolic::{AirLayout, SymbolicAirBuilder};
+use miden_stark::air::{
+    BaseAir, LiftedAir,
+    symbolic::{AirLayout, SymbolicAirBuilder},
+};
 
 fn air_layout_for(air: MidenAir, layout: &InputLayout) -> AirLayout {
     AirLayout {

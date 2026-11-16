@@ -9,7 +9,7 @@ use miden_core::{Felt, program::domain::STARK_TRANSCRIPT};
 use miden_crypto::hash::eidos::MidenEidosChallenger;
 #[cfg(all(test, feature = "prover"))]
 use miden_stark::StarkConfig;
-pub use miden_stark::{
+use miden_stark::{
     config::{EidosConfig, RelationDigest},
     pcs::PcsParams,
 };

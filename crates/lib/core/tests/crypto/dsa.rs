@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use miden_assembly::{Assembler, Linkage};
-use miden_core::{Felt, serde::Deserializable, utils::bytes_to_packed_u32_elements};
+use miden_core::{
+    Felt, proof::HashFunction, serde::Deserializable, utils::bytes_to_packed_u32_elements,
+};
 use miden_core_lib::{
     CoreLibrary, dsa::ecdsa_k256_keccak,
     handlers::ecdsa_k256_keccak::ECDSA_K256_KECCAK_RECOVER_EVENT_NAME,
@@ -13,10 +15,7 @@ use miden_crypto::{
     utils::hex_to_bytes,
 };
 use miden_precompiles::{K1Scalar, SECP256K1_LAMBDA, scalar_mul_mod_n};
-use miden_precompiles_stark::{
-    prover::{HashFunction, prove_precompiles},
-    verifier::verify_deferred,
-};
+use miden_precompiles_stark::{prover::prove_precompiles, verifier::verify_deferred};
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, MemoryError,
     ProcessorState, StackInputs,

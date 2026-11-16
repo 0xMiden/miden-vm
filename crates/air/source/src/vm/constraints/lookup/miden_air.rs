@@ -96,6 +96,7 @@ mod tests {
     use std::{vec, vec::Vec};
 
     use miden_core::{
+        Felt,
         field::{PrimeCharacteristicRing, QuadFelt},
         utils::{Matrix, RowMajorMatrix},
     };
@@ -108,8 +109,7 @@ mod tests {
     };
 
     use crate::vm::{
-        ChipletsAir, EidosCompressionAir, Felt, MidenAir, NUM_EIDOS_COMPRESSION_COLS,
-        NUM_PUBLIC_VALUES,
+        ChipletsAir, EidosCompressionAir, MidenAir, NUM_EIDOS_COMPRESSION_COLS, NUM_PUBLIC_VALUES,
         constraints::{
             columns::{NUM_CHIPLETS_COLS, NUM_CORE_COLS},
             eidos_compression::lookup::EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE,

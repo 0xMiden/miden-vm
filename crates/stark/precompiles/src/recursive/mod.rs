@@ -38,7 +38,7 @@ use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
     StarkConfig, VerifierInstance,
     air::{LiftedAir, Statement},
-    config::observe_protocol_params,
+    config::{EidosConfig, observe_protocol_params},
     proof::{StarkProof, StarkProofData},
     recursive::advice::{
         AdviceError, MerkleAdvice, append_proof_payload, build_merkle_advice, package_for_request,
@@ -48,7 +48,7 @@ use miden_stark::{
 use serde_wincode::SerdeCompat;
 
 use self::ace::{proof_order_from_log_heights, shared_pvm_recursive_circuit};
-use crate::setup::config::{EidosConfig, eidos_config};
+use crate::setup::config::eidos_config;
 
 type Challenge = QuadFelt;
 type EidosLmcs = <EidosConfig as StarkConfig<Felt, Challenge>>::Lmcs;
