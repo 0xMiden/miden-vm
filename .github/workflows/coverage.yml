@@ -47,7 +47,7 @@ jobs:
           ref: ${{ inputs.pr && format('refs/pull/{0}/head', inputs.pr) || github.sha }}
           path: source
           persist-credentials: false
-      - uses: 0xMiden/miden-vm/.github/actions/cleanup-runner@29abecaac16bbd01b4391b61363cb1c85d95cf6e
+      - uses: 0xMiden/miden-vm/.github/actions/cleanup-runner@43945d94ed02fecac85e4d2a5c318952e60bc2ce
       - name: Install Rust and LLVM tools
         run: rustup toolchain install 1.99.0 --profile minimal --component llvm-tools-preview --no-self-update
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -57,7 +57,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends protobuf-compiler libclang-dev
-      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-llvm-cov@0.8.7,cargo-nextest@0.9.135
       - name: Install debugger fixture runner
