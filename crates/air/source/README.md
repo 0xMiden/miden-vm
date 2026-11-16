@@ -32,6 +32,28 @@ Test standalone and composed AIRs through their complete evaluators on valid tra
 lookups. For optimized evaluators, compare constraint values and assertion order with the
 authored evaluator on arbitrary field assignments.
 
+## Writing constraints
+
+Use the builder method that states the obligation: `assert_eq`, `assert_one`, and their array
+and extension variants express equalities directly. Use `assert_bool` or `assert_bools` for the
+canonical Boolean polynomial `x * (x - 1)`; use `.bool_check()` when that polynomial is part of
+another equation. Name common gates and use `when(gate)` around related obligations. Array
+assertions preserve independent constraints in element order; never replace them with one
+assertion on their sum.
+
+Write mathematical reductions with `.map(...).sum()` or `sum_array`. Use `dot_product` for
+homogeneous weighted sums and `Algebra<Base>::mixed_dot_product` for algebra values with base
+coefficients. Keep coefficients and gates in the narrowest available domain. Factor a repeated
+extension value through a sum of base gates, and group subtraction tails into a positive sum or
+an equality when that makes the equation easier to audit.
+
+Use ring operations such as `.square()`, `.double()`, and `.mul_2exp_u64()` to retain their meaning
+in symbolic capture. Preserve useful shared prefixes, readable Horner forms, and independently
+derived reference equations. Uniform subexpressions depend only on constants, public values,
+challenges, and exports; trace values and row selectors remain row-dependent even when named.
+Explicit algebra operations expose intent, while generated-code comparisons and measurements
+determine whether a scheduling change improves evaluation.
+
 ## License
 
 This project is dual-licensed under the [MIT](http://opensource.org/licenses/MIT) and

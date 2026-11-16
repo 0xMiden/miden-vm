@@ -191,3 +191,96 @@ pre-existing unnecessary qualifications and redundant clones in unchanged `ir/in
 `ir/program.rs`; no lint suppressions or unrelated fixes are added. Host `no_std` checks pass for
 AIR definitions, generated AIR, ACE runtime, VM STARK, and precompile STARK. Scoped formatting and
 `git diff --check` pass. No compiler-memory, preparation-time, or end-to-end proving claim is made.
+
+## Power-of-two scaling follow-up, 2026-11-16
+
+The subsequent source cleanup writes byte packing with `mul_2exp_u64` rather than literal
+multiplication. Capture correctly retains `ScalePow2`, but native scalar-dot discovery previously
+recognized only `Mul`. It therefore missed reductions such as
+`b0 + 256*b1 + 65536*b2 + 16777216*b3` when written with scaling methods.
+
+Scalar-dot matching now extracts the field coefficient from a single-use base `ScalePow2`,
+including inverse powers and the full signed-u64 magnitude range. Shared and prepared values
+remain atoms. Identity, doubling, and halving alone cannot justify a new dot; cheap scales may
+still join a dot justified by another multiplication. Existing literal-Mul eligibility is retained.
+
+A literal-coefficient dot can evaluate over either `Felt` or `PackedFelt`. For regions that
+consume a source scale, the emitter uses the backend's `BATCHED_LC_CHUNK < 4` hint to select
+specialized products plus `sum_array`; otherwise it emits `mixed_dot_product`. Current scalar
+`Felt` uses chunk eight and non-SVE2 NEON uses chunk two. This is a measured scheduling heuristic,
+not a semantic guarantee of the algebra trait. The constant branch folds at monomorphization.
+Literal-only dots, extension dots, and authored linear combinations keep their existing dispatch.
+
+For example, the generated packing region has this shape:
+
+```rust
+if <B as Algebra<Felt>>::BATCHED_LC_CHUNK < 4 {
+    B::sum_array::<4>(&[b0, b1.mul_2exp_u64(8), b2.mul_2exp_u64(16), b3.mul_2exp_u64(24)])
+} else {
+    <B as Algebra<Felt>>::mixed_dot_product::<4>(
+        &[b0, b1, b2, b3],
+        &[1, 256, 65536, 16777216].map(Felt::from_u64),
+    )
+}
+```
+
+Across all sixteen AIRs, discovery finds 96 additional dots. Eight existing Eidos dots also absorb
+32 previously separate scales. The resulting 104 scale-containing regions receive the backend
+choice; 28 literal-only dots remain unconditional. Core and Chiplets row functions and all sixteen
+preparation functions are byte-identical to the completed source-cleanup baseline. Prepared
+capacities remain VM 61 and PVM 89. ACE remains 6,556 VM and 12,583 PVM operations, with unchanged
+constants, READ inputs, padding, and stream sizes. Source expressions and fingerprints are unchanged.
+
+### Alternatives measured
+
+| Candidate | Observation and decision |
+|---|---|
+| Recognize scales and always emit mixed dots | Scalar Eidos improves, but packed Eidos regresses roughly 1–4% on the performance core. |
+| Change the general NEON field implementation to separate packed products and sums for lengths 4–16 | Runtime-coefficient microbenchmarks regress roughly 59–98%. Removed; no field implementation change remains. |
+| Follow the short-chunk hint with `batched_linear_combination` | Packed Eidos regresses about 7.6% in the performance-core screen. Rejected. |
+| Separate products for every synthesized scalar dot on short-chunk backends | Helps Eidos, but changes existing literal dots and regresses packed Chiplets by 2.86%. Restricted to regions consuming scales. |
+| Let a lone double justify a four-term dot | Changes Core for negligible arithmetic benefit and exposes a scalar regression. Cheap scales no longer justify fusion alone. |
+
+These alternatives were tested in temporary executables; historical evaluator modules and field
+prototypes are not retained in the repository.
+
+### Final measurements and validation
+
+The baseline is the completed source cleanup before this fix, including its uncommitted source
+changes, rather than the older arithmetic at `f9db7eab`. Frozen and current generated bodies use
+identical kernel wrappers in one executable. Every AIR matches both its handwritten definition
+and the frozen cleaned evaluator exactly at seeds `0`, `42`, `0x243f6a8885a308d3`, and `u64::MAX`,
+including distinct packed lanes, all 1,420 assertions, their order, and their classes.
+No residual sign allowances apply.
+
+Apple M2 Pro, aarch64/NEON, Rust 1.99.0, release profile; preparation and allocation are excluded.
+Both evaluators share inputs, frame, and output allocation, warm up for 256 interleaved calls,
+and alternate timed order. CPU 8 uses eleven samples of 16,384 calls; CPU 2 uses seven samples of
+8,192 calls. Builds and timings are serialized and power guards pass. Percentages below are
+candidate/control median changes; negative values mean faster.
+
+| Eidos evaluator | CPU 8 scalar | CPU 8 packed | CPU 2 scalar | CPU 2 packed |
+|---|---:|---:|---:|---:|
+| VM | -2.32% | -0.50% | -3.34% | -2.26% |
+| PVM | -2.22% | -0.62% | -2.69% | -1.85% |
+
+The equally weighted sixteen-AIR geometric means are -0.27% scalar / -0.06% packed on CPU 8
+and -0.56% scalar / -1.40% packed on CPU 2. The latter includes a -17.69% packed Core outlier
+despite Core's generated function being byte-identical to the baseline. That outlier remains
+a compiler/benchmark-context observation; it is not counted as an arithmetic optimization.
+Across the seven AIRs whose generated row functions actually change, geometric means are
+-0.71% scalar / -0.16% packed on CPU 8 and -1.09% scalar / -0.50% packed on CPU 2.
+Same-kernel control geometric means move by less than 0.04% on both cores. The
+[per-AIR results](symbolic-scale-dot-results.csv) retain all medians, MADs, sample counts, controls,
+and unchanged functions.
+
+Regression tests cover signed and inverse scales, full-width exponents, field-period identities,
+cheap scales, literal-only dispatch, shared/prepared boundaries, squares, extension dispatch,
+and both generated branches. Source capture, source-file review hashes, and protocol artifacts
+remain unchanged by this scheduling fix.
+
+Focused release validation passes 87 compiler tests and 17 generated-AIR checks; two manual tests
+are skipped. Standard Clippy with warnings denied passes for compiler and generated AIR across
+all targets, including the opt-in experiment harness. Generated AIR also passes its host
+`no_std` check. Scoped formatting and `git diff --check` pass. All 201 source-file review hashes
+remain exact. Temporary benchmark sources are removed from the repository.

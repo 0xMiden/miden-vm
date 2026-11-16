@@ -21,13 +21,12 @@
 
 use core::array;
 
-use p3_field::Dup;
-
 use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing},
     operations::opcodes,
 };
+use p3_field::Dup;
 
 use crate::vm::constraints::{
     decoder::columns::DecoderCols, op_flags::get_op_index, stack::columns::StackCols,
@@ -213,9 +212,15 @@ where
         let prefix_010 = prefix_01 * bits[4][0].clone();
         let u32_add3_madd_group = u32_rc_op.clone() * bits[3][1].clone() * bits[2][1].clone();
         let is_loop = decoder.end_block_flags().is_loop;
-        let end_loop = end.clone() * is_loop;
-        let left_shift =
-            prefix_010 + u32_add3_madd_group + split.clone() + repeat + end_loop + dyn_op.clone();
+        let end_loop = end.dup() * is_loop;
+        let left_shift = E::sum_array::<6>(&[
+            prefix_010,
+            u32_add3_madd_group,
+            split.dup(),
+            repeat,
+            end_loop,
+            dyn_op.dup(),
+        ]);
 
         // overflow = (b0 - 16) * h0, degree 2 (uses stack columns, not decoder).
         let b0: E = stack.b0.dup().into();

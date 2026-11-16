@@ -117,7 +117,7 @@ mod tests {
     use miden_core::{Felt, field::QuadFelt};
     use miden_stark::air::{
         self,
-        symbolic::{BaseInput, BaseLeaf, RowOffset, SymbolicExpr},
+        symbolic::{BaseInput, ExprRef, ExprView, RowOffset},
     };
 
     use super::{ChunkNodeSpongeAir, SPONGE_COL_OFFSET, chunk_node, sponge};
@@ -226,17 +226,12 @@ mod tests {
         }
     }
 
-    fn input_addresses(expr: &air::symbolic::SymbolicExpression<Felt>, out: &mut Vec<BaseInput>) {
-        match expr {
-            SymbolicExpr::Leaf(BaseLeaf::Input(input)) => out.push(*input),
-            SymbolicExpr::Leaf(_) => {},
-            SymbolicExpr::Add { x, y, .. }
-            | SymbolicExpr::Sub { x, y, .. }
-            | SymbolicExpr::Mul { x, y, .. } => {
-                input_addresses(x, out);
-                input_addresses(y, out);
-            },
-            SymbolicExpr::Neg { x, .. } => input_addresses(x, out),
+    fn input_addresses(expr: ExprRef<'_, Felt, QuadFelt>, out: &mut Vec<BaseInput>) {
+        if let ExprView::BaseInput(input) = expr.view() {
+            out.push(input);
+        }
+        for child in expr.children() {
+            input_addresses(child, out);
         }
     }
 
@@ -246,18 +241,18 @@ mod tests {
         let periodic = &captured.descriptor.spec().periodic_columns;
         assert_eq!(&periodic[..11], sponge::sponge_program().as_slice());
         assert_eq!(&periodic[11..], chunk_node::periodic_columns());
-        let current = |index| BaseInput::Main { offset: RowOffset::Current, index };
-        let next = |index| BaseInput::Main { offset: RowOffset::Next, index };
+        let current = |index| BaseInput::Main { row: RowOffset::Current, column: index };
+        let next = |index| BaseInput::Main { row: RowOffset::Next, column: index };
         // Capacity and late payload rows use different physical cells for logical is_head.
         for (ordinal, expected) in [
-            (23, vec![BaseInput::Periodic(18), current(16), current(16)]),
-            (25, vec![BaseInput::Periodic(17), next(16), next(44), current(44)]),
-            (26, vec![BaseInput::Periodic(19), current(14), current(14)]),
+            (23, vec![BaseInput::Periodic { index: 18 }, current(16)]),
+            (25, vec![BaseInput::Periodic { index: 17 }, next(16), next(44), current(44)]),
+            (26, vec![BaseInput::Periodic { index: 19 }, current(14)]),
             (
                 28,
                 vec![
-                    BaseInput::Periodic(20),
-                    BaseInput::Periodic(17),
+                    BaseInput::Periodic { index: 20 },
+                    BaseInput::Periodic { index: 17 },
                     next(14),
                     next(44),
                     current(44),
@@ -268,7 +263,12 @@ mod tests {
                 panic!("chunk/node ordinary assertion changed class");
             };
             let mut addresses = Vec::new();
-            input_addresses(expr, &mut addresses);
+            // A Boolean check retains one operand instead of spelling out x * (x - 1).
+            if matches!(ordinal, 23 | 26) {
+                assert!(matches!(expr.as_ref().view(), ExprView::Mul { y, .. }
+                    if matches!(y.view(), ExprView::BoolCheck { .. })));
+            }
+            input_addresses(expr.as_ref(), &mut addresses);
             assert_eq!(addresses, expected);
         }
     }

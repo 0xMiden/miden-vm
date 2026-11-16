@@ -314,8 +314,6 @@ pub const NUM_MAIN_COLS: usize = 35;
 const NUM_LOGUP_COLS: usize = 12;
 const AUX_WIDTH: usize = NUM_LOGUP_COLS;
 const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [2; NUM_LOGUP_COLS];
-/// `2¹⁶`, the high-half weight in the ordering decomposition.
-const TWO16: u32 = 1 << 16;
 
 // AIR
 // ================================================================================================
@@ -347,31 +345,37 @@ impl air::LiftedAir for EcMsmAir {
         let local = frame.main.current;
         let next = frame.main.next;
 
-        let act: AB::Expr = local[COL_ACT].dup();
-        let act_next: AB::Expr = next[COL_ACT].dup();
-        let is_boundary: AB::Expr = local[COL_IS_BOUNDARY].dup();
-        let is_intro: AB::Expr = local[COL_IS_INTRO].dup();
-        let is_combine: AB::Expr = local[COL_IS_COMBINE].dup();
-        let is_neg: AB::Expr = local[COL_IS_NEG].dup();
-        let is_intro_zero: AB::Expr = local[COL_IS_INTRO_ZERO].dup();
-        let is_intro_endo = act.clone()
-            - is_intro.clone()
-            - is_combine.clone()
-            - is_neg.clone()
-            - is_intro_zero.clone();
-        let minted: AB::Expr = local[COL_NEG_MINTED].dup();
-        let idx: AB::Expr = local[COL_IDX].dup();
+        let act = local[COL_ACT].dup();
+        let act_next = next[COL_ACT].dup();
+        let is_boundary = local[COL_IS_BOUNDARY].dup();
+        let is_intro = local[COL_IS_INTRO].dup();
+        let is_combine = local[COL_IS_COMBINE].dup();
+        let is_neg = local[COL_IS_NEG].dup();
+        let is_intro_zero = local[COL_IS_INTRO_ZERO].dup();
+        let is_intro_endo = act.dup()
+            - AB::Expr::sum_array::<4>(&[
+                is_intro.dup(),
+                is_combine.dup(),
+                is_neg.dup(),
+                is_intro_zero.dup(),
+            ]);
+        let minted = local[COL_NEG_MINTED].dup();
+        let idx = local[COL_IDX].dup();
 
         // Booleans.
-        builder.assert_bool(local[COL_ACT].dup());
-        builder.assert_bool(local[COL_IS_BOUNDARY].dup());
-        builder.assert_bool(local[COL_IS_INTRO].dup());
-        builder.assert_bool(local[COL_IS_COMBINE].dup());
-        builder.assert_bool(local[COL_IS_NEG].dup());
-        builder.assert_bool(local[COL_IS_INTRO_ZERO].dup());
-        builder.assert_zero(is_intro_endo.clone() * (is_intro_endo.clone() - AB::Expr::ONE));
-        builder.assert_bool(local[COL_NEG_MINTED].dup());
-        builder.assert_zero((AB::Expr::ONE - is_neg.clone() - is_intro_endo.clone()) * minted);
+        builder.assert_bools([
+            act.dup(),
+            is_boundary.dup(),
+            is_intro.dup(),
+            is_combine.dup(),
+            is_neg.dup(),
+            is_intro_zero.dup(),
+            is_intro_endo.dup(),
+            minted.dup(),
+        ]);
+        builder
+            .when(minted.dup())
+            .assert_eq(AB::Expr::ONE, is_neg.dup() + is_intro_endo.dup());
         builder.assert_zero(
             (is_intro_zero.clone() + is_intro_endo.clone()) * local[COL_INTRO_IS_PAI].dup(),
         );
@@ -379,43 +383,44 @@ impl air::LiftedAir for EcMsmAir {
         // Activity is sticky-downward (pads are a tail). The residual's
         // Boolean constraint above makes every active row exactly one op and
         // every pad no op.
-        builder
-            .when(frame.transition())
-            .assert_zero((AB::Expr::ONE - act.clone()) * act_next);
+        let inactive = AB::Expr::ONE - act.dup();
+        builder.when(frame.transition()).when(inactive.dup()).assert_zero(act_next);
         // A boundary only on active rows; pads carry `is_boundary = 0` so
         // the allocator freezes `expr_ptr` across the tail.
-        builder.assert_zero((AB::Expr::ONE - act.clone()) * is_boundary.clone());
+        builder.when(inactive.dup()).assert_zero(is_boundary.dup());
         // Pin the provide multiplicity to 0 on inactive rows (mirroring the
         // eval chip's `out_mult` pin): pads then provide *nothing* — the
         // `MsmTerm` provide (`−mult`, otherwise ungated by `act`) and the
         // `MsmExpr` provide both vanish — so a forged pad `mult` can't inject
         // phantom terms, independent of the consumer set.
-        builder.assert_zero((AB::Expr::ONE - act.clone()) * local[COL_MULT].dup());
-        builder.assert_zero((AB::Expr::ONE - act) * local[COL_IS_CLAIMED].dup());
+        builder
+            .when(inactive)
+            .assert_zeros([local[COL_MULT].dup(), local[COL_IS_CLAIMED].dup()]);
         // At most one claim per expression: each claim run must consume
         // exactly its own expression's claim terms.
         builder.assert_bool(local[COL_IS_CLAIMED].dup());
 
         // Allocator: expr_ptr = 1 on the first row, `+1` after each
         // boundary. ptr → (run) is injective by construction.
-        let expr_ptr: AB::Expr = local[COL_EXPR_PTR].dup();
-        let expr_ptr_next: AB::Expr = next[COL_EXPR_PTR].dup();
-        builder.when(frame.first_row()).assert_zero(expr_ptr - AB::Expr::ONE);
+        let expr_ptr = local[COL_EXPR_PTR].dup();
+        let expr_ptr_next = next[COL_EXPR_PTR].dup();
+        builder.when(frame.first_row()).assert_one(expr_ptr.dup());
         builder
             .when(frame.transition())
-            .assert_zero(expr_ptr_next - local[COL_EXPR_PTR].dup() - is_boundary.clone());
+            .assert_eq(expr_ptr_next, expr_ptr + is_boundary.dup());
 
         // Cursor `idx` resets to 0 after a boundary, else `+1` — so the
         // first row of every run has idx 0 and the boundary's idx is k−1.
-        let idx_next: AB::Expr = next[COL_IDX].dup();
-        builder.when(frame.first_row()).assert_zero(idx.clone());
+        let idx_next = next[COL_IDX].dup();
+        builder.when(frame.first_row()).assert_zero(idx.dup());
+        let not_boundary = AB::Expr::ONE - is_boundary.dup();
         builder
             .when(frame.transition())
-            .assert_zero(idx_next - (AB::Expr::ONE - is_boundary.clone()) * (idx + AB::Expr::ONE));
+            .assert_eq(idx_next, not_boundary.dup() * (idx.dup() + AB::Expr::ONE));
 
         // Expression-level columns remain constant within a run. This is vacuous for one-row intro
         // runs and required for multi-row combine runs. Boundary transitions are excluded.
-        let not_boundary = AB::Expr::ONE - is_boundary.clone();
+        let within_run = frame.transition() * not_boundary.dup();
         for col in [
             COL_GROUP_PTR,
             COL_SBOUND_PTR,
@@ -436,20 +441,18 @@ impl air::LiftedAir for EcMsmAir {
             COL_BETA_PTR,
             COL_LAMBDA_PTR,
         ] {
-            let here: AB::Expr = local[col].dup();
-            let there: AB::Expr = next[col].dup();
-            builder
-                .when(frame.transition())
-                .assert_zero(not_boundary.clone() * (there - here));
+            let here = local[col].dup();
+            let there = next[col].dup();
+            builder.when(within_run.dup()).assert_eq(there, here);
         }
 
         // Intro: a 1-row run (boundary), value = base (a ptr equality; the
         // scalar's literal-1 rides the bus). idx = 0 falls out of the
         // cursor reset, so it needs no separate constraint.
-        builder.assert_zero(is_intro.clone() * (AB::Expr::ONE - is_boundary.clone()));
-        let base: AB::Expr = local[COL_BASE].dup();
-        let val: AB::Expr = local[COL_VAL].dup();
-        builder.assert_zero(is_intro * (val - base));
+        builder.when(is_intro.dup()).assert_eq(AB::Expr::ONE, is_boundary.dup());
+        let base = local[COL_BASE].dup();
+        let val = local[COL_VAL].dup();
+        builder.when(is_intro.dup()).assert_eq(val, base);
 
         // intro_endo: also a 1-row run (boundary). The value relation is
         // *not* `val = base` (that's plain intro's) — it's proved by the
@@ -457,46 +460,41 @@ impl air::LiftedAir for EcMsmAir {
         // constraint here is the scalar pin: the term's scalar is the
         // group's λ, never an AIR-known constant (see
         // [`msm::require::intro_endo`](crate::precompiles::ec::msm::require::intro_endo)).
-        builder.assert_zero(is_intro_endo.clone() * (AB::Expr::ONE - is_boundary.clone()));
-        let lambda_ptr: AB::Expr = local[COL_LAMBDA_PTR].dup();
-        let scalar: AB::Expr = local[COL_SCALAR].dup();
-        builder.assert_zero(is_intro_endo.clone() * (scalar - lambda_ptr));
+        builder.when(is_intro_endo.dup()).assert_eq(AB::Expr::ONE, is_boundary.dup());
+        let lambda_ptr = local[COL_LAMBDA_PTR].dup();
+        let scalar = local[COL_SCALAR].dup();
+        builder.when(is_intro_endo.dup()).assert_eq(scalar, lambda_ptr);
 
         // intro_zero: also a 1-row run (boundary). Neither the scalar (0)
         // nor the value (the group's PAI point) is an AIR-known constant
         // and neither is a native ptr equality (unlike plain intro's
         // `val = base`) — both ride LogUp consumes below (§ intro_zero):
         // the literal-0 `UintVal` and the `EcPoint(val, is_pai = 1)` tie.
-        builder.assert_zero(is_intro_zero * (AB::Expr::ONE - is_boundary.clone()));
+        builder.when(is_intro_zero.dup()).assert_eq(AB::Expr::ONE, is_boundary.dup());
 
         // ---- combine ----------------------------------------------------
         // Per-row take one-hot: each combine row emits one output term.
-        let take_a: AB::Expr = local[COL_TAKE_A].dup();
-        let take_b: AB::Expr = local[COL_TAKE_B].dup();
-        let take_both = is_combine.clone() - take_a.clone() - take_b.clone();
-        builder.assert_bool(local[COL_TAKE_A].dup());
-        builder.assert_bool(local[COL_TAKE_B].dup());
-        builder.assert_bool(take_both.clone());
+        let take_a = local[COL_TAKE_A].dup();
+        let take_b = local[COL_TAKE_B].dup();
+        let take_both = is_combine.dup() - (take_a.dup() + take_b.dup());
+        builder.assert_bools([take_a.dup(), take_b.dup(), take_both.dup()]);
 
         // Cursors: 0 at run start, advance by the take on each in-run step
         // (reset to 0 across a boundary). The boundary's i + adv_i is k_a.
-        let i_cur: AB::Expr = local[COL_I].dup();
-        let j_cur: AB::Expr = local[COL_J].dup();
-        let i_next: AB::Expr = next[COL_I].dup();
-        let j_next: AB::Expr = next[COL_J].dup();
-        builder.when(frame.first_row()).assert_zero(i_cur.clone());
-        builder.when(frame.first_row()).assert_zero(j_cur.clone());
+        let i_cur = local[COL_I].dup();
+        let j_cur = local[COL_J].dup();
+        let i_next = next[COL_I].dup();
+        let j_next = next[COL_J].dup();
+        builder.when(frame.first_row()).assert_zeros([i_cur.dup(), j_cur.dup()]);
         // A neg row takes the next A term every row, so its cursor-i advance
         // is `is_neg` (the take flags are 0 off combine, pinned by the
         // one-hot above); j never advances on a neg.
-        let adv_i = take_a.clone() + take_both.clone() + is_neg.clone();
-        let adv_j = take_b.clone() + take_both;
-        builder
-            .when(frame.transition())
-            .assert_zero(i_next - (AB::Expr::ONE - is_boundary.clone()) * (i_cur + adv_i));
-        builder
-            .when(frame.transition())
-            .assert_zero(j_next - (AB::Expr::ONE - is_boundary.clone()) * (j_cur + adv_j));
+        let adv_i = take_a.dup() + take_both.dup() + is_neg.dup();
+        let adv_j = take_b.dup() + take_both;
+        builder.when(frame.transition()).assert_eq_arrays(
+            [i_next, j_next],
+            [not_boundary.dup() * (i_cur.dup() + adv_i), not_boundary * (j_cur.dup() + adv_j)],
+        );
 
         // Operand consumes authenticate the output base directly. Single takes copy the
         // scalar; merged and negated scalars are authenticated by their UintAdd messages.
@@ -511,26 +509,22 @@ impl air::LiftedAir for EcMsmAir {
         // against circular derivations. The a-side applies to combine AND
         // neg (both consume operand A); the b-side to combine, and its limbs
         // carry the certificate ordering below on minting rows.
-        let bnd_a = (is_combine.clone() + is_neg) * is_boundary.clone();
-        let bnd_b = is_combine * is_boundary;
-        let two16 = AB::Expr::from(Felt::from(TWO16));
-        let here_expr: AB::Expr = local[COL_EXPR_PTR].dup();
-        let a_expr: AB::Expr = local[COL_A_EXPR].dup();
-        let b_expr: AB::Expr = local[COL_B_EXPR].dup();
-        let a_lo: AB::Expr = local[COL_A_DIFF_LO].dup();
-        let a_hi: AB::Expr = local[COL_A_DIFF_HI].dup();
-        let b_lo: AB::Expr = local[COL_B_DIFF_LO].dup();
-        let b_hi: AB::Expr = local[COL_B_DIFF_HI].dup();
-        builder.assert_zero(
-            bnd_a * (here_expr.clone() - a_expr - AB::Expr::ONE - a_lo - two16.clone() * a_hi),
+        let bnd_a = (is_combine.dup() + is_neg.dup()) * is_boundary.dup();
+        let bnd_b = is_combine.dup() * is_boundary.dup();
+        let here_expr = local[COL_EXPR_PTR].dup();
+        let a_expr = local[COL_A_EXPR].dup();
+        let b_expr = local[COL_B_EXPR].dup();
+        let a_lo = local[COL_A_DIFF_LO].dup();
+        let a_hi = local[COL_A_DIFF_HI].dup();
+        let b_lo = local[COL_B_DIFF_LO].dup();
+        let b_hi = local[COL_B_DIFF_HI].dup();
+        builder.when(bnd_a).assert_eq(
+            here_expr.dup(),
+            AB::Expr::ONE + AB::Expr::sum_array::<3>(&[a_expr, a_lo, a_hi.mul_2exp_u64(16)]),
         );
-        builder.assert_zero(
-            bnd_b
-                * (here_expr
-                    - b_expr
-                    - AB::Expr::ONE
-                    - b_lo.clone()
-                    - two16.clone() * b_hi.clone()),
+        builder.when(bnd_b).assert_eq(
+            here_expr,
+            AB::Expr::ONE + AB::Expr::sum_array::<3>(&[b_expr, b_lo.dup(), b_hi.mul_2exp_u64(16)]),
         );
 
         // Certificate ordering: a minted `EcOnCurveCert(group, val)` rests on
@@ -538,17 +532,19 @@ impl air::LiftedAir for EcMsmAir {
         // must have the larger point ptr, as for EcGroupAdd's `r > p, q`.
         // Without it a point could certify itself, or a cycle of points each
         // other, with none of them on the curve.
-        let cert_val: AB::Expr = local[COL_VAL].dup();
-        let cert_val_a: AB::Expr = local[COL_VAL_A].dup();
-        let cert_base: AB::Expr = local[COL_BASE].dup();
-        let cert_diff = b_lo + two16 * b_hi;
+        let cert_val = local[COL_VAL].dup();
+        let cert_val_a = local[COL_VAL_A].dup();
+        let cert_base = local[COL_BASE].dup();
+        let cert_diff = b_lo + b_hi.mul_2exp_u64(16);
         // The two families share a mint-flag column; their selectors choose the source point.
-        let neg_mint: AB::Expr = local[COL_NEG_MINTED].dup() * local[COL_IS_NEG].dup();
-        let endo_mint: AB::Expr = local[COL_ENDO_MINTED].dup() * is_intro_endo;
-        builder.assert_zero(
-            neg_mint * (cert_val.clone() - cert_val_a - AB::Expr::ONE - cert_diff.clone()),
-        );
-        builder.assert_zero(endo_mint * (cert_val - cert_base - AB::Expr::ONE - cert_diff));
+        let neg_mint = local[COL_NEG_MINTED].dup() * local[COL_IS_NEG].dup();
+        let endo_mint = local[COL_ENDO_MINTED].dup() * is_intro_endo;
+        builder
+            .when(neg_mint)
+            .assert_eq(cert_val.dup(), AB::Expr::ONE + cert_val_a + cert_diff.dup());
+        builder
+            .when(endo_mint)
+            .assert_eq(cert_val, AB::Expr::ONE + cert_base + cert_diff);
 
         // Phase 2: LogUp.
         lookup::eval_lookup(self, frame, inputs, builder);
@@ -588,19 +584,21 @@ where
     fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         let local = frame.main.current;
 
-        let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_MULT].dup();
-        let neg_is_claimed: LB::Expr = LB::Expr::ZERO - local[COL_IS_CLAIMED].dup();
-        let act: LB::Expr = local[COL_ACT].dup();
-        let is_boundary: LB::Expr = local[COL_IS_BOUNDARY].dup();
-        let is_intro: LB::Expr = local[COL_IS_INTRO].dup();
-        let is_combine: LB::Expr = local[COL_IS_COMBINE].dup();
-        let is_neg: LB::Expr = local[COL_IS_NEG].dup();
-        let is_intro_zero: LB::Expr = local[COL_IS_INTRO_ZERO].dup();
-        let is_intro_endo = act.clone()
-            - is_intro.clone()
-            - is_combine.clone()
-            - is_neg.clone()
-            - is_intro_zero.clone();
+        let neg_mult = -local[COL_MULT].dup();
+        let neg_is_claimed = -local[COL_IS_CLAIMED].dup();
+        let act = local[COL_ACT].dup();
+        let is_boundary = local[COL_IS_BOUNDARY].dup();
+        let is_intro = local[COL_IS_INTRO].dup();
+        let is_combine = local[COL_IS_COMBINE].dup();
+        let is_neg = local[COL_IS_NEG].dup();
+        let is_intro_zero = local[COL_IS_INTRO_ZERO].dup();
+        let is_intro_endo = act.dup()
+            - LB::Expr::sum_array::<4>(&[
+                is_intro.dup(),
+                is_combine.dup(),
+                is_neg.dup(),
+                is_intro_zero.dup(),
+            ]);
 
         let expr_ptr: LB::Expr = local[COL_EXPR_PTR].dup();
         let group_ptr: LB::Expr = local[COL_GROUP_PTR].dup();
@@ -610,26 +608,26 @@ where
         let scalar: LB::Expr = local[COL_SCALAR].dup();
         let val: LB::Expr = local[COL_VAL].dup();
 
-        let a_expr: LB::Expr = local[COL_A_EXPR].dup();
-        let b_expr: LB::Expr = local[COL_B_EXPR].dup();
-        let i_cur: LB::Expr = local[COL_I].dup();
-        let j_cur: LB::Expr = local[COL_J].dup();
-        let take_a: LB::Expr = local[COL_TAKE_A].dup();
-        let take_b: LB::Expr = local[COL_TAKE_B].dup();
-        let take_both = is_combine.clone() - take_a.clone() - take_b.clone();
-        let s_a: LB::Expr = local[COL_S_A].dup();
-        let s_b: LB::Expr = local[COL_S_B].dup();
-        let val_a: LB::Expr = local[COL_VAL_A].dup();
-        let val_b: LB::Expr = local[COL_VAL_B].dup();
-        let a_ptr: LB::Expr = local[COL_A_PTR].dup();
-        let b_ptr: LB::Expr = local[COL_B_PTR].dup();
-        let bound_ptr: LB::Expr = local[COL_BOUND_PTR].dup();
-        let beta_ptr: LB::Expr = local[COL_BETA_PTR].dup();
-        let lambda_ptr: LB::Expr = local[COL_LAMBDA_PTR].dup();
-        let a_lo: LB::Expr = local[COL_A_DIFF_LO].dup();
-        let a_hi: LB::Expr = local[COL_A_DIFF_HI].dup();
-        let b_lo: LB::Expr = local[COL_B_DIFF_LO].dup();
-        let b_hi: LB::Expr = local[COL_B_DIFF_HI].dup();
+        let a_expr = local[COL_A_EXPR].dup();
+        let b_expr = local[COL_B_EXPR].dup();
+        let i_cur = local[COL_I].dup();
+        let j_cur = local[COL_J].dup();
+        let take_a = local[COL_TAKE_A].dup();
+        let take_b = local[COL_TAKE_B].dup();
+        let take_both = is_combine.dup() - (take_a.dup() + take_b.dup());
+        let s_a = local[COL_S_A].dup();
+        let s_b = local[COL_S_B].dup();
+        let val_a = local[COL_VAL_A].dup();
+        let val_b = local[COL_VAL_B].dup();
+        let a_ptr = local[COL_A_PTR].dup();
+        let b_ptr = local[COL_B_PTR].dup();
+        let bound_ptr = local[COL_BOUND_PTR].dup();
+        let beta_ptr = local[COL_BETA_PTR].dup();
+        let lambda_ptr = local[COL_LAMBDA_PTR].dup();
+        let a_lo = local[COL_A_DIFF_LO].dup();
+        let a_hi = local[COL_A_DIFF_HI].dup();
+        let b_lo = local[COL_B_DIFF_LO].dup();
+        let b_hi = local[COL_B_DIFF_HI].dup();
         // The neg and intro_endo families reuse these four value-relation
         // cells. Their bus gates assign each cell its family-specific role.
         let neg_x: LB::Expr = local[COL_NEG_X].dup();
@@ -742,7 +740,7 @@ where
             pair_deg,
             (
                 "provide-oncurvecert-neg-or-endo",
-                LB::Expr::ZERO - minted * is_boundary.clone(),
+                -minted.dup() * is_boundary.dup(),
                 EcOnCurveCertMsg {
                     group_ptr: group_ptr.clone(),
                     r_ptr: val.clone()

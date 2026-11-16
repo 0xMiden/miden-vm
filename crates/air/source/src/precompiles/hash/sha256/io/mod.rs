@@ -146,23 +146,27 @@ pub fn eval_main<AB: air::LiftedAirBuilder<F = Felt>>(
     // These controller constraints belong to the dense standalone wrapper. A composite caller
     // supplies the corresponding block/coverage constraints from the shared compression rows.
     builder.when(frame.first_row()).assert_zero(v(COL_BLOCK_ID));
-    builder.when(frame.first_row()).assert_zero(act.dup() * (first - one.dup()));
+    builder.when(frame.first_row()).when(act.dup()).assert_one(first);
     builder
         .when(frame.transition())
-        .assert_zero(nv(COL_BLOCK_ID) - v(COL_BLOCK_ID) - last.dup());
+        .assert_eq(nv(COL_BLOCK_ID), v(COL_BLOCK_ID) + last.dup());
     builder
         .when(frame.transition())
-        .assert_zero((one.dup() - act.dup()) * next_act.dup());
+        .when(one.dup() - act.dup())
+        .assert_zero(next_act.dup());
     builder
         .when(frame.transition())
-        .assert_zero((one.dup() - last.dup()) * (next_act.dup() - act.dup()));
+        .when(one.dup() - last.dup())
+        .assert_eq(next_act.dup(), act.dup());
     builder
         .when(frame.transition())
-        .assert_zero(next_act.dup() * last.dup() * (nv(COL_FIRST_BLOCK) - final_block.dup()));
+        .when(next_act.dup() * last.dup())
+        .assert_eq(nv(COL_FIRST_BLOCK), final_block.dup());
     builder
         .when(frame.transition())
-        .assert_zero((act.dup() - next_act) * last * (one.dup() - final_block.dup()));
-    builder.when(frame.last_row()).assert_zero(act * (one - final_block));
+        .when((act.dup() - next_act) * last)
+        .assert_eq(one.dup(), final_block.dup());
+    builder.when(frame.last_row()).when(act).assert_eq(one, final_block);
 }
 
 /// `owned` gates reused cells; `carry` also includes non-final block boundaries in standalone IO.
@@ -182,89 +186,85 @@ pub(super) fn eval_main_rows<AB: air::LiftedAirBuilder<F = Felt>>(
     let first = v(COL_FIRST_BLOCK);
     let final_block = v(COL_FINAL_BLOCK);
     let raw = owned.dup() * p[program::P_RAW].dup();
-    for column in [COL_ACT, COL_FIRST_BLOCK, COL_FINAL_BLOCK, COL_BEFORE] {
-        builder.assert_zero(owned.dup() * v(column) * (one.dup() - v(column)));
-    }
-    builder.assert_zero(raw.dup() * v(COL_CHUNK_ACTIVE) * (one.dup() - v(COL_CHUNK_ACTIVE)));
+    builder
+        .when(owned.dup())
+        .assert_bools([COL_ACT, COL_FIRST_BLOCK, COL_FINAL_BLOCK, COL_BEFORE].map(v));
+    builder.when(raw.dup()).assert_bool(v(COL_CHUNK_ACTIVE));
     for column in [COL_FIRST_BLOCK, COL_FINAL_BLOCK] {
-        builder.when(frame.transition()).assert_zero(
-            owned.dup() * (one.dup() - p[program::P_LAST].dup()) * (nv(column) - v(column)),
-        );
+        builder
+            .when(frame.transition())
+            .when(owned.dup() * (one.dup() - p[program::P_LAST].dup()))
+            .assert_eq(nv(column), v(column));
     }
     for column in [COL_LEN, COL_INPUT_HEAD] {
         builder
             .when(frame.transition())
-            .assert_zero(carry.dup() * (nv(column) - v(column)));
+            .when(carry.dup())
+            .assert_eq(nv(column), v(column));
     }
     let start = act.dup() * p[program::P_FIRST].dup() * first.dup();
-    builder.assert_zero(start.dup() * (v(COL_LEFT) - v(COL_LEN)));
-    builder.assert_zero(start.dup() * (v(COL_BEFORE) - one.dup()));
-    builder.assert_zero(start * (v(COL_INPUT_HEAD) - v(COL_INPUT_EIDOS)));
-    builder.assert_zero(
-        act.dup()
-            * p[program::P_RAW].dup()
-            * (v(COL_LEFT) - v(COL_LEFT_LO16) - v(COL_LEFT_HI16) * Felt::from_u32(1 << 16)),
+    builder.when(start).assert_eq_arrays(
+        [v(COL_LEFT), v(COL_BEFORE), v(COL_INPUT_HEAD)],
+        [v(COL_LEN), one.dup(), v(COL_INPUT_EIDOS)],
     );
-    let mut sum = AB::Expr::ZERO;
+    builder
+        .when(act.dup() * p[program::P_RAW].dup())
+        .assert_eq(v(COL_LEFT), v(COL_LEFT_LO16) + v(COL_LEFT_HI16).mul_2exp_u64(16));
+    let sum: AB::Expr = (0..4).map(|i| v(COL_MSG_BEGIN + i)).sum();
     let mut previous = v(COL_BEFORE);
     let padded: [AB::Expr; 4] = array::from_fn(|i| {
         let msg = v(COL_MSG_BEGIN + i);
-        builder.assert_zero(raw.dup() * msg.dup() * (one.dup() - msg.dup()));
-        builder.assert_zero(raw.dup() * msg.dup() * (one.dup() - previous.dup()));
-        builder.assert_zero(raw.dup() * v(COL_RAW_BEGIN + i) * (one.dup() - msg.dup()));
-        let byte = v(COL_RAW_BEGIN + i) + (previous.dup() - msg.dup()) * Felt::from_u8(128);
-        sum += msg.dup();
+        builder.when(raw.dup()).assert_bool(msg.dup());
+        builder.when(raw.dup() * msg.dup()).assert_eq(one.dup(), previous.dup());
+        builder
+            .when(raw.dup() * (one.dup() - msg.dup()))
+            .assert_zero(v(COL_RAW_BEGIN + i));
+        let byte = v(COL_RAW_BEGIN + i) + (previous.dup() - msg.dup()).mul_2exp_u64(7);
         previous = msg;
         byte
     });
-    builder.assert_zero(raw * (one.dup() - previous.dup()) * (v(COL_LEFT) - sum.dup()));
-    builder.when(frame.transition()).assert_zero(
-        carry.dup() * (nv(COL_LEFT) - v(COL_LEFT) + p[program::P_RAW].dup() * sum.dup()),
+    builder
+        .when(raw * (one.dup() - previous.dup()))
+        .assert_eq(v(COL_LEFT), sum.dup());
+    builder
+        .when(frame.transition())
+        .when(carry.dup())
+        .assert_eq(nv(COL_LEFT), v(COL_LEFT) - p[program::P_RAW].dup() * sum.dup());
+    builder.when(frame.transition()).when(carry.dup()).assert_eq(
+        nv(COL_BEFORE),
+        v(COL_BEFORE) + p[program::P_RAW].dup() * (previous - v(COL_BEFORE)),
     );
-    builder.when(frame.transition()).assert_zero(
-        carry.dup()
-            * (nv(COL_BEFORE)
-                - v(COL_BEFORE)
-                - p[program::P_RAW].dup() * (previous - v(COL_BEFORE))),
-    );
-    builder.assert_zero(
-        act.dup() * p[program::P_RAW_LAST].dup() * final_block.dup() * (v(COL_LEFT) - sum),
-    );
+    builder
+        .when(act.dup() * p[program::P_RAW_LAST].dup() * final_block.dup())
+        .assert_eq(v(COL_LEFT), sum);
     // The marker must precede W14/W15 exactly when this block is final.
-    builder.assert_zero(
-        act.dup() * p[program::P_LENGTH].dup() * (final_block.dup() + v(COL_BEFORE) - one.dup()),
-    );
+    builder
+        .when(act.dup() * p[program::P_LENGTH].dup())
+        .assert_one(final_block.dup() + v(COL_BEFORE));
     let padded_word = padded
         .into_iter()
         .fold(AB::Expr::ZERO, |word, byte| word * Felt::from_u32(256) + byte);
-    builder.assert_zero(
-        act.dup()
-            * (p[program::P_RAW].dup() - final_block.dup() * p[program::P_SUFFIX].dup())
-            * (v(COL_WORD) - padded_word),
-    );
-    builder.assert_zero(
-        act.dup()
-            * p[program::P_LENGTH].dup()
-            * final_block.dup()
-            * (nv(COL_WORD) + v(COL_WORD) * Felt::new_unchecked(1u64 << 32)
-                - v(COL_LEN) * Felt::from_u8(8)),
-    );
+    builder
+        .when(
+            act.dup() * (p[program::P_RAW].dup() - final_block.dup() * p[program::P_SUFFIX].dup()),
+        )
+        .assert_eq(v(COL_WORD), padded_word);
+    builder
+        .when(act.dup() * p[program::P_LENGTH].dup() * final_block.dup())
+        .assert_eq(nv(COL_WORD) + v(COL_WORD).mul_2exp_u64(32), v(COL_LEN).mul_2exp_u64(3));
     let expected_chunk =
         v(COL_MSG_BEGIN) + p[program::P_FIRST].dup() * first.dup() * (one.dup() - v(COL_MSG_BEGIN));
-    builder.assert_zero(
-        act.dup() * p[program::P_CHUNK_FIRST].dup() * (v(COL_CHUNK_ACTIVE) - expected_chunk),
-    );
-    builder.when(frame.transition()).assert_zero(
-        owned.dup()
-            * (p[program::P_RAW].dup() - p[program::P_CHUNK_END].dup())
-            * (nv(COL_CHUNK_ACTIVE) - v(COL_CHUNK_ACTIVE)),
-    );
-    builder.when(frame.transition()).assert_zero(
-        carry
-            * (nv(COL_INPUT_EIDOS)
-                - v(COL_INPUT_EIDOS)
-                - (p[program::P_CHUNK_ADVANCE].dup() + p[program::P_LAST].dup())
-                    * nv(COL_CHUNK_ACTIVE)),
+    builder
+        .when(act.dup() * p[program::P_CHUNK_FIRST].dup())
+        .assert_eq(v(COL_CHUNK_ACTIVE), expected_chunk);
+    builder
+        .when(frame.transition())
+        .when(owned.dup() * (p[program::P_RAW].dup() - p[program::P_CHUNK_END].dup()))
+        .assert_eq(nv(COL_CHUNK_ACTIVE), v(COL_CHUNK_ACTIVE));
+    builder.when(frame.transition()).when(carry).assert_eq(
+        nv(COL_INPUT_EIDOS),
+        v(COL_INPUT_EIDOS)
+            + (p[program::P_CHUNK_ADVANCE].dup() + p[program::P_LAST].dup()) * nv(COL_CHUNK_ACTIVE),
     );
     for i in 0..7 {
         let value = if i < 6 {
@@ -272,37 +272,36 @@ pub(super) fn eval_main_rows<AB: air::LiftedAirBuilder<F = Felt>>(
         } else {
             pack_le(&local[COL_RAW_BEGIN..COL_RAW_BEGIN + 4], 256)
         };
-        builder.when(frame.transition()).assert_zero(
-            owned.dup() * p[program::P_RAW_NEXT].dup() * (nv(COL_RAW_BUFFER + i) - value),
-        );
+        builder
+            .when(frame.transition())
+            .when(owned.dup() * p[program::P_RAW_NEXT].dup())
+            .assert_eq(nv(COL_RAW_BUFFER + i), value);
     }
     let state = act.dup() * first * p[program::P_STATE].dup();
-    builder.assert_zero(state.dup() * (v(COL_STATE_HI) - p[program::P_IV_HI].dup()));
-    builder.assert_zero(state * (v(COL_STATE_LO) - p[program::P_IV_LO].dup()));
+    builder.when(state).assert_eq_arrays(
+        [v(COL_STATE_HI), v(COL_STATE_LO)],
+        [p[program::P_IV_HI].dup(), p[program::P_IV_LO].dup()],
+    );
     let digest: &[AB::Expr; 8] = local[COL_DIGEST_BEGIN..COL_DIGEST_BEGIN + 8]
         .try_into()
-        .expect("SHA-256 digest byte band");
+        .expect("declared AIR row band");
     for (i, half) in halves_le::<AB::Expr, _>(digest, 256).into_iter().enumerate() {
-        builder.when(frame.transition()).assert_zero(
-            act.dup()
-                * final_block.dup()
-                * p[program::P_DIGEST_NEXT].dup()
-                * (nv(COL_PREVIOUS_DIGEST + i) - half),
-        );
-        builder.when(frame.transition()).assert_zero(
-            act.dup()
-                * final_block.dup()
-                * p[program::P_DIGEST_SECOND].dup()
-                * (nv(COL_CHUNK_HEAD_DIGEST + i) - v(COL_PREVIOUS_DIGEST + i)),
-        );
+        builder
+            .when(frame.transition())
+            .when(act.dup() * final_block.dup() * p[program::P_DIGEST_NEXT].dup())
+            .assert_eq(nv(COL_PREVIOUS_DIGEST + i), half);
+        builder
+            .when(frame.transition())
+            .when(act.dup() * final_block.dup() * p[program::P_DIGEST_SECOND].dup())
+            .assert_eq(nv(COL_CHUNK_HEAD_DIGEST + i), v(COL_PREVIOUS_DIGEST + i));
     }
-    builder.when(frame.transition()).assert_zero(
-        act.dup()
-            * final_block.dup()
-            * p[program::P_DIGEST_CARRY].dup()
-            * (nv(COL_DIGEST_EIDOS) - v(COL_DIGEST_EIDOS)),
-    );
-    builder.assert_zero(act * p[program::P_BIND].dup() * (one - final_block) * v(COL_OUT_MULT));
+    builder
+        .when(frame.transition())
+        .when(act.dup() * final_block.dup() * p[program::P_DIGEST_CARRY].dup())
+        .assert_eq(nv(COL_DIGEST_EIDOS), v(COL_DIGEST_EIDOS));
+    builder
+        .when(act * p[program::P_BIND].dup() * (one - final_block))
+        .assert_zero(v(COL_OUT_MULT));
 }
 
 fn chunks_initial_cv<E: Algebra<Felt>>(num_felts: E) -> [E; 4] {
@@ -441,7 +440,8 @@ pub(super) fn eval_lookup_group<G>(
         p[P_FIRST].dup(),
         p[P_RAW_EMIT].dup(),
         p[P_LENGTH].dup(),
-        p[P_RAW].dup() - p[P_FIRST].dup() - p[P_RAW_EMIT].dup() - p[P_LENGTH].dup(),
+        p[P_RAW].dup()
+            - [P_FIRST, P_RAW_EMIT, P_LENGTH].map(|i| p[i].dup()).into_iter().sum::<G::Expr>(),
         p[P_STATE].dup(),
         p[P_DIGEST_EMIT].dup(),
         p[P_DIGEST].dup() - p[P_DIGEST_EMIT].dup(),
@@ -497,7 +497,7 @@ fn eval_batch<B>(
             } else {
                 (1, COL_STATE_LO)
             };
-            let addr = p[program::P_STATE_IDX].dup() * Felt::from_u8(2) + B::Expr::from_u32(off);
+            let addr = p[program::P_STATE_IDX].double() + B::Expr::from_u32(off);
             batch.insert(
                 "incoming",
                 -one.dup(),
@@ -522,7 +522,7 @@ fn eval_batch<B>(
                 EidosInitMsg {
                     compression_id: e(COL_INPUT_HEAD),
                     initial_cv: chunks_initial_cv(
-                        (e(COL_INPUT_EIDOS) - e(COL_INPUT_HEAD) + one) * Felt::from_u8(8),
+                        (e(COL_INPUT_EIDOS) - e(COL_INPUT_HEAD) + one).mul_2exp_u64(3),
                     ),
                 },
                 d1,
@@ -659,8 +659,7 @@ fn eval_batch<B>(
                 .try_into()
                 .expect("SHA-256 digest word band");
             let [lo, hi] = halves_be(bytes);
-            let addr = B::Expr::from_u32(OUTPUT_SLOTS[0])
-                + p[program::P_DIGEST_IDX].dup() * Felt::from_u8(2);
+            let addr = B::Expr::from_u32(OUTPUT_SLOTS[0]) + p[program::P_DIGEST_IDX].double();
             batch.insert("digest-hi", final_block.dup(), word(e(COL_BLOCK_ID), addr.dup(), hi), d1);
             batch.insert("digest-lo", final_block, word(e(COL_BLOCK_ID), addr + one, lo), d1);
         },

@@ -96,13 +96,10 @@ pub const PRE_XOR: usize = 2;
 pub const PRE_WRAP12: usize = 3;
 pub const PRE_WRAP7: usize = 4;
 
-/// Multiplicative inverse of two in the Miden base field.
-const FELT_INV_TWO: Felt = Felt::new_unchecked(9_223_372_034_707_292_161);
-
 /// Recover `a & b` from `x = a xor b` using `(a + b - x) / 2`.
 #[cfg(test)]
 pub(crate) fn and_result_from_xor<E: Algebra<Felt>>(a: E, b: E, x: E) -> E {
-    (a + b - x) * FELT_INV_TWO
+    (a + b - x).halve()
 }
 
 /// Recover `(!a) & b` from `x = a xor b` using `(x - a + b) / 2`.
@@ -110,7 +107,7 @@ pub(crate) fn and_result_from_xor<E: Algebra<Felt>>(a: E, b: E, x: E) -> E {
 /// The identity is linear, so it also holds when byte tuples are packed with common positional
 /// weights, as in Keccak's 32-bit Memory64 limbs.
 pub(crate) fn andnot_result_from_xor<E: Algebra<Felt>>(a: E, b: E, x: E) -> E {
-    (x - a + b) * FELT_INV_TWO
+    (x - a + b).halve()
 }
 
 /// Log2 of [`TRACE_HEIGHT`].
@@ -168,13 +165,13 @@ pub struct BytePairLutMsg<E> {
 impl<E: Algebra<Felt>> BytePairLutMsg<E> {
     /// Construct from an ordinary AND result.
     pub fn from_and(a: E, b: E, h: E) -> Self {
-        let x = a.clone() + b.clone() - h.clone() - h;
+        let x = a.dup() + b.dup() - h.double();
         Self { a, b, x }
     }
 
     /// Construct from `c = (!a) & b` using `x = a - b + 2c`.
     pub fn from_andnot(a: E, b: E, c: E) -> Self {
-        let x = a.clone() - b.clone() + c.clone() + c;
+        let x = a.dup() - b.dup() + c.double();
         Self { a, b, x }
     }
 }
@@ -285,16 +282,16 @@ where
         let preprocessed = frame.preprocessed.current;
         let main = frame.main.current;
 
-        let a_value: LB::Expr = preprocessed[PRE_A].dup();
-        let b_value: LB::Expr = preprocessed[PRE_B].dup();
-        let x: LB::Expr = preprocessed[PRE_XOR].dup();
-        let wrap12: LB::Expr = preprocessed[PRE_WRAP12].dup();
-        let wrap7: LB::Expr = preprocessed[PRE_WRAP7].dup();
-        let w = a_value.clone() + LB::Expr::from_u16(256) * b_value.clone();
+        let a_value = preprocessed[PRE_A].dup();
+        let b_value = preprocessed[PRE_B].dup();
+        let x = preprocessed[PRE_XOR].dup();
+        let wrap12 = preprocessed[PRE_WRAP12].dup();
+        let wrap7 = preprocessed[PRE_WRAP7].dup();
+        let w = a_value.dup() + b_value.mul_2exp_u64(8);
 
         let neg_relation: [LB::Expr; eidos::NUM_RELATIONS] =
-            core::array::from_fn(|relation| LB::Expr::ZERO - main[relation].dup());
-        let neg_range16 = LB::Expr::ZERO - main[COL_MULT_RANGE16].dup();
+            core::array::from_fn(|relation| -main[relation].dup());
+        let neg_range16 = -main[COL_MULT_RANGE16].dup();
 
         let relation_values = eidos::provider_values(x.clone(), wrap12, wrap7);
 

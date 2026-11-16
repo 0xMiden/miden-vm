@@ -23,7 +23,7 @@ use crate::vm::constraints::{
         main_air::{MainBusContext, NativeMainLookupBuilder},
         messages::{BlockHashMsg, OpGroupMsg},
     },
-    utils::{BoolNot, horner_eval_bits},
+    utils::horner_eval_bits,
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
@@ -60,7 +60,12 @@ pub(in crate::vm::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
 
     let f_join = op_flags.join();
     let f_split = op_flags.split();
-    let f_child = op_flags.dyn_op() + op_flags.dyncall() + op_flags.call() + op_flags.syscall();
+    let f_child = LB::Expr::sum_array::<4>(&[
+        op_flags.dyn_op(),
+        op_flags.dyncall(),
+        op_flags.call(),
+        op_flags.syscall(),
+    ]);
     let f_end = op_flags.end();
     let f_push = op_flags.push();
 
@@ -113,9 +118,8 @@ pub(in crate::vm::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                         || {
                             let parent = addr_next.dup();
                             let s0: LB::Expr = s0.dup();
-                            let one_minus_s0 = s0.not();
                             let child_hash = array::from_fn(|i| {
-                                s0.clone() * h_0[i].dup() + one_minus_s0.clone() * h_1[i].dup()
+                                h_1[i].dup() + s0.dup() * (h_0[i].dup() - h_1[i].dup())
                             });
                             BlockHashMsg::Child { parent, child_hash }
                         },
@@ -170,10 +174,12 @@ pub(in crate::vm::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                             // `respan_next` here — otherwise an END→RESPAN pair encodes a
                             // false-positive `is_first_child = 1` and unbalances the bus.
                             let is_first_child = LB::Expr::ONE
-                                - op_flags.end_next()
-                                - op_flags.repeat_next()
-                                - op_flags.respan_next()
-                                - op_flags.halt_next();
+                                - LB::Expr::sum_array::<4>(&[
+                                    op_flags.end_next(),
+                                    op_flags.repeat_next(),
+                                    op_flags.respan_next(),
+                                    op_flags.halt_next(),
+                                ]);
                             let is_loop_body = dec.end_block_flags().is_loop_body.dup();
                             BlockHashMsg::End {
                                 parent,
@@ -256,8 +262,9 @@ pub(in crate::vm::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                             let opcode_next = horner_eval_bits::<7, _, LB::Expr>(&dec_next.op_bits);
                             let stk_next_0: LB::Expr = stk_next.get(0);
                             let h0_next: LB::Expr = dec_next.hasher_state[0].dup();
-                            let group_value = f_push.clone() * stk_next_0
-                                + f_push.not() * (h0_next * LB::Expr::from_u16(128) + opcode_next);
+                            let decoded_group = h0_next.mul_2exp_u64(7) + opcode_next;
+                            let group_value =
+                                decoded_group.dup() + f_push.dup() * (stk_next_0 - decoded_group);
                             let batch_id = addr.dup();
                             OpGroupMsg { batch_id, group_pos: gc, group_value }
                         },

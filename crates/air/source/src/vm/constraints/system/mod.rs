@@ -59,11 +59,8 @@ pub fn enforce_main<AB>(
     // Clock: starts at 0, increments by 1
     {
         let builder = &mut builder.when(frame.first_row());
-        builder.assert_zero(local.system.clk.dup());
-        builder.assert_zero(local.system.ctx.dup());
-        for limb in &local.system.fn_hash {
-            builder.assert_zero(limb.dup());
-        }
+        builder.assert_zeros([local.system.clk.dup(), local.system.ctx.dup()]);
+        builder.assert_zeros(local.system.fn_hash.each_ref().map(Dup::dup));
     }
     {
         builder
@@ -76,9 +73,8 @@ pub fn enforce_main<AB>(
     // The degree-7 opcode selector times ctx has degree 8.
     builder.when(op_flags.clear_deferred()).assert_zero(local.system.ctx.dup());
 
-    let f_call = op_flags.call();
+    let call_dyncall_flag = op_flags.call() + op_flags.dyncall();
     let f_syscall = op_flags.syscall();
-    let f_dyncall = op_flags.dyncall();
 
     // Only a caller-frame END may restore `ctx` and `fn_hash`; a continuation END preserves them.
     // The decoder constrains this selector, and the block-stack relation authenticates the entry
@@ -92,19 +88,18 @@ pub fn enforce_main<AB>(
         let ctx_next = next.system.ctx.dup();
         let clk = local.system.clk.dup();
 
-        let call_dyncall_flag = f_call.dup() + f_dyncall.dup();
         let change_ctx_flag =
-            f_call.dup() + f_syscall.dup() + f_dyncall.dup() + f_restore_caller_frame.dup();
+            call_dyncall_flag.dup() + f_syscall.dup() + f_restore_caller_frame.dup();
         let default_flag = change_ctx_flag.not();
 
-        builder.when(call_dyncall_flag).assert_eq(ctx_next.dup(), clk + F_1);
+        builder.when(call_dyncall_flag.dup()).assert_eq(ctx_next.dup(), clk.dup() + F_1);
         builder.when(f_syscall).assert_zero(ctx_next.dup());
         builder.when(frame.transition()).when(default_flag).assert_eq(ctx_next, ctx);
     }
 
     // Function hash transition constraints (see module doc for transition table)
     {
-        let f_load = f_call + f_dyncall;
+        let f_load = call_dyncall_flag;
         let f_preserve = (f_load.dup() + f_restore_caller_frame).not();
 
         {

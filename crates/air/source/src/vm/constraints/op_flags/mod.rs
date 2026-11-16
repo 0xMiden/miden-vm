@@ -370,8 +370,7 @@ where
 
         // Exclude NOOP and CLEARDEFERRED: they already preserve s0 in no_shift_depth0.
         let no_shift_depth1 = deg7[0..8].iter().cloned().sum::<E>()
-            - op7(opcodes::NOOP)
-            - op7(opcodes::CLEARDEFERRED);
+            - (op7(opcodes::NOOP) + op7(opcodes::CLEARDEFERRED));
 
         // +U32ADD +U32SUB +U32MUL +U32DIV — consume s0,s1, produce 2 results
         let u32_arith_group = prefix_100.clone() * bits[3][0].clone();

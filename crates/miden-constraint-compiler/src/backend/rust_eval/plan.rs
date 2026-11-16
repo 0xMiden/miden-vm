@@ -2,6 +2,7 @@
 //! for ACE and constraint metadata; this plan only changes arithmetic scheduling.
 
 use crate::ir::{Class, OpKind, index::ExpressionIndex};
+use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_stark::air::symbolic::ExprView;
 
 // Bound array sizes and live ranges. Longer sums retain a materialized prefix.
@@ -47,6 +48,9 @@ pub(super) enum Piece {
     Dot {
         kind: DotKind,
         pairs: Vec<(usize, Coefficient)>,
+        // True only when scalar matching consumes a single-use source ScalePow2.
+        // Preserve the existing scheduling policy for literal-only scalar dots.
+        scaled: bool,
     },
 }
 
@@ -127,6 +131,40 @@ impl<'g, 'a> Plan<'g, 'a> {
             Some((_, OpKind::Mul, x, Some(y))) if self.uses[id] == 1 && x != y => Some((x, y)),
             _ => None,
         }
+    }
+
+    /// Match scalar terms without opening shared values, prepared values, or squares.
+    fn scalar_term(&self, id: usize) -> Option<(usize, u64)> {
+        if self.graph.class(id) != Class::Base || self.uses[id] != 1 {
+            return None;
+        }
+        if let Some((x, y)) = self.product(id) {
+            return self
+                .constant(x)
+                .map(|scalar| (y, scalar))
+                .or_else(|| self.constant(y).map(|scalar| (x, scalar)));
+        }
+        let ExprView::ScalePow2 { exponent, .. } = self.graph.node(id).view() else {
+            return None;
+        };
+        // ScalePow2 permits signed u64 magnitudes, including powers beyond a host
+        // word. Compute their coefficients in Felt, including inverse powers.
+        let magnitude = u64::try_from(exponent.unsigned_abs()).expect("scaling magnitude fits u64");
+        let scalar = if exponent < 0 {
+            Felt::ONE.div_2exp_u64(magnitude)
+        } else {
+            Felt::ONE.mul_2exp_u64(magnitude)
+        };
+        Some((self.graph.children(id)[0], scalar.as_canonical_u64()))
+    }
+
+    fn useful_product(&self, id: usize, kind: DotKind) -> bool {
+        self.product(id).is_some()
+            || (kind == DotKind::Scalar
+                && self.scalar_term(id).is_some_and(|(_, scalar)| {
+                    // Identity, doubling, and halving alone do not justify a dot.
+                    !matches!(scalar, 1 | 2 | 0x7fff_ffff_8000_0001)
+                }))
     }
 
     /// Cancel only inverse literal offsets, without opening a shared or prepared
@@ -232,13 +270,10 @@ impl<'g, 'a> Plan<'g, 'a> {
         let product = self.product(id);
         match kind {
             DotKind::Scalar if class == Class::Base => {
-                if let Some((x, y)) = product {
-                    if let Some(c) = self.constant(x) {
-                        return Some((y, Coefficient::Scalar(c)));
-                    }
-                    if let Some(c) = self.constant(y) {
-                        return Some((x, Coefficient::Scalar(c)));
-                    }
+                if let Some((value, scalar)) = self.scalar_term(id) {
+                    return Some((value, Coefficient::Scalar(scalar)));
+                }
+                if product.is_some() {
                     return None;
                 }
                 Some((id, Coefficient::Scalar(1)))
@@ -311,6 +346,18 @@ impl<'g, 'a> Plan<'g, 'a> {
     }
 
     fn specialized_scalar_product(&self, id: usize) -> bool {
+        let id = if super::native_options().signed_dots {
+            self.negated(id).unwrap_or(id)
+        } else {
+            id
+        };
+        // Cost classification also applies to shared atoms: including an already
+        // materialized scale in a tiny dot should not bypass this protection.
+        if self.graph.class(id) == Class::Base
+            && matches!(self.graph.node(id).view(), ExprView::ScalePow2 { .. })
+        {
+            return true;
+        }
         let Some((Class::Base, OpKind::Mul, x, Some(y))) = self.operation(id) else {
             return false;
         };
@@ -350,18 +397,19 @@ impl<'g, 'a> Plan<'g, 'a> {
                     .map_while(|&id| self.pair(id, class, kind))
                     .collect();
                 // Unit terms allow beta^0*x and non-product prefixes, but a dot
-                // must consume a real, single-use multiplication to be useful.
+                // must consume a real, single-use multiplication or a scale that
+                // needs multiplication rather than identity, doubling, or halving.
                 if pairs.len() >= minimum
                     && (pairs.len() >= SPECIALIZED_SCALAR_MIN_TERMS
                         || !terms[start..start + pairs.len()]
                             .iter()
                             .any(|&id| self.specialized_scalar_product(id)))
                     && terms[start..start + pairs.len()].iter().any(|&id| {
-                        self.product(id).is_some()
+                        self.useful_product(id, kind)
                             || (super::native_options().signed_dots
                                 && self
                                     .negated(id)
-                                    .is_some_and(|value| self.product(value).is_some()))
+                                    .is_some_and(|value| self.useful_product(value, kind)))
                     })
                 {
                     selected = Some((kind, pairs));
@@ -369,8 +417,19 @@ impl<'g, 'a> Plan<'g, 'a> {
                 }
             }
             if let Some((kind, pairs)) = selected {
+                let scaled = kind == DotKind::Scalar
+                    && terms[start..start + pairs.len()].iter().any(|&id| {
+                        let id = if super::native_options().signed_dots {
+                            self.negated(id).unwrap_or(id)
+                        } else {
+                            id
+                        };
+                        self.graph.class(id) == Class::Base
+                            && self.uses[id] == 1
+                            && matches!(self.graph.node(id).view(), ExprView::ScalePow2 { .. })
+                    });
                 start += pairs.len();
-                pieces.push(Piece::Dot { kind, pairs });
+                pieces.push(Piece::Dot { kind, pairs, scaled });
             } else {
                 pieces.push(Piece::Node(terms[start]));
                 start += 1;

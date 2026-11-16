@@ -45,17 +45,19 @@ where
     EF: Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let compression_prefix =
-            challenges.bus_prefix[BusId::HasherCompressionLink as usize].clone();
-        let aead_prefix = challenges.bus_prefix[BusId::AeadEidosCompressionInput as usize].clone();
-        let mut encoded =
-            compression_prefix.clone() + (aead_prefix - compression_prefix) * self.mode.clone();
-        for (idx, field) in
-            self.block.iter().chain(self.cv_in.iter()).chain(self.tail.iter()).enumerate()
-        {
-            encoded += challenges.beta_powers[idx].clone() * field.clone();
-        }
-        encoded
+        let compression_prefix = challenges.bus_prefix[BusId::HasherCompressionLink as usize].dup();
+        let aead_prefix = challenges.bus_prefix[BusId::AeadEidosCompressionInput as usize].dup();
+        let prefix =
+            compression_prefix.dup() + (aead_prefix - compression_prefix) * self.mode.dup();
+        let payload = self
+            .block
+            .iter()
+            .chain(self.cv_in.iter())
+            .chain(self.tail.iter())
+            .enumerate()
+            .map(|(idx, field)| challenges.beta_powers[idx].dup() * field.dup())
+            .sum::<EF>();
+        prefix + payload
     }
 }
 
@@ -206,7 +208,7 @@ where
     LB: LookupBuilder<F = Felt>,
 {
     let footer_idx = selectors.is_footer_row(1)
-        + LB::Expr::from_u64(2) * selectors.is_footer_row(2)
+        + selectors.is_footer_row(2).double()
         + LB::Expr::from_u64(3) * selectors.is_footer_row(3);
     let [value0, value1] = if lane_offset == 0 {
         [
@@ -222,7 +224,7 @@ where
 
     AeadEidosCompressionOutputPairMsg {
         clk: local.columns[F_CLK_COL].dup(),
-        first_lane_idx: LB::Expr::from_u64(lane_offset as u64) + LB::Expr::from_u64(2) * footer_idx,
+        first_lane_idx: LB::Expr::from_u64(lane_offset as u64) + footer_idx.double(),
         value0,
         value1,
     }

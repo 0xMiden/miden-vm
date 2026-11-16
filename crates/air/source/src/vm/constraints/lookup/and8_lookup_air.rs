@@ -153,8 +153,6 @@ pub(crate) fn emit_and8_lookup_columns<LB>(
         },
         "range_row",
         local.range_multiplicity.dup(),
-        || RangeMsg {
-            value: a.clone() * LB::Expr::from_u16(256) + b.clone(),
-        },
+        || RangeMsg { value: a.mul_2exp_u64(8) + b.dup() },
     );
 }

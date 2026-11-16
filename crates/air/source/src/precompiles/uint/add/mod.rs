@@ -92,6 +92,7 @@ use miden_core::{
 };
 use miden_stark::{
     air,
+    air::LiftedAirBuilder as _,
     lookup::{self, Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage},
 };
 use miden_utils_sync::LazyLock;
@@ -351,13 +352,13 @@ where
         let ab_sel: LB::Expr = frame.periodic[0].dup();
         let cp_sel: LB::Expr = LB::Expr::ONE - ab_sel.clone();
 
-        let a_ptr: LB::Expr = local[COL_A_PTR].dup();
-        let b_ptr: LB::Expr = local[COL_B_PTR].dup();
-        let c_ptr: LB::Expr = local[COL_C_PTR].dup();
-        let bound_ptr: LB::Expr = local[COL_BOUND_PTR].dup();
-        let act: LB::Expr = local[COL_ACT].dup();
-        let nz: LB::Expr = local[COL_NZ].dup();
-        let neg_mult: LB::Expr = LB::Expr::ZERO - local[TERM_CELL_MULT].dup();
+        let a_ptr = local[COL_A_PTR].dup();
+        let b_ptr = local[COL_B_PTR].dup();
+        let c_ptr = local[COL_C_PTR].dup();
+        let bound_ptr = local[COL_BOUND_PTR].dup();
+        let act = local[COL_ACT].dup();
+        let nz = local[COL_NZ].dup();
+        let neg_mult = -local[TERM_CELL_MULT].dup();
 
         // The row's two full 8×32 views: `lo` is the a / c value (cells
         // 0–7 on the open / closing row), `hi` the b / p value (cells
@@ -464,85 +465,87 @@ impl air::LiftedAir for UintAddAir {
         builder: &mut AB,
     ) {
         let local: &[AB::Expr; NUM_MAIN_COLS] =
-            frame.main.current[..NUM_MAIN_COLS].try_into().expect("uint main row band");
+            frame.main.current[..NUM_MAIN_COLS].try_into().expect("declared AIR row band");
         let next: &[AB::Expr; NUM_MAIN_COLS] =
-            frame.main.next[..NUM_MAIN_COLS].try_into().expect("uint main row band");
+            frame.main.next[..NUM_MAIN_COLS].try_into().expect("declared AIR row band");
 
         // The role selector is one on the open row; its complement marks the closing row. Every
         // next-row constraint is gated by `ab_sel`, so none applies across the cyclic last-to-first
         // boundary.
-        let ab_sel: AB::Expr = frame.periodic[0].dup();
-        let cp_sel: AB::Expr = AB::Expr::ONE - ab_sel.clone();
+        let ab_sel = frame.periodic[0].dup();
+        let cp_sel = AB::Expr::ONE - ab_sel.dup();
 
         // β^0 .. β^7.
-        let beta: AB::ExtExpr = inputs.challenge(1);
-        let mut bp: Vec<AB::ExtExpr> = Vec::with_capacity(8);
-        bp.push(AB::ExtExpr::ONE);
-        for i in 1..8 {
-            bp.push(bp[i - 1].clone() * beta.clone());
-        }
-        let t32: AB::Expr = AB::Expr::from(Felt::new(1u64 << 32).expect("2^32 < Goldilocks p"));
+        let beta: AB::ExtExpr = inputs.challenges[1].dup();
+        let mut bp: [AB::ExtExpr; NUM_LIMBS] = array::from_fn(|_| AB::ExtExpr::ZERO);
+        beta.powers().fill(&mut bp);
+        let t32 = AB::Expr::from(Felt::new(1u64 << 32).expect("2^32 < Goldilocks p"));
 
         // The four values at β (Σⱼ limbⱼ·βʲ — t = 2³² is the limb radix, so
         // the 32-bit limbs recombine to the 256-bit value at β), all read
         // from the open row's window: a ‖ b local, c ‖ p next.
-        let a_beta: AB::ExtExpr =
-            (0..NUM_LIMBS).fold(AB::ExtExpr::ZERO, |s, j| s + bp[j].clone() * local[j].dup());
-        let b_beta: AB::ExtExpr = (0..NUM_LIMBS)
-            .fold(AB::ExtExpr::ZERO, |s, j| s + bp[j].clone() * local[CELL_HI + j].dup());
-        let c_beta: AB::ExtExpr =
-            (0..NUM_LIMBS).fold(AB::ExtExpr::ZERO, |s, j| s + bp[j].clone() * next[j].dup());
-        let p_beta: AB::ExtExpr = (0..NUM_LIMBS)
-            .fold(AB::ExtExpr::ZERO, |s, j| s + bp[j].clone() * next[CELL_HI + j].dup());
+        let a_beta = <AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product(
+            &bp,
+            local[..NUM_LIMBS].try_into().expect("uint limbs"),
+        );
+        let b_beta = <AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product(
+            &bp,
+            local[CELL_HI..CELL_HI + NUM_LIMBS].try_into().expect("uint limbs"),
+        );
+        let c_beta = <AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product(
+            &bp,
+            next[..NUM_LIMBS].try_into().expect("uint limbs"),
+        );
+        let p_beta = <AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product(
+            &bp,
+            next[CELL_HI..CELL_HI + NUM_LIMBS].try_into().expect("uint limbs"),
+        );
 
         // Block scalars, read from the row that hosts them.
-        let is_b_zero: AB::Expr = local[CELL_IS_B_ZERO].dup();
-        let is_c_zero_next: AB::Expr = next[CELL_IS_C_ZERO].dup();
-        let k_next: AB::Expr = next[CELL_K].dup();
+        let is_b_zero = local[CELL_IS_B_ZERO].dup();
+        let is_c_zero_next = next[CELL_IS_C_ZERO].dup();
+        let k_next = next[CELL_K].dup();
 
         // Σⱼ (β^{j+1} − t·βʲ)·γⱼ — the (β − t)·Γ(β) term, each slot read
         // from whichever block row the placement table hosts it on.
-        let mut carry: AB::ExtExpr = AB::ExtExpr::ZERO;
-        for (j, &(row, cell)) in GAMMA_SLOTS.iter().enumerate() {
-            let w: AB::ExtExpr = bp[j + 1].clone() - bp[j].clone() * t32.clone();
-            let g: AB::Expr = if row == ROW_AB {
+        let carry_weights: [AB::ExtExpr; NUM_GAMMA] =
+            array::from_fn(|j| bp[j + 1].dup() - bp[j].dup() * t32.dup());
+        let carries: [AB::Expr; NUM_GAMMA] = GAMMA_SLOTS.map(|(row, cell)| {
+            if row == ROW_AB {
                 local[cell].dup()
             } else {
                 next[cell].dup()
-            };
-            carry += w * g;
-        }
+            }
+        });
+        let carry = <AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product(&carry_weights, &carries);
 
         // The block-local SZ identity, one ext constraint on the open
         // row's window: a(β) + b(β)·(1−is_b_zero) − c(β)·(1−is_c_zero)
         // − k·(bound(β)+1) + (β−t)·Γ(β) = 0. Padding rows satisfy it
         // trivially (all-zero cells), so no act gate is needed.
-        let identity: AB::ExtExpr = a_beta + b_beta * (AB::Expr::ONE - is_b_zero.clone())
-            - c_beta * (AB::Expr::ONE - is_c_zero_next)
-            - (p_beta + bp[0].clone()) * k_next
+        let identity: AB::ExtExpr = a_beta + b_beta * (AB::Expr::ONE - is_b_zero.dup())
+            - c_beta * (AB::Expr::ONE - is_c_zero_next.dup())
+            - (p_beta + bp[0].dup()) * k_next.dup()
             + carry;
-        builder.assert_zero_ext(identity * ab_sel.clone());
+        builder.assert_zero_ext(identity * ab_sel.dup());
 
         // Ternary carries: each carry column hosts only Γ slots (or a
         // structural zero), so the {−1, 0, 1} range check runs ungated on
         // every row — degree 3 with no selector, lqd-safe.
         for cell in &local[FIRST_GAMMA_COL..FIRST_GAMMA_COL + NUM_GAMMA_COLS] {
             let g = cell.dup();
-            builder.assert_zero(g.clone() * (AB::Expr::ONE - g.clone()) * (AB::Expr::ONE + g));
+            builder.assert_zero(g.dup() * (AB::Expr::ONE - g.dup()) * (AB::Expr::ONE + g));
         }
 
         // Columns 20 and 23 host booleans on both rows (is_b_zero / k and
         // b_on / is_c_zero) — one ungated check per column covers both.
-        for col in [CELL_FLAG, CELL_B_ON] {
-            let f: AB::Expr = local[col].dup();
-            builder.assert_zero(f.clone() * (AB::Expr::ONE - f));
-        }
+        builder.assert_bools([local[CELL_FLAG].dup(), local[CELL_B_ON].dup()]);
 
         // act / nz: boolean cycle-constant flags.
-        let act: AB::Expr = local[COL_ACT].dup();
-        builder.assert_zero(act.clone() * (AB::Expr::ONE - act.clone()));
-        let nz: AB::Expr = local[COL_NZ].dup();
-        builder.assert_zero(nz.clone() * (AB::Expr::ONE - nz.clone()));
+        let act = local[COL_ACT].dup();
+        builder.assert_bool(act.dup());
+        let nz = local[COL_NZ].dup();
+        builder.assert_bool(nz.dup());
 
         // A provide must come from an active block. The `UintAdd` provide
         // is gated only by the closing-row selector (not `act`), and the
@@ -550,34 +553,38 @@ impl air::LiftedAir for UintAddAir {
         // zeroed limbs (the SZ closes trivially) and a witnessed `mult`
         // would provide a *false* relation onto the bus. Force the mult to
         // 0 when act = 0.
-        builder.assert_zero(
-            cp_sel.clone() * (AB::Expr::ONE - act.clone()) * local[TERM_CELL_MULT].dup(),
-        );
+        builder
+            .when(cp_sel.dup() * (AB::Expr::ONE - act.dup()))
+            .assert_zero(local[TERM_CELL_MULT].dup());
 
         // is_c_zero (read locally on the closing row) forces c_ptr = 0 —
         // the zero result has no stored address, and the tuple's c_ptr = 0
         // reads as "≡ 0" to a consumer.
-        let is_c_zero: AB::Expr = local[CELL_IS_C_ZERO].dup();
-        let c_ptr_local: AB::Expr = local[COL_C_PTR].dup();
-        builder.assert_zero(cp_sel.clone() * is_c_zero.clone() * c_ptr_local);
+        let is_c_zero = local[CELL_IS_C_ZERO].dup();
+        let c_ptr_local = local[COL_C_PTR].dup();
+        builder.when(cp_sel.dup() * is_c_zero.dup()).assert_zero(c_ptr_local);
 
         // is_b_zero (an open-row scalar) likewise forces b_ptr = 0 so the
         // tuple reads as the `a + 0 ≡ c` equality form.
-        let b_ptr_local: AB::Expr = local[COL_B_PTR].dup();
-        builder.assert_zero(ab_sel.clone() * is_b_zero.clone() * b_ptr_local);
+        let b_ptr_local = local[COL_B_PTR].dup();
+        builder.when(ab_sel.dup() * is_b_zero.dup()).assert_zero(b_ptr_local);
 
         // The nonzero certificate speaks about the stored `b`, so it cannot
         // ride an `a + 0 ≡ c` block, whose `b` limbs the identity ignores.
-        builder.assert_zero(ab_sel.clone() * nz.clone() * is_b_zero.clone());
+        builder.when(ab_sel.dup() * nz.dup()).assert_zero(is_b_zero.dup());
 
         // b_on / c_on host act·(1 − is_zero): the witnessed activity gates
         // that let the gated b/c UintVal consumes carry a degree-2
         // multiplicity `sel·on` instead of `sel·(1−is_zero)·act`
         // (degree 3). Each is pinned on its own row, all cells local.
-        let b_on: AB::Expr = local[CELL_B_ON].dup();
-        builder.assert_zero(ab_sel.clone() * (b_on - act.clone() * (AB::Expr::ONE - is_b_zero)));
-        let c_on: AB::Expr = local[CELL_C_ON].dup();
-        builder.assert_zero(cp_sel * (c_on - act * (AB::Expr::ONE - is_c_zero)));
+        let b_on = local[CELL_B_ON].dup();
+        builder
+            .when(ab_sel.dup())
+            .assert_eq(b_on.dup(), act.dup() * (AB::Expr::ONE - is_b_zero.dup()));
+        let c_on = local[CELL_C_ON].dup();
+        builder
+            .when(cp_sel)
+            .assert_eq(c_on.dup(), act.dup() * (AB::Expr::ONE - is_c_zero.dup()));
 
         // Nonzero certificate (open row): when `nz = 1`, this block
         // additionally certifies `b ≠ 0` — the disequality cert the EC
@@ -588,20 +595,19 @@ impl air::LiftedAir for UintAddAir {
         // witnessed candidate inverse, `wS` its pinned product (hoisted so
         // the main check stays degree 3 instead of stacking
         // `ab_sel·nz·w·S` at degree 5).
-        let s_sum: AB::Expr =
-            (0..NUM_LIMBS).fold(AB::Expr::ZERO, |s, j| s + local[CELL_HI + j].dup());
-        let w: AB::Expr = local[CELL_D_W].dup();
-        let ws: AB::Expr = local[CELL_D_WS].dup();
-        builder.assert_zero(ab_sel.clone() * (ws.clone() - w * s_sum));
-        builder.assert_zero(ab_sel.clone() * nz * (ws - AB::Expr::ONE));
+        let s_sum = AB::Expr::sum_array::<NUM_LIMBS>(&local[CELL_HI..CELL_HI + NUM_LIMBS]);
+        let w = local[CELL_D_W].dup();
+        let ws = local[CELL_D_WS].dup();
+        builder.when(ab_sel.dup()).assert_eq(ws.dup(), w.dup() * s_sum);
+        builder.when(ab_sel.dup() * nz.dup()).assert_one(ws.dup());
 
         // Cycle-constancy: the four ptrs + act + nz are constant within a
         // block — the open row pins the closing row; the closing → open
         // edge (the block boundary, and the cyclic wrap) is free.
         for col in [COL_A_PTR, COL_B_PTR, COL_C_PTR, COL_BOUND_PTR, COL_ACT, COL_NZ] {
-            let here: AB::Expr = local[col].dup();
-            let there: AB::Expr = next[col].dup();
-            builder.assert_zero(ab_sel.clone() * (there - here));
+            let here = local[col].dup();
+            let there = next[col].dup();
+            builder.when(ab_sel.dup()).assert_eq(there, here);
         }
 
         // Phase 2: LogUp — UintVal consumes + the UintAdd provide.

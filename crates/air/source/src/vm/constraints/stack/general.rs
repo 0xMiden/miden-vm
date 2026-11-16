@@ -43,6 +43,8 @@ pub fn enforce_main<AB>(
 ) where
     AB: NativeMidenAirBuilder,
 {
+    let builder = &mut builder.when(frame.transition());
+
     // For each position i, the constraint ensures that the next value is consistent
     // with the current value based on the shift flags:
     //
@@ -60,7 +62,7 @@ pub fn enforce_main<AB>(
             + op_flags.left_shift_at(1) * local.stack.get(1);
         let actual = next.stack.get(0);
 
-        builder.when(frame.transition()).assert_zero(actual * flag_sum - expected);
+        builder.assert_eq(actual * flag_sum, expected);
     }
 
     // Positions 1-14: all three shift types possible.
@@ -74,7 +76,7 @@ pub fn enforce_main<AB>(
             + op_flags.right_shift_at(i - 1) * local.stack.get(i - 1);
         let actual = next.stack.get(i);
 
-        builder.when(frame.transition()).assert_zero(actual * flag_sum - expected);
+        builder.assert_eq(actual * flag_sum, expected);
     }
 
     // Position 15: no left shift (handled by overflow constraints)
@@ -85,7 +87,7 @@ pub fn enforce_main<AB>(
             + op_flags.right_shift_at(14) * local.stack.get(14);
         let actual = next.stack.get(15);
 
-        builder.when(frame.transition()).assert_zero(actual * flag_sum - expected);
+        builder.assert_eq(actual * flag_sum, expected);
     }
 }
 

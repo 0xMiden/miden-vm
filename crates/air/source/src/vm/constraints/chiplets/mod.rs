@@ -77,16 +77,29 @@ mod tests {
     use miden_core::{Felt, field::QuadFelt};
     use miden_stark::air::{
         AirSpec, Assertion, capture_from_spec,
-        symbolic::{BaseInput, BaseLeaf, RowOffset, SymbolicExpr, SymbolicExpression},
+        symbolic::{BaseInput, ExprRef, ExprView, RowOffset},
     };
 
     use super::{columns::PeriodicCols, enforce_main, selectors::build_chiplet_selectors};
     use crate::vm::{ChipletCols, constraints::columns::NUM_CHIPLETS_COLS};
 
-    fn assert_main(expression: &SymbolicExpression<Felt>, offset: RowOffset, index: usize) {
-        assert!(matches!(expression, SymbolicExpr::Leaf(BaseLeaf::Input(
-            BaseInput::Main { offset: actual_offset, index: actual_index }
-        )) if *actual_offset == offset && *actual_index == index));
+    fn assert_main(expression: ExprRef<'_, Felt, QuadFelt>, row: RowOffset, column: usize) {
+        assert!(matches!(expression.view(), ExprView::BaseInput(
+            BaseInput::Main { row: actual_row, column: actual_column }
+        ) if actual_row == row && actual_column == column));
+    }
+
+    fn difference<'a>(
+        expression: ExprRef<'a, Felt, QuadFelt>,
+    ) -> (ExprRef<'a, Felt, QuadFelt>, ExprRef<'a, Felt, QuadFelt>) {
+        let ExprView::Sum { values } = expression.view() else {
+            panic!("an equality difference must remain an ordered sum");
+        };
+        assert_eq!(values.len(), 2);
+        let ExprView::Neg { x: rhs } = values.get(1).unwrap().view() else {
+            panic!("an equality difference must negate its right operand");
+        };
+        (values.get(0).unwrap(), rhs)
     }
 
     /// Native helper capture covers every ordinary chiplet with non-Copy expression/periodic
@@ -116,49 +129,44 @@ mod tests {
         // ACE's arithmetic equality follows its ternary-op assertion. It remains two BASE-class
         // constraints, c0 then c1, pointing at the two result-value cells in the current row.
         for (ordinal, index) in [(165, 11), (166, 12)] {
-            let Assertion::Base(SymbolicExpr::Mul { y: difference, .. }) =
-                &captured.assertions[ordinal]
-            else {
+            let Assertion::Base(expression) = &captured.assertions[ordinal] else {
                 panic!("ACE equality must remain a gated base assertion");
             };
-            let SymbolicExpr::Sub { x: lhs, .. } = difference.as_ref() else {
-                panic!("ACE equality must preserve lhs-minus-rhs construction");
+            let ExprView::Mul { y: relation, .. } = expression.as_ref().view() else {
+                panic!("ACE equality must retain its gate");
             };
+            let (lhs, _) = difference(relation);
             assert_main(lhs, RowOffset::Current, index);
         }
 
         // The final Merkle-level constraint owns its raw marker/s0/op_final scope; it must stay
         // after ACE without acquiring current activity or a transition selector from a wrapper.
-        let Assertion::Base(SymbolicExpr::Mul { x: gate, y: relation, .. }) =
-            captured.assertions.last().unwrap()
-        else {
+        let Assertion::Base(expression) = captured.assertions.last().unwrap() else {
             panic!("the final assertion must remain the Merkle-level relation");
         };
-        let SymbolicExpr::Mul { x: merkle, y: not_final, .. } = gate.as_ref() else {
+        let ExprView::Mul { x: gate, y: relation } = expression.as_ref().view() else {
+            panic!("the final assertion must retain its gate");
+        };
+        let ExprView::Mul { x: merkle, y: not_final } = gate.view() else {
             panic!("the Merkle-level gate must retain its two-factor construction");
         };
-        let SymbolicExpr::Mul { x: marker, y: selector, .. } = merkle.as_ref() else {
+        let ExprView::Mul { x: marker, y: selector } = merkle.view() else {
             panic!("the controller Merkle marker must remain quadratic");
         };
         assert_main(marker, RowOffset::Current, 22);
         assert_main(selector, RowOffset::Current, 1);
-        let SymbolicExpr::Sub { x: one, y: op_final, .. } = not_final.as_ref() else {
-            panic!("the final-row marker must remain complemented");
-        };
-        assert!(
-            matches!(one.as_ref(), SymbolicExpr::Leaf(BaseLeaf::Constant(value)) if *value == Felt::ONE)
-        );
+        let (one, op_final) = difference(not_final);
+        assert!(matches!(one.view(), ExprView::BaseConstant(value) if *value == Felt::ONE));
         assert_main(op_final, RowOffset::Current, 20);
-        let SymbolicExpr::Sub { x: next_level, y: expected_level, .. } = relation.as_ref() else {
-            panic!("the level constraint must remain an equality difference");
-        };
+        let (next_level, expected_level) = difference(relation);
         assert_main(next_level, RowOffset::Next, 19);
-        let SymbolicExpr::Add { x: level, y: one, .. } = expected_level.as_ref() else {
+        let ExprView::Sum { values } = expected_level.view() else {
             panic!("the expected level must advance by one");
         };
-        assert_main(level, RowOffset::Current, 19);
+        assert_eq!(values.len(), 2);
+        assert_main(values.get(0).unwrap(), RowOffset::Current, 19);
         assert!(
-            matches!(one.as_ref(), SymbolicExpr::Leaf(BaseLeaf::Constant(value)) if *value == Felt::ONE)
+            matches!(values.get(1).unwrap().view(), ExprView::BaseConstant(value) if *value == Felt::ONE)
         );
     }
 }

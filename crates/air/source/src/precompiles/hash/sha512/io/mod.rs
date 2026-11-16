@@ -167,28 +167,32 @@ pub fn eval_main<AB: air::LiftedAirBuilder<F = Felt>>(
     // supplies the corresponding block/coverage constraints from the shared compression rows.
     // The first active block starts an invocation; block IDs advance exactly once per 64 rows.
     builder.when(frame.first_row()).assert_zero(v(COL_BLOCK_ID));
-    builder.when(frame.first_row()).assert_zero(act.dup() * (first - one.dup()));
+    builder.when(frame.first_row()).when(act.dup()).assert_one(first);
     builder
         .when(frame.transition())
-        .assert_zero(nv(COL_BLOCK_ID) - v(COL_BLOCK_ID) - last.dup());
+        .assert_eq(nv(COL_BLOCK_ID), v(COL_BLOCK_ID) + last.dup());
     // Once activity falls to zero it stays zero, and it cannot change inside a block.
     builder
         .when(frame.transition())
-        .assert_zero((one.dup() - act.dup()) * next_act.dup());
+        .when(one.dup() - act.dup())
+        .assert_zero(next_act.dup());
     builder
         .when(frame.transition())
-        .assert_zero((one.dup() - last.dup()) * (next_act.dup() - act.dup()));
+        .when(one.dup() - last.dup())
+        .assert_eq(next_act.dup(), act.dup());
     // At an active block boundary, the next block starts a new invocation exactly when the
     // current block is final. This prevents both splitting and joining invocations arbitrarily.
     builder
         .when(frame.transition())
-        .assert_zero(next_act.dup() * last.dup() * (nv(COL_FIRST_BLOCK) - final_block.dup()));
+        .when(next_act.dup() * last.dup())
+        .assert_eq(nv(COL_FIRST_BLOCK), final_block.dup());
     // Activity may stop only after a final block. Check the last trace row separately because
     // there is no next-row transition there to enforce completion of the final invocation.
     builder
         .when(frame.transition())
-        .assert_zero((act.dup() - next_act) * last * (one.dup() - final_block.dup()));
-    builder.when(frame.last_row()).assert_zero(act * (one - final_block));
+        .when((act.dup() - next_act) * last)
+        .assert_eq(one.dup(), final_block.dup());
+    builder.when(frame.last_row()).when(act).assert_eq(one, final_block);
 }
 
 /// Evaluate the row-local IO equations shared by the dense standalone band and the composite
@@ -219,39 +223,38 @@ pub(super) fn eval_main_rows<AB: air::LiftedAirBuilder<F = Felt>>(
 
     // These selectors describe IO data only. Gating by `owned` avoids imposing Boolean
     // constraints on the compression values occupying the same cells outside the IO window.
-    for index in [COL_ACT, COL_FIRST_BLOCK, COL_FINAL_BLOCK, COL_BEFORE, COL_CHUNK_ACTIVE] {
-        builder.assert_zero(owned.dup() * local[index].dup() * (one.dup() - local[index].dup()));
-    }
+    builder.when(owned.dup()).assert_bools(
+        [COL_ACT, COL_FIRST_BLOCK, COL_FINAL_BLOCK, COL_BEFORE, COL_CHUNK_ACTIVE]
+            .map(|index| local[index].dup()),
+    );
 
     // Length and input-chain head identify an invocation and must not change while it continues.
     builder
         .when(frame.transition())
-        .assert_zero(carry.dup() * (nv(COL_LEN) - v(COL_LEN)));
-    builder
-        .when(frame.transition())
-        .assert_zero(carry.dup() * (nv(COL_INPUT_HEAD) - v(COL_INPUT_HEAD)));
+        .when(carry.dup())
+        .assert_eq_arrays([nv(COL_LEN), nv(COL_INPUT_HEAD)], [v(COL_LEN), v(COL_INPUT_HEAD)]);
     // First/final are block-wide flags: allow changes only after row 63. Boundary constraints
     // in the wrapper decide whether those changes describe a continuation or a new invocation.
     for index in [COL_FIRST_BLOCK, COL_FINAL_BLOCK] {
         builder
             .when(frame.transition())
-            .assert_zero(owned.dup() * (one.dup() - last.dup()) * (nv(index) - v(index)));
+            .when(owned.dup() * (one.dup() - last.dup()))
+            .assert_eq(nv(index), v(index));
     }
     // Initialize the remaining-byte count and the prefix sentinel. The first raw chunk is also
     // the Eidos chain head, including the mandatory zero chunk for an empty message.
     let start = p[program::P_FIRST].dup() * first.dup();
-    builder.assert_zero(act.dup() * start.dup() * (v(COL_LEFT) - v(COL_LEN)));
-    builder.assert_zero(act.dup() * start.dup() * (v(COL_BEFORE) - one.dup()));
-    builder.assert_zero(act.dup() * start * (v(COL_INPUT_HEAD) - v(COL_INPUT_EIDOS)));
+    builder.when(act.dup() * start).assert_eq_arrays(
+        [v(COL_LEFT), v(COL_BEFORE), v(COL_INPUT_HEAD)],
+        [v(COL_LEN), one.dup(), v(COL_INPUT_EIDOS)],
+    );
     // Two Range16 lookups bound LEFT to u32. Since LEFT = LEN at invocation start, this also
     // bounds LEN; subsequent subtractions cannot wrap through the base field back into u32.
-    builder.assert_zero(
-        act.dup()
-            * p[program::P_RAW].dup()
-            * (v(COL_LEFT) - v(COL_LEFT_LO16) - v(COL_LEFT_HI16) * Felt::from_u32(1 << 16)),
-    );
+    builder
+        .when(act.dup() * p[program::P_RAW].dup())
+        .assert_eq(v(COL_LEFT), v(COL_LEFT_LO16) + v(COL_LEFT_HI16).mul_2exp_u64(16));
 
-    let mut sum_msg = AB::Expr::ZERO;
+    let sum_msg: AB::Expr = (0..8).map(|i| v(COL_MSG_BEGIN + i)).sum();
     let mut previous = v(COL_BEFORE);
     // Presence bits form a single prefix per invocation. Its first 1 -> 0 transition adds
     // the 0x80 marker; later absent bytes remain zero, including in a padding-only final block.
@@ -259,75 +262,68 @@ pub(super) fn eval_main_rows<AB: air::LiftedAirBuilder<F = Felt>>(
     // to zero. The last rule also ensures the Eidos commitment uses canonical zero padding.
     let padded: [AB::Expr; 8] = array::from_fn(|i| {
         let msg = v(COL_MSG_BEGIN + i);
-        builder.assert_zero(raw.dup() * local[COL_MSG_BEGIN + i].dup() * (one.dup() - msg.dup()));
-        builder.assert_zero(raw.dup() * v(COL_MSG_BEGIN + i) * (one.dup() - previous.dup()));
-        builder.assert_zero(raw.dup() * v(COL_RAW_BEGIN + i) * (one.dup() - msg.dup()));
-        let byte = v(COL_RAW_BEGIN + i) + (previous.dup() - msg.dup()) * Felt::from_u8(128);
-        sum_msg += msg.dup();
+        builder.when(raw.dup()).assert_bool(msg.dup());
+        builder.when(raw.dup() * msg.dup()).assert_eq(one.dup(), previous.dup());
+        builder
+            .when(raw.dup() * (one.dup() - msg.dup()))
+            .assert_zero(v(COL_RAW_BEGIN + i));
+        let byte = v(COL_RAW_BEGIN + i) + (previous.dup() - msg.dup()).mul_2exp_u64(7);
         previous = msg;
         byte
     });
     // If the prefix has ended by this row's last byte, consume all remaining message bytes
     // here. Otherwise each of its eight presence bits is one, and the counter decreases by eight.
-    builder.assert_zero(
-        act.dup()
-            * p[program::P_RAW].dup()
-            * (one.dup() - previous.dup())
-            * (v(COL_LEFT) - sum_msg.dup()),
-    );
+    builder
+        .when(act.dup() * p[program::P_RAW].dup() * (one.dup() - previous.dup()))
+        .assert_eq(v(COL_LEFT), sum_msg.dup());
     // Carry the remaining count and last presence bit to the next row. This joins byte prefixes
     // across rows, while continuation lookups perform the same transport between sparse blocks.
-    builder.when(frame.transition()).assert_zero(
-        carry.dup() * (nv(COL_LEFT) - v(COL_LEFT) + p[program::P_RAW].dup() * sum_msg.dup()),
-    );
-    builder.when(frame.transition()).assert_zero(
-        carry.dup()
-            * (nv(COL_BEFORE)
-                - v(COL_BEFORE)
-                - p[program::P_RAW].dup() * (previous - v(COL_BEFORE))),
+    builder
+        .when(frame.transition())
+        .when(carry.dup())
+        .assert_eq(nv(COL_LEFT), v(COL_LEFT) - p[program::P_RAW].dup() * sum_msg.dup());
+    builder.when(frame.transition()).when(carry.dup()).assert_eq(
+        nv(COL_BEFORE),
+        v(COL_BEFORE) + p[program::P_RAW].dup() * (previous - v(COL_BEFORE)),
     );
     // Require exhaustion on the final raw row before its payload cells are reused.
-    builder.assert_zero(act.dup() * end.dup() * (v(COL_LEFT) - sum_msg));
+    builder.when(act.dup() * end.dup()).assert_eq(v(COL_LEFT), sum_msg);
     // At row 14, BEFORE describes byte 111. The block is final exactly when that byte is
     // already past the message, leaving room for the marker before the 128-bit length suffix.
-    builder.assert_zero(
-        act.dup() * p[program::P_AT14].dup() * (final_block.dup() + v(COL_BEFORE) - one.dup()),
-    );
+    builder
+        .when(act.dup() * p[program::P_AT14].dup())
+        .assert_one(final_block.dup() + v(COL_BEFORE));
     // Every word except the final length word is the big-endian packing of message/marker/zeros.
     // In a final block, the row-14 condition above forces its high length word to be zero too.
     let [word_lo, word_hi]: [AB::Expr; 2] = halves_be(&padded);
     let data_gate = act.dup() * (p[program::P_RAW].dup() - end.dup());
-    builder.assert_zero(data_gate.dup() * (v(COL_WORD_LO) - word_lo));
-    builder.assert_zero(data_gate * (v(COL_WORD_HI) - word_hi));
+    builder
+        .when(data_gate)
+        .assert_eq_arrays([v(COL_WORD_LO), v(COL_WORD_HI)], [word_lo, word_hi]);
     // The u32 message length needs only the suffix's low 64 bits; row 14 supplies its zero
     // high word. Range16(word_hi), together with the compressor's u32 halves, keeps the low
     // word below 2^48 and prevents satisfying this equation with the field alias 8*len + p.
-    builder.assert_zero(
-        act.dup()
-            * end
-            * (v(COL_WORD_LO) + v(COL_WORD_HI) * Felt::new_unchecked(1u64 << 32)
-                - v(COL_LEN) * Felt::from_u8(8)),
-    );
+    builder
+        .when(act.dup() * end)
+        .assert_eq(v(COL_WORD_LO) + v(COL_WORD_HI).mul_2exp_u64(32), v(COL_LEN).mul_2exp_u64(3));
 
     // Even an empty message has one zero-filled CHUNKS block. Later chunks are active only
     // when their first byte belongs to the message; SHA padding is never committed as input.
     let expected_chunk =
         v(COL_MSG_BEGIN) + p[program::P_FIRST].dup() * first * (one.dup() - v(COL_MSG_BEGIN));
-    builder.assert_zero(
-        act.dup() * p[program::P_CHUNK_FIRST].dup() * (v(COL_CHUNK_ACTIVE) - expected_chunk),
-    );
+    builder
+        .when(act.dup() * p[program::P_CHUNK_FIRST].dup())
+        .assert_eq(v(COL_CHUNK_ACTIVE), expected_chunk);
     // All four rows of a chunk share its activity flag. Advance INPUT_EIDOS only when
     // crossing into an active next chunk; after the input ends it stays at the chain tail.
-    builder.when(frame.transition()).assert_zero(
-        owned.dup()
-            * (p[program::P_RAW].dup() - p[program::P_CHUNK_LAST].dup())
-            * (nv(COL_CHUNK_ACTIVE) - v(COL_CHUNK_ACTIVE)),
-    );
-    builder.when(frame.transition()).assert_zero(
-        carry
-            * (nv(COL_INPUT_EIDOS)
-                - v(COL_INPUT_EIDOS)
-                - (p[program::P_CHUNK_ADVANCE].dup() + last.dup()) * nv(COL_CHUNK_ACTIVE)),
+    builder
+        .when(frame.transition())
+        .when(owned.dup() * (p[program::P_RAW].dup() - p[program::P_CHUNK_LAST].dup()))
+        .assert_eq(nv(COL_CHUNK_ACTIVE), v(COL_CHUNK_ACTIVE));
+    builder.when(frame.transition()).when(carry).assert_eq(
+        nv(COL_INPUT_EIDOS),
+        v(COL_INPUT_EIDOS)
+            + (p[program::P_CHUNK_ADVANCE].dup() + last.dup()) * nv(COL_CHUNK_ACTIVE),
     );
     // An Eidos block carries a whole chunk. Chunk rows 1 and 2 already see the preceding row's
     // packed felts; row 1 also forwards its predecessor so the emitting row sees all four rows.
@@ -343,11 +339,10 @@ pub(super) fn eval_main_rows<AB: air::LiftedAirBuilder<F = Felt>>(
             act.dup() * final_block.dup() * p[program::P_DIGEST_SECOND].dup(),
         ),
     ] {
-        for i in 0..2 {
-            builder
-                .when(frame.transition())
-                .assert_zero(gate.dup() * (nv(head + i) - v(previous + i)));
-        }
+        builder
+            .when(frame.transition())
+            .when(gate)
+            .assert_eq_arrays([nv(head), nv(head + 1)], [v(previous), v(previous + 1)]);
     }
     let raw: &[AB::Expr; 8] = local[COL_RAW_BEGIN..COL_RAW_BEGIN + 8]
         .try_into()
@@ -356,16 +351,19 @@ pub(super) fn eval_main_rows<AB: air::LiftedAirBuilder<F = Felt>>(
     // Preserve each row's two packed raw felts for the next row's chunk assembly. The chunk's
     // third row then has rows 0 and 1 in carried cells, row 2 locally, and row 3 through `next`.
     for (i, packed) in raw_le.into_iter().enumerate() {
-        builder.when(frame.transition()).assert_zero(
-            owned.dup() * p[program::P_RAW_NEXT].dup() * (nv(COL_PREVIOUS_RAW + i) - packed),
-        );
+        builder
+            .when(frame.transition())
+            .when(owned.dup() * p[program::P_RAW_NEXT].dup())
+            .assert_eq(nv(COL_PREVIOUS_RAW + i), packed);
     }
 
     // Initialize only the first block from the fixed SHA-512 IV. Later blocks obtain these
     // same state halves from the previous block's feedforward outputs through the word lookup.
     let state_gate = act.dup() * v(COL_FIRST_BLOCK) * p[program::P_STATE].dup();
-    builder.assert_zero(state_gate.dup() * (v(COL_STATE_LO) - p[program::P_IV_LO].dup()));
-    builder.assert_zero(state_gate * (v(COL_STATE_HI) - p[program::P_IV_HI].dup()));
+    builder.when(state_gate).assert_eq_arrays(
+        [v(COL_STATE_LO), v(COL_STATE_HI)],
+        [p[program::P_IV_LO].dup(), p[program::P_IV_HI].dup()],
+    );
     let digest: &[AB::Expr; 8] = local[COL_DIGEST_BEGIN..COL_DIGEST_BEGIN + 8]
         .try_into()
         .expect("SHA-512 digest byte band");
@@ -373,23 +371,22 @@ pub(super) fn eval_main_rows<AB: air::LiftedAirBuilder<F = Felt>>(
     // Only the final block exposes digest bytes, in rows 24..32. Carry their packed felts across
     // rows 24->25 through 30->31 for its two Eidos chunks, without constraining reused cells later.
     for (i, packed) in digest_le.into_iter().enumerate() {
-        builder.when(frame.transition()).assert_zero(
-            act.dup()
-                * final_block.dup()
-                * p[program::P_DIGEST_NEXT].dup()
-                * (nv(COL_PREVIOUS_DIGEST + i) - packed),
-        );
+        builder
+            .when(frame.transition())
+            .when(act.dup() * final_block.dup() * p[program::P_DIGEST_NEXT].dup())
+            .assert_eq(nv(COL_PREVIOUS_DIGEST + i), packed);
     }
     // This includes the binding row: the final EidosOut must refer to the same two-block digest
     // span.
-    builder.when(frame.transition()).assert_zero(
-        act.dup() * final_block * (one - last) * (nv(COL_DIGEST_EIDOS) - v(COL_DIGEST_EIDOS)),
-    );
+    builder
+        .when(frame.transition())
+        .when(act.dup() * final_block * (one - last))
+        .assert_eq(nv(COL_DIGEST_EIDOS), v(COL_DIGEST_EIDOS));
     // Only the binding row of a final block may publish truth claims. Zero the multiplicity on
     // every other owned row; the truth lookup uses it directly without another row selector.
-    builder.assert_zero(
-        (owned - act * v(COL_FINAL_BLOCK) * p[program::P_BIND].dup()) * v(COL_OUT_MULT),
-    );
+    builder
+        .when(owned - act * v(COL_FINAL_BLOCK) * p[program::P_BIND].dup())
+        .assert_zero(v(COL_OUT_MULT));
 }
 
 /// The eight packed felts of the chunk whose third row is `local`: the carried first row, the
@@ -561,7 +558,8 @@ fn phase_masks<E: PrimeCharacteristicRing>(p: &[E; NUM_PERIODIC_COLS]) -> [E; 9]
         p[P_FIRST].dup(),
         p[P_CHUNK_EMIT].dup(),
         p[P_RAW_LAST].dup(),
-        p[P_RAW].dup() - p[P_FIRST].dup() - p[P_CHUNK_EMIT].dup() - p[P_RAW_LAST].dup(),
+        p[P_RAW].dup()
+            - [P_FIRST, P_CHUNK_EMIT, P_RAW_LAST].map(|i| p[i].dup()).into_iter().sum::<E>(),
         p[P_STATE].dup(),
         p[P_DIGEST_EMIT].dup(),
         p[P_DIGEST].dup() - p[P_DIGEST_EMIT].dup(),
@@ -745,7 +743,7 @@ fn eval_term<B>(
             EidosInitMsg {
                 compression_id: e(COL_INPUT_HEAD),
                 initial_cv: chunks_initial_cv(
-                    (e(COL_INPUT_EIDOS) - e(COL_INPUT_HEAD) + B::Expr::ONE) * B::Expr::from_u8(8),
+                    (e(COL_INPUT_EIDOS) - e(COL_INPUT_HEAD) + B::Expr::ONE).mul_2exp_u64(3),
                 ),
             },
             degree,

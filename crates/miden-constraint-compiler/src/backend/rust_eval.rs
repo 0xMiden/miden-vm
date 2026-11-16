@@ -1,7 +1,7 @@
 //! Native Rust evaluation emitted directly from authored symbolic expression views.
 //!
 //! One source index supplies sharing, use counts and preparation boundaries.
-//! Structured operations remain intact until their specialized trait call is emitted.
+//! Structured source operations inform both individual and fused trait calls.
 
 use std::{collections::HashMap, fmt::Write as _};
 
@@ -270,6 +270,16 @@ fn lift_base_to_ext(t: &Token, types: ExprTypes) -> String {
 /// Render a reusable expression in its own field class.
 fn operand(t: &Token) -> String {
     format!("{}.dup()", t.code)
+}
+
+fn scalar_product(value: &str, scalar: u64) -> String {
+    match scalar {
+        1 => value.into(),
+        2 => format!("{value}.double()"),
+        0x7fff_ffff_8000_0001 => format!("{value}.halve()"),
+        c if c.is_power_of_two() => format!("{value}.mul_2exp_u64({})", c.trailing_zeros()),
+        _ => format!("{value} * Felt::from_u64({scalar})"),
+    }
 }
 
 /// Binary-operator symbol; `Neg` is emitted as a prefix, never through here.
@@ -1109,14 +1119,7 @@ impl<'g, 'a> Emitter<'g, 'a> {
             Rewrite::Scalar { value, scalar, op, reversed } => {
                 let value = self.expr(value, Class::Base);
                 if op == OpKind::Mul {
-                    match scalar {
-                        2 => return format!("{value}.double()"),
-                        0x7fff_ffff_8000_0001 => return format!("{value}.halve()"),
-                        c if c.is_power_of_two() => {
-                            return format!("{value}.mul_2exp_u64({})", c.trailing_zeros());
-                        },
-                        _ => {},
-                    }
+                    return scalar_product(&value, scalar);
                 }
                 if reversed && op == OpKind::Sub {
                     format!("-{value} + Felt::from_u64({scalar})")
@@ -1169,12 +1172,23 @@ impl<'g, 'a> Emitter<'g, 'a> {
                             };
                             operand(&self.hoist(class, rhs))
                         },
-                        Piece::Dot { kind, pairs } => {
+                        Piece::Dot { kind, pairs, scaled } => {
                             let n = pairs.len();
                             let mut terms = Vec::with_capacity(n);
                             let mut coeffs = Vec::with_capacity(n);
+                            let mut products = if scaled { Vec::with_capacity(n) } else { Vec::new() };
                             for (id, coefficient) in pairs {
-                                terms.push(self.expr(id, class));
+                                let value = self.expr(id, class);
+                                if scaled {
+                                    products.push(match coefficient {
+                                        Coefficient::Scalar(c) => scalar_product(&value, c),
+                                        Coefficient::NegativeScalar(c) => {
+                                            format!("-({})", scalar_product(&value, c))
+                                        },
+                                        _ => unreachable!("scaled scalar dot has scalar coefficients"),
+                                    });
+                                }
+                                terms.push(value);
                                 coeffs.push(match coefficient {
                                     Coefficient::Scalar(c) => format!("Felt::from_u64({c})"),
                                     Coefficient::One => format!("{}::ONE", self.types().base),
@@ -1216,6 +1230,17 @@ impl<'g, 'a> Emitter<'g, 'a> {
                                 terms.join(", "),
                                 coeffs.join(", ")
                             );
+                            let rhs = if scaled {
+                                // Short backend chunks keep consumed scales as specialized
+                                // products. This chunk-hint policy is not an Algebra guarantee;
+                                // monomorphization folds the constant branch.
+                                format!(
+                                    "if <{ty} as Algebra<Felt>>::BATCHED_LC_CHUNK < 4 {{ {ty}::sum_array::<{n}>(&[{}]) }} else {{ {rhs} }}",
+                                    products.join(", ")
+                                )
+                            } else {
+                                rhs
+                            };
                             // Finish this dot before loading the next region's
                             // operands, keeping its inputs out of later live ranges.
                             operand(&self.hoist(class, rhs))
@@ -1496,10 +1521,270 @@ mod tests {
         plan.sum_pieces(&plan.sum_terms(root), class)
             .into_iter()
             .filter_map(|piece| match piece {
-                Piece::Dot { kind, pairs } => Some((kind, pairs.len())),
+                Piece::Dot { kind, pairs, .. } => Some((kind, pairs.len())),
                 _ => None,
             })
             .collect()
+    }
+
+    fn scalar_dot_policy(output: &str) -> (&str, &str) {
+        let rows = row(output);
+        assert_eq!(rows.matches("BATCHED_LC_CHUNK").count(), 1, "{output}");
+        rows.lines()
+            .find(|line| line.contains("BATCHED_LC_CHUNK"))
+            .unwrap()
+            .split_once(" } else { ")
+            .unwrap()
+    }
+
+    #[test]
+    fn power_of_two_packing_schedules_scalar_dots_without_changing_literal_dots() {
+        let scaled = B::sum_array::<4>(&[
+            main(0),
+            main(1).mul_2exp_u64(8),
+            main(2).mul_2exp_u64(16),
+            main(3).mul_2exp_u64(24),
+        ]);
+        let multiplied = B::sum_array::<4>(&[
+            main(0),
+            main(1) * Felt::from_u64(256),
+            main(2) * Felt::from_u64(65536),
+            main(3) * Felt::from_u64(16777216),
+        ]);
+        for (scaled, value) in [(true, scaled), (false, multiplied)] {
+            let assertion = Assertion::Base(value);
+            assert_eq!(synthesized_dots(assertion.clone()), [(DotKind::Scalar, 4)]);
+            let output = emit(&[assertion]);
+            assert!(row(&output).contains("mixed_dot_product::<4>"), "{output}");
+            if scaled {
+                let (products, mixed) = scalar_dot_policy(&output);
+                assert!(products.contains("if <AB::Expr as Algebra<Felt>>::BATCHED_LC_CHUNK < 4"));
+                assert!(products.contains("AB::Expr::sum_array::<4>"));
+                for exponent in [8, 16, 24] {
+                    assert!(products.contains(&format!(".mul_2exp_u64({exponent})")));
+                }
+                assert!(!products.contains(" * Felt::from_u64(1)"));
+                assert!(mixed.contains("<AB::Expr as Algebra<Felt>>::mixed_dot_product::<4>"));
+                for column in 0..4 {
+                    assert_eq!(row(&output).matches(&format!("m0[{column}].dup()")).count(), 1);
+                }
+            } else {
+                assert!(!row(&output).contains("BATCHED_LC_CHUNK"), "{output}");
+                assert!(!row(&output).contains("mul_2exp_u64"), "{output}");
+            }
+        }
+    }
+
+    #[test]
+    fn scalar_dots_handle_inverse_and_full_width_power_of_two_scales() {
+        for exponents in [[64, -1, -64, 8], [i128::from(u64::MAX), -i128::from(u64::MAX), 96, -96]]
+        {
+            let values: [B; 4] = core::array::from_fn(|i| {
+                let magnitude = u64::try_from(exponents[i].unsigned_abs()).unwrap();
+                if exponents[i] < 0 {
+                    main(i).div_2exp_u64(magnitude)
+                } else {
+                    main(i).mul_2exp_u64(magnitude)
+                }
+            });
+            let assertion = Assertion::Base(B::sum_array::<4>(&values));
+            assert_eq!(synthesized_dots(assertion.clone()), [(DotKind::Scalar, 4)]);
+            let output = emit(&[assertion]);
+            assert!(row(&output).contains("mixed_dot_product::<4>"), "{output}");
+            scalar_dot_policy(&output);
+            assert!(!row(&output).contains(".exp_u64("), "{output}");
+        }
+        with_native_experiment(NativeExperiment::SignedDots, || {
+            let values = core::array::from_fn::<_, 4, _>(|i| -main(i).mul_2exp_u64(8));
+            let assertion = Assertion::Base(B::sum_array::<4>(&values));
+            assert_eq!(synthesized_dots(assertion.clone()), [(DotKind::Scalar, 4)]);
+            emit(&[assertion]);
+        });
+    }
+
+    #[test]
+    fn scaled_scalar_fallback_keeps_specializations_and_completed_product_signs() {
+        with_native_experiment(NativeExperiment::SignedDots, || {
+            let assertion = Assertion::Base(B::sum_array::<5>(&[
+                main(0),
+                -main(1),
+                -main(2).double(),
+                -main(3).halve(),
+                -(main(4) * Felt::from_u64(7)),
+            ]));
+            assert_eq!(synthesized_dots(assertion.clone()), [(DotKind::Scalar, 5)]);
+            let output = emit(&[assertion]);
+            let (products, mixed) = scalar_dot_policy(&output);
+            for term in [
+                "&[h0.dup(), -(h1.dup()),",
+                "-(h2.dup().double())",
+                "-(h3.dup().halve())",
+                "-(h4.dup() * Felt::from_u64(7))",
+            ] {
+                assert!(products.contains(term), "missing {term}: {output}");
+            }
+            assert!(!products.contains(" * Felt::from_u64(1)"), "{output}");
+            assert!(mixed.contains("mixed_dot_product::<5>"), "{output}");
+            assert!(mixed.contains("-Felt::from_u64(1)"), "{output}");
+            assert_eq!(row(&output).matches("builder.emit_base").count(), 1);
+        });
+    }
+
+    #[test]
+    fn tiny_scalar_dots_keep_specialized_scales_even_through_signed_wrappers() {
+        with_native_experiment(NativeExperiment::DotMin2, || {
+            for signed_dots in [false, true] {
+                let options = NativeOptions { signed_dots, ..native_options() };
+                NATIVE_OPTIONS.with(|current| current.set(Some(options)));
+                for count in [2, 3] {
+                    for scales in [false, true] {
+                        for negative in [false, true] {
+                            let value = (0..count)
+                                .map(|i| {
+                                    let value = if scales {
+                                        main(i).mul_2exp_u64(8)
+                                    } else {
+                                        main(i) * Felt::from_u64(256)
+                                    };
+                                    if negative { -value } else { value }
+                                })
+                                .sum::<B>();
+                            let assertion = Assertion::Base(value);
+                            assert!(synthesized_dots(assertion.clone()).is_empty());
+                            let output = emit(&[assertion]);
+                            assert!(!row(&output).contains("dot_product"), "{output}");
+                        }
+                    }
+                }
+                for scales in [false, true] {
+                    let shared = if scales {
+                        main(0).mul_2exp_u64(8)
+                    } else {
+                        main(0) * Felt::from_u64(256)
+                    };
+                    let assertion = Assertion::Base(B::sum_array::<3>(&[
+                        shared.dup(),
+                        shared,
+                        main(1) * Felt::from_u64(7),
+                    ]));
+                    assert!(synthesized_dots(assertion.clone()).is_empty());
+                    assert!(!row(&emit(&[assertion])).contains("dot_product"));
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn cheap_scales_do_not_alone_justify_a_scalar_dot() {
+        // Goldilocks has 2^192 = 1. These nonzero exponents still capture ScalePow2.
+        let identity = core::array::from_fn::<_, 4, _>(|i| main(i).mul_2exp_u64(192 * i as u64));
+        for values in [
+            identity,
+            core::array::from_fn(|i| main(i).double()),
+            core::array::from_fn(|i| main(i).halve()),
+        ] {
+            let assertion = Assertion::Base(B::sum_array::<4>(&values));
+            assert!(synthesized_dots(assertion.clone()).is_empty());
+            assert!(!row(&emit(&[assertion])).contains("dot_product"));
+        }
+        with_native_experiment(NativeExperiment::SignedDots, || {
+            let values = [-main(0), -main(1).double(), -main(2).halve(), -main(3).double()];
+            let assertion = Assertion::Base(B::sum_array::<4>(&values));
+            assert!(synthesized_dots(assertion.clone()).is_empty());
+            assert!(!row(&emit(&[assertion])).contains("dot_product"));
+        });
+        let multiplied = core::array::from_fn::<_, 4, _>(|i| main(i) * Felt::from_u64(2));
+        let assertion = Assertion::Base(B::sum_array::<4>(&multiplied));
+        assert_eq!(synthesized_dots(assertion.clone()), [(DotKind::Scalar, 4)]);
+        assert!(!row(&emit(&[assertion])).contains("BATCHED_LC_CHUNK"));
+
+        let value = B::sum_array::<4>(&[
+            main(0).mul_2exp_u64(192),
+            main(1) * Felt::from_u64(7),
+            main(2) * Felt::from_u64(11),
+            main(3) * Felt::from_u64(13),
+        ]);
+        let assertion = Assertion::Base(value);
+        assert_eq!(synthesized_dots(assertion.clone()), [(DotKind::Scalar, 4)]);
+        let output = emit(&[assertion]);
+        assert!(!row(&output).contains("mul_2exp_u64"), "{output}");
+    }
+
+    #[test]
+    fn scalar_dots_keep_shared_and_materialized_scales_atomic() {
+        let shared = main(0).mul_2exp_u64(8);
+        let output = emit(&[
+            Assertion::Base(B::sum_array::<4>(&[
+                shared.dup(),
+                main(1),
+                main(2).mul_2exp_u64(16),
+                main(3).mul_2exp_u64(24),
+            ])),
+            Assertion::Base(shared),
+        ]);
+        assert_eq!(row(&output).matches("mul_2exp_u64(8)").count(), 1, "{output}");
+        assert!(row(&output).contains("mixed_dot_product::<4>"), "{output}");
+
+        let shared = main(0).mul_2exp_u64(8);
+        let output = emit(&[
+            Assertion::Base(B::sum_array::<4>(&[
+                shared.dup(),
+                main(1) * Felt::from_u64(7),
+                main(2) * Felt::from_u64(11),
+                main(3) * Felt::from_u64(13),
+            ])),
+            Assertion::Base(shared),
+        ]);
+        assert!(row(&output).contains("mixed_dot_product::<4>"), "{output}");
+        assert!(!row(&output).contains("BATCHED_LC_CHUNK"), "{output}");
+
+        let values = [
+            main(0).mul_2exp_u64(8),
+            main(1) * Felt::from_u64(7),
+            main(2) * Felt::from_u64(11),
+            main(3) * Felt::from_u64(13),
+        ];
+        let program =
+            CapturedProgram::from_assertions(vec![Assertion::Base(B::sum_array::<4>(&values))]);
+        let index = ExpressionIndex::new(program.assertions());
+        let (root, class) = index.roots[0];
+        let materialized = index.children(root)[0];
+        let plan = Plan::new(&index, &[materialized]);
+        let pieces = plan.sum_pieces(&plan.sum_terms(root), class);
+        assert!(
+            matches!(pieces.as_slice(), [Piece::Dot { kind: DotKind::Scalar, pairs, scaled: false }]
+            if pairs[0].0 == materialized && matches!(pairs[0].1, Coefficient::Scalar(1)))
+        );
+
+        let values = core::array::from_fn::<_, 4, _>(|i| main(i).mul_2exp_u64(8 * (i + 1) as u64));
+        let program =
+            CapturedProgram::from_assertions(vec![Assertion::Base(B::sum_array::<4>(&values))]);
+        let index = ExpressionIndex::new(program.assertions());
+        let (root, class) = index.roots[0];
+        let materialized = index.children(root)[0];
+        let plan = Plan::new(&index, &[materialized]);
+        let pieces = plan.sum_pieces(&plan.sum_terms(root), class);
+        assert!(
+            matches!(pieces.as_slice(), [Piece::Dot { kind: DotKind::Scalar, pairs, scaled: true }]
+            if pairs[0].0 == materialized && matches!(pairs[0].1, Coefficient::Scalar(1)))
+        );
+    }
+
+    #[test]
+    fn scalar_scale_matching_preserves_extension_and_square_dispatch() {
+        let squares = core::array::from_fn::<_, 4, _>(|i| main(i).square());
+        let assertion = Assertion::Base(B::sum_array::<4>(&squares));
+        assert!(synthesized_dots(assertion.clone()).is_empty());
+        let output = emit(&[assertion]);
+        assert_eq!(row(&output).matches(".square()").count(), 4, "{output}");
+
+        let extension = core::array::from_fn::<_, 4, _>(|i| {
+            E::from(AuxInput::Trace { row: RowOffset::Current, column: i }).mul_2exp_u64(8)
+        });
+        let assertion = Assertion::Extension(E::sum_array::<4>(&extension));
+        assert!(synthesized_dots(assertion.clone()).is_empty());
+        let output = emit(&[assertion]);
+        assert_eq!(row(&output).matches("mul_2exp_u64(8)").count(), 4, "{output}");
     }
 
     #[test]
@@ -1889,6 +2174,7 @@ mod tests {
             output.contains("<AB::ExtExpr as Algebra<AB::Expr>>::batched_linear_combination"),
             "{output}"
         );
+        assert!(!output.contains("BATCHED_LC_CHUNK"), "{output}");
     }
 
     #[test]

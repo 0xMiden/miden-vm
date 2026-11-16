@@ -152,11 +152,22 @@ factoring patterns. Sum/dot pattern recovery uses bounded regions, and long mixe
 combinations use the batched method. Shared expressions and prepared results remain materialized
 rather than being expanded into every consumer.
 
+Scalar-dot matching reads `ScalePow2` coefficients, including inverse powers.
+Scale-containing regions use the backend's linear-combination chunk hint to choose between
+explicit scaling and a dot. Identity, doubling, and halving alone do not justify fusion.
+Existing literal-only dots and authored linear combinations retain their dispatch.
+
 Further measured planning shares repeated native product pairs, cancels inverse literal offsets
 such as `(D - 1) + 1`, and caps synthesized mixed dots at eight terms. ACE independently shares
 larger repeated product subsets when they reduce circuit cost. Eidos lookup wrappers use the
 existing doubled-AND XOR equation consistently with the main constraints. These changes preserve
 the source assertion vocabulary and polynomial values.
+
+The handwritten AIRs also use the retained algebra operations consistently: one Boolean-check
+convention, ordered array assertions, direct equalities and gates, reductions and typed weighted
+sums, radix operations, and local factoring through base-domain gates. All 201 source-tree files
+were reviewed; 58 changed files received an independent cross-review. The [source audit](crates/air/source/docs/algebra-cleanup-review.md)
+records every file, applied rules, deferred opportunities, and measured tradeoffs.
 
 ACE and arithmetic analyses consume the derived primitive graph, which still has
 `Add`/`Sub`/`Mul`/`Neg` operations. The source vocabulary does not force ACE to add corresponding
@@ -223,26 +234,43 @@ attribution and the [MIT](crates/stark/core/src/air/symbolic/LICENSE-MIT) and
 [Apache-2.0](crates/stark/core/src/air/symbolic/LICENSE-APACHE) license texts remain.
 :codex-annotation{index="8"}
 
-The final six-crate release run has 578 passes and two pre-existing allocation-test failures.
-Scalar/packed drift, auxiliary-security bounds, ACE arithmetic, current proof bindings, and
-embedded verifier roots pass. Both allocation failures reproduce at the starting commit with the
-same counts; their code is unchanged. After lint cleanup, 164 compiler/ACE tests pass again.
-Standard Clippy with warnings denied, host `no_std`, formatting, and generated-artifact consistency
-checks pass. The stricter project lint flags still report existing style warnings in unchanged
-compiler files. Current VM/PVM proof fixtures and verifier roots are regenerated and checked.
+The source-cleanup seven-crate release run passed 807 tests. Scalar/packed drift, auxiliary-security
+bounds, ACE arithmetic, current proof bindings, and embedded verifier roots pass. Two pre-existing
+allocation guards fail in the unfiltered run with their established baseline counts and are
+excluded from the final rerun; their code is unchanged. Standard Clippy with warnings denied,
+host `no_std`, formatting, and generated-artifact consistency checks pass. Current VM/PVM proof
+fixtures and verifier roots are regenerated and checked. The stricter project lint flags have
+existing style warnings in unchanged compiler files, outside this source cleanup.
 
-Raw ACE operations fall from 6,831 to 6,583 for VM and 13,287 to 12,558 for PVM over the optimization
-work in this PR. The [first experiment report](crates/miden-constraint-compiler/docs/symbolic-optimization-results.md)
+Across the recorded optimization rounds and source cleanup, raw ACE operations fall from 6,831
+to 6,556 for VM and 13,287 to 12,583 for PVM. The [first experiment report](crates/miden-constraint-compiler/docs/symbolic-optimization-results.md)
 records the initial folding and sum-fragment research, which reached 6,646 VM and 12,728 PVM
 operations. The [follow-up report](crates/miden-constraint-compiler/docs/symbolic-optimization-followup.md)
 records the subsequent parallel product, cancellation, dot-size, affine, scheduling, and source
 experiments, including rejected alternatives, per-AIR data, and reproduction commands.
 
-Against that intermediate commit, the cleaned production build's geometric mean of row-evaluation
-latency falls 3.80% scalar and 3.36% packed on a performance core, and 5.56% scalar and 3.67% packed
-on an efficiency core. These are shared-input, paired measurements over all sixteen AIRs on an
+Before the final source cleanup, the follow-up optimization build's geometric mean of row-evaluation
+latency fell 3.80% scalar and 3.36% packed on a performance core, and 5.56% scalar and 3.67% packed
+on an efficiency core, relative to its intermediate baseline. These are shared-input, paired measurements over all sixteen AIRs on an
 Apple M2 Pro; preparation and allocation are excluded. They are not combined arithmetically with
 the earlier experiment's percentages or presented as end-to-end proving improvements.
+
+The subsequent source cleanup changes VM ACE operations from 6,583 to 6,556 and PVM operations
+from 12,558 to 12,583. Before the scaling follow-up, its final timing aggregates are broadly
+neutral: scalar +0.36% / packed
++0.21% on the performance core and scalar +0.34% / packed -0.32% on the efficiency core. Per-AIR
+results include packed Core regressions of 7.89% / 2.66% in the final comparison binary. The
+source audit retains those regressions, earlier measurements, and the limits of the code-generation
+context investigation; source readability and richer capture do not imply a universal speedup.
+
+The [scaling follow-up](crates/miden-constraint-compiler/docs/symbolic-optimization-followup.md#power-of-two-scaling-follow-up-2026-11-16)
+then recovers native dots through `ScalePow2` with backend-specific scheduling. Eidos improves
+2.2–3.3% scalar and 0.5–2.3% packed across the two core types relative to the cleaned source
+before that fix. Preparation, source identity, and ACE circuits remain unchanged. Its report
+retains per-AIR results and a large timing shift in the unchanged Core function, so aggregate
+movement is not presented entirely as an arithmetic improvement.
+Its focused validation passes 87 compiler tests and 17 generated-AIR checks, plus Clippy and
+the generated AIR's host `no_std` check.
 
 Compiler memory consumption and compilation time are not acceptance criteria for this change.
 :codex-annotation{index="5"} :codex-annotation{index="10"}

@@ -35,21 +35,20 @@ pub fn enforce_fused_rows<AB>(
     for g in 0..NUM_G {
         let k3 = local[g_k3_col(g)].dup();
         let k2 = local[G_K2_BASE_COL + g].dup();
-        builder
-            .assert_zero(k3.clone() * (k3.clone() - AB::Expr::ONE) * (k3 - AB::Expr::from_u64(2)));
-        builder.when(is_fused.clone()).assert_zero(k2.clone() * (AB::Expr::ONE - k2));
+        builder.assert_zero(k3.bool_check() * (k3 - AB::Expr::TWO));
+        builder.when(is_fused.dup()).assert_bool(k2);
     }
 
     // First fused row: bind the C and D lanes to the fixed IV.
     let is_first = selectors.is_first_fused();
     for g in 0..NUM_G {
-        let builder = &mut builder.when(is_first.clone());
-        builder.assert_zero(
-            input_c_for_rotation::<AB>(local, g, 16)
-                - AB::Expr::from_u64(EIDOS_COMPRESSION_IV[g] as u64),
-        );
-        builder.assert_zero(
-            input_d::<AB>(local, g) - AB::Expr::from_u64(EIDOS_COMPRESSION_IV[4 + g] as u64),
+        let builder = &mut builder.when(is_first.dup());
+        builder.assert_eq_arrays(
+            [input_c_for_rotation::<AB>(local, g, 16), input_d::<AB>(local, g)],
+            [
+                AB::Expr::from_u32(EIDOS_COMPRESSION_IV[g]),
+                AB::Expr::from_u32(EIDOS_COMPRESSION_IV[4 + g]),
+            ],
         );
     }
 
@@ -167,10 +166,15 @@ pub(crate) fn enforce_footer_bridge<AB>(
     let final_w = |idx| output_word::<AB>(local, &G_IDX_DIAG, idx, selectors);
     let f0_words = footer_words::<AB>(next);
 
-    builder.when(gate.clone()).assert_zero(f0_words.v_low_even - final_w(0));
-    builder.when(gate.clone()).assert_zero(f0_words.v_low_odd - final_w(1));
-    builder.when(gate.clone()).assert_zero(f0_words.v_high_even - final_w(8));
-    builder.when(gate.clone()).assert_zero(f0_words.v_high_odd - final_w(9));
+    builder.when(gate.dup()).assert_eq_arrays(
+        [
+            f0_words.v_low_even,
+            f0_words.v_low_odd,
+            f0_words.v_high_even,
+            f0_words.v_high_odd,
+        ],
+        [final_w(0), final_w(1), final_w(8), final_w(9)],
+    );
     builder
         .when(gate.clone())
         .assert_eq(next[F_COMPRESSION_CYCLE_ID_COL].dup(), fused_compression_cycle_id::<AB>(local));
@@ -181,20 +185,21 @@ pub(crate) fn enforce_footer_bridge<AB>(
             continue;
         }
         builder
-            .when(gate.clone())
-            .assert_zero(next[footer_future_w_col(0, idx)].dup() - final_w(word_idx));
+            .when(gate.dup())
+            .assert_eq(next[footer_future_w_col(0, idx)].dup(), final_w(word_idx));
     }
 
-    let footer_b_sum = [4usize, 5, 6, 7].into_iter().fold(AB::Expr::ZERO, |sum, word_idx| {
-        let idx = F_FUTURE_W_WORD_INDICES
-            .iter()
-            .position(|&candidate| candidate == word_idx)
-            .expect("all final B words are carried by footer 0");
-        sum + next[footer_future_w_col(0, idx)].dup()
-    });
-    builder
-        .when(gate)
-        .assert_zero(sum_input_b(|col| next[col].dup()) - footer_b_sum);
+    let footer_b_sum: AB::Expr = [4usize, 5, 6, 7]
+        .into_iter()
+        .map(|word_idx| {
+            let idx = F_FUTURE_W_WORD_INDICES
+                .iter()
+                .position(|&candidate| candidate == word_idx)
+                .expect("all final B words are carried by footer 0");
+            next[footer_future_w_col(0, idx)].dup()
+        })
+        .sum();
+    builder.when(gate).assert_eq(sum_input_b(|col| next[col].dup()), footer_b_sum);
 }
 
 pub(crate) fn enforce_footer_word_bindings<AB>(
@@ -205,17 +210,19 @@ pub(crate) fn enforce_footer_word_bindings<AB>(
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    builder
-        .when(is_footer.clone())
-        .assert_zero(words.high_even_duplicate.clone() - words.v_high_even.clone());
-    builder
-        .when(is_footer.clone())
-        .assert_zero(words.high_odd_duplicate.clone() - words.v_high_odd.clone());
-    builder
-        .when(is_footer.clone())
-        .assert_zero(local[F_TOP_BIT_SLOT_BASE_COL].dup() - words.out_odd_byte3.clone());
-    builder.when(is_footer).assert_zero(
-        local[F_TOP_BIT_SLOT_BASE_COL + 1].dup() - AB::Expr::from_u64(F_TOP_BIT_MASK as u64),
+    builder.when(is_footer).assert_eq_arrays(
+        [
+            words.high_even_duplicate.dup(),
+            words.high_odd_duplicate.dup(),
+            local[F_TOP_BIT_SLOT_BASE_COL].dup(),
+            local[F_TOP_BIT_SLOT_BASE_COL + 1].dup(),
+        ],
+        [
+            words.v_high_even.dup(),
+            words.v_high_odd.dup(),
+            words.out_odd_byte3.dup(),
+            AB::Expr::from_u8(F_TOP_BIT_MASK),
+        ],
     );
 }
 
@@ -234,8 +241,9 @@ pub(crate) fn enforce_footer_payload<AB>(
 
     for limb in 0..F_RANGE_SLOTS {
         let base = footer_range_slot_col(limb, 0);
-        builder.when(is_footer.clone()).assert_zero(local[base + 1].dup());
-        builder.when(is_footer.clone()).assert_zero(local[base + 2].dup());
+        builder
+            .when(is_footer.dup())
+            .assert_zeros([local[base + 1].dup(), local[base + 2].dup()]);
     }
 
     for pair in 0..2 {
@@ -279,21 +287,22 @@ pub(crate) fn enforce_footer_transition<AB>(
     ];
 
     for idx in 0..2 * footer {
-        builder.when(gate.clone()).assert_zero(
-            local[footer_r_col(footer, idx)].dup() - next[footer_r_col(footer + 1, idx)].dup(),
+        builder.when(gate.dup()).assert_eq(
+            local[footer_r_col(footer, idx)].dup(),
+            next[footer_r_col(footer + 1, idx)].dup(),
         );
     }
     for pair in 0..2 {
         let lo = footer_message_word(|col| local[col].dup(), 2 * pair);
         let hi = footer_message_word(|col| local[col].dup(), 2 * pair + 1);
-        builder.when(gate.clone()).assert_zero(
-            pack_pair(lo, hi) - next[footer_r_col(footer + 1, 2 * footer + pair)].dup(),
-        );
+        builder
+            .when(gate.dup())
+            .assert_eq(pack_pair(lo, hi), next[footer_r_col(footer + 1, 2 * footer + pair)].dup());
     }
     for idx in 0..=2 * footer + 1 {
         builder
-            .when(gate.clone())
-            .assert_zero(cv_word::<AB>(local, idx) - cv_word::<AB>(next, idx));
+            .when(gate.dup())
+            .assert_eq(cv_word::<AB>(local, idx), cv_word::<AB>(next, idx));
     }
     for idx in 0..=footer {
         builder
@@ -302,13 +311,13 @@ pub(crate) fn enforce_footer_transition<AB>(
     }
     for (idx, expected) in consumed.into_iter().enumerate() {
         builder
-            .when(gate.clone())
-            .assert_zero(local[footer_future_w_col(footer, idx)].dup() - expected);
+            .when(gate.dup())
+            .assert_eq(local[footer_future_w_col(footer, idx)].dup(), expected);
     }
     for idx in 0..footer_future_w_indices(footer + 1).len() {
-        builder.when(gate.clone()).assert_zero(
-            local[footer_future_w_col(footer, 4 + idx)].dup()
-                - next[footer_future_w_col(footer + 1, idx)].dup(),
+        builder.when(gate.dup()).assert_eq(
+            local[footer_future_w_col(footer, 4 + idx)].dup(),
+            next[footer_future_w_col(footer + 1, idx)].dup(),
         );
     }
 }
@@ -380,12 +389,10 @@ pub(crate) fn enforce_footer_row_inputs<AB>(
     AB: LiftedAirBuilder<F = Felt>,
 {
     let gate = selectors.is_footer_row(footer);
-    builder
-        .when(gate.clone())
-        .assert_zero(cv_word::<AB>(local, 2 * footer) - words.h_even.clone());
-    builder
-        .when(gate)
-        .assert_zero(cv_word::<AB>(local, 2 * footer + 1) - words.h_odd.clone());
+    builder.when(gate).assert_eq_arrays(
+        [cv_word::<AB>(local, 2 * footer), cv_word::<AB>(local, 2 * footer + 1)],
+        [words.h_even.dup(), words.h_odd.dup()],
+    );
 }
 
 pub(crate) fn packed_footer_output<AB>(
@@ -396,8 +403,8 @@ where
     AB: LiftedAirBuilder<F = Felt>,
 {
     let top_bit_masked = footer_top_bit::<AB>(local);
-    let masked_odd = words.out_odd.clone() - AB::Expr::from_u64(1 << 24) * top_bit_masked;
-    pack_pair(words.out_even.clone(), masked_odd)
+    let masked_odd = words.out_odd.dup() - top_bit_masked.mul_2exp_u64(24);
+    pack_pair(words.out_even.dup(), masked_odd)
 }
 
 fn enforce_canonical_pair<AB>(
@@ -412,9 +419,8 @@ fn enforce_canonical_pair<AB>(
 {
     let h = hi - AB::Expr::from_u64((1u64 << 32) - 1);
     let builder = &mut builder.when(gate);
-    builder.assert_zero(h.clone() * inv + z.clone() - AB::Expr::ONE);
-    builder.assert_zero(z.clone() * h);
-    builder.assert_zero(z * lo);
+    builder.assert_one(h.dup() * inv + z.dup());
+    builder.assert_zeros([z.dup() * h, z * lo]);
 }
 
 fn footer_top_bit<AB>(row: &[AB::Expr]) -> AB::Expr
@@ -598,7 +604,7 @@ fn input_c_for_rotation<AB>(row: &[AB::Expr], g: usize, d_rotation: u32) -> AB::
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    c_new::<AB>(row, g) + AB::Expr::from_u64(1u64 << 32) * row[G_K2_BASE_COL + g].dup()
+    c_new::<AB>(row, g) + row[G_K2_BASE_COL + g].mul_2exp_u64(32)
         - d_new_for_rotation::<AB>(row, g, d_rotation)
 }
 
@@ -650,11 +656,13 @@ where
     AB: LiftedAirBuilder<F = Felt>,
 {
     debug_assert_ne!(g, MISSING_ROTATION_G);
-    (0..BYTES_PER_WORD).fold(AB::Expr::ZERO, |acc, byte| {
-        let col = g_bd_rot_result_col(g, byte)
-            .expect("only the final lane has a derived rotation result");
-        acc + row[col].dup()
-    })
+    (0..BYTES_PER_WORD)
+        .map(|byte| {
+            let col = g_bd_rot_result_col(g, byte)
+                .expect("only the final lane has a derived rotation result");
+            row[col].dup()
+        })
+        .sum()
 }
 
 fn d_new<AB>(

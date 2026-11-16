@@ -6,10 +6,7 @@
 
 use alloc::borrow::Cow;
 
-use miden_core::{
-    Felt,
-    field::{PrimeCharacteristicRing, QuadFelt},
-};
+use miden_core::{Felt, field::QuadFelt};
 use miden_stark::{air, lookup};
 use p3_field::Dup;
 
@@ -89,7 +86,7 @@ where
             .try_into()
             .expect("EC group-table main row band");
         let provider = (
-            LB::Expr::ZERO - local[groups::COL_MULT].dup(),
+            -local[groups::COL_MULT].dup(),
             ec::EcGroupMsg {
                 group_ptr: local[groups::COL_PTR].dup(),
                 a_ptr: local[groups::COL_A_PTR].dup(),

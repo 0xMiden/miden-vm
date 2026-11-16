@@ -127,8 +127,8 @@ fn enforce_stack_depth_constraints<AB>(
     // - Therefore, these terms already vanish in the masked regimes, and masking them would only
     //   increase polynomial degree.
     // - We still need to suppress the raw (b0' - b0) term on caller-frame END rows, hence the mask.
-    let normal_mask = AB::Expr::ONE - call_or_dyncall_or_syscall.dup() - caller_frame_end;
-    let depth_delta_part = (depth_next.dup() - depth) * normal_mask;
+    let normal_mask = AB::Expr::ONE - (call_or_dyncall_or_syscall.dup() + caller_frame_end);
+    let depth_delta_part = (depth_next.dup() - depth.dup()) * normal_mask;
 
     // Left shift with non-empty overflow decrements depth by one.
     let left_shift_part = op_flags.left_shift() * op_flags.overflow();

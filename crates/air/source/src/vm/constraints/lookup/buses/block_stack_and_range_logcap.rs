@@ -150,8 +150,12 @@ pub(in crate::vm::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                     // ---- Block-stack relation (Continuation / CallerFrame tagged entries) ----
 
                     // JOIN/SPLIT/SPAN/DYN: continuation push with `is_loop = 0`.
-                    let f =
-                        op_flags.join() + op_flags.split() + op_flags.span() + op_flags.dyn_op();
+                    let f = LB::Expr::sum_array::<4>(&[
+                        op_flags.join(),
+                        op_flags.split(),
+                        op_flags.span(),
+                        op_flags.dyn_op(),
+                    ]);
                     g.add(
                         "join_split_span_dyn",
                         f,

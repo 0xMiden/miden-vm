@@ -35,7 +35,6 @@ use crate::vm::{
     NativeMidenAirBuilder,
     constraints::{
         chiplets::{columns::MemoryCols, selectors::ChipletSelectors},
-        constants::{F_4, TWO_POW_16},
         utils::BoolNot,
     },
 };
@@ -69,14 +68,14 @@ pub fn enforce_memory_constraints<AB>(
         builder.assert_bool(cols.idx0.dup());
         builder.assert_bool(cols.idx1.dup());
 
-        let word_addr = (cols.word_addr_hi.dup() * TWO_POW_16 + cols.word_addr_lo.dup()) * F_4;
+        let word_addr =
+            (cols.word_addr_hi.mul_2exp_u64(16) + cols.word_addr_lo.dup()).mul_2exp_u64(2);
         builder.assert_eq(cols.word_addr.dup(), word_addr);
 
         // For word access, idx bits must be zero (only element accesses use idx0/idx1).
         {
             let builder = &mut builder.when(cols.is_word.dup());
-            builder.assert_zero(cols.idx0.dup());
-            builder.assert_zero(cols.idx1.dup());
+            builder.assert_zeros([cols.idx0.dup(), cols.idx1.dup()]);
         }
     }
 
@@ -163,7 +162,7 @@ pub fn enforce_memory_constraints<AB>(
         let clk_term = same_addr * clk_delta.clone();
         ctx_term + same_ctx * (addr_term + clk_term)
     };
-    let delta_next = cols_next.d1.dup() * TWO_POW_16 + cols_next.d0.dup();
+    let delta_next = cols_next.d1.mul_2exp_u64(16) + cols_next.d0.dup();
     builder.assert_eq(computed_delta, delta_next);
 
     // --- read-only constraint ---

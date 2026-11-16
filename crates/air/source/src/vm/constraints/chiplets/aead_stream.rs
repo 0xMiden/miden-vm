@@ -6,6 +6,7 @@
 
 use core::borrow::Borrow;
 
+use miden_core::field::PrimeCharacteristicRing;
 use miden_stark::air::{Frame, LiftedAirBuilder};
 use p3_field::Dup;
 
@@ -16,7 +17,7 @@ use crate::vm::{
             columns::{AeadStreamCols, PeriodicCols},
             selectors::ChipletSelectors,
         },
-        constants::{TWO_POW_32, TWO_POW_32_MINUS_1},
+        constants::TWO_POW_32_MINUS_1,
         utils::{BoolNot, pack_u32_bytes_le, pack_u32_xor_bytes_le},
     },
 };
@@ -199,13 +200,12 @@ fn enforce_canonical_split<AB>(
 ) where
     AB: NativeMidenAirBuilder,
 {
-    builder
-        .when(gate.clone())
-        .assert_eq(plaintext, lo.clone() + AB::Expr::from(TWO_POW_32) * hi.clone());
+    let builder = &mut builder.when(gate);
+    builder.assert_eq(plaintext, lo.dup() + hi.mul_2exp_u64(32));
 
     let hi_gap = AB::Expr::from(TWO_POW_32_MINUS_1) - hi;
     // If the high limb is all ones, canonical packing requires the low limb to be zero.
-    builder.when(gate).assert_eq(hi_quotient * hi_gap, lo);
+    builder.assert_eq(hi_quotient * hi_gap, lo);
 }
 
 fn a_limb_expr<AB>(bytes: &[AB::Expr; 12]) -> AB::Expr

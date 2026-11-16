@@ -128,11 +128,10 @@ impl air::LiftedAir for Sha512Air {
         // The two padding cycles are exactly the sixty-four-row IO window.
         // Equality fixes IO ownership in both directions: it forbids IO on compression rows
         // and requires all sixty-four IO rows in each active block, so no block can omit binding.
-        builder.assert_zero(
-            io_act.dup()
-                - local[compression::COL_ACT].dup()
-                    * local[compression::COL_PHASE_BEGIN + compression::program::PHASE_PADDING]
-                        .dup(),
+        builder.assert_eq(
+            io_act.dup(),
+            local[compression::COL_ACT].dup()
+                * local[compression::COL_PHASE_BEGIN + compression::program::PHASE_PADDING].dup(),
         );
         compression::eval_main_with_io(frame, builder, 0, 0, io_act.dup());
         let io_local = IO_COLUMNS.map(|column| local[column].dup());

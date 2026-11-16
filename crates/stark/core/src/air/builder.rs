@@ -43,14 +43,34 @@ pub trait LiftedAirBuilder: Sized {
         self.assert_zero(left.into() - right.into());
     }
 
+    /// Asserts the canonical Boolean vanishing polynomial `x * (x - 1)`.
+    ///
+    /// Using the ring operation preserves symbolic intent and allows concrete algebras to
+    /// choose their implementation.
     fn assert_bool<I: Into<Self::Expr>>(&mut self, value: I) {
-        let value = value.into();
-        self.assert_zero(value.dup() * (value - Self::Expr::ONE));
+        let value: Self::Expr = value.into();
+        self.assert_zero(value.bool_check());
+    }
+
+    fn assert_bools<const N: usize, I: Into<Self::Expr>>(&mut self, values: [I; N]) {
+        for value in values {
+            self.assert_bool(value);
+        }
     }
 
     fn assert_zeros<const N: usize, I: Into<Self::Expr>>(&mut self, values: [I; N]) {
         for value in values {
             self.assert_zero(value);
+        }
+    }
+
+    fn assert_eq_arrays<const N: usize, I: Into<Self::Expr>, J: Into<Self::Expr>>(
+        &mut self,
+        left: [I; N],
+        right: [J; N],
+    ) {
+        for (left, right) in left.into_iter().zip(right) {
+            self.assert_eq(left, right);
         }
     }
 
@@ -60,6 +80,26 @@ pub trait LiftedAirBuilder: Sized {
 
     fn assert_eq_ext<I: Into<Self::ExtExpr>, J: Into<Self::ExtExpr>>(&mut self, left: I, right: J) {
         self.assert_zero_ext(left.into() - right.into());
+    }
+
+    fn assert_one_ext<I: Into<Self::ExtExpr>>(&mut self, value: I) {
+        self.assert_eq_ext(value, Self::ExtExpr::ONE);
+    }
+
+    fn assert_zeros_ext<const N: usize, I: Into<Self::ExtExpr>>(&mut self, values: [I; N]) {
+        for value in values {
+            self.assert_zero_ext(value);
+        }
+    }
+
+    fn assert_eq_ext_arrays<const N: usize, I: Into<Self::ExtExpr>, J: Into<Self::ExtExpr>>(
+        &mut self,
+        left: [I; N],
+        right: [J; N],
+    ) {
+        for (left, right) in left.into_iter().zip(right) {
+            self.assert_eq_ext(left, right);
+        }
     }
 
     fn when<I: Into<Self::Expr>>(&mut self, condition: I) -> Filtered<'_, Self> {
@@ -72,6 +112,10 @@ pub trait LiftedAirBuilder: Sized {
         right: J,
     ) -> Filtered<'_, Self> {
         self.when(left.into() - right.into())
+    }
+
+    fn scope<R>(&mut self, name: &str, f: impl FnOnce(&mut Named<'_, Self>) -> R) -> R {
+        f(&mut self.named(name))
     }
 
     fn named<'a>(&'a mut self, name: &'a str) -> Named<'a, Self> {
@@ -118,5 +162,84 @@ impl<B: LiftedAirBuilder> LiftedAirBuilder for Named<'_, B> {
     fn emit_ext(&mut self, value: Self::ExtExpr, meta: ConstraintMeta<'_>) {
         let path = ConstraintPath { name: self.name, nested: meta.path };
         self.inner.emit_ext(value, ConstraintMeta { path: Some(&path) });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::{borrow::Cow, vec::Vec};
+
+    use super::*;
+    use crate::{
+        air::{
+            AirSpec, Assertion, capture_from_spec,
+            symbolic::{ExprView, ExpressionDomain},
+        },
+        testing::configs::{Felt, QuadFelt},
+    };
+
+    #[derive(Default)]
+    struct NumericSink {
+        values: Vec<(ExpressionDomain, QuadFelt)>,
+    }
+
+    impl LiftedAirBuilder for NumericSink {
+        type F = Felt;
+        type Expr = Felt;
+        type ExtExpr = QuadFelt;
+
+        fn emit_base(&mut self, value: Felt, _: ConstraintMeta<'_>) {
+            self.values.push((ExpressionDomain::Base, value.into()));
+        }
+
+        fn emit_ext(&mut self, value: QuadFelt, _: ConstraintMeta<'_>) {
+            self.values.push((ExpressionDomain::Extension, value));
+        }
+    }
+
+    #[test]
+    fn boolean_builder_methods_retain_ring_operations_and_ordered_gates() {
+        fn checks<S: LiftedAirBuilder>(sink: &mut S, values: &[S::Expr]) {
+            sink.assert_bools([values[0].dup(), values[1].dup()]);
+            sink.when(values[2].dup()).assert_bool(values[0].dup());
+            sink.when(S::Expr::ZERO).assert_bool(values[1].dup());
+        }
+
+        let symbolic = capture_from_spec::<Felt, QuadFelt>(
+            AirSpec {
+                main_width: 3,
+                aux_width: 0,
+                num_public_values: 0,
+                num_challenges: 0,
+                num_exports: 0,
+                preprocessed: None,
+                periodic_columns: Cow::Borrowed(&[]),
+            },
+            |frame, _, sink| checks(sink, frame.main.current),
+        )
+        .unwrap();
+        assert_eq!(symbolic.assertions.len(), 4, "zero gates still emit");
+        for assertion in &symbolic.assertions[..2] {
+            let Assertion::Base(value) = assertion else {
+                panic!("Boolean assertions retain the base class");
+            };
+            assert!(matches!(value.as_ref().view(), ExprView::BoolCheck { .. }));
+        }
+        let Assertion::Base(gated) = &symbolic.assertions[2] else {
+            panic!("gated Boolean assertions retain the base class");
+        };
+        assert!(matches!(gated.as_ref().view(), ExprView::Mul { y, .. }
+            if matches!(y.view(), ExprView::BoolCheck { .. })));
+
+        // Non-Boolean values and a non-Boolean gate verify the actual polynomial.
+        let mut numeric = NumericSink::default();
+        checks(&mut numeric, &[Felt::from_u64(5), Felt::from_u64(7), Felt::from_u64(11)]);
+        assert_eq!(
+            numeric.values,
+            [20, 42, 220, 0]
+                .into_iter()
+                .map(|value| (ExpressionDomain::Base, Felt::from_u64(value).into()))
+                .collect::<Vec<_>>()
+        );
     }
 }

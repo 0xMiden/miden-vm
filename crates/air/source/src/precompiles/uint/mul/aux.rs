@@ -3,7 +3,7 @@ use core::array;
 
 use miden_core::{
     Felt,
-    field::{PrimeCharacteristicRing, QuadFelt},
+    field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::Matrix,
 };
 use miden_stark::{
@@ -28,17 +28,14 @@ pub(crate) fn build_aux(
 
     // β⁰..β³¹ + the γ slot weights (mirroring the AIR's).
     let mut bp = [QuadFelt::ZERO; NUM_GAMMA + 1];
-    bp[0] = QuadFelt::ONE;
-    for i in 1..NUM_GAMMA + 1 {
-        bp[i] = bp[i - 1] * beta;
-    }
-    let t16 = QuadFelt::from(Felt::from(1u32 << 16));
+    beta.powers().fill(&mut bp);
+    let t16 = Felt::from(1u32 << 16);
     let x_minus_t = beta - t16;
     let offset = Felt::from(GAMMA_OFFSET);
-    let slot_weight = |s: usize| -> QuadFelt {
+    let slot_weights: [QuadFelt; 2 * NUM_GAMMA] = array::from_fn(|s| {
         let w = x_minus_t * bp[s / 2];
-        if s % 2 == 1 { w * t16 } else { w }
-    };
+        if s % 2 == 1 { w.mul_2exp_u64(16) } else { w }
+    });
     // Per row-role: the hosted γ slots (slot index, cell).
     let slots_by_row: [Vec<(usize, usize)>; PERIOD] = {
         let mut by_row: [Vec<(usize, usize)>; PERIOD] = array::from_fn(|_| Vec::new());
@@ -58,44 +55,51 @@ pub(crate) fn build_aux(
 
         let cell = |c: usize| -> Felt { main.values[r * NUM_MAIN_COLS + c] };
         let row_kind = r % PERIOD;
-        let kappa_a = QuadFelt::from(cell(COL_KAPPA_A));
+        let kappa_a = cell(COL_KAPPA_A);
         let act = cell(COL_ACT);
 
-        let full16_sum =
-            (0..16).fold(QuadFelt::ZERO, |acc, i| acc + bp[i] * QuadFelt::from(cell(i)));
-        let full_q_sum =
-            (0..NUM_Q_LIMBS).fold(QuadFelt::ZERO, |acc, i| acc + bp[i] * QuadFelt::from(cell(i)));
+        let full16_sum = <QuadFelt as Algebra<Felt>>::mixed_dot_product::<8>(
+            bp[..8].try_into().expect("low operand weights"),
+            &array::from_fn(&cell),
+        ) + <QuadFelt as Algebra<Felt>>::mixed_dot_product::<8>(
+            bp[8..16].try_into().expect("high operand weights"),
+            &array::from_fn(|i| cell(8 + i)),
+        );
+        let full_q_sum = full16_sum + bp[NUM_Q_LIMBS - 1] * cell(NUM_Q_LIMBS - 1);
+        let even_weights: [QuadFelt; 8] = array::from_fn(|m| bp[2 * m]);
         let val_sum =
-            (0..8).fold(QuadFelt::ZERO, |acc, m| acc + bp[2 * m] * QuadFelt::from(cell(m)));
+            <QuadFelt as Algebra<Felt>>::mixed_dot_product(&even_weights, &array::from_fn(&cell));
 
         let role_contrib: QuadFelt = match row_kind {
             _ if row_kind == ROW_B => s_reg * full16_sum,
             // +borrow·(bound(β)+1); the +1 of p = bound + 1 rides β⁰.
             _ if row_kind == ROW_P => {
                 let borrow = main.values[r * NUM_MAIN_COLS + COL_BORROW];
-                QuadFelt::from(borrow) * (full16_sum + QuadFelt::ONE)
+                (full16_sum + QuadFelt::ONE) * borrow
             },
             _ if row_kind == ROW_Q => -((s_reg + QuadFelt::ONE) * full_q_sum),
             _ if row_kind == ROW_R => -val_sum,
             _ if row_kind == ROW_C => {
                 let kappa_c_signed = main.values[r * NUM_MAIN_COLS + TERM_CELL_KAPPA_C_SIGNED];
-                QuadFelt::from(kappa_c_signed) * val_sum
+                val_sum * kappa_c_signed
             },
             _ => QuadFelt::ZERO,
         };
-        let gamma_contrib: QuadFelt =
-            slots_by_row[row_kind].iter().fold(QuadFelt::ZERO, |acc, &(s, c)| {
+        let gamma_contrib: QuadFelt = slots_by_row[row_kind]
+            .iter()
+            .map(|&(s, c)| {
                 let v = if s % 2 == 0 { cell(c) - act * offset } else { cell(c) };
-                acc + slot_weight(s) * QuadFelt::from(v)
-            });
+                slot_weights[s] * v
+            })
+            .sum();
         id += role_contrib + gamma_contrib;
 
         let build: QuadFelt = match row_kind {
-            _ if row_kind == ROW_A => kappa_a * full16_sum,
+            _ if row_kind == ROW_A => full16_sum * kappa_a,
             _ if row_kind == ROW_P => full16_sum,
             _ => QuadFelt::ZERO,
         };
-        let keep = QuadFelt::from(Felt::from(S_KEEP[row_kind] as u32));
+        let keep = Felt::from(S_KEEP[row_kind] as u32);
         s_reg = s_reg * keep + build;
     }
 

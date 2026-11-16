@@ -161,9 +161,9 @@ pub const PAD_CONST_BYTES: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0x80];
 /// For boolean bits and `product = b0 * b1`, returns one-hot offset selectors of degree two.
 fn offset_selectors<E: Algebra<Felt>>([b0, b1, b2]: [E; 3], product: E) -> [E; 8] {
     let low = [
-        E::ONE - b0.clone() - b1.clone() + product.clone(),
-        b0 - product.clone(),
-        b1 - product.clone(),
+        E::ONE - (b0.dup() + b1.dup()) + product.dup(),
+        b0 - product.dup(),
+        b1 - product.dup(),
         product,
     ];
     array::from_fn(|i| low[i % 4].clone() * if i < 4 { E::ONE - b2.clone() } else { b2.clone() })
@@ -288,39 +288,38 @@ fn eval_main_inner<AB: air::LiftedAirBuilder<F = Felt>>(
     let [state_new_lo, state_new_hi]: [AB::Expr; 2] = halves_le(state_new_bytes, 256);
 
     let bits: [AB::Expr; 3] = array::from_fn(|i| local[OFFSET_BITS_RANGE.start + i].dup());
-    let product: AB::Expr = local[COL_OFFSET_PRODUCT].dup();
-    builder.assert_eq(product.clone(), bits[0].clone() * bits[1].clone());
-    let selected = offset_selectors(bits.clone(), product.clone());
-    let byte_offset = bits[0].clone()
-        + AB::Expr::from(Felt::from(2u8)) * bits[1].clone()
-        + AB::Expr::from(Felt::from(4u8)) * bits[2].clone();
+    let product = local[COL_OFFSET_PRODUCT].dup();
+    builder.assert_eq(product.dup(), bits[0].dup() * bits[1].dup());
+    let selected = offset_selectors(bits.each_ref().map(Dup::dup), product.dup());
+    let byte_offset = bits[0].dup() + bits[1].double() + bits[2].mul_2exp_u64(2);
 
     // The padded bytes contain only the suffix at and after the selected offset. The two
     // suffix limbs are subtracted for the input read, leaving canonical zero input padding.
     let pad_row = p_rate_block.clone() * (is_zero_next.clone() - is_zero.clone());
     // Linear expansion of 256^(b0 + 2*b1) using the witnessed low-bit product.
-    let shift = AB::Expr::ONE
-        + AB::Expr::from(Felt::from(255u8)) * bits[0].clone()
-        + AB::Expr::from(Felt::from(65535u32)) * bits[1].clone()
-        + AB::Expr::from(Felt::from(16711425u32)) * product;
-    builder.assert_eq(
-        local[COL_PAD_LO].dup(),
-        pad_row.clone() * (AB::Expr::ONE - bits[2].clone()) * shift.clone(),
+    let shift = AB::Expr::mixed_dot_product(
+        &[AB::Expr::ONE, bits[0].dup(), bits[1].dup(), product],
+        &[1u32, 255, 65535, 16711425].map(Felt::from),
     );
-    builder.assert_eq(local[COL_PAD_HI].dup(), pad_row.clone() * bits[2].clone() * shift);
+    builder.assert_eq_arrays(
+        [local[COL_PAD_LO].dup(), local[COL_PAD_HI].dup()],
+        [
+            pad_row.dup() * (AB::Expr::ONE - bits[2].dup()) * shift.dup(),
+            pad_row.dup() * bits[2].dup() * shift,
+        ],
+    );
     let mut past_suffix = AB::Expr::ZERO;
     for (i, selector) in selected.iter().enumerate() {
-        let byte: AB::Expr = chunk_bytes[i].dup();
-        past_suffix += selector.clone();
-        builder.assert_zero(pad_row.clone() * (past_suffix.clone() * byte - selector.clone()));
+        let byte = chunk_bytes[i].dup();
+        past_suffix += selector.dup();
+        builder.when(pad_row.dup()).assert_eq(past_suffix.dup() * byte, selector.dup());
     }
     // On the active lane-16 padding row, BytePairLut checks chunk_bytes[7] + 128 as a byte
     // and the other seven bytes directly, so the top byte lies in [-128, 127]. Its lower
     // three bytes cannot cancel a nonzero top byte in a zero packed high half, and all
     // magnitudes are below the field modulus. Both zero halves therefore pin every chunk
     // byte to zero, leaving only the fixed 0x80 lookup operand.
-    builder.assert_zero(p_pad_0x80.clone() * chunk_lo.clone());
-    builder.assert_zero(p_pad_0x80 * chunk_hi.clone());
+    builder.when(p_pad_0x80).assert_zeros([chunk_lo.dup(), chunk_hi.dup()]);
 
     // Boundary (`when_first_row`) ---------------------------
     // `sponge_seq_id` starts at 0 (row counter convention). No
@@ -338,15 +337,17 @@ fn eval_main_inner<AB: air::LiftedAirBuilder<F = Felt>>(
     // suffix trace cycles back to `act_0 = 1` on the next loop.
     builder
         .when(frame.transition())
-        .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
+        .when(AB::Expr::ONE - act.dup())
+        .assert_zero(act_next.dup());
     // Drop placement: the unique 1 → 0 transition must land at
     // slot 31 (where `p_last = 1`) of a last-block period
     // (`pad_block = 1`). Equivalent to `act · (1 - act')` under the
     // sticky-down constraint above; the linear form costs one
     // fewer witness multiplication.
-    builder.when(frame.transition()).assert_zero(
-        (act.clone() - act_next) * (AB::Expr::ONE - p_last.clone() * pad_block.clone()),
-    );
+    builder
+        .when(frame.transition())
+        .when(act.dup() - act_next.dup())
+        .assert_eq(AB::Expr::ONE, p_last.dup() * pad_block.dup());
 
     // Row counter -------------------------------------------
     // sponge_seq_id' - sponge_seq_id - 1 = 0. Deg 1.
@@ -354,34 +355,33 @@ fn eval_main_inner<AB: air::LiftedAirBuilder<F = Felt>>(
     // sponge_seq_id_0 = N) unconstrained.
     builder
         .when(frame.transition())
-        .assert_zero(sponge_seq_id_next - sponge_seq_id - AB::Expr::ONE);
+        .assert_eq(sponge_seq_id_next.dup(), sponge_seq_id.dup() + AB::Expr::ONE);
 
     // `is_first_block_of_invocation` structure --------------
     builder.assert_bool(local[COL_IS_FIRST_BLOCK_OF_INVOCATION].dup());
     // Constant within period. `(1 - p_last)` makes the wrap
     // vacuous (p_last_{N-1} = 1) and lets `is_first_block` toggle
     // at period boundaries.
-    builder.assert_zero(
-        (AB::Expr::ONE - p_last.clone()) * (is_first_block_next.clone() - is_first_block.clone()),
-    );
+    builder
+        .when(AB::Expr::ONE - p_last.dup())
+        .assert_eq(is_first_block_next.dup(), is_first_block.dup());
 
     // `bytes_left` decrement chain --------------------------
     // Activity gating admits the zero-invocation trace. Counter transitions out of inactive
     // rows are unconstrained; active rows can reset the counter only at invocation seams.
     // Absorb row (`p_rate_block = 1`): decrements by 8.
-    builder.assert_zero(
-        act.clone()
-            * p_rate_block.clone()
-            * (bytes_left_next.clone() - bytes_left.clone() + AB::Expr::from(Felt::from(8u8))),
-    );
+    builder
+        .when(act.dup() * p_rate_block.dup())
+        .assert_eq(bytes_left_next.dup(), bytes_left.dup() - AB::Expr::from_u8(8));
     // Non-absorb row + no invocation boundary at next row: holds steady.
-    let enters_new_invocation = p_last.clone() * is_first_block_next.clone();
-    builder.assert_zero(
-        act.clone()
-            * (AB::Expr::ONE - enters_new_invocation.clone())
-            * (AB::Expr::ONE - p_rate_block.clone())
-            * (bytes_left_next - bytes_left.clone()),
-    );
+    let enters_new_invocation = p_last.dup() * is_first_block_next.dup();
+    builder
+        .when(
+            act.dup()
+                * (AB::Expr::ONE - enters_new_invocation.dup())
+                * (AB::Expr::ONE - p_rate_block.dup()),
+        )
+        .assert_eq(bytes_left_next.dup(), bytes_left.dup());
 
     // `chunk_ptr` increment chain ---------------------------
     // Within an invocation: chunk_ptr' - chunk_ptr -
@@ -397,13 +397,14 @@ fn eval_main_inner<AB: air::LiftedAirBuilder<F = Felt>>(
     // bus balance against the chunk chiplet's contiguous emissions,
     // not by the chain. `when_transition` also keeps the cyclic
     // wrap unconstrained.
-    builder.when(frame.transition()).assert_zero(
-        (AB::Expr::ONE - enters_new_invocation)
-            * (chunk_ptr_next
-                - chunk_ptr
-                - (p_rate_block.clone() + p_extra.clone() * pad_block.clone())
-                    * is_chunk_avail.clone()),
-    );
+    builder
+        .when(frame.transition())
+        .when(AB::Expr::ONE - enters_new_invocation)
+        .assert_eq(
+            chunk_ptr_next.dup(),
+            chunk_ptr.dup()
+                + (p_rate_block.dup() + p_extra.dup() * pad_block.dup()) * is_chunk_avail.dup(),
+        );
 
     // Chunk zero-fill on `is_chunk_avail = 0` --------------
     // An unavailable input lane reconstructs as zero. Its padded bytes can still contain
@@ -413,74 +414,71 @@ fn eval_main_inner<AB: air::LiftedAirBuilder<F = Felt>>(
     } else {
         AB::Expr::ONE
     };
-    builder.assert_zero(
-        zero_fill.clone() * (AB::Expr::ONE - is_chunk_avail.clone()) * chunk_lo.clone(),
-    );
-    builder.assert_zero(zero_fill * (AB::Expr::ONE - is_chunk_avail.clone()) * chunk_hi.clone());
+    builder
+        .when(zero_fill * (AB::Expr::ONE - is_chunk_avail.dup()))
+        .assert_zeros([chunk_lo.dup(), chunk_hi.dup()]);
 
     // Message lanes come from the tape ----------------------
     // A rate row whose lane carries message bytes must consume a tape
     // lane: every verbatim row, and the pad row unless the pad sits at
     // byte 0. Otherwise such a row would absorb a zero lane while the
     // skipped tape lanes are consumed later, on rows that ignore them.
-    builder.assert_zero(
-        act.clone()
-            * p_rate_block.clone()
-            * (AB::Expr::ONE - is_zero.clone())
-            * bytes_left.clone()
-            * (AB::Expr::ONE - is_chunk_avail.clone()),
-    );
+    let needs_chunk =
+        act.dup() * p_rate_block.dup() * (AB::Expr::ONE - is_zero.dup()) * bytes_left.dup();
+    builder.when(needs_chunk).assert_eq(AB::Expr::ONE, is_chunk_avail.dup());
 
     // Tape bytes after the message are zero -----------------
     // The chunk encoding zero-pads the last chunk: a lane consumed past
     // the pad is zero. The pad lane's suffix and higher bytes are constrained above.
-    let past_pad = (p_rate_block.clone() + p_extra) * is_zero.clone();
-    builder.assert_zero(act.clone() * past_pad.clone() * chunk_lo);
-    builder.assert_zero(act.clone() * past_pad * chunk_hi);
+    let past_pad = (p_rate_block.dup() + p_extra.dup()) * is_zero.dup();
+    builder.when(act.dup() * past_pad).assert_zeros([chunk_lo, chunk_hi]);
 
     // Padding state machine ---------------------------------
     // Binarity.
-    builder.assert_bool(local[COL_IS_ZERO].dup());
-    builder.assert_bool(local[COL_IS_CHUNK_AVAIL].dup());
-    builder.assert_bool(local[COL_IS_PAD_BLOCK].dup());
+    builder.assert_bools(
+        [COL_IS_ZERO, COL_IS_CHUNK_AVAIL, COL_IS_PAD_BLOCK].map(|col| local[col].dup()),
+    );
     for col in OFFSET_BITS_RANGE {
         builder.assert_bool(local[col].dup());
-        builder.assert_zero((AB::Expr::ONE - pad_block.clone()) * local[col].dup());
+        builder.when(AB::Expr::ONE - pad_block.dup()).assert_zero(local[col].dup());
     }
 
     // `is_zero` non-decreasing within period.
-    builder.assert_zero(
-        (AB::Expr::ONE - p_last.clone()) * is_zero.clone() * (AB::Expr::ONE - is_zero_next.clone()),
-    );
+    builder
+        .when((AB::Expr::ONE - p_last.dup()) * is_zero.dup())
+        .assert_eq(AB::Expr::ONE, is_zero_next.dup());
     // `is_chunk_avail` non-increasing within period.
-    builder.assert_zero(
-        (AB::Expr::ONE - p_last.clone()) * (AB::Expr::ONE - is_chunk_avail) * is_chunk_avail_next,
-    );
+    builder
+        .when((AB::Expr::ONE - p_last.dup()) * (AB::Expr::ONE - is_chunk_avail.dup()))
+        .assert_zero(is_chunk_avail_next.dup());
     // Active blocks start before padding; inactive blocks start past it.
-    builder.assert_zero(p_first * (is_zero.clone() + act.clone() - AB::Expr::ONE));
+    builder.when(p_first.dup()).assert_one(is_zero.dup() + act.dup());
     // Pad-block and offset bits are constant within a period.
     for col in COL_IS_PAD_BLOCK..OFFSET_BITS_RANGE.end {
         builder
-            .assert_zero((AB::Expr::ONE - p_last.clone()) * (next[col].dup() - local[col].dup()));
+            .when(AB::Expr::ONE - p_last.dup())
+            .assert_eq(next[col].dup(), local[col].dup());
     }
     // At active capacity/slack rows, is_zero identifies the padded block; inactive rows use 1.
-    builder.assert_zero(
-        (AB::Expr::ONE - p_rate_block.clone())
-            * (pad_block.clone() + AB::Expr::ONE - act.clone() - is_zero.clone()),
-    );
+    builder
+        .when(AB::Expr::ONE - p_rate_block.dup())
+        .assert_eq(pad_block.dup() + AB::Expr::ONE, act.dup() + is_zero.dup());
 
     // An active first row starts an invocation; an active last row belongs to a padded block.
     builder
         .when(frame.first_row())
-        .assert_zero(act.clone() * (AB::Expr::ONE - is_first_block.clone()));
+        .when(act.dup())
+        .assert_eq(AB::Expr::ONE, is_first_block.dup());
     builder
         .when(frame.last_row())
-        .assert_zero(act * (AB::Expr::ONE - pad_block.clone()));
+        .when(act.dup())
+        .assert_eq(AB::Expr::ONE, pad_block.dup());
     // A new invocation follows exactly a padded block, preventing truncation. Check only active
     // successors and non-wrapping transitions so inactive tails remain admissible.
     builder
         .when(frame.transition())
-        .assert_zero(p_last * next[COL_ACT].dup() * (is_first_block_next - pad_block));
+        .when(p_last.dup() * next[COL_ACT].dup())
+        .assert_eq(is_first_block_next.dup(), pad_block.dup());
 
     // Pad-lane tie-down -------------------------------------
     // On the unique pad transition row (`p_rate_block = 1`,
@@ -488,22 +486,26 @@ fn eval_main_inner<AB: air::LiftedAirBuilder<F = Felt>>(
     // everywhere else. The `p_rate_block` gate also absorbs
     // the period-wrap `is_pad = −1` case, which always lands
     // on `p_idx = 31` where `p_rate_block = 0`.
-    let is_pad: AB::Expr = is_zero_next - is_zero.clone();
-    builder.assert_zero(p_rate_block.clone() * is_pad * (byte_offset - bytes_left));
+    let is_pad = is_zero_next.dup() - is_zero.dup();
+    builder
+        .when(p_rate_block.dup() * is_pad)
+        .assert_eq(byte_offset, bytes_left.dup());
 
     // state_prev = 0 on first-block state-lane rows ---------
-    builder.assert_zero(p_state_lane.clone() * is_first_block.clone() * state_prev_lo.clone());
-    builder.assert_zero(p_state_lane * is_first_block * state_prev_hi.clone());
+    builder
+        .when(p_state_lane * is_first_block.dup())
+        .assert_zeros([state_prev_lo.dup(), state_prev_hi.dup()]);
 
     // State propagation (no BytePairLut request fires) --------
     // Past-pad rate XORin rows: `state_new = state_prev`.
-    builder.assert_zero(
-        p_rate_block.clone() * is_zero.clone() * (state_new_lo.clone() - state_prev_lo.clone()),
+    builder.when(p_rate_block.dup() * is_zero.dup()).assert_eq_arrays(
+        [state_new_lo.dup(), state_new_hi.dup()],
+        [state_prev_lo.dup(), state_prev_hi.dup()],
     );
-    builder.assert_zero(p_rate_block * is_zero * (state_new_hi.clone() - state_prev_hi.clone()));
     // Capacity rows: identity passthrough.
-    builder.assert_zero(p_capacity.clone() * (state_new_lo - state_prev_lo));
-    builder.assert_zero(p_capacity * (state_new_hi - state_prev_hi));
+    builder
+        .when(p_capacity)
+        .assert_eq_arrays([state_new_lo, state_new_hi], [state_prev_lo, state_prev_hi]);
 }
 
 // LOOKUP AIR
@@ -592,13 +594,12 @@ pub(crate) fn eval_lookups<LB>(
     let is_absorb: LB::Expr = LB::Expr::ONE - is_zero;
 
     // Per-row address expressions.
-    let hundred_seq = LB::Expr::from(Felt::from(100u8)) * sponge_seq_id.clone();
-    let ninety_nine_idx = LB::Expr::from(Felt::from(99u8)) * p_idx.clone();
-    let addr_state_lane_prev =
-        hundred_seq.clone() - ninety_nine_idx.clone() - LB::Expr::from(Felt::from(128u8));
-    let addr_state_lane_new = hundred_seq.clone() - ninety_nine_idx.clone();
-    let addr_rc = hundred_seq.clone()
-        + LB::Expr::from(Felt::from(28u8)) * p_idx
+    let hundred_seq = LB::Expr::from(Felt::from(100u8)) * sponge_seq_id.dup();
+    let ninety_nine_idx = LB::Expr::from(Felt::from(99u8)) * p_idx.dup();
+    let addr_state_lane_prev = hundred_seq.dup() - (ninety_nine_idx.dup() + LB::Expr::from_u8(128));
+    let addr_state_lane_new = hundred_seq.dup() - ninety_nine_idx.dup();
+    let addr_rc = hundred_seq.dup()
+        + LB::Expr::from(Felt::from(28u8)) * p_idx.dup()
         + LB::Expr::from(Felt::from(25u8));
     let addr_squeeze = hundred_seq.clone() - ninety_nine_idx + LB::Expr::from(Felt::from(3072u32));
     let addr_lane16 = hundred_seq - LB::Expr::from(Felt::from(2484u32));
@@ -607,17 +608,14 @@ pub(crate) fn eval_lookups<LB>(
     let addr_chunk = LB::Expr::from(chunk_addr_base) + chunk_ptr.clone();
 
     // Memory multiplicities vanish on inactive rows, where act and pad_block are zero.
-    let mult_prev_perm: LB::Expr = act.clone() * is_intra;
-    let mult_new_state: LB::Expr = LB::Expr::ZERO - LB::Expr::from(Felt::from(2u8)) * act.clone();
-    let mult_rc: LB::Expr =
-        LB::Expr::ZERO - LB::Expr::from(Felt::from(1u8)) * act.clone() * p_rc_active;
+    let mult_prev_perm = act.dup() * is_intra;
+    let mult_new_state = -act.double();
+    let mult_rc = -act.dup() * p_rc_active.dup();
     // Each round output has two copies. A continuation reads one; the final digest reader
     // reads one of lanes 0..4. This band consumes the remaining copies.
-    let mult_squeeze = act.clone() * p_state_lane.clone() + pad_block.clone() * p_squeeze_active;
-    let mult_lane16_consume: LB::Expr =
-        LB::Expr::from(Felt::from(2u8)) * act.clone() * pad_block.clone();
-    let mult_lane16_provide: LB::Expr =
-        LB::Expr::ZERO - LB::Expr::from(Felt::from(2u8)) * act.clone() * pad_block.clone();
+    let mult_squeeze = act.dup() * p_state_lane.dup() + pad_block.dup() * p_squeeze_active.dup();
+    let mult_lane16_consume = act.double() * pad_block.dup();
+    let mult_lane16_provide = -mult_lane16_consume.dup();
 
     let new_state_deg = Deg { v: 2, u: 1 };
     let selected_interaction_deg = Deg { v: 3, u: 1 };

@@ -105,21 +105,22 @@ pub(crate) fn eval_main<AB: air::LiftedAirBuilder<F = Felt>>(
     builder.assert_bool(local[COL_NODE_ACT].dup());
     builder
         .when(frame.transition())
-        .assert_zero((one.clone() - node_act.clone()) * nv(COL_NODE_ACT));
+        .when(one.dup() - node_act.dup())
+        .assert_zero(nv(COL_NODE_ACT));
     builder
         .when(frame.transition())
-        .assert_zero((one.clone() - last) * (nv(COL_NODE_ACT) - node_act.clone()));
-    for column in [COL_SPONGE_HEAD, COL_CHUNK_HEAD, COL_CHUNK_SEQ] {
-        builder.when(frame.first_row()).assert_zero(local[column].dup());
-    }
-    builder.when(frame.transition()).assert_zero(
-        nv(COL_SPONGE_HEAD)
-            - v(COL_SPONGE_HEAD)
-            - p[3].clone() * v(COL_NODE_PERMS) * Felt::from_u8(32),
+        .when(one.dup() - last)
+        .assert_eq(nv(COL_NODE_ACT), node_act.dup());
+    builder.when(frame.first_row()).assert_zeros(
+        [COL_SPONGE_HEAD, COL_CHUNK_HEAD, COL_CHUNK_SEQ].map(|column| local[column].dup()),
+    );
+    builder.when(frame.transition()).assert_eq(
+        nv(COL_SPONGE_HEAD),
+        v(COL_SPONGE_HEAD) + p[3].dup() * v(COL_NODE_PERMS).mul_2exp_u64(5),
     );
     builder
         .when(frame.transition())
-        .assert_zero(nv(COL_CHUNK_HEAD) - v(COL_CHUNK_HEAD) - p[6].clone() * v(COL_NODE_CHUNKS));
+        .assert_eq(nv(COL_CHUNK_HEAD), v(COL_CHUNK_HEAD) + p[6].dup() * v(COL_NODE_CHUNKS));
 
     // Each value is held from its first authenticated use through its last consumer. These
     // intervals stop before the same cells take a new role or become chunk payload.
@@ -130,8 +131,8 @@ pub(crate) fn eval_main<AB: air::LiftedAirBuilder<F = Felt>>(
         (COL_LEN, &[0, 1, 2, 3, 4][..]),
         (COL_DIGEST_ID, &[2, 3, 4][..]),
     ] {
-        let hold = phases.iter().map(|&i| p[i].clone()).sum::<AB::Expr>();
-        builder.when(frame.transition()).assert_zero(hold * (nv(column) - v(column)));
+        let hold = phases.iter().map(|&i| p[i].dup()).sum::<AB::Expr>();
+        builder.when(frame.transition()).when(hold).assert_eq(nv(column), v(column));
     }
     node::eval_chunk_count(
         builder,
@@ -141,7 +142,7 @@ pub(crate) fn eval_main<AB: air::LiftedAirBuilder<F = Felt>>(
         v(COL_CHUNKS_INV),
         v(COL_REMAINDER),
     );
-    builder.assert_zero(p[6].clone() * (one.clone() - node_act) * v(COL_OUT_MULT));
+    builder.when(p[6].dup() * (one.dup() - node_act)).assert_zero(v(COL_OUT_MULT));
 
     let chunk = p[P_CHUNK_CAPACITY].clone() + p[P_CHUNK_LATE].clone();
     let entering = p[P_NEXT_CHUNK].clone();
@@ -149,28 +150,30 @@ pub(crate) fn eval_main<AB: air::LiftedAirBuilder<F = Felt>>(
     builder.assert_bool(local[COL_CHUNK_ACT].dup());
     builder
         .when(frame.transition())
-        .assert_zero((one.clone() - chunk_act.clone()) * nv(COL_CHUNK_ACT));
+        .when(one.dup() - chunk_act.dup())
+        .assert_zero(nv(COL_CHUNK_ACT));
     builder
         .when(frame.transition())
-        .assert_zero((one.clone() - entering.clone()) * (nv(COL_CHUNK_ACT) - chunk_act.clone()));
+        .when(one.dup() - entering.dup())
+        .assert_eq(nv(COL_CHUNK_ACT), chunk_act.dup());
     builder
         .when(frame.transition())
-        .assert_zero(nv(COL_CHUNK_SEQ) - v(COL_CHUNK_SEQ) - chunk);
+        .assert_eq(nv(COL_CHUNK_SEQ), v(COL_CHUNK_SEQ) + chunk);
     builder
         .when(frame.transition())
-        .assert_zero((one.clone() - entering.clone()) * (nv(COL_CHUNK_ID) - v(COL_CHUNK_ID)));
+        .when(one.dup() - entering.dup())
+        .assert_eq(nv(COL_CHUNK_ID), v(COL_CHUNK_ID));
     for (mask, columns, entry_mask) in [
         (p[P_CHUNK_CAPACITY].clone(), CHUNK_CAPACITY_COLUMNS, p[6].clone()),
         (p[P_CHUNK_LATE].clone(), CHUNK_LATE_COLUMNS, entering - p[6].clone()),
     ] {
         let head = v(columns[3]);
-        builder.assert_zero(mask.clone() * head.clone() * (head.clone() - one.clone()));
-        builder.assert_zero(mask * head * (one.clone() - chunk_act.clone()));
-        builder.when(frame.transition()).assert_zero(
-            entry_mask
-                * (one.clone() - nv(columns[3]))
-                * (nv(COL_CHUNK_ID) - v(COL_CHUNK_ID) - one.clone()),
-        );
+        builder.when(mask.dup()).assert_bool(head.dup());
+        builder.when(mask * head).assert_eq(one.dup(), chunk_act.dup());
+        builder
+            .when(frame.transition())
+            .when(entry_mask * (one.dup() - nv(columns[3])))
+            .assert_eq(nv(COL_CHUNK_ID), v(COL_CHUNK_ID) + one.dup());
     }
 }
 
@@ -232,7 +235,7 @@ where
 {
     let v = |i: usize| -> B::Expr { local[i].dup() };
     let act = v(2);
-    let base = B::Expr::from_u64(CHUNK_ADDR_BASE) + v(0) * B::Expr::from_u8(4);
+    let base = B::Expr::from_u64(CHUNK_ADDR_BASE) + v(0).mul_2exp_u64(2);
     let linear = Deg { v: 1, u: 1 };
     let lanes = if index == 0 { 0..3 } else { 3..4 };
     for lane in lanes {
@@ -297,7 +300,7 @@ fn emit_node<B: LookupBatch>(
                 -act.clone(),
                 KeccakSpongeMsg {
                     sponge_seq_id: v(COL_SPONGE_HEAD),
-                    chunk_ptr: v(COL_CHUNK_HEAD) * B::Expr::from_u8(4),
+                    chunk_ptr: v(COL_CHUNK_HEAD).mul_2exp_u64(2),
                     len_bytes: v(COL_LEN),
                 },
                 degree,
@@ -396,7 +399,7 @@ fn emit_node<B: LookupBatch>(
                 act,
                 EidosInitMsg {
                     compression_id: v(COL_INPUT_ID),
-                    initial_cv: chunks_cv(v(COL_NODE_CHUNKS) * B::Expr::from_u8(8)),
+                    initial_cv: chunks_cv(v(COL_NODE_CHUNKS).mul_2exp_u64(3)),
                 },
                 degree,
             );
