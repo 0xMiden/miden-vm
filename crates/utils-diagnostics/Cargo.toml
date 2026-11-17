@@ -25,3 +25,6 @@ miette = { workspace = true, features = [
     "derive",
 ] }
 tracing.workspace = true
+
+[lints]
+workspace = true

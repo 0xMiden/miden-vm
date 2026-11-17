@@ -25,3 +25,6 @@ serde_json = { workspace = true, features = ["std"] }
 thiserror.workspace = true
 fake = { version = "5.*", features = ["derive"], optional = true }
 rand = { workspace = true, optional = true, features = ["std", "thread_rng"] }
+
+[lints]
+workspace = true

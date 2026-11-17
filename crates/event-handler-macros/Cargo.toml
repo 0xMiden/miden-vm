@@ -26,3 +26,6 @@ syn2.workspace = true
 miden-core.workspace = true
 miden-event-handler-abi.workspace = true
 miden-mast-package.workspace = true
+
+[lints]
+workspace = true

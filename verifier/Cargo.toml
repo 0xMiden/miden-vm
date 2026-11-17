@@ -40,3 +40,6 @@ thiserror.workspace = true
 
 [dev-dependencies]
 miden-air.workspace = true
+
+[lints]
+workspace = true

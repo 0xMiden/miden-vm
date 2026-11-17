@@ -49,3 +49,6 @@ insta.workspace = true
 miden-ace = { workspace = true, features = ["testing"] }
 miden-test-serialization-macros.workspace = true
 proptest.workspace = true
+
+[lints]
+workspace = true

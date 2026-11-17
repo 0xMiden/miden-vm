@@ -6,6 +6,7 @@
 
 #### Changes
 
+- Updated development and coverage to Rust 1.100 with Cargo dependency checks enforced in CI. Reduced dependencies in builds with fewer features while keeping MSRV at 1.96.1 ([#4234](https://github.com/0xMiden/miden-vm/pull/4234)).
 - Increased in-memory SMT insert benchmark batches to 4,096 and 16,384 entries and fixed the SMT CodSpeed job at eight Rayon threads ([#4220](https://github.com/0xMiden/miden-vm/pull/4220)).
 - Added workspace test coverage collection with `make coverage` and CI reports on `next`/`main` pushes and manual runs ([#4218](https://github.com/0xMiden/miden-vm/pull/4218)).
 

@@ -85,3 +85,6 @@ trybuild.workspace = true
 # `tests/ui/` holds trybuild `compile_fail` fixtures loaded by path at runtime
 # (see core/tests/public_api.rs), so static analysis cannot link them.
 ignored-paths = ["tests/ui/**"]
+
+[lints]
+workspace = true

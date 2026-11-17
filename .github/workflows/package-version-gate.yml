@@ -75,7 +75,7 @@ jobs:
 
       - name: Install cargo-semver-checks
         if: ${{ !inputs.skip_checks }}
-        # Rust 1.99 emits rustdoc JSON v61, supported by cargo-semver-checks 0.51.
+        # Rust 1.100 emits rustdoc JSON v61, supported by cargo-semver-checks 0.51.
         run: cargo install cargo-semver-checks --version 0.51.0 --locked
 
       - name: Check package versions

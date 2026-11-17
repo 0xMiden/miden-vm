@@ -49,7 +49,7 @@ jobs:
           persist-credentials: false
       - uses: 0xMiden/miden-vm/.github/actions/cleanup-runner@43945d94ed02fecac85e4d2a5c318952e60bc2ce
       - name: Install Rust and LLVM tools
-        run: rustup toolchain install 1.99.0 --profile minimal --component llvm-tools-preview --no-self-update
+        run: rustup toolchain install 1.100.0 --profile minimal --component llvm-tools-preview --no-self-update
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.14'
@@ -61,7 +61,7 @@ jobs:
         with:
           tool: cargo-llvm-cov@0.8.7,cargo-nextest@0.9.135
       - name: Install debugger fixture runner
-        run: cargo +1.99.0 install litcheck --version 0.4.6 --locked
+        run: cargo +1.100.0 install litcheck --version 0.4.6 --locked
       - name: Inspect coverage runner
         run: |
           lscpu

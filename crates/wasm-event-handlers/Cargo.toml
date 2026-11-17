@@ -61,3 +61,6 @@ criterion.workspace = true
 [[bench]]
 name = "handler_call"
 harness = false
+
+[lints]
+workspace = true

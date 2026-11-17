@@ -102,3 +102,6 @@ miden-core-lib-codegen = { workspace = true, features = ["std"] }
 name = "regenerate-constraints"
 path = "src/bin/regenerate-constraints.rs"
 required-features = ["constraints-tools"]
+
+[lints]
+workspace = true

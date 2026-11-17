@@ -19,3 +19,6 @@ miden-assembly = { workspace = true, features = ["std"] }
 miden-assembly-syntax.workspace = true
 miden-debug-types = { workspace = true, features = ["std"] }
 miden-mast-package.workspace = true
+
+[lints]
+workspace = true

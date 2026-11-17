@@ -124,3 +124,6 @@ tempfile.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 walkdir.workspace = true
 wat.workspace = true
+
+[lints]
+workspace = true

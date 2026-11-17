@@ -98,3 +98,6 @@ required-features = ["server"]
 [package.metadata.cargo-shear]
 # The generated gRPC codec refers to this crate.
 ignored = ["tonic-prost"]
+
+[lints]
+workspace = true

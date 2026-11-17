@@ -7,7 +7,8 @@ set -euo pipefail
 
 echo "Checking all feature combinations with cargo-hack..."
 
-# Set environment variables to treat warnings as errors
+# Treat Cargo and rustc lint warnings as errors.
+export CARGO_BUILD_WARNINGS=deny
 export RUSTFLAGS="-D warnings"
 export MIDEN_BUILD_LIB_DOCS=1
 
