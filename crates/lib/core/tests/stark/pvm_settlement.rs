@@ -19,7 +19,7 @@ use miden_precompiles_stark::recursive::{
 };
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionOptions, ExecutionOutput, FastProcessor, FutureMaybeSend, Host,
-    LoadedMastForest, ProcessorState, StackInputs, SyncHost,
+    LoadedMastForest, MastForestLoadError, ProcessorState, StackInputs, SyncHost,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
     event::EventError,
 };
@@ -267,7 +267,7 @@ impl Host for PvmSettlementHost {
     fn get_mast_forest(
         &self,
         node_digest: &Word,
-    ) -> impl FutureMaybeSend<Option<LoadedMastForest>> {
+    ) -> impl FutureMaybeSend<Result<Option<LoadedMastForest>, MastForestLoadError>> {
         let forest = SyncHost::get_mast_forest(&self.inner, node_digest);
         async move { forest }
     }

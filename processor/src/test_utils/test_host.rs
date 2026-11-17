@@ -6,8 +6,8 @@ use miden_debug_types::{
 };
 
 use crate::{
-    BaseHost, LoadedMastForest, MastForestStore, MemMastForestStore, ProcessorState, SyncHost,
-    Word,
+    BaseHost, LoadedMastForest, MastForestLoadError, MastForestStore, MemMastForestStore,
+    ProcessorState, SyncHost, Word,
     advice::AdviceMutation,
     event::{EventError, TraceError},
     mast::MastForest,
@@ -179,8 +179,11 @@ impl<S> SyncHost for TestHost<S>
 where
     S: SourceManagerSync,
 {
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<LoadedMastForest> {
-        self.store.get(node_digest)
+    fn get_mast_forest(
+        &self,
+        node_digest: &Word,
+    ) -> Result<Option<LoadedMastForest>, MastForestLoadError> {
+        Ok(self.store.get(node_digest))
     }
 
     fn on_event(&mut self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
