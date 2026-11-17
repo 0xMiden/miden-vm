@@ -11,6 +11,12 @@
 
 #### Fixes
 
+- [BREAKING] Fixed the VM package registry's version equality, ordering, keys and lookups to
+  consistently ignore SemVer build metadata. Imported registries now validate and canonicalize
+  their version maps, registry implementations share canonical record insertion, and the
+  inconsistent `Borrow<SemVer>` implementation was removed
+  ([#4061](https://github.com/0xMiden/miden-vm/pull/4061)).
+
 ## v1.0.0-rc.1 (2026-11-14)
 
 #### Features

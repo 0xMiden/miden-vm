@@ -1107,7 +1107,9 @@ mod tests {
     };
     use miden_core::{serde::Serializable, utils::hash_string_to_word};
     use miden_mast_package::{Package as MastPackage, TargetType};
-    use miden_package_registry::{PackageIndex, PackageRecord, PackageRegistry, PackageVersions};
+    use miden_package_registry::{
+        PackageIndex, PackageRecord, PackageRegistry, PackageVersions, insert_package_record,
+    };
     use tempfile::TempDir;
 
     use super::*;
@@ -1130,18 +1132,12 @@ mod tests {
         }
 
         fn insert_record(&mut self, id: PackageId, record: PackageRecord) -> Result<(), Report> {
-            use std::collections::btree_map::Entry;
-
             let semver = record.semantic_version().clone();
-            match self.packages.entry(id.clone()).or_default().entry(semver.clone()) {
-                Entry::Vacant(entry) => {
-                    entry.insert(record);
-                    Ok(())
+            insert_package_record(self.packages.entry(id.clone()).or_default(), record).map_err(
+                |_error| {
+                    Report::msg(format!("package '{id}' version '{semver}' is already registered"))
                 },
-                Entry::Occupied(_) => Err(Report::msg(format!(
-                    "package '{id}' version '{semver}' is already registered"
-                ))),
-            }
+            )
         }
     }
 
@@ -1157,6 +1153,21 @@ mod tests {
         fn register(&mut self, name: PackageId, record: PackageRecord) -> Result<(), Self::Error> {
             self.insert_record(name, record)
         }
+    }
+
+    #[test]
+    fn test_registry_uses_canonical_semver_keys() {
+        let mut registry = TestRegistry::default();
+        let package = PackageId::from("dep");
+        registry.insert("dep", "1.0.0+first".parse().unwrap());
+
+        assert!(registry.get_by_semver(&package, &"1.0.0+second".parse().unwrap()).is_some());
+        assert!(
+            registry
+                .available_versions(&package)
+                .expect("package should be indexed")
+                .contains_key(&"1.0.0".parse().unwrap())
+        );
     }
 
     #[test]
