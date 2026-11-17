@@ -2185,15 +2185,19 @@ impl SyncForestLoader for FailingMastForestHost {
     }
 }
 
-#[test]
-fn external_mast_forest_load_error_is_propagated_sync() {
+#[rstest]
+#[tokio::test(flavor = "current_thread")]
+async fn external_mast_forest_load_error_is_propagated(#[values(false, true)] run_async: bool) {
     let missing_digest = Word::from([ONE, ONE, ONE, ONE]);
     let program = program_calling_external_procedures([missing_digest, Word::default()]);
     let mut host = FailingMastForestHost::new();
 
-    let err = FastProcessor::new(StackInputs::default())
-        .execute_sync(&program, &mut host)
-        .unwrap_err();
+    let processor = FastProcessor::new(StackInputs::default());
+    let err = if run_async {
+        processor.execute(&program, &mut host).await.unwrap_err()
+    } else {
+        processor.execute_sync(&program, &mut host).unwrap_err()
+    };
 
     let ExecutionError::MastForestError { root_digest, error, .. } = &err else {
         panic!("expected a MAST forest load error, got {err:?}");
@@ -2341,23 +2345,6 @@ async fn package_source_debug_load_error_preserves_source_span(
             && actual_source_file.id() == source_file.id()
             && root_digest == missing_digest
     );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn ordinary_execution_queries_opted_in_loaders() {
-    let root = Word::from([ONE, ONE, ONE, ONE]);
-    let program = program_calling_external_procedures([root, Word::default()]);
-    let mut host = FailingMastForestHost::new();
-    let sync_error = FastProcessor::new(StackInputs::default())
-        .execute_sync(&program, &mut host)
-        .unwrap_err();
-    let async_error = FastProcessor::new(StackInputs::default())
-        .execute(&program, &mut host)
-        .await
-        .unwrap_err();
-    for error in [sync_error, async_error] {
-        assert_matches!(error, ExecutionError::MastForestError { root_digest, .. } if root_digest == root);
-    }
 }
 
 #[test]
