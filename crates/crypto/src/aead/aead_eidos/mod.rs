@@ -53,7 +53,7 @@ pub(crate) const AUTH_TAG_SIZE: usize = 2;
 /// This count includes the nonce, associated data, expanded ciphertext, encoded lengths, and
 /// padding. It limits each authentication polynomial to at most `2^27` quadratic-extension
 /// coefficients.
-pub(crate) const MAX_AUTHENTICATED_INPUT_FELTS: usize = 1 << 28;
+pub const MAX_AUTHENTICATED_INPUT_FELTS: usize = 1 << 28;
 
 /// Degree budget for failed and pending MAC verification attempts under one key.
 ///

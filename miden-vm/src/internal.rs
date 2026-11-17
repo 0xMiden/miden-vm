@@ -93,7 +93,7 @@ impl Default for InputFile {
 /// Helper methods to interact with the input file
 impl InputFile {
     /// Maximum input JSON file size in bytes (64 MiB).
-    pub(crate) const MAX_FILE_SIZE: usize = 64 * 1024 * 1024;
+    pub const MAX_FILE_SIZE: usize = 64 * 1024 * 1024;
 
     /// Reads input JSON from a regular file of at most [`Self::MAX_FILE_SIZE`] bytes.
     /// Symlinks to regular files are accepted.

@@ -328,8 +328,8 @@ impl<F: TwoAdicField> Coset<F> for TwoAdicCoset<F> {
 /// `g·K_max`.
 ///
 /// **Single home of `F::GENERATOR` in this crate** — exposed via
-/// [`LiftedDomain::canonical_lde_shift`] and used internally by
-/// [`LiftedDomain::try_canonical`] and [`LiftedDomain::try_sub_domain`].
+/// `canonical_lde_shift` and used internally by `try_canonical` and
+/// [`LiftedDomain::try_sub_domain`].
 ///
 /// # Invariants
 ///

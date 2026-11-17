@@ -128,7 +128,7 @@ impl Stepper {
     /// context, such as one of a library without debug info. Source attribution then starts
     /// from the unique source root of the entry point, and the first step fails when that
     /// root is ambiguous: the step API has no way to start from a given entry-point source
-    /// node, only [`Self::for_package`] honors the one a package names.
+    /// node, only `for_package` honors the one a package names.
     ///
     /// Panics unless the stepper is ready to run its first step.
     pub fn with_debug_info(mut self, debug_info: Arc<PackageDebugInfo>) -> Self {
@@ -230,7 +230,7 @@ impl Stepper {
 
     /// Executes one step with an asynchronous host, describing its cycle to `on_cycle` first.
     ///
-    /// Returns whether the program is still running, like [`Self::step_sync`].
+    /// Returns whether the program is still running, like `step_sync`.
     pub async fn step(
         &mut self,
         host: &mut impl Host,

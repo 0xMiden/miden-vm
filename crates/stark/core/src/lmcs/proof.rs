@@ -118,7 +118,7 @@ impl<F, const SALT_ELEMS: usize> LeafOpening<F, SALT_ELEMS> {
     /// Write this leaf opening (rows + salt) to a prover channel.
     ///
     /// Writes each row slice, then salt elements (when `SALT_ELEMS > 0`).
-    /// Symmetric with [`read_from_channel`](Self::read_from_channel).
+    /// Symmetric with `read_from_channel`.
     pub fn write_to_channel<Ch>(&self, channel: &mut Ch)
     where
         F: Copy,

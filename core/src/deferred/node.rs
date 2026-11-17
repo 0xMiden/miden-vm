@@ -323,8 +323,7 @@ impl Node {
     ///
     /// # Panics
     ///
-    /// Panics if `bytes` is longer than `32 * (u32::MAX / 8)` bytes. Use
-    /// [`Node::try_chunks_from_bytes`] for untrusted input.
+    /// Panics if `bytes` is longer than `32 * (u32::MAX / 8)` bytes.
     pub fn chunks_from_bytes(bytes: &[u8]) -> Self {
         Self::try_chunks_from_bytes(bytes)
             .expect("chunks_from_bytes requires its encoded Felt length to fit in a u32")

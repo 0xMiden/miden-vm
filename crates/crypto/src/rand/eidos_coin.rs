@@ -114,7 +114,8 @@ impl EidosRandomCoin {
     ///
     /// # Panics
     ///
-    /// Panics under the same condition as [`Self::draw_basefield`].
+    /// Panics if output generation requires another block after the `u64` block counter is
+    /// exhausted.
     pub fn draw(&mut self) -> Felt {
         self.draw_basefield()
     }
@@ -123,7 +124,8 @@ impl EidosRandomCoin {
     ///
     /// # Panics
     ///
-    /// Panics under the same condition as [`Self::draw_basefield`].
+    /// Panics if output generation requires another block after the `u64` block counter is
+    /// exhausted.
     pub fn draw_ext_field<E: ExtensionField<Felt>>(&mut self) -> E {
         E::from_basis_coefficients_fn(|_| self.draw_basefield())
     }

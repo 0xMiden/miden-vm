@@ -194,7 +194,7 @@ pub fn auth_tag_expanded(
 /// Panics if the plaintext requires more than `2^32` counter blocks, if the expanded ciphertext
 /// length overflows `usize`, or if the padded MAC input exceeds
 /// [`MAX_AUTHENTICATED_INPUT_FELTS`].
-pub(crate) fn encrypt_felts_expanded_authenticated(
+pub fn encrypt_felts_expanded_authenticated(
     key: Word,
     nonce: Word,
     associated_data: &[Felt],
@@ -217,7 +217,7 @@ pub(crate) fn encrypt_felts_expanded_authenticated(
 ///
 /// Returns `None` without producing plaintext if the input lengths or limbs are invalid, or if the
 /// supplied tag does not match `(key, nonce, associated_data, ciphertext)`.
-pub(crate) fn decrypt_felts_expanded_authenticated(
+pub fn decrypt_felts_expanded_authenticated(
     key: Word,
     nonce: Word,
     associated_data: &[Felt],

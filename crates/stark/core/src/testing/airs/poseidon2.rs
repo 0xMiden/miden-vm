@@ -90,7 +90,7 @@ impl<EF: Field> LiftedAir<Goldilocks, EF> for LiftedPoseidon2Air {
 ///
 /// Each input is a WIDTH=12 element Goldilocks array. The number of inputs must
 /// be a power of two. The trace has `inputs.len()` rows and
-/// [`NUM_POSEIDON2_COLS`] columns.
+/// `NUM_POSEIDON2_COLS` columns.
 pub fn generate_poseidon2_trace(
     inputs: Vec<[Goldilocks; WIDTH]>,
     constants: &GoldilocksRoundConstants,

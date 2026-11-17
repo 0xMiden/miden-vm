@@ -11,7 +11,7 @@
 //!
 //! Each digest element is below `2^63`, so digest elements are not uniform over the Goldilocks
 //! field and their 32-byte serialization is not a uniform 256-bit string. Use
-//! [`crate::rand::EidosRandomCoin::draw_basefield`] for full-field sampling and
+//! [`EidosRandomCoin::draw`](crate::rand::EidosRandomCoin::draw) for full-field sampling and
 //! [`crate::aead::aead_eidos`] for authenticated encryption. The Fiat-Shamir challenger retains
 //! the restricted output distribution; its soundness bounds must use the actual sampling support.
 //!
