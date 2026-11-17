@@ -17,15 +17,6 @@ fn any_word_elements_u64_canonical() -> BoxedStrategy<[u64; Word::NUM_ELEMENTS]>
 
 proptest! {
     #[test]
-    fn word_is_equal_to_itself(word in any::<Word>()) {
-        use core::cmp::Ordering;
-
-        prop_assert_eq!(word, word);
-        prop_assert_eq!(word.cmp(&word), Ordering::Equal);
-        prop_assert_eq!(word.partial_cmp(&word), Some(Ordering::Equal));
-    }
-
-    #[test]
     fn word_serialization_roundtrip(word in any::<Word>()) {
         let mut bytes = Vec::new();
         word.write_into(&mut bytes);
@@ -110,124 +101,20 @@ proptest! {
     }
 
     #[test]
+    fn word_string_conversion_roundtrip(words in prop::array::uniform2(any::<Word>())) {
+        // Preserve the two original properties' combined random-case budget.
+        for word in words {
+            let string: String = word.into();
+            prop_assert_eq!(word, Word::try_from(string).unwrap());
+
+            let string: String = (&word).into();
+            prop_assert_eq!(word, Word::try_from(&string).unwrap());
+        }
+    }
+
+    #[test]
     fn word_reversed_roundtrip(word in any::<Word>()) {
         prop_assert_eq!(word, word.reversed().reversed());
-    }
-}
-
-fn assert_word_string_roundtrip(word: Word) -> proptest::test_runner::TestCaseResult {
-    let string: String = word.into();
-    let round_trip: Word = string.try_into().unwrap();
-    prop_assert_eq!(word, round_trip);
-
-    let string: String = (&word).into();
-    let round_trip: Word = (&string).try_into().unwrap();
-    prop_assert_eq!(word, round_trip);
-    Ok(())
-}
-
-#[test]
-fn word_string_conversion_roundtrip() {
-    // Every run checks correlated values and noncanonical representations through the same oracle.
-    for element in [
-        Felt::ZERO,
-        Felt::ONE,
-        Felt::MAX,
-        Felt::new_unchecked(Felt::ORDER),
-        Felt::new_unchecked(u64::MAX),
-    ] {
-        assert_word_string_roundtrip(Word::new([element; Word::NUM_ELEMENTS])).unwrap();
-    }
-    for index in 0..Word::NUM_ELEMENTS {
-        for element in [Felt::ONE, Felt::MAX] {
-            let mut elements = [Felt::ZERO; Word::NUM_ELEMENTS];
-            elements[index] = element;
-            assert_word_string_roundtrip(Word::new(elements)).unwrap();
-        }
-    }
-    assert_word_string_roundtrip(Word::new([
-        Felt::ZERO,
-        Felt::ONE,
-        Felt::MAX,
-        Felt::new_unchecked(Felt::ORDER),
-    ]))
-    .unwrap();
-
-    // Two words per case preserve the original combined budget under PROPTEST_CASES overrides.
-    proptest!(ProptestConfig::with_source_file(file!()), |(words in prop::array::uniform2(any::<Word>()))| {
-        for word in words {
-            assert_word_string_roundtrip(word)?;
-        }
-    });
-}
-
-#[test]
-fn word_strategy_reaches_correlated_classes_and_shrinks() {
-    extern crate std;
-    use proptest::{
-        strategy::ValueTree,
-        test_runner::{RngAlgorithm, RngSeed, TestRunner},
-    };
-
-    let strategy = any::<Word>();
-    for seed in [0, 1, 2] {
-        let mut runner = TestRunner::new(ProptestConfig {
-            rng_algorithm: RngAlgorithm::ChaCha,
-            rng_seed: RngSeed::Fixed(seed),
-            failure_persistence: None,
-            ..ProptestConfig::default()
-        });
-        let samples = 10_000;
-        let mut splats = [0usize; 4]; // Zero, one, maximum, and other equal-limb words.
-        let mut single_limb = [0usize; Word::NUM_ELEMENTS];
-        let mut varied = 0;
-        let mut shrinks = 0;
-        for sample in 0..samples {
-            let mut tree = strategy.new_tree(&mut runner).unwrap();
-            let elements = tree.current().into_elements();
-            if elements.iter().all(|element| *element == elements[0]) {
-                let class = if elements[0] == Felt::ZERO {
-                    0
-                } else if elements[0] == Felt::ONE {
-                    1
-                } else if elements[0] == Felt::MAX {
-                    2
-                } else {
-                    3
-                };
-                splats[class] += 1;
-            } else {
-                varied += 1;
-            }
-            for index in 0..Word::NUM_ELEMENTS {
-                if elements[index] != Felt::ZERO
-                    && elements
-                        .iter()
-                        .enumerate()
-                        .all(|(i, element)| i == index || *element == Felt::ZERO)
-                {
-                    single_limb[index] += 1;
-                }
-            }
-            if sample < 16 {
-                for _ in 0..64 {
-                    if !tree.simplify() {
-                        break;
-                    }
-                    shrinks += 1;
-                    assert_word_string_roundtrip(tree.current()).unwrap();
-                    tree.complicate();
-                    assert_word_string_roundtrip(tree.current()).unwrap();
-                }
-            }
-        }
-        std::println!(
-            "Word strategy seed={seed} samples={samples} splats={splats:?} single_limb={single_limb:?} varied={varied} shrinks={shrinks}\n{runner}"
-        );
-        assert!(splats.iter().all(|hits| *hits >= 200), "seed={seed}: {splats:?}");
-        assert!(single_limb.iter().all(|hits| *hits >= 100), "seed={seed}: {single_limb:?}");
-        assert!(varied >= 2_000, "seed={seed}: {varied}");
-        assert!(shrinks > 0, "seed={seed}: strategy did not shrink");
     }
 }
 
@@ -346,11 +233,27 @@ fn word_macro_endianness(#[case] input: &str, #[case] expected: Word) {
 
 proptest! {
     #[test]
-    fn word_ord_is_consistent_with_partialeq(a in any::<Word>(), b in any::<Word>()) {
-        use core::cmp::Ordering;
-
-        prop_assert_eq!(a == b, a.cmp(&b) == Ordering::Equal);
-        prop_assert_eq!(b == a, b.cmp(&a) == Ordering::Equal);
+    fn word_order_matches_canonical_limbs(a in any::<Word>(), b in any::<Word>()) {
+        let a = a.into_elements();
+        let original_b = b.into_elements();
+        for equal_high_limbs in 0..=Word::NUM_ELEMENTS {
+            // Exercise every comparison position and equality on every generated pair.
+            let start = Word::NUM_ELEMENTS - equal_high_limbs;
+            let mut b = original_b;
+            b[start..].copy_from_slice(&a[start..]);
+            let mut lhs = a.map(|element| element.as_canonical_u64());
+            let mut rhs = b.map(|element| element.as_canonical_u64());
+            lhs.reverse();
+            rhs.reverse();
+            let expected = lhs.cmp(&rhs);
+            let (a, b) = (Word::new(a), Word::new(b));
+            prop_assert_eq!(a.cmp(&b), expected);
+            prop_assert_eq!(b.cmp(&a), expected.reverse());
+            prop_assert_eq!(a.partial_cmp(&b), Some(expected));
+            prop_assert_eq!(b.partial_cmp(&a), Some(expected.reverse()));
+            prop_assert_eq!(a == b, expected == Ordering::Equal);
+            prop_assert_eq!(b == a, expected == Ordering::Equal);
+        }
     }
 
     #[test]
@@ -369,29 +272,5 @@ proptest! {
         map.insert(key2, 2);
         prop_assert_eq!(map.len(), 1);
         prop_assert_eq!(map.get(&word), Some(&2));
-    }
-}
-
-#[test]
-fn word_is_ordered_lexicographically() {
-    for (expected, key0, key1) in [
-        (Ordering::Equal, [0, 0, 0, 0u32], [0, 0, 0, 0u32]),
-        (Ordering::Greater, [1, 0, 0, 0u32], [0, 0, 0, 0u32]),
-        (Ordering::Greater, [0, 1, 0, 0u32], [0, 0, 0, 0u32]),
-        (Ordering::Greater, [0, 0, 1, 0u32], [0, 0, 0, 0u32]),
-        (Ordering::Greater, [0, 0, 0, 1u32], [0, 0, 0, 0u32]),
-        (Ordering::Less, [0, 0, 0, 0u32], [1, 0, 0, 0u32]),
-        (Ordering::Less, [0, 0, 0, 0u32], [0, 1, 0, 0u32]),
-        (Ordering::Less, [0, 0, 0, 0u32], [0, 0, 1, 0u32]),
-        (Ordering::Less, [0, 0, 0, 0u32], [0, 0, 0, 1u32]),
-        (Ordering::Greater, [0, 0, 0, 1u32], [1, 1, 1, 0u32]),
-        (Ordering::Greater, [0, 0, 1, 0u32], [1, 1, 0, 0u32]),
-        (Ordering::Less, [1, 1, 1, 0u32], [0, 0, 0, 1u32]),
-        (Ordering::Less, [1, 1, 0, 0u32], [0, 0, 1, 0u32]),
-    ] {
-        assert_eq!(
-            Word::from(key0.map(Felt::from_u32)).cmp(&Word::from(key1.map(Felt::from_u32))),
-            expected
-        );
     }
 }

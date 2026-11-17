@@ -3501,6 +3501,7 @@ version = "1.0.0-rc.2"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
+ "proptest",
  "rustix",
  "serde-wincode",
  "tempfile",
