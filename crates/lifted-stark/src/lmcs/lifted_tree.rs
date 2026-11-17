@@ -8,7 +8,7 @@ use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use p3_maybe_rayon::{iter, prelude::*};
 use p3_symmetric::{Hash, PseudoCompressionFunction};
 use p3_util::{log2_strict_usize, reverse_bits_len};
-use tracing::info_span;
+use tracing::trace_span;
 
 use crate::{
     lmcs::{Lmcs, LmcsTree, proof::LeafOpening, row_list::RowList, tree_indices::TreeIndices},
@@ -276,7 +276,7 @@ where
 
         // Build leaf hashes: absorb all matrix rows into sponge states, then squeeze.
         let leaf_digests: Vec<[PD::Value; DIGEST_ELEMS]> =
-            info_span!("hash leaves").in_scope(|| {
+            trace_span!(target: "miden::vm::prove", "hash_leaves").in_scope(|| {
                 let mut leaf_states: Vec<[PD::Value; WIDTH]> =
                     build_leaf_states_upsampled::<PF, PD, M, H, WIDTH, DIGEST_ELEMS>(
                         &leaves,
@@ -288,7 +288,7 @@ where
                 if let Some(ref salt_matrix) = salt {
                     debug_assert_eq!(salt_matrix.height(), leaf_states.len());
                     debug_assert_eq!(salt_matrix.width(), SALT_ELEMS);
-                    info_span!("absorb salt", height = salt_matrix.height(), width = SALT_ELEMS)
+                    trace_span!(target: "miden::vm::prove", "absorb_salt", height = salt_matrix.height(), width = SALT_ELEMS)
                         .in_scope(|| {
                             absorb_matrix::<PF, PD, _, _, WIDTH, DIGEST_ELEMS>(
                                 &mut leaf_states,
@@ -303,7 +303,7 @@ where
                 // the Merkle tree is indexed naturally.
                 let n = leaf_states.len();
                 let log_n = log2_strict_usize(n);
-                info_span!("squeeze leaves", n).in_scope(|| {
+                trace_span!(target: "miden::vm::prove", "squeeze_leaf_digests", n).in_scope(|| {
                     (0..n)
                         .into_par_iter()
                         .map(|i| {
@@ -317,26 +317,27 @@ where
         // Build digest layers by repeatedly compressing until we reach the root,
         // then reverse so index 0 = root, matching the top-down NodeId convention.
         // The lowest `PRUNED_LAYERS` layers are dropped as soon as their parents exist.
-        let digest_layers = info_span!("compress tree layers").in_scope(|| {
-            let pruned_layers = PRUNED_LAYERS.min(log2_strict_usize(leaf_digests.len()));
-            let mut lowest_stored = leaf_digests;
-            for _ in 0..pruned_layers {
-                lowest_stored = compress_uniform::<PD, C, DIGEST_ELEMS>(&lowest_stored, c);
-            }
-
-            let mut digest_layers = vec![lowest_stored];
-            loop {
-                let prev_layer = digest_layers.last().unwrap();
-                if prev_layer.len() == 1 {
-                    break;
+        let digest_layers = trace_span!(target: "miden::vm::prove", "compress_tree_layers")
+            .in_scope(|| {
+                let pruned_layers = PRUNED_LAYERS.min(log2_strict_usize(leaf_digests.len()));
+                let mut lowest_stored = leaf_digests;
+                for _ in 0..pruned_layers {
+                    lowest_stored = compress_uniform::<PD, C, DIGEST_ELEMS>(&lowest_stored, c);
                 }
 
-                let next_layer = compress_uniform::<PD, C, DIGEST_ELEMS>(prev_layer, c);
-                digest_layers.push(next_layer);
-            }
-            digest_layers.reverse();
-            digest_layers
-        });
+                let mut digest_layers = vec![lowest_stored];
+                loop {
+                    let prev_layer = digest_layers.last().unwrap();
+                    if prev_layer.len() == 1 {
+                        break;
+                    }
+
+                    let next_layer = compress_uniform::<PD, C, DIGEST_ELEMS>(prev_layer, c);
+                    digest_layers.push(next_layer);
+                }
+                digest_layers.reverse();
+                digest_layers
+            });
 
         Self {
             leaves,
@@ -508,7 +509,7 @@ where
     // - states: Per-leaf scalar states (one per final row), maintained across matrices.
     // - scratch_states: Temporary buffer used when duplicating states during upsampling.
     // `repeat_n` initializes these large buffers in parallel when concurrency is enabled.
-    let mut states = info_span!("alloc states", final_height, width = WIDTH)
+    let mut states = trace_span!(target: "miden::vm::prove", "allocate_leaf_states", final_height, width = WIDTH)
         .in_scope(|| iter::repeat_n(initial_state, final_height).collect::<Vec<_>>());
     // Allocated lazily on first upsampling: single-matrix trees (quotient, FRI
     // rounds) never need the scratch buffer.
@@ -526,13 +527,13 @@ where
             let scaling_factor = height / active_height;
 
             if scratch_states.is_empty() {
-                scratch_states = info_span!("alloc scratch", final_height)
+                scratch_states = trace_span!(target: "miden::vm::prove", "allocate_scratch_states", final_height)
                     .in_scope(|| iter::repeat_n(initial_state, final_height).collect::<Vec<_>>());
             }
 
             // Copy `states` into `scratch_states`, repeating each entry `scaling_factor` times
             // so we keep the accumulated sponge states aligned with the taller matrix.
-            info_span!("upsample states", from = active_height, to = height).in_scope(|| {
+            trace_span!(target: "miden::vm::prove", "upsample_leaf_states", from = active_height, to = height).in_scope(|| {
                 scratch_states[..height]
                     .par_chunks_mut(scaling_factor)
                     .zip(states[..active_height].par_iter())
@@ -544,9 +545,10 @@ where
         }
 
         // Absorb the rows of the matrix into the extended state vector
-        info_span!("absorb matrix", height, width = matrix.width()).in_scope(|| {
-            absorb_matrix::<PF, PD, _, _, _, _>(&mut states[..height], matrix, sponge)
-        });
+        trace_span!(target: "miden::vm::prove", "absorb_matrix", height, width = matrix.width())
+            .in_scope(|| {
+                absorb_matrix::<PF, PD, _, _, _, _>(&mut states[..height], matrix, sponge)
+            });
 
         active_height = height;
     }

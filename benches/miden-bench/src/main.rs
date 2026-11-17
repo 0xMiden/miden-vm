@@ -5,8 +5,9 @@
 //! arguments; all parameters have sensible defaults.
 //!
 //! By default the output is concise (config header + proof size + total time).
-//! Pass `-v` for the full hierarchical tracing tree, or set `RUST_LOG` for
-//! fine-grained control.
+//! Pass `-v` for the Miden proving and benchmark tracing tree, or set `RUST_LOG`
+//! for fine-grained control. To include dependency tracing, add its targets, for example:
+//! `RUST_LOG=warn,miden::vm=trace,miden::bench=trace,p3_batch_stark=debug,p3_fri=debug`.
 //!
 //! ```bash
 //! # Quick run with defaults (blake3:15 keccak:18 poseidon2:19):
@@ -15,7 +16,7 @@
 //! # Custom traces:
 //! cargo run -p miden-bench --features concurrent --release -- keccak:15 keccak:18 keccak:19
 //!
-//! # Full tracing tree:
+//! # Miden proving and benchmark tracing tree:
 //! cargo run -p miden-bench --features concurrent --release -- -v keccak:15
 //!
 //! # Multi-iteration with warm-up (reports min/median/mean/max):
@@ -55,7 +56,7 @@ use p3_goldilocks::GenericPoseidon2LinearLayersGoldilocks;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use p3_poseidon2_air::RoundConstants;
 use rand::{RngExt, SeedableRng, rngs::SmallRng};
-use tracing::info_span;
+use tracing::trace_span;
 use tracing_subscriber::{Layer, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::cli::{AirType, Cli, HashFn, Mode, TraceSpec};
@@ -145,7 +146,7 @@ fn generate_traces(
     specs
         .iter()
         .map(|spec| {
-            info_span!("generate trace", air = %spec.air_type, log_height = spec.log_height)
+            trace_span!(target: "miden::bench", "generate_trace", air = %spec.air_type, log_height = spec.log_height)
                 .in_scope(|| match spec.air_type {
                     AirType::Keccak => {
                         let n = keccak_hash_count(spec.log_height);
@@ -309,15 +310,14 @@ fn main() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 fn init_tracing(verbose: bool) {
-    let default_level = if verbose {
-        tracing_forest::util::LevelFilter::DEBUG
+    let default_filter = if verbose {
+        "warn,miden::vm=trace,miden::bench=trace"
     } else {
-        tracing_forest::util::LevelFilter::WARN
+        "warn"
     };
 
-    let env_filter = tracing_subscriber::EnvFilter::builder()
-        .with_default_directive(default_level.into())
-        .from_env_lossy();
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter));
 
     Registry::default()
         .with(tracing_forest::ForestLayer::default().with_filter(env_filter))

@@ -116,7 +116,7 @@ impl OutputFile {
 
     /// Reads output JSON from a regular file of at most [`Self::MAX_FILE_SIZE`] bytes.
     /// Symlinks to regular files are accepted.
-    #[instrument(name = "read_output_file",
+    #[instrument(target = "miden::cli", name = "read_output_file", level = "trace",
         fields(path = %outputs_path.clone().unwrap_or(program_path.with_extension("outputs")).display()), skip_all)]
     pub fn read(outputs_path: &Option<PathBuf>, program_path: &Path) -> Result<Self, String> {
         // If outputs_path has been provided then use this as path.  Alternatively we will
@@ -140,7 +140,7 @@ impl OutputFile {
     }
 
     /// Writes output JSON through a temporary file and atomically replaces the destination.
-    #[instrument(name = "write_data_to_output_file", fields(path = %path.display()), skip_all)]
+    #[instrument(target = "miden::cli", name = "write_output_file", level = "trace", fields(path = %path.display()), skip_all)]
     pub fn write(stack_outputs: &StackOutputs, path: &Path) -> Result<(), String> {
         write_file_atomically(path, |file| {
             serde_json::to_writer_pretty(file, &Self::new(stack_outputs)).map_err(io::Error::from)
@@ -188,7 +188,7 @@ where
 {
     /// Reads the masm file at the specified path and parses it into a [ProgramFile], using the
     /// provided [miden_assembly::SourceManager] implementation.
-    #[instrument(name = "read_program_file", skip(source_manager), fields(path = %path.as_ref().display()))]
+    #[instrument(target = "miden::cli", name = "read_program_file", level = "trace", skip(source_manager), fields(path = %path.as_ref().display()))]
     pub fn read_with(path: impl AsRef<Path>, source_manager: Arc<S>) -> Result<Self, Report> {
         // parse the program into an AST
         let path = path.as_ref();
@@ -201,7 +201,7 @@ where
     }
 
     /// Compiles this program file into an executable [Package].
-    #[instrument(name = "compile_package", skip_all)]
+    #[instrument(target = "miden::cli", name = "compile_package", level = "trace", skip_all)]
     pub fn compile_package<I>(&self, libraries: I) -> Result<Box<Package>, Report>
     where
         I: IntoIterator<Item = Arc<Package>>,
@@ -223,7 +223,7 @@ where
     }
 
     /// Compiles this program file into a [Program].
-    #[instrument(name = "compile_program", skip_all)]
+    #[instrument(target = "miden::cli", name = "compile_program", level = "trace", skip_all)]
     pub fn compile<I>(&self, libraries: I) -> Result<Program, Report>
     where
         I: IntoIterator<Item = Arc<Package>>,
@@ -250,7 +250,7 @@ pub struct ProofFile;
 /// Helper methods to interact with proof file
 impl ProofFile {
     /// Read stark proof from file
-    #[instrument(name = "read_proof_file",
+    #[instrument(target = "miden::cli", name = "read_proof_file", level = "trace",
         fields(path = %proof_path.clone().unwrap_or(program_path.with_extension("proof")).display()), skip_all)]
     pub fn read(
         proof_path: &Option<PathBuf>,
@@ -273,7 +273,7 @@ impl ProofFile {
     }
 
     /// Writes the proof through a temporary file and atomically replaces the destination.
-    #[instrument(name = "write_data_to_proof_file",
+    #[instrument(target = "miden::cli", name = "write_proof_file", level = "trace",
                  fields(
                     path = %proof_path.clone().unwrap_or(program_path.with_extension("proof")).display(),
                     size = Empty), skip_all)]
@@ -305,7 +305,7 @@ pub struct ProgramHash;
 
 /// Helper method to parse program hash from hex
 impl ProgramHash {
-    #[instrument(name = "read_program_hash", skip_all)]
+    #[instrument(target = "miden::cli", name = "read_program_hash", level = "trace", skip_all)]
     pub fn read(hash_hex_string: &str) -> Result<Word, String> {
         // decode hex to bytes
         let program_hash_bytes = hex::decode(hash_hex_string)
@@ -330,7 +330,7 @@ pub struct Libraries {
 
 impl Libraries {
     /// Creates a new instance of [Libraries] from a list of library paths.
-    #[instrument(name = "read_library_files", skip_all)]
+    #[instrument(target = "miden::cli", name = "read_library_files", level = "trace", skip_all)]
     pub fn new<P, I>(paths: I) -> Result<Self, Report>
     where
         P: AsRef<Path>,

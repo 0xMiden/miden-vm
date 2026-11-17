@@ -154,7 +154,12 @@ impl FastProcessor {
     /// precompile witness is returned separately because [`crate::trace::VmTrace`] retains only
     /// its authenticated root.
     #[cfg(feature = "std")]
-    #[instrument(name = "execute_and_build_trace_sync", skip_all)]
+    #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
+        name = "execute_and_build_trace_sync",
+        skip_all
+    )]
     pub fn execute_and_build_trace_sync(
         self,
         program: &Program,
@@ -227,7 +232,11 @@ impl FastProcessor {
             Ok(output) => output,
             Err(err) => {
                 if let Err(builder_err) = hasher {
-                    tracing::debug!(%builder_err, "hasher builder also failed");
+                    tracing::trace!(
+                        target: "miden::vm::execute",
+                        %builder_err,
+                        "hasher builder also failed"
+                    );
                 }
                 return Err(err);
             },
@@ -264,7 +273,12 @@ impl FastProcessor {
     ///
     /// assert_eq!(*trace.program_hash(), program.hash());
     /// ```
-    #[instrument(name = "execute_for_proving_sync", skip_all)]
+    #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
+        name = "execute_for_proving_sync",
+        skip_all
+    )]
     pub fn execute_for_proving_sync(
         self,
         program: &Program,
@@ -286,7 +300,12 @@ impl FastProcessor {
 
     /// Executes the given program synchronously with package-owned source/debug context and returns
     /// its complete post-execution witness.
-    #[instrument(name = "execute_for_proving_with_package_debug_info_sync", skip_all)]
+    #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
+        name = "execute_for_proving_with_package_debug_info_sync",
+        skip_all
+    )]
     pub fn execute_for_proving_with_package_debug_info_sync(
         self,
         program: &Program,
@@ -316,6 +335,8 @@ impl FastProcessor {
     /// Executes the given program synchronously with package-owned source/debug context rooted at
     /// `entrypoint_source_node_id` and returns its complete post-execution witness.
     #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
         name = "execute_for_proving_with_package_debug_info_at_source_node_sync",
         skip_all
     )]
@@ -348,7 +369,12 @@ impl FastProcessor {
 
     /// Async variant of [`Self::execute_for_proving_sync`] for async hosts.
     #[inline(always)]
-    #[instrument(name = "execute_for_proving", skip_all)]
+    #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
+        name = "execute_for_proving",
+        skip_all
+    )]
     pub async fn execute_for_proving(
         self,
         program: &Program,
@@ -371,7 +397,12 @@ impl FastProcessor {
     /// Async variant of [`Self::execute_for_proving_with_package_debug_info_sync`].
     #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
-    #[instrument(name = "execute_for_proving_with_package_debug_info", skip_all)]
+    #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
+        name = "execute_for_proving_with_package_debug_info",
+        skip_all
+    )]
     pub async fn execute_for_proving_with_package_debug_info(
         self,
         program: &Program,
@@ -404,7 +435,12 @@ impl FastProcessor {
     /// [`Self::execute_for_proving_with_package_debug_info_at_source_node_sync`].
     #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
-    #[instrument(name = "execute_for_proving_with_package_debug_info_at_source_node", skip_all)]
+    #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
+        name = "execute_for_proving_with_package_debug_info_at_source_node",
+        skip_all
+    )]
     pub async fn execute_for_proving_with_package_debug_info_at_source_node(
         self,
         program: &Program,

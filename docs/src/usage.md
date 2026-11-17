@@ -93,13 +93,28 @@ To execute a program using the Miden VM there needs to be a `.masm` file contain
 
 #### Enabling logging
 
-You can use `MIDEN_LOG` environment variable to control how much logging output the VM produces. For example:
+Use the `MIDEN_LOG` environment variable to select tracing targets and verbosity. The
+CLI defaults to `warn`. Successful proving emits no tracing output at `info`.
+Proving instrumentation uses `trace`, with three profiles:
+
+| Target | Operations |
+| --- | --- |
+| `miden::vm::execute` | Program execution for proving |
+| `miden::vm::trace` | VM and precompile trace construction |
+| `miden::vm::prove` | STARK proof generation and its phases |
+
+Enable all proving phases, or only STARK proving:
 
 ```shell
-MIDEN_LOG=trace ./target/optimized/miden-vm [subcommand] [parameters]
+MIDEN_LOG=info,miden::vm=trace ./target/optimized/miden-vm prove [parameters]
+MIDEN_LOG=info,miden::vm::prove=trace ./target/optimized/miden-vm prove [parameters]
 ```
 
-If the level is not specified, `warn` level is set as default.
+CLI file operations use `miden::cli`. The `miden-bench` and standalone PCS profiling
+binaries use `RUST_LOG` instead of `MIDEN_LOG`; for example,
+`RUST_LOG=warn,miden::vm=trace,miden::bench=trace` enables Miden proving and
+benchmark spans. Third-party instrumentation can be selected using its own targets,
+such as `p3_dft=debug`.
 
 #### Debugging procedures
 

@@ -12,7 +12,7 @@ use miden_lifted_stark::{
 };
 use p3_field::Field;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
-use tracing::info_span;
+use tracing::trace_span;
 
 use crate::{
     Felt, GlRoundConstants, QuadFelt, RunResult,
@@ -139,8 +139,7 @@ where
     let prover_instance =
         ProverInstance::new(config, prover_statement, None).expect("no preprocessed columns");
 
-    let (output, statement) = info_span!("prove")
-        .in_scope(|| prover_instance.prove(config.challenger()).expect("proving failed"));
+    let (output, statement) = prover_instance.prove(config.challenger()).expect("proving failed");
 
     let result = RunResult {
         proof_size_bytes: output.proof.size_in_bytes(),
@@ -149,7 +148,7 @@ where
     };
 
     if !cli.no_verify {
-        info_span!("verify").in_scope(|| {
+        trace_span!(target: "miden::bench", "verify_stark").in_scope(|| {
             let digest = VerifierInstance::new(config, &statement, None)
                 .expect("no preprocessed columns")
                 .verify(&output.proof, config.challenger())

@@ -12,7 +12,7 @@ use p3_keccak_air::{KeccakAir, NUM_KECCAK_COLS};
 use p3_lookup::InteractionBuilder;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_merkle_tree::MerkleTreeMmcs;
-use tracing::info_span;
+use tracing::trace_span;
 
 use crate::{
     BatchPoseidon2Air, Felt, GlRoundConstants, QuadFelt, RunResult,
@@ -203,7 +203,7 @@ where
         ProverData::from_instances(config, &instances).expect("batch-stark setup failed");
     let common = &prover_data.common;
 
-    let proof = info_span!("prove").in_scope(|| {
+    let proof = trace_span!(target: "miden::bench", "prove_batch_stark").in_scope(|| {
         prove_batch(config, &instances, &prover_data).expect("batch-stark proving failed")
     });
 
@@ -214,7 +214,7 @@ where
     };
 
     if !cli.no_verify {
-        info_span!("verify").in_scope(|| {
+        trace_span!(target: "miden::bench", "verify_batch_stark").in_scope(|| {
             verify_batch(config, &airs, &proof, &pvs, common)
                 .expect("batch-stark verification failed");
         });

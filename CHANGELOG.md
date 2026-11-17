@@ -2,6 +2,10 @@
 
 ## v0.36.5 (Unreleased)
 
+#### Changes
+
+- Moved routine VM execution, trace construction, and STARK proving instrumentation to `TRACE` under `miden::vm::{execute,trace,prove}`, keeping successful proving silent at `INFO`.
+
 ## v0.36.4 (2026-11-06)
 
 #### Changes

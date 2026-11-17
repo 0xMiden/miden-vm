@@ -193,6 +193,53 @@ fn single_trace() {
 }
 
 #[test]
+fn proving_tracing_is_opt_in() {
+    extern crate std;
+
+    use std::sync::{Arc, Mutex};
+
+    use tracing::{Event, Metadata, Subscriber, span::Attributes};
+    use tracing_subscriber::{EnvFilter, Layer, Registry, layer::Context, prelude::*};
+
+    #[derive(Clone, Default)]
+    struct Capture(Arc<Mutex<Vec<&'static Metadata<'static>>>>);
+
+    impl<S: Subscriber> Layer<S> for Capture {
+        fn on_new_span(&self, attrs: &Attributes<'_>, _: &tracing::span::Id, _: Context<'_, S>) {
+            self.0.lock().unwrap().push(attrs.metadata());
+        }
+
+        fn on_event(&self, event: &Event<'_>, _: Context<'_, S>) {
+            self.0.lock().unwrap().push(event.metadata());
+        }
+    }
+
+    for filter in ["info", "info,miden::vm::prove=trace"] {
+        let capture = Capture::default();
+        let _guard = Registry::default()
+            .with(EnvFilter::new(filter))
+            .with(capture.clone())
+            .set_default();
+        let pv = vec![Felt::from_u64(START)];
+        prove_and_verify(&TinyAir::new(vec![]), &pv, &[trace_of_height(8)]);
+
+        let captured = capture.0.lock().unwrap();
+        if filter == "info" {
+            assert!(captured.is_empty());
+        } else {
+            for name in ["prove_stark", "commit_main_traces", "open_polynomials", "fold_fri_round"]
+            {
+                assert!(captured.iter().any(|metadata| metadata.name() == name), "missing {name}");
+            }
+            assert!(captured.iter().all(|metadata| {
+                metadata.target() == "miden::vm::prove"
+                    && *metadata.level() == tracing::Level::TRACE
+            }));
+        }
+    }
+}
+
+#[test]
 fn malformed_transcript_is_rejected() {
     let config = test_config();
     let prover_statement = tiny_prover_statement(

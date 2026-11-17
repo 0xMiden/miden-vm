@@ -486,7 +486,11 @@ impl Session {
     pub fn finish(mut self, root: Truthy) -> SessionTraces {
         macro_rules! trace_span {
             ($name:literal, $expr:expr) => {{
-                let _span = tracing::info_span!($name).entered();
+                let _span = tracing::trace_span!(
+                    target: "miden::vm::trace",
+                    $name
+                )
+                .entered();
                 $expr
             }};
         }
@@ -499,36 +503,44 @@ impl Session {
             self.node.add_consumers(row, consumers);
         }
         // EcCreate rows hash the group pointer and bind it through their EcPoint consume.
-        let eval = trace_span!("eval", eval_trace(self.eval, root));
+        let eval = trace_span!("build_transcript_eval_trace", eval_trace(self.eval, root));
         let chunk_node_sponge = trace_span!(
-            "chunk_node_sponge",
+            "build_chunk_node_sponge_trace",
             chunk_node_sponge_trace(self.chunk, self.node, self.sponge)
         );
-        let p2 = trace_span!("poseidon2", p2_trace(self.p2));
-        let round = trace_span!("keccak_round", round_trace(self.round, &mut self.bpl));
+        let p2 = trace_span!("build_poseidon2_trace", p2_trace(self.p2));
+        let round = trace_span!("build_keccak_round_trace", round_trace(self.round, &mut self.bpl));
         // The relation traces route their store demand as they lay, so
         // they run before the store reads its provide multiplicities;
         // every Range16 consumer fires before BPL. (The EC add chiplet
         // consumes no UintVal — its predicates are ptr-level certificates
         // already routed by the uint relations.)
-        let add = trace_span!("uint_add", uint_add_trace(self.uint.add, &mut self.uint.store));
+        let add = trace_span!(
+            "build_uint_add_trace",
+            uint_add_trace(self.uint.add, &mut self.uint.store)
+        );
         // EcMsm routes its intros' literal-1 UintVal demand into the store,
         // so it runs before the store reads its provide ledger.
-        let msm = trace_span!("ec_msm", msm_trace(self.msm, &mut self.uint.store, &mut self.bpl));
+        let msm = trace_span!(
+            "build_ec_msm_trace",
+            msm_trace(self.msm, &mut self.uint.store, &mut self.bpl)
+        );
         // Mul routes its own store demand internally, ahead of the store
         // reading its ledger — see `uint::store_mul::trace::generate_trace`.
         let uint = trace_span!(
-            "uint_store_mul",
+            "build_uint_store_mul_trace",
             uint_trace(self.uint.store, self.uint.mul, &mut self.bpl)
         );
         // The add relation routes its EcGroup / EcPoint demand as it lays,
         // so it runs before the stores read their provide ledgers; it also
         // raises the closure-cert ptr-ordering Range16 requires into BPL
         // (which is traced last, below).
-        let ec_add =
-            trace_span!("ec_add", ec_add_trace(self.ec.add, &mut self.ec.store, &mut self.bpl));
-        let ec = trace_span!("ec_store", ec_store_trace(self.ec.store));
-        let bpl = trace_span!("byte_pair_lut", bpl_trace(self.bpl));
+        let ec_add = trace_span!(
+            "build_ec_add_trace",
+            ec_add_trace(self.ec.add, &mut self.ec.store, &mut self.bpl)
+        );
+        let ec = trace_span!("build_ec_store_trace", ec_store_trace(self.ec.store));
+        let bpl = trace_span!("build_byte_pair_lut_trace", bpl_trace(self.bpl));
 
         let traces = SessionTraces {
             chunk_node_sponge,

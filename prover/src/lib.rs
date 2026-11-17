@@ -64,7 +64,7 @@ pub use prover::{Prover, ProverError, prove_sync};
 /// Pre-seeds the challenger with the protocol parameters, the AIR public values, and the
 /// statement `aux_inputs` (program hash, final deferred root, and the concatenated kernel-procedure
 /// digests). Then delegates to the lifted multi-AIR prover.
-#[instrument("prove_stark", skip_all)]
+#[instrument(target = "miden::vm::prove", name = "prove_vm_stark", level = "trace", skip_all)]
 fn prove_stark<SC>(
     config: &SC,
     core_trace: RowMajorMatrix<Felt>,
