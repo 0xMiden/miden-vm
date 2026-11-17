@@ -4,7 +4,7 @@
 
 #### Changes
 
-- Moved routine VM execution, trace construction, and STARK proving instrumentation to `TRACE` under `miden::vm::{execute,trace,prove}`, keeping successful proving silent at `INFO`.
+- Moved routine VM execution, trace construction, and STARK proving instrumentation to `TRACE` under `miden::vm::{execute,trace,prove}`, keeping successful proving silent at `INFO` ([#4238](https://github.com/0xMiden/miden-vm/pull/4238)).
 
 ## v0.36.4 (2026-11-06)
 
