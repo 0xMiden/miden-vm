@@ -1,11 +1,3 @@
-## Async store example
-
-A host can advertise a separate store through `forest_loader`. The store below suspends
-before completing its lookup. The examples exercise ordinary execution, witness recording,
-and stepping through the same host capability. Disabling the capability selects the legacy
-lookup; a store error or missing forest never triggers a second lookup through that path.
-
-```rust
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -18,7 +10,7 @@ use miden_processor::{
     LoadedMastForest, MastForestLoadFuture, ProcessorState, Program, StackInputs, Word,
     advice::AdviceMutation,
     event::EventError,
-    mast::{ExternalNodeBuilder, JoinNodeBuilder, MastForest},
+    mast::{DenseMastForestBuilder, ExternalNodeBuilder, JoinNodeBuilder},
 };
 
 struct Store {
@@ -71,10 +63,12 @@ fn fixture() -> (Program, StoreHost) {
         .assemble_program("callee", "begin add.1 end")
         .unwrap()
         .unwrap_program();
-    let mut forest = MastForest::new();
-    let external = ExternalNodeBuilder::new(callee.hash()).add_to_forest(&mut forest).unwrap();
-    let root = JoinNodeBuilder::new([external; 2]).add_to_forest(&mut forest).unwrap();
-    forest.make_root(root);
+    let mut forest = DenseMastForestBuilder::new();
+    let external = forest.push_node(ExternalNodeBuilder::new(callee.hash())).unwrap();
+    let root = forest.push_node(JoinNodeBuilder::new([external; 2])).unwrap();
+    forest.mark_root(root);
+    let forest = forest.build().unwrap();
+    let root = forest.procedure_roots()[0];
     let host = StoreHost {
         store: Store {
             result: Ok(Some(LoadedMastForest::new(callee.mast_forest().clone()))),
@@ -86,10 +80,16 @@ fn fixture() -> (Program, StoreHost) {
     (Program::new(forest.into(), root), host)
 }
 
+#[tokio::test]
 async fn async_extension_loads_once_and_reuses_the_forest() {
     let (program, mut host) = fixture();
     // Native callers retain the ability to move the execution future between threads.
+    #[cfg(not(target_family = "wasm"))]
     fn assert_send<T: Send>(future: T) -> T {
+        future
+    }
+    #[cfg(target_family = "wasm")]
+    fn assert_send<T>(future: T) -> T {
         future
     }
     let output =
@@ -101,6 +101,7 @@ async fn async_extension_loads_once_and_reuses_the_forest() {
     assert_eq!(host.legacy_calls.load(Ordering::SeqCst), 0);
 }
 
+#[tokio::test]
 async fn extension_error_is_preserved_without_legacy_retry() {
     let (program, mut host) = fixture();
     host.store.result = Err(std::io::ErrorKind::PermissionDenied);
@@ -118,6 +119,7 @@ async fn extension_error_is_preserved_without_legacy_retry() {
     assert_eq!(host.legacy_calls.load(Ordering::SeqCst), 0);
 }
 
+#[tokio::test]
 async fn extension_absence_is_distinct_from_an_absent_forest() {
     for enabled in [false, true] {
         let (program, mut host) = fixture();
@@ -133,6 +135,7 @@ async fn extension_absence_is_distinct_from_an_absent_forest() {
     }
 }
 
+#[tokio::test]
 async fn stepped_execution_uses_the_same_extension() {
     let (program, mut host) = fixture();
     let mut processor = FastProcessor::new(StackInputs::default());
@@ -144,12 +147,3 @@ async fn stepped_execution_uses_the_same_extension() {
     assert_eq!(host.store.calls.load(Ordering::SeqCst), 1);
     assert_eq!(host.legacy_calls.load(Ordering::SeqCst), 0);
 }
-
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
-    async_extension_loads_once_and_reuses_the_forest().await;
-    extension_error_is_preserved_without_legacy_retry().await;
-    extension_absence_is_distinct_from_an_absent_forest().await;
-    stepped_execution_uses_the_same_extension().await;
-}
-```

@@ -15,7 +15,27 @@ use super::{EventMutationRecorder, MastForestRecorder, advice::clone_advice_muta
 /// be replayed later from a [`ReplaySnapshot`](super::ReplaySnapshot).
 ///
 /// A recorder left unset is not recorded into.
-#[doc = include_str!("recording_host/idet_example.md")]
+///
+/// # Example
+///
+/// Pass the recording host to a diagnostic executor, then retrieve the forests for replay.
+///
+/// ```
+/// use miden_debug_engine::exec::{DiagnosticExecutor, MastForestRecorder, RecordingHost};
+/// use miden_processor::{ExecutionOptions, StackInputs, advice::AdviceInputs};
+/// # use miden_processor::{ExecutionError, Host, Program};
+/// # async fn example(program: &Program, host: &mut (impl Host + Send)) -> Result<(), ExecutionError> {
+/// let forests = MastForestRecorder::new();
+/// let mut recording = RecordingHost::new(host, None, Some(forests.clone()));
+/// let executor = DiagnosticExecutor::new(
+///     StackInputs::default(), AdviceInputs::default(), ExecutionOptions::default(),
+/// );
+/// let output = executor.execute_async(program, &mut recording).await?;
+/// let loaded_forests = forests.snapshot();
+/// # let _ = (output, loaded_forests);
+/// # Ok(())
+/// # }
+/// ```
 pub struct RecordingHost<'a, H> {
     inner: &'a mut H,
     /// When set, the advice mutations produced by each `on_event` invocation of the inner host

@@ -23,7 +23,59 @@ pub type MastForestLoadFuture<'a> = Pin<Box<dyn FutureMaybeSend<MastForestLoadRe
 ///
 /// Dropping a lookup must leave host and store state valid. Completed host effects are not rolled
 /// back when execution is cancelled.
-#[doc = include_str!("idet_example.md")]
+///
+/// # Example
+///
+/// Advertise the loader on the host, then use the ordinary execution method.
+///
+/// ```
+/// use miden_processor::{
+///     AsyncForestLoader, BaseHost, ExecutionError, FastProcessor, FutureMaybeSend, Host,
+///     LoadedMastForest, MastForestLoadFuture, ProcessorState, StackInputs, Word,
+///     advice::AdviceMutation, event::EventError,
+/// };
+/// # use std::sync::Arc;
+/// # use miden_debug_types::{Location, SourceFile, SourceSpan};
+///
+/// struct DatabaseHost;
+/// # impl BaseHost for DatabaseHost {
+/// #     fn get_label_and_source_file(&self, _: &Location) -> (SourceSpan, Option<Arc<SourceFile>>) {
+/// #         (SourceSpan::UNKNOWN, None)
+/// #     }
+/// # }
+///
+/// impl Host for DatabaseHost {
+///     fn forest_loader(&self) -> Option<&dyn AsyncForestLoader> {
+///         Some(self)
+///     }
+/// #     fn get_mast_forest(&self, _: &Word) -> impl FutureMaybeSend<Option<LoadedMastForest>> {
+/// #         async { unreachable!("use the advertised loader") }
+/// #     }
+/// #     fn on_event(&mut self, _: &ProcessorState<'_>)
+/// #         -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
+/// #         async { Ok(Vec::new()) }
+/// #     }
+/// }
+///
+/// impl AsyncForestLoader for DatabaseHost {
+///     fn load<'a>(&'a self, _root: &'a Word) -> MastForestLoadFuture<'a> {
+///         Box::pin(async move {
+///             // Await your datastore lookup here. This example returns a storage error.
+///             Err(std::io::Error::other("database unavailable").into())
+///         })
+///     }
+/// }
+///
+/// # #[tokio::main(flavor = "current_thread")]
+/// # async fn main() {
+/// # let program = miden_assembly::Assembler::default()
+/// #     .assemble_program("program", "begin dynexec end").unwrap().unwrap_program();
+/// let mut host = DatabaseHost;
+/// let error = FastProcessor::new(StackInputs::default())
+///     .execute(&program, &mut host).await.unwrap_err();
+/// assert!(matches!(error, ExecutionError::MastForestError { .. }));
+/// # }
+/// ```
 pub trait AsyncForestLoader {
     fn load<'a>(&'a self, root: &'a Word) -> MastForestLoadFuture<'a>;
 }
