@@ -316,8 +316,11 @@ fn init_tracing(verbose: bool) {
         "warn"
     };
 
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter));
+    let env_filter = match std::env::var("RUST_LOG") {
+        Ok(value) => tracing_subscriber::EnvFilter::try_new(value).expect("invalid RUST_LOG"),
+        Err(std::env::VarError::NotPresent) => tracing_subscriber::EnvFilter::new(default_filter),
+        Err(error) => panic!("invalid RUST_LOG: {error}"),
+    };
 
     Registry::default()
         .with(tracing_forest::ForestLayer::default().with_filter(env_filter))

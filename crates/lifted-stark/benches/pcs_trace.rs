@@ -26,10 +26,11 @@ fn main() {
     // Use RUST_LOG to select profiling targets and verbosity, e.g.
     // RUST_LOG=warn,miden::vm::prove=trace for STARK proving spans.
     tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("warn,miden::vm::prove=trace")),
-        )
+        .with_env_filter(match std::env::var("RUST_LOG") {
+            Ok(value) => EnvFilter::try_new(value).expect("invalid RUST_LOG"),
+            Err(std::env::VarError::NotPresent) => EnvFilter::new("warn,miden::vm::prove=trace"),
+            Err(error) => panic!("invalid RUST_LOG: {error}"),
+        })
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
         .init();
 

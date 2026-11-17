@@ -99,7 +99,6 @@ mod tests;
 ///
 /// assert_eq!(*trace.program_hash(), program.hash());
 /// ```
-#[instrument(target = "miden::vm::trace", name = "build_vm_trace", level = "trace", skip_all)]
 pub fn build_trace(witness: VmWitness) -> Result<VmTrace, ExecutionError> {
     build_trace_inner(witness, None, DEFAULT_MAX_PROVER_MEMORY_BYTES)
 }
@@ -124,6 +123,7 @@ pub(crate) fn build_trace_with_prebuilt_hasher(
     build_trace_inner(witness, Some(prebuilt_hasher), max_prover_memory_bytes)
 }
 
+#[instrument(target = "miden::vm::trace", name = "build_vm_trace", level = "trace", skip_all)]
 fn build_trace_inner(
     witness: VmWitness,
     prebuilt_hasher: Option<Hasher>,

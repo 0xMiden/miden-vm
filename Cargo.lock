@@ -2763,11 +2763,13 @@ dependencies = [
  "miden-precompiles-prover",
  "miden-processor",
  "miden-verifier",
+ "rayon",
  "serde",
  "serde-wincode",
  "thiserror",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

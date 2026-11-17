@@ -71,11 +71,11 @@ Once the executable has been compiled, you can run Miden VM like so:
 
 Currently, Miden VM can be executed with the following subcommands:
 
-- `run` - this will execute a Miden assembly program and output the result, but will not generate a proof of execution.
-- `prove` - this will execute a Miden assembly program, and will also generate a STARK proof of execution.
-- `verify` - this will verify a previously generated proof of execution for a given program.
-- `compile` - this will compile a Miden assembly program (i.e., build a program [MAST](./design/programs.md)) and outputs stats about the compilation process.
-- `example` - this will execute a Miden assembly example program, generate a STARK proof of execution and verify it. Currently, it is possible to run `blake3` and `fibonacci` examples.
+- `run` executes a Miden assembly program and outputs the result without generating a proof of execution.
+- `prove` executes a Miden assembly program and generates a STARK proof of execution.
+- `verify` verifies a previously generated proof of execution for a given program.
+- `compile` compiles a Miden assembly program (i.e., build a program [MAST](./design/programs.md)) and outputs stats about the compilation process.
+- `example` executes a Miden assembly example program, generates a STARK proof of execution and verifies it. Currently, it is possible to run `blake3` and `fibonacci` examples.
 
 All of the above subcommands require various parameters to be provided. To get more detailed help on what is needed for a given subcommand, you can run the following:
 
@@ -95,12 +95,14 @@ To execute a program using the Miden VM there needs to be a `.masm` file contain
 
 Use the `MIDEN_LOG` environment variable to select tracing targets and verbosity. The
 CLI defaults to `warn`. Successful proving emits no tracing output at `info`.
-Proving instrumentation uses `trace`, with three profiles:
+Proving instrumentation uses `trace`. The `miden::vm` target contains the end-to-end
+`prove_program` span and the combined execution and trace-building span. Phase targets
+report their own work:
 
 | Target | Operations |
 | --- | --- |
 | `miden::vm::execute` | Program execution for proving |
-| `miden::vm::trace` | VM and precompile trace construction |
+| `miden::vm::trace` | VM and precompile trace construction, including the streamed hasher |
 | `miden::vm::prove` | STARK proof generation and its phases |
 
 Enable all proving phases, or only STARK proving:
@@ -110,11 +112,14 @@ MIDEN_LOG=info,miden::vm=trace ./target/optimized/miden-vm prove [parameters]
 MIDEN_LOG=info,miden::vm::prove=trace ./target/optimized/miden-vm prove [parameters]
 ```
 
+During overlapped proving, streamed hasher construction runs alongside execution;
+`build_vm_trace` covers the remaining trace construction after execution finishes.
+
 CLI file operations use `miden::cli`. The `miden-bench` and standalone PCS profiling
 binaries use `RUST_LOG` instead of `MIDEN_LOG`; for example,
 `RUST_LOG=warn,miden::vm=trace,miden::bench=trace` enables Miden proving and
-benchmark spans. Third-party instrumentation can be selected using its own targets,
-such as `p3_dft=debug`.
+benchmark spans. Invalid `RUST_LOG` values cause an error. Third-party instrumentation
+can be selected using its own targets, such as `p3_dft=debug`.
 
 #### Debugging procedures
 
@@ -131,14 +136,14 @@ If trace building would exceed the VM trace row limit, `run` returns a trace len
 As described [here](https://docs.miden.xyz/miden-vm/overview#inputs-and-outputs) the Miden VM can consume public and secret inputs.
 
 - Public inputs:
-  - `operand_stack` - can be supplied to the VM to initialize the stack with the desired values before a program starts executing. If the number of provided input values is less than 16, the input stack will be padded with zeros to the length of 16. The maximum number of the stack inputs is limited by 16 values, providing more than 16 values will cause an error.
+  - `operand_stack` can be supplied to the VM to initialize the stack with the desired values before a program starts executing. If the number of provided input values is less than 16, the input stack will be padded with zeros to the length of 16. The maximum number of the stack inputs is limited by 16 values, providing more than 16 values will cause an error.
 - Secret (or nondeterministic) inputs:
-  - `advice_stack` - can be supplied to the VM. There is no limit on how much data the advice provider can hold. This is provided as a string array where each string entry represents a field element.
-  - `advice_map` - is supplied as a map of 64-character hex keys, each mapped to an array of numbers. The hex keys are interpreted as 4 field elements and the arrays of numbers are interpreted as arrays of field elements.
-  - `merkle_store` - the Merkle store is container that allows the user to define `merkle_tree`, `sparse_merkle_tree` and `partial_merkle_tree` data structures.
-    - `merkle_tree` - is supplied as an array of 64-character hex values where each value represents a leaf (4 elements) in the tree.
-    - `sparse_merkle_tree` - is supplied as an array of tuples of the form (number, 64-character hex string). The number represents the leaf index and the hex string represents the leaf value (4 elements).
-    - `partial_merkle_tree` - is supplied as an array of tuples of the form ((number, number), 64-character hex string). The internal tuple represents the leaf depth and index at this depth, and the hex string represents the leaf value (4 elements).
+  - `advice_stack` can be supplied to the VM. There is no limit on how much data the advice provider can hold. This is provided as a string array where each string entry represents a field element.
+  - `advice_map` is supplied as a map of 64-character hex keys, each mapped to an array of numbers. The hex keys are interpreted as 4 field elements and the arrays of numbers are interpreted as arrays of field elements.
+  - `merkle_store` holds a container that allows the user to define `merkle_tree`, `sparse_merkle_tree` and `partial_merkle_tree` data structures.
+    - `merkle_tree` is supplied as an array of 64-character hex values where each value represents a leaf (4 elements) in the tree.
+    - `sparse_merkle_tree` is supplied as an array of tuples of the form (number, 64-character hex string). The number represents the leaf index and the hex string represents the leaf value (4 elements).
+    - `partial_merkle_tree` is supplied as an array of tuples of the form ((number, number), 64-character hex string). The internal tuple represents the leaf depth and index at this depth, and the hex string represents the leaf value (4 elements).
 
 _Check out the [comparison example](https://github.com/0xMiden/examples/blob/main/examples/comparison.masm) to see how secret inputs work._
 
