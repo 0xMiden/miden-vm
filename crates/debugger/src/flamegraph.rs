@@ -30,7 +30,7 @@ pub struct FlamegraphProfile {
     total_cycles: usize,
 }
 
-/// The output format selected by [`FlamegraphProfile::write_to_path`].
+/// The output format selected by `FlamegraphProfile::write_to_path`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FlamegraphOutput {
     Svg,

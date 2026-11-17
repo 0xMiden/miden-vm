@@ -166,7 +166,7 @@ impl Executor {
     /// this the cheap way to step a program to its end while observing every cycle. The profiler
     /// configuration is not used; observe the cycles through the stepper's callback instead.
     ///
-    /// Fails as [`Stepper::for_package`] does: the package's advice map conflicts with the
+    /// Fails as `Stepper::for_package` does: the package's advice map conflicts with the
     /// advice inputs or, added to them, exceeds the options' advice budget, or its debug info
     /// cannot be used with its program. Panics, as [`Executor::into_debug`] does, when `package`
     /// is not a program, the advice inputs do not fit the options' advice budget, or an event

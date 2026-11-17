@@ -105,7 +105,7 @@ impl NodeIndex {
         self
     }
 
-    /// Returns the parent of the current node. This is the same as [`Self::move_up()`], but returns
+    /// Returns the parent of the current node. This is the same as `move_up`, but returns
     /// a new value instead of mutating `self`.
     pub const fn parent(mut self) -> Self {
         self.depth = self.depth.saturating_sub(1);

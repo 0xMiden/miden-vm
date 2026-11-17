@@ -20,7 +20,7 @@ pub fn seeded_rng(seed: [u8; 32]) -> ChaCha20Rng {
     ChaCha20Rng::from_seed(seed)
 }
 
-/// Array-shaped variant of [`seeded_felts`] for sites that need a
+/// Draws `N` values from the same fixed-seed stream for sites that need a
 /// fixed-length `[Felt; N]` (e.g. fixed-width state roundtrips).
 pub fn seeded_felts_array<const N: usize>(seed: u8) -> [Felt; N] {
     let mut rng = seeded_rng([seed; 32]);

@@ -125,7 +125,7 @@ impl IterCost {
 /// rate on the `decoder_pad` snippet) are measured so the solver can subtract them.
 pub type Calibration = BTreeMap<&'static str, IterCost>;
 
-/// Run every snippet through a single-point calibration at [`CALIBRATION_ITERS`] and record
+/// Run every snippet through a single-point calibration at `CALIBRATION_ITERS` and record
 /// per-iter cost in each component.
 pub fn calibrate() -> Result<Calibration, MeasurementError> {
     let mut cal = Calibration::new();

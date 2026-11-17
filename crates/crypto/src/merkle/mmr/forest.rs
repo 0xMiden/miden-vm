@@ -146,10 +146,6 @@ impl Forest {
     }
 
     /// Returns the height (bit position) of the largest tree in the forest.
-    ///
-    /// If the forest cannot be empty, use [`largest_tree_height_unchecked`] for performance.
-    ///
-    /// [`largest_tree_height_unchecked`]: Self::largest_tree_height_unchecked
     pub fn largest_tree_height(self) -> Option<usize> {
         if self.is_empty() {
             return None;
@@ -190,11 +186,6 @@ impl Forest {
     }
 
     /// Returns the height (bit position) of the smallest tree in the forest.
-    ///
-    /// If the forest cannot be empty, use [`smallest_tree_height_unchecked`] for better
-    /// performance.
-    ///
-    /// [`smallest_tree_height_unchecked`]: Self::smallest_tree_height_unchecked
     pub fn smallest_tree_height(self) -> Option<usize> {
         if self.is_empty() {
             return None;
@@ -325,10 +316,6 @@ impl Forest {
     /// This function takes the smallest tree in this forest, "pretends" that it is a subtree of a
     /// fully balanced binary tree, and returns the in-order index of that balanced tree's root
     /// node.
-    ///
-    /// If the forest cannot be empty, use [`root_in_order_index_unchecked`] for performance.
-    ///
-    /// [`root_in_order_index_unchecked`]: Self::root_in_order_index_unchecked
     pub fn root_in_order_index(&self) -> Option<InOrderIndex> {
         if self.is_empty() {
             return None;
@@ -364,10 +351,6 @@ impl Forest {
     }
 
     /// Returns the in-order index of the rightmost element (the smallest tree).
-    ///
-    /// If the forest cannot be empty, use [`rightmost_in_order_index_unchecked`] for performance.
-    ///
-    /// [`rightmost_in_order_index_unchecked`]: Self::rightmost_in_order_index_unchecked
     pub fn rightmost_in_order_index(&self) -> Option<InOrderIndex> {
         if self.is_empty() {
             return None;

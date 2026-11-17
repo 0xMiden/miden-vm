@@ -72,7 +72,7 @@ where
     /// Returns the advice mutations recorded so far, leaving the recording empty.
     ///
     /// Returns an empty log when recording was not enabled via
-    /// [DebuggerHost::with_event_advice_mutations_recording].
+    /// `DebuggerHost::with_event_advice_mutations_recording`.
     pub fn take_recorded_event_mutations(&mut self) -> Vec<Vec<AdviceMutation>> {
         self.event_recording.as_mut().map(core::mem::take).unwrap_or_default()
     }
