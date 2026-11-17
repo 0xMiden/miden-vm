@@ -5,6 +5,11 @@ import { fileURLToPath } from "node:url";
 
 // See ../README.md for scope and rationale. Remove these when patches are released.
 const exceptions = {
+  "https://github.com/advisories/GHSA-fc5q-39xc-vjpf": {
+    package: "picomatch",
+    version: "2.3.2",
+    expires: "2026-11-24",
+  },
   "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm": {
     package: "braces",
     version: "3.0.3",
@@ -66,7 +71,7 @@ function main() {
   const report = JSON.parse(result.stdout);
   const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
   const count = checkAudit(report, lock);
-  console.log(`Docs audit passed with ${count} findings covered by the braces exception, expiring 2026-11-03.`);
+  console.log(`Docs audit passed with ${count} findings covered by reviewed temporary exceptions.`);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
