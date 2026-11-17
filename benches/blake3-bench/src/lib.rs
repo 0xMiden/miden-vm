@@ -153,7 +153,7 @@ pub fn execute_program(fixture: &Blake3Fixture) -> ExecutionOutput {
 }
 
 pub fn prove_program(fixture: &Blake3Fixture) {
-    let _span = tracing::info_span!("prove_program_sync").entered();
+    let _span = tracing::trace_span!(target: "miden::bench", "prove_program").entered();
     prove_trace(execute_for_proving(fixture));
 }
 
@@ -273,8 +273,8 @@ pub fn prove_span_duration(fixture: &Blake3Fixture) -> Duration {
     let spans = collect_trace_spans(fixture);
     let prove_span = spans
         .iter()
-        .find(|span| span.name == "prove")
-        .expect("failed to collect `prove` span from Blake3 proof run");
+        .find(|span| span.target == "miden::vm::prove" && span.name == "prove_stark")
+        .expect("failed to collect `prove_stark` span from Blake3 proof run");
     Duration::from_secs_f64(prove_span.duration_ms / 1000.0)
 }
 

@@ -87,7 +87,7 @@ use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use p3_maybe_rayon::prelude::*;
 use periodic::PeriodicLde;
 use thiserror::Error;
-use tracing::{info_span, instrument};
+use tracing::{instrument, trace_span};
 
 use crate::{
     StarkConfig,
@@ -226,7 +226,7 @@ where
 ///
 /// # Returns
 /// `Ok((StarkOutput { digest, proof }, statement))`, or a [`ProverError`] if validation fails.
-#[instrument(name = "prove", skip_all)]
+#[instrument(target = "miden::vm::prove", name = "prove_stark", level = "trace", skip_all)]
 pub(crate) fn prove<F, EF, MA, SC>(
     instance: ProverInstance<'_, F, EF, MA, SC>,
     mut challenger: SC::Challenger,
@@ -326,7 +326,7 @@ where
             RowMajorMatrix::new(values, trace.width())
         })
         .collect();
-    let main_committed = info_span!("commit to main traces")
+    let main_committed = trace_span!(target: "miden::vm::prove", "commit_main_traces")
         .in_scope(|| commit_traces(config, &instance_domains, main_traces));
     channel.send_commitment(main_committed.root());
 
@@ -342,8 +342,8 @@ where
     // trust contract above); a malformed output is caught downstream by the
     // LDE/commit or by verification.
     let aux_inputs = statement.aux_inputs();
-    let (mut aux_traces_ef, mut all_aux_values): (Vec<_>, Vec<_>) = info_span!("build aux traces")
-        .in_scope(|| {
+    let (mut aux_traces_ef, mut all_aux_values): (Vec<_>, Vec<_>) =
+        trace_span!(target: "miden::vm::prove", "build_aux_traces").in_scope(|| {
             airs.par_iter()
                 .zip(traces.par_iter())
                 .map(|(air, main)| {
@@ -403,7 +403,7 @@ where
         })
         .collect();
 
-    let aux_committed = info_span!("commit to aux traces")
+    let aux_committed = trace_span!(target: "miden::vm::prove", "commit_aux_traces")
         .in_scope(|| commit_traces(config, &instance_domains, aux_traces));
     channel.send_commitment(aux_committed.root());
 
@@ -436,7 +436,7 @@ where
         .map(|&air| get_constraint_layout::<F, EF, _>(air))
         .collect();
 
-    info_span!("evaluate constraints").in_scope(|| {
+    trace_span!(target: "miden::vm::prove", "evaluate_constraints").in_scope(|| {
         for (i, &air) in proof_ordered_airs.iter().enumerate() {
             let this_log_quotient_degree = log_quotient_degrees[i];
             let this_quotient_degree = 1usize << this_log_quotient_degree;
@@ -476,8 +476,9 @@ where
             let aux_values_i = &all_aux_values[i];
             let inv_z_h = this_quotient_eval_domain.inv_vanishing_evals();
 
-            tracing::debug_span!(
-                "eval_instance",
+            trace_span!(
+                target: "miden::vm::prove",
+                "evaluate_air_constraints",
                 instance = i,
                 native_height = this_quotient_eval_domain.size(),
                 target_height = this_target_quotient_height,
@@ -504,7 +505,8 @@ where
 
             if this_log_quotient_degree < log_quotient_degree {
                 let added_bits = (log_quotient_degree - this_log_quotient_degree) as usize;
-                quotient_evals = tracing::debug_span!(
+                quotient_evals = trace_span!(
+                    target: "miden::vm::prove",
                     "upsample_quotient",
                     instance = i,
                     from = this_quotient_eval_domain.size(),
@@ -519,8 +521,9 @@ where
 
             // Cyclically extend the running accumulator to the per-AIR target height and
             // Horner-fold this AIR's contribution in: acc <- acc * beta + Q_j.
-            tracing::debug_span!(
-                "cyclic_extend_and_accumulate",
+            trace_span!(
+                target: "miden::vm::prove",
+                "accumulate_quotient",
                 acc_len = accumulator.len(),
                 target = this_target_quotient_height
             )
@@ -533,7 +536,7 @@ where
     debug_assert_eq!(accumulator.len(), max_quotient_height);
 
     // 5. Commit quotient.
-    let quotient_committed = info_span!("commit to quotient poly chunks")
+    let quotient_committed = trace_span!(target: "miden::vm::prove", "commit_quotient")
         .in_scope(|| quotient::commit_quotient(config, accumulator, &max_eval_domain));
     channel.send_commitment(quotient_committed.root());
 
@@ -552,16 +555,14 @@ where
     trees.push(aux_committed.tree());
     trees.push(quotient_committed.tree());
 
-    info_span!("open").in_scope(|| {
-        open_with_channel::<F, EF, SC::Lmcs, RowMajorMatrix<F>, _, 2>(
-            config.pcs(),
-            config.lmcs(),
-            &max_lde_domain,
-            [z, z_next],
-            &trees,
-            &mut channel,
-        )
-    });
+    open_with_channel::<F, EF, SC::Lmcs, RowMajorMatrix<F>, _, 2>(
+        config.pcs(),
+        config.lmcs(),
+        &max_lde_domain,
+        [z, z_next],
+        &trees,
+        &mut channel,
+    );
 
     let (digest, transcript) = channel.finalize();
     let proof = StarkProofData {

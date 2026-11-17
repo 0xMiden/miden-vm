@@ -773,12 +773,12 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
                 let variant_span = join_spans(name_span, discriminant.span());
                 (
                     ast::Variant::new(name.clone(), discriminant, None).with_span(variant_span),
-                    self.next_enum_discriminant_expr(name.clone(), variant_span),
+                    self.next_enum_discriminant_expr(name, variant_span),
                 )
             } else {
                 (
                     ast::Variant::new(name.clone(), next, None).with_span(name_span),
-                    self.next_enum_discriminant_expr(name.clone(), name_span),
+                    self.next_enum_discriminant_expr(name, name_span),
                 )
             };
             next = next_expr;

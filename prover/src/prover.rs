@@ -127,11 +127,8 @@ impl Prover {
 
     /// Materializes and proves the VM trace represented by `witness`.
     fn prove_vm(&self, witness: VmWitness) -> Result<VmProof, ProverError> {
-        let trace = {
-            let _span = tracing::info_span!("build_miden_vm_trace").entered();
-            build_trace_with_budget(witness, self.max_prover_memory_bytes)
-                .map_err(ProverError::TraceGeneration)?
-        };
+        let trace = build_trace_with_budget(witness, self.max_prover_memory_bytes)
+            .map_err(ProverError::TraceGeneration)?;
 
         self.prove_vm_trace(trace)
     }
@@ -176,20 +173,26 @@ impl Prover {
     ///
     /// Buffered and overlapped trace construction share this private implementation so STARK
     /// generation and VM proof packaging cannot diverge.
-    #[tracing::instrument(name = "miden_vm", skip_all)]
+    #[tracing::instrument(
+        target = "miden::vm::prove",
+        name = "prove_vm",
+        level = "trace",
+        skip_all
+    )]
     fn prove_vm_trace(&self, trace: VmTrace) -> Result<VmProof, ProverError> {
         let trace_len_summary = trace.trace_len_summary();
         let params = config::pcs_params();
         tracing::event!(
-            tracing::Level::INFO,
-            "Generated execution traces: core={}, range={}, chiplets={}, poseidon2={}, padded={}, \
-             estimated_prover_memory_bytes={:?}",
-            trace_len_summary.core_trace_len(),
-            trace_len_summary.range_trace_len(),
-            trace_len_summary.chiplets_trace_len().trace_len(),
-            trace_len_summary.poseidon2_permutation_trace_len(),
-            trace_len_summary.padded_trace_len(),
-            trace_len_summary.prover_memory_bytes(&params)
+            name: "vm_trace_ready",
+            target: "miden::vm::trace",
+            tracing::Level::TRACE,
+            core_rows = trace_len_summary.core_trace_len(),
+            range_rows = trace_len_summary.range_trace_len(),
+            chiplet_rows = trace_len_summary.chiplets_trace_len().trace_len(),
+            poseidon2_rows = trace_len_summary.poseidon2_permutation_trace_len(),
+            padded_rows = trace_len_summary.padded_trace_len(),
+            estimated_prover_memory_bytes = trace_len_summary.prover_memory_bytes(&params),
+            "VM trace ready"
         );
 
         let precompile_root = trace.precompile_root();
@@ -268,7 +271,7 @@ impl Prover {
 /// When enabled in `execution_options`, the processor may build the hasher chiplet alongside
 /// execution. A caller with no separate Rayon worker uses compact buffered replay. Both cases use
 /// the same private VM STARK and complete-local packaging implementation.
-#[tracing::instrument(name = "prove_program_sync", skip_all)]
+#[tracing::instrument(target = "miden::vm", name = "prove_program", level = "trace", skip_all)]
 pub fn prove_sync(
     prover: &Prover,
     program: &Program,
@@ -284,14 +287,11 @@ pub fn prove_sync(
 
     #[cfg(feature = "std")]
     if overlapped_trace_build {
-        let (trace, precompile) = {
-            let _span = tracing::info_span!("execute_miden_vm").entered();
-            processor.execute_and_build_trace_sync(
-                program,
-                host,
-                prover.max_prover_memory_bytes(),
-            )?
-        };
+        let (trace, precompile) = processor.execute_and_build_trace_sync(
+            program,
+            host,
+            prover.max_prover_memory_bytes(),
+        )?;
         let stack_outputs = *trace.stack_outputs();
         let proof = prover
             .prove_full_trace(trace, precompile)
@@ -299,10 +299,7 @@ pub fn prove_sync(
         return Ok((stack_outputs, proof));
     }
 
-    let witness = {
-        let _span = tracing::info_span!("execute_miden_vm").entered();
-        processor.execute_for_proving_sync(program, host)?
-    };
+    let witness = processor.execute_for_proving_sync(program, host)?;
     let stack_outputs = *witness.claim().stack_outputs();
     let proof = prover.prove_full(witness).map_err(ProverError::into_execution_error)?;
     Ok((stack_outputs, proof))

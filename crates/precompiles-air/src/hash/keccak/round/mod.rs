@@ -278,7 +278,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
             let [r_lo, r_hi] = halves_le(&r_bytes, 256);
             let lo_decomp: AB::Expr = pack_le(&rot_limbs[0..4], 1u64 << 16);
             let hi_decomp: AB::Expr = pack_le(&rot_limbs[4..8], 1u64 << 16);
-            let rol_gate = act.clone() * is_rol.clone();
+            let rol_gate = act * is_rol.clone();
             builder
                 .assert_zero(rol_gate.clone() * ((r_lo + two_32.clone()) * k.clone() - lo_decomp));
             builder.assert_zero(rol_gate * ((r_hi + two_32.clone()) * k.clone() - hi_decomp));
@@ -441,7 +441,7 @@ where
             // `reads_b`: XOR / ANDNOT / fused XORROL all read `src_b`.
             let reads_b = act.clone() * (is_xor.clone() + is_andnot.clone());
             let rol_act = act.clone() * is_rol.clone();
-            let dst_mult_act = act.clone() * dst_mult.clone();
+            let dst_mult_act = act * dst_mult.clone();
 
             // band col 0: memory64 dst provide. Mixed-sign multiplicities:
             // `mult = -dst_mult` for the provide (signed via `g.insert`, since

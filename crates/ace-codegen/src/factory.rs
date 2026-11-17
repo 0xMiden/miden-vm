@@ -212,8 +212,8 @@ where
             for block in 0..blocks {
                 for i in 0..RATE_WIDTH {
                     let elem = &mut state[Poseidon2::RATE_RANGE.start + i];
-                    for lane in 0..LEAF_LANES {
-                        elem.as_slice_mut()[lane] = scratch.streams[lane][block * RATE_WIDTH + i];
+                    for (lane, stream) in scratch.streams.iter().enumerate() {
+                        elem.as_slice_mut()[lane] = stream[block * RATE_WIDTH + i];
                     }
                 }
                 Poseidon2Permutation256.permute_mut(&mut state);

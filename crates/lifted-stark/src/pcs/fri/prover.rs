@@ -6,7 +6,7 @@ use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::{bitrev::BitReversalPerm, dense::RowMajorMatrix, extension::FlatMatrixView};
 use p3_maybe_rayon::prelude::*;
 use p3_util::reverse_slice_index_bits;
-use tracing::{debug_span, info_span};
+use tracing::trace_span;
 
 use crate::{
     domain::{Coset, LiftedDomain},
@@ -161,16 +161,17 @@ where
             // Wrap in BitReversedMatrixView to present domain order to the LMCS.
             // The LMCS extracts the inner FlatMatrixView and stores it.
             let natural_view = BitReversalPerm::new_view(flat_view);
-            let tree = info_span!("FRI round commit", round, domain_size)
-                .in_scope(|| lmcs.build_tree(alloc::vec![natural_view]));
+            let tree =
+                trace_span!(target: "miden::vm::prove", "commit_fri_round", round, domain_size)
+                    .in_scope(|| lmcs.build_tree(alloc::vec![natural_view]));
             let commitment = tree.root();
-            channel.send_commitment(commitment.clone());
+            channel.send_commitment(commitment);
 
             // ─────────────────────────────────────────────────────────────────────
             // Grind and sample folding challenge beta
             // ─────────────────────────────────────────────────────────────────────
             let _pow_witness =
-                info_span!("FRI folding grind", round, bits = params.folding_pow_bits)
+                trace_span!(target: "miden::vm::prove", "grind_folding_pow", round, bits = params.folding_pow_bits)
                     .in_scope(|| channel.grind(params.folding_pow_bits));
             let beta: EF = channel.sample_algebra_element();
 
@@ -180,8 +181,9 @@ where
             // Get the underlying EF matrix from the FlatMatrixView via Deref for folding.
             let flat_view_ref = &tree.leaves()[0];
             let ef_matrix: &RowMajorMatrix<EF> = flat_view_ref;
-            folded_evals = info_span!("FRI fold", round, domain_size)
-                .in_scope(|| params.fold.fold_matrix(ef_matrix.as_view(), &s_invs, beta));
+            folded_evals =
+                trace_span!(target: "miden::vm::prove", "fold_fri_round", round, domain_size)
+                    .in_scope(|| params.fold.fold_matrix(ef_matrix.as_view(), &s_invs, beta));
             // No bit-reversal needed: folded evals maintain bit-reversed order
             // because s_invs are already bit-reversed to match.
 
@@ -228,8 +230,9 @@ where
         folded_evals.truncate(final_poly_degree);
         reverse_slice_index_bits(&mut folded_evals);
 
-        let mut final_poly = debug_span!("idft final poly")
-            .in_scope(|| Radix2DFTSmallBatch::default().idft_algebra(folded_evals));
+        let mut final_poly =
+            trace_span!(target: "miden::vm::prove", "interpolate_final_polynomial")
+                .in_scope(|| Radix2DFTSmallBatch::default().idft_algebra(folded_evals));
 
         // Store in descending degree order [cₙ, ..., c₁, c₀] so the verifier
         // can evaluate via Horner without reversing.

@@ -145,21 +145,29 @@ pub(crate) fn selected_criterion_axes(bench_axes: &str) -> Option<BTreeSet<Strin
 
 fn report_span_metric_name(name: &str) -> Option<String> {
     match name {
-        "execute_for_proving_with_package_debug_info_sync"
+        "execute_program"
+        | "execute_for_proving_sync"
+        | "execute_for_proving_with_package_debug_info_sync"
         | "execute_for_proving_with_package_debug_info_at_source_node_sync" => {
             Some(EXECUTE_FOR_PROVING_METRIC.to_string())
         },
-        "build aux traces" => Some("build_aux_trace".to_string()),
+        "build_aux_traces" | "build aux traces" => Some("build_aux_trace".to_string()),
         "to_core_chiplets_matrices" => Some("to_row_major_matrix".to_string()),
+        "build_vm_trace" => Some("build_trace".to_string()),
+        "commit_main_traces" => Some("commit_to_main_traces".to_string()),
+        "commit_aux_traces" => Some("commit_to_aux_traces".to_string()),
+        "commit_quotient" => Some("commit_to_quotient_poly_chunks".to_string()),
+        "open_polynomials" => Some("open".to_string()),
         "build_trace"
         | "commit to main traces"
         | "commit to aux traces"
+        | "evaluate_constraints"
         | "evaluate constraints"
         | "commit to quotient poly chunks"
         | "open"
         | "prove_trace_sync" => Some(name.replace(' ', "_")),
-        "prove" => Some("prove_span".to_string()),
-        "prove_program_sync" => Some("e2e_prove_wall".to_string()),
+        "prove_stark" | "prove" => Some("prove_span".to_string()),
+        "prove_program" | "prove_program_sync" => Some("e2e_prove_wall".to_string()),
         _ => None,
     }
 }

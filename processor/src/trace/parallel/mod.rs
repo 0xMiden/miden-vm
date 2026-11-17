@@ -18,7 +18,7 @@ use miden_core::{
     utils::Idx,
 };
 use rayon::prelude::*;
-use tracing::{info_span, instrument};
+use tracing::{instrument, trace_span};
 
 use super::{
     chiplets::Chiplets,
@@ -99,7 +99,6 @@ mod tests;
 ///
 /// assert_eq!(*trace.program_hash(), program.hash());
 /// ```
-#[instrument(name = "build_trace", skip_all)]
 pub fn build_trace(witness: VmWitness) -> Result<VmTrace, ExecutionError> {
     build_trace_inner(witness, None, DEFAULT_MAX_PROVER_MEMORY_BYTES)
 }
@@ -124,6 +123,7 @@ pub(crate) fn build_trace_with_prebuilt_hasher(
     build_trace_inner(witness, Some(prebuilt_hasher), max_prover_memory_bytes)
 }
 
+#[instrument(target = "miden::vm::trace", name = "build_vm_trace", level = "trace", skip_all)]
 fn build_trace_inner(
     witness: VmWitness,
     prebuilt_hasher: Option<Hasher>,
@@ -182,33 +182,35 @@ fn build_trace_inner(
         return Err(ExecutionError::Internal("no trace fragments provided in the trace witness"));
     }
 
-    let chiplets = info_span!("initialize_chiplets").in_scope(|| {
-        initialize_chiplets(
-            program_info.kernel().clone(),
-            &core_trace_contexts,
-            memory_writes,
-            bitwise,
-            kernel_replay,
-            hasher_for_chiplet,
-            prebuilt_hasher,
-            ace_replay,
-            &mast_forest_store,
-            max_trace_len,
-        )
-    })?;
+    let chiplets =
+        trace_span!(target: "miden::vm::trace", "initialize_chiplets").in_scope(|| {
+            initialize_chiplets(
+                program_info.kernel().clone(),
+                &core_trace_contexts,
+                memory_writes,
+                bitwise,
+                kernel_replay,
+                hasher_for_chiplet,
+                prebuilt_hasher,
+                ace_replay,
+                &mast_forest_store,
+                max_trace_len,
+            )
+        })?;
 
-    let range_checker = info_span!("initialize_range_checker")
+    let range_checker = trace_span!(target: "miden::vm::trace", "initialize_range_checker")
         .in_scope(|| initialize_range_checker(range_checker_replay, &chiplets));
 
-    let mut core_trace_data = info_span!("generate_core_trace").in_scope(|| {
-        generate_core_trace_row_major(
-            core_trace_contexts,
-            program_info.kernel().clone(),
-            fragment_size,
-            &mast_forest_store,
-            max_stack_depth,
-        )
-    })?;
+    let mut core_trace_data = trace_span!(target: "miden::vm::trace", "generate_core_trace")
+        .in_scope(|| {
+            generate_core_trace_row_major(
+                core_trace_contexts,
+                program_info.kernel().clone(),
+                fragment_size,
+                &mast_forest_store,
+                max_stack_depth,
+            )
+        })?;
 
     let core_trace_len = core_trace_data.len() / CORE_STORAGE_WIDTH;
 
@@ -252,16 +254,18 @@ fn build_trace_inner(
     );
 
     // Each segment is built at its own per-AIR height (no cross-padding to the unified max).
-    let ((chiplets_trace, poseidon2_permutation_trace), ()) = info_span!("chiplet_traces_core_pad")
-        .in_scope(|| {
-            rayon::join(
-                || chiplets.into_traces(chiplets_height, poseidon2_permutation_height),
-                || pad_core_row_major(&mut core_trace_data, core_height),
-            )
-        });
+    let ((chiplets_trace, poseidon2_permutation_trace), ()) =
+        trace_span!(target: "miden::vm::trace", "build_chiplet_traces_and_pad_core").in_scope(
+            || {
+                rayon::join(
+                    || chiplets.into_traces(chiplets_height, poseidon2_permutation_height),
+                    || pad_core_row_major(&mut core_trace_data, core_height),
+                )
+            },
+        );
 
     // The range checker occupies the two trailing columns of the core buffer.
-    info_span!("write_range_checker_columns").in_scope(|| {
+    trace_span!(target: "miden::vm::trace", "write_range_checker_columns").in_scope(|| {
         range_checker.write_range_into_core(
             &mut core_trace_data,
             CORE_STORAGE_WIDTH,
@@ -580,8 +584,8 @@ fn push_halt_opcode_row(
 
         // Pad op_bits columns with HALT opcode bits
         let halt_opcode = opcodes::HALT;
-        for bit_idx in 0..NUM_OP_BITS {
-            row.decoder.op_bits[bit_idx] = Felt::from_u8((halt_opcode >> bit_idx) & 1);
+        for (bit_idx, bit) in row.decoder.op_bits.iter_mut().enumerate() {
+            *bit = Felt::from_u8((halt_opcode >> bit_idx) & 1);
         }
 
         // Pad hasher state columns (8 columns)
@@ -944,8 +948,8 @@ fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, core_height: usize) {
 
         // Pad op_bits columns with HALT opcode bits
         let halt_opcode = opcodes::HALT;
-        for i in 0..NUM_OP_BITS {
-            template.decoder.op_bits[i] = Felt::from_u8((halt_opcode >> i) & 1);
+        for (i, bit) in template.decoder.op_bits.iter_mut().enumerate() {
+            *bit = Felt::from_u8((halt_opcode >> i) & 1);
         }
         // Pad hasher state columns (8 columns)
         // - First 4 columns: copy the last value (to propagate program hash)

@@ -5,6 +5,11 @@ import { fileURLToPath } from "node:url";
 
 // See ../README.md for scope and rationale. Remove these when patches are released.
 const exceptions = {
+  "https://github.com/advisories/GHSA-fc5q-39xc-vjpf": {
+    package: "picomatch",
+    version: "2.3.2",
+    expires: "2026-11-24",
+  },
   "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm": {
     package: "braces",
     version: "3.0.3",
@@ -12,7 +17,7 @@ const exceptions = {
   },
 };
 
-export function checkAudit(report, lock, today = new Date().toISOString().slice(0, 10)) {
+export function checkAudit(report, lock, today = new Date().toISOString().slice(0, 10), latestPicomatchVersion) {
   if (report.error || report.auditReportVersion !== 2 || !report.vulnerabilities) {
     throw new Error("npm audit did not return a valid version 2 report");
   }
@@ -33,9 +38,17 @@ export function checkAudit(report, lock, today = new Date().toISOString().slice(
         continue;
       }
       const exception = exceptions[cause.url];
+      const fix = finding.fixAvailable;
+      // This plugin downgrade requires Docusaurus 2; the preview uses Docusaurus 3.
+      const inapplicableDowngrade = name === "picomatch" &&
+        fix?.name === "@cmfcmf/docusaurus-search-local" &&
+        fix.version === "0.11.0" && fix.isSemVerMajor === true;
+      const picomatchUnchanged = name !== "picomatch" ||
+        (latestPicomatchVersion === "4.0.7" && cause.range === "<=4.0.7");
       if (!exception || name !== exception.package || cause.name !== name ||
           cause.severity !== "high" || today >= exception.expires ||
-          finding.fixAvailable !== false || !finding.nodes?.length ||
+          (fix !== false && !inapplicableDowngrade) || !picomatchUnchanged ||
+          !finding.nodes?.length ||
           !finding.nodes.every((node) => lock.packages?.[node]?.version === exception.version)) {
         throw new Error(`Unaccepted advisory for ${name}: ${cause.url}. Check locked versions, patches, and exception expiry.`);
       }
@@ -64,9 +77,22 @@ function main() {
   // Keep the complete findings visible even when a temporary exception applies.
   process.stdout.write(result.stdout);
   const report = JSON.parse(result.stdout);
+  let latestPicomatchVersion;
+  if (report.vulnerabilities?.picomatch) {
+    const registry = spawnSync("npm", ["view", "picomatch", "version", "--json"], {
+      cwd: docs,
+      encoding: "utf8",
+      timeout: 120_000,
+      maxBuffer: 1024 * 1024,
+    });
+    if (registry.error || registry.signal || registry.status !== 0) {
+      throw new Error(`picomatch registry lookup failed: ${registry.error || registry.stderr || registry.signal || registry.status}`);
+    }
+    latestPicomatchVersion = JSON.parse(registry.stdout);
+  }
   const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  const count = checkAudit(report, lock);
-  console.log(`Docs audit passed with ${count} findings covered by the braces exception, expiring 2026-11-03.`);
+  const count = checkAudit(report, lock, undefined, latestPicomatchVersion);
+  console.log(`Docs audit passed with ${count} findings covered by reviewed temporary exceptions.`);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

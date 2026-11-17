@@ -41,7 +41,12 @@ impl SessionTraces {
     }
 
     /// Proves the whole chiplet stack with the requested hash function.
-    #[tracing::instrument("prove_stark", skip_all)]
+    #[tracing::instrument(
+        target = "miden::vm::prove",
+        name = "prove_precompile_stark",
+        level = "trace",
+        skip_all
+    )]
     pub(crate) fn prove_stark(self, hash_fn: HashFunction) -> Result<StarkProof, ProveError> {
         let params = precompile_pcs_params();
         match hash_fn {

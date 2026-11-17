@@ -178,7 +178,9 @@ fn overlap_builder_thread_enters_the_instrument_span() {
             id: &Id,
             _ctx: tracing_subscriber::layer::Context<'_, S>,
         ) {
-            if attrs.metadata().name() == "execute_and_build_trace_sync" {
+            if attrs.metadata().target() == "miden::vm"
+                && attrs.metadata().name() == "execute_and_build_trace_sync"
+            {
                 *self.target.lock().unwrap() = Some(id.clone());
             }
         }

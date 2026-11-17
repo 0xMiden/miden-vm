@@ -13,7 +13,7 @@ pub(crate) const DEFAULT_MIDEN_AUX_COLS: usize = 8;
 /// Prove and verify a set of AIR instances with the lifted or batch STARK prover.
 ///
 /// Prints a configuration summary, proof size, and total time.
-/// Pass -v for the full hierarchical tracing tree.
+/// Pass -v for the Miden proving and benchmark tracing tree.
 ///
 /// Trace spec format:  `AIR:LOG_HEIGHT[:WIDTH[:AUX_COLS]]`
 ///
@@ -30,7 +30,7 @@ pub(crate) const DEFAULT_MIDEN_AUX_COLS: usize = 8;
 ///
 ///   bench                                             # default: blake3:15 keccak:18 poseidon2:19
 ///   bench keccak:15 keccak:18 keccak:19               # 3x Keccak at different heights
-///   bench -v keccak:15                                 # full tracing tree
+///   bench -v keccak:15                                 # Miden tracing tree
 ///   bench miden:18:51 miden:19:20                      # two Miden-shaped traces (auto blowup=3)
 ///   bench -m batch keccak:15 keccak:18 keccak:19       # batch-STARK comparison
 ///   bench -H keccak keccak:15                          # use Keccak hash for commitments
@@ -56,7 +56,7 @@ pub(crate) struct Cli {
     #[arg(long, short = 'H', value_enum, default_value_t = HashFn::Poseidon2)]
     pub(crate) hash: HashFn,
 
-    /// Print the full hierarchical tracing tree (default: summary only).
+    /// Print the Miden proving and benchmark tracing tree (default: summary only).
     ///
     /// RUST_LOG overrides this when set.
     #[arg(long, short = 'v')]

@@ -22,7 +22,12 @@ use tracing::instrument;
 /// Runs `air.eval()` on a [`ConstraintLayoutBuilder`] that uses concrete field zeros
 /// for all variables. This discovers which constraints are base-field vs extension-field
 /// without building symbolic expression trees — only the emission order matters.
-#[instrument(name = "compute constraint layout", skip_all, level = "debug")]
+#[instrument(
+    target = "miden::vm::prove",
+    name = "compute_constraint_layout",
+    level = "trace",
+    skip_all
+)]
 pub(crate) fn get_constraint_layout<F, EF, A>(air: &A) -> ConstraintLayout
 where
     F: Field,

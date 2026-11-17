@@ -134,7 +134,7 @@ impl RunCmd {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-#[instrument(name = "run_program", skip_all)]
+#[instrument(target = "miden::cli", name = "run_program", level = "trace", skip_all)]
 fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
     let program = get_masp_program(&params.program_file)?;
 
@@ -168,7 +168,7 @@ fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
     Ok((trace, program_hash))
 }
 
-#[instrument(name = "run_program", skip_all)]
+#[instrument(target = "miden::cli", name = "run_program", level = "trace", skip_all)]
 fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
     for lib in &params.library_paths {
         if !lib.is_file() {

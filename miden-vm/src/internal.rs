@@ -90,7 +90,7 @@ impl InputFile {
 
     /// Reads input JSON from a regular file of at most [`Self::MAX_FILE_SIZE`] bytes.
     /// Symlinks to regular files are accepted.
-    #[instrument(name = "read_input_file", skip_all)]
+    #[instrument(target = "miden::cli", name = "read_input_file", level = "trace", skip_all)]
     pub fn read(inputs_path: &Option<PathBuf>, program_path: &Path) -> Result<Self, Report> {
         // If inputs_path has been provided then use this as path. Alternatively we will
         // replace the program_path extension with .inputs and use this as a default.
@@ -147,7 +147,7 @@ impl InputFile {
             let root = merkle_builder::add_tree(data, &mut |left, right| {
                 provider.merge_roots(left, right).map_err(|err| err.to_string())
             })?;
-            event!(Level::TRACE, "Added Merkle tree with root {} to the Merkle store", root);
+            event!(target: "miden::cli", Level::TRACE, "Added Merkle tree with root {} to the Merkle store", root);
         }
         let (stack, map, store) = provider.into_parts();
         Ok(AdviceInputs::new(stack.into(), map, store))
@@ -228,6 +228,7 @@ impl InputFile {
                         .map_err(|e| format!("failed to parse a Merkle tree: {e}"))?;
                     merkle_store.extend(tree.inner_nodes());
                     event!(
+                        target: "miden::cli",
                         Level::TRACE,
                         "Added Merkle tree with root {} to the Merkle store",
                         tree.root()
@@ -239,6 +240,7 @@ impl InputFile {
                         .map_err(|e| format!("failed to parse a Sparse Merkle Tree: {e}"))?;
                     merkle_store.extend(tree.inner_nodes());
                     event!(
+                        target: "miden::cli",
                         Level::TRACE,
                         "Added Sparse Merkle tree with root {} to the Merkle store",
                         tree.root()
@@ -250,6 +252,7 @@ impl InputFile {
                         .map_err(|e| format!("failed to parse a Partial Merkle Tree: {e}"))?;
                     merkle_store.extend(tree.inner_nodes());
                     event!(
+                        target: "miden::cli",
                         Level::TRACE,
                         "Added Partial Merkle tree with root {} to the Merkle store",
                         tree.root()
@@ -580,7 +583,7 @@ mod tests {
         let err = InputFile::read(&Some(file.path().to_path_buf()), file.path()).unwrap_err();
         let message = format!("{err:?}");
         assert!(message.contains("size limit of 67108864 bytes"), "{message}");
-        assert!(message.contains(&file.path().display().to_string()), "{message}");
+        assert!(err.to_string().contains(&file.path().display().to_string()), "{message}");
 
         // The exact limit reaches the JSON parser, which rejects the sparse file's zero bytes.
         file.as_file().set_len(InputFile::MAX_FILE_SIZE as u64).unwrap();

@@ -122,7 +122,7 @@ impl LiftedAir<Felt, QuadFelt> for BenchAir {
         for _ in 0..CONSTRAINTS_PER_COLUMN {
             for c in 0..WIDTH {
                 let x: AB::Expr = local[c].into();
-                let x_hi: AB::Expr = x.clone().exp_power_of_2(log2_hi);
+                let x_hi: AB::Expr = x.exp_power_of_2(log2_hi);
                 builder.when_transition().assert_eq(next[c].into(), x_hi * x);
             }
         }
@@ -304,9 +304,11 @@ fn run_prove(
 
 fn main() {
     tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")),
-        )
+        .with_env_filter(match std::env::var("RUST_LOG") {
+            Ok(value) => EnvFilter::try_new(value).expect("invalid RUST_LOG"),
+            Err(std::env::VarError::NotPresent) => EnvFilter::new("warn,miden::vm::prove=trace"),
+            Err(error) => panic!("invalid RUST_LOG: {error}"),
+        })
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
         .init();
 

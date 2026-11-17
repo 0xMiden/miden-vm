@@ -51,7 +51,7 @@ where
     A: LiftedAir<F, EF>,
     for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
 {
-    let _span = tracing::info_span!("build_aux_trace_logup").entered();
+    let _span = tracing::trace_span!(target: "miden::vm::trace", "build_logup_aux_trace").entered();
 
     debug_assert!(
         challenges.len() >= 2,

@@ -392,8 +392,8 @@ mod tests {
     }
 
     fn base_setup(local: &mut CoreCols<Felt>) {
-        for i in 0..16 {
-            local.stack.top[i] = sentinel(i);
+        for (i, value) in local.stack.top.iter_mut().enumerate() {
+            *value = sentinel(i);
         }
     }
 

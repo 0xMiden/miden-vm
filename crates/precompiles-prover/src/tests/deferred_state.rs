@@ -436,7 +436,11 @@ fn insufficient_budget_rejects_before_building_traces() {
         }
 
         fn new_span(&self, attrs: &tracing::span::Attributes<'_>) -> tracing::span::Id {
-            assert_ne!(attrs.metadata().name(), "build_trace", "budget must be checked first");
+            assert_ne!(
+                attrs.metadata().name(),
+                "build_precompile_traces",
+                "budget must be checked first"
+            );
             tracing::span::Id::from_u64(1)
         }
 

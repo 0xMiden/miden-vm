@@ -257,6 +257,7 @@ pub trait EidosEncoding: 'static {
 
 /// Type marker for the standard exact-length Felt-sequence construction.
 #[derive(Debug)]
+#[expect(clippy::empty_enums, reason = "uninhabited type-level marker")]
 pub enum FeltSequence {}
 
 impl EidosEncoding for FeltSequence {
@@ -265,6 +266,7 @@ impl EidosEncoding for FeltSequence {
 
 /// Type marker for the standard exact-length byte-string construction.
 #[derive(Debug)]
+#[expect(clippy::empty_enums, reason = "uninhabited type-level marker")]
 pub enum ByteString {}
 
 impl EidosEncoding for ByteString {
@@ -273,6 +275,7 @@ impl EidosEncoding for ByteString {
 
 /// Type marker for the Eidos Fiat-Shamir transcript seed construction.
 #[derive(Debug)]
+#[expect(clippy::empty_enums, reason = "uninhabited type-level marker")]
 pub enum Transcript {}
 
 impl EidosEncoding for Transcript {
@@ -281,6 +284,7 @@ impl EidosEncoding for Transcript {
 
 /// Type marker for a domain-specific Eidos schedule.
 #[derive(Debug)]
+#[expect(clippy::empty_enums, reason = "uninhabited type-level marker")]
 pub enum Custom {}
 
 impl EidosEncoding for Custom {

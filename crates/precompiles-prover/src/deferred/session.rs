@@ -153,7 +153,11 @@ pub(crate) fn prove(
     max_prover_memory_bytes: u64,
 ) -> Result<crate::PrecompileProof, crate::PrecompileProvingError> {
     let imported = {
-        let _span = tracing::info_span!("build_session").entered();
+        let _span = tracing::trace_span!(
+            target: "miden::vm::trace",
+            "import_precompile_witnesses"
+        )
+        .entered();
         import_witnesses(witnesses, ImportLimits::default())?
     };
     let params = precompile_pcs_params();
@@ -164,7 +168,11 @@ pub(crate) fn prove(
     crate::check_memory_budget(estimated_bytes, max_prover_memory_bytes)?;
 
     let traces = {
-        let _span = tracing::info_span!("build_trace").entered();
+        let _span = tracing::trace_span!(
+            target: "miden::vm::trace",
+            "build_precompile_traces"
+        )
+        .entered();
         imported.session.finish(imported.root)
     };
     Ok(crate::PrecompileProof {
