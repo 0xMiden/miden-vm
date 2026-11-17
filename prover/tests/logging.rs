@@ -85,6 +85,12 @@ fn proving_is_quiet_at_info_and_separates_trace_building() {
         let pipeline = records.iter().find(|record| record.name == "prove_program").unwrap();
         assert_eq!(pipeline.target, "miden::vm");
 
+        let streamed_hasher = records.iter().find(|record| record.name == "build_streamed_hasher");
+        assert_eq!(streamed_hasher.is_some(), overlapped, "{records:?}");
+        if let Some(hasher) = streamed_hasher {
+            assert_eq!(hasher.target, TRACE);
+        }
+
         let builds: Vec<_> =
             records.iter().filter(|record| record.name == "build_vm_trace").collect();
         assert_eq!(builds.len(), 1, "overlapped={overlapped}: {records:?}");
