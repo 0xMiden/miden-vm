@@ -6,7 +6,7 @@ use miden_air::{
     CoreCols, DecoderCols, StackCols, SystemCols,
     trace::{
         chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
-        decoder::{NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_USER_OP_HELPERS},
+        decoder::{NUM_OP_BATCH_FLAGS, NUM_USER_OP_HELPERS},
     },
 };
 use miden_core::{
@@ -504,8 +504,8 @@ impl<'a> CoreTraceGenerationTracer<'a> {
 
         // Decompose operation into bits
         let opcode = decoder_row.opcode;
-        for i in 0..NUM_OP_BITS {
-            decoder.op_bits[i] = Felt::from_u8((opcode >> i) & 1);
+        for (i, bit) in decoder.op_bits.iter_mut().enumerate() {
+            *bit = Felt::from_u8((opcode >> i) & 1);
         }
 
         // Hasher state

@@ -15,6 +15,11 @@
 //! Debuggers can use this information along with MAST debug metadata to provide source-level
 //! variable inspection, stepping, and call stack visualization.
 
+#![allow(
+    clippy::empty_enums,
+    reason = "zerocopy derives generate uninhabited helper types"
+)]
+
 use alloc::{sync::Arc, vec::Vec};
 use core::{marker::PhantomData, num::NonZeroU32};
 

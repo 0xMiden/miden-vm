@@ -282,20 +282,27 @@ mod tests {
     fn poseidon2_external_round_constants_are_correct() {
         let periodic = Poseidon2PermutationPeriodicCols::new();
 
-        for lane in 0..STATE_WIDTH {
-            assert_eq!(periodic.ark[lane][0], Hasher::ARK_EXT_INITIAL[0][lane]);
+        for (lane, ark) in periodic.ark.iter().enumerate() {
+            assert_eq!(ark[0], Hasher::ARK_EXT_INITIAL[0][lane]);
 
-            for row in INITIAL_EXTERNAL_ROUND_START..INITIAL_EXTERNAL_ROUND_END {
-                assert_eq!(periodic.ark[lane][row], Hasher::ARK_EXT_INITIAL[row][lane]);
+            for (row, constant) in ark
+                .iter()
+                .enumerate()
+                .take(INITIAL_EXTERNAL_ROUND_END)
+                .skip(INITIAL_EXTERNAL_ROUND_START)
+            {
+                assert_eq!(*constant, Hasher::ARK_EXT_INITIAL[row][lane]);
             }
 
-            assert_eq!(
-                periodic.ark[lane][INTERNAL_PLUS_EXTERNAL_ROW],
-                Hasher::ARK_EXT_TERMINAL[0][lane]
-            );
-            for row in TERMINAL_EXTERNAL_ROUND_START..TERMINAL_EXTERNAL_ROUND_END {
+            assert_eq!(ark[INTERNAL_PLUS_EXTERNAL_ROW], Hasher::ARK_EXT_TERMINAL[0][lane]);
+            for (row, constant) in ark
+                .iter()
+                .enumerate()
+                .take(TERMINAL_EXTERNAL_ROUND_END)
+                .skip(TERMINAL_EXTERNAL_ROUND_START)
+            {
                 assert_eq!(
-                    periodic.ark[lane][row],
+                    *constant,
                     Hasher::ARK_EXT_TERMINAL[row - INTERNAL_PLUS_EXTERNAL_ROW][lane]
                 );
             }
@@ -308,15 +315,12 @@ mod tests {
 
         for triple in 0..NUM_PACKED_INTERNAL_ROUND_ROWS {
             let row = PACKED_INTERNAL_ROUND_START + triple;
-            for lane in 0..NUM_SBOX_WITNESSES {
-                assert_eq!(
-                    periodic.ark[lane][row],
-                    Hasher::ARK_INT[triple * NUM_SBOX_WITNESSES + lane]
-                );
+            for (lane, ark) in periodic.ark[..NUM_SBOX_WITNESSES].iter().enumerate() {
+                assert_eq!(ark[row], Hasher::ARK_INT[triple * NUM_SBOX_WITNESSES + lane]);
             }
 
-            for lane in NUM_SBOX_WITNESSES..STATE_WIDTH {
-                assert_eq!(periodic.ark[lane][row], Felt::ZERO);
+            for ark in &periodic.ark[NUM_SBOX_WITNESSES..] {
+                assert_eq!(ark[row], Felt::ZERO);
             }
         }
     }
@@ -331,8 +335,8 @@ mod tests {
         assert_eq!(periodic.is_packed_int[row], Felt::ZERO);
         assert_eq!(periodic.is_int_ext[row], Felt::ZERO);
 
-        for lane in 0..STATE_WIDTH {
-            assert_eq!(periodic.ark[lane][row], Felt::ZERO);
+        for ark in &periodic.ark {
+            assert_eq!(ark[row], Felt::ZERO);
         }
     }
 }

@@ -165,7 +165,7 @@ where
                 trace_span!(target: "miden::vm::prove", "commit_fri_round", round, domain_size)
                     .in_scope(|| lmcs.build_tree(alloc::vec![natural_view]));
             let commitment = tree.root();
-            channel.send_commitment(commitment.clone());
+            channel.send_commitment(commitment);
 
             // ─────────────────────────────────────────────────────────────────────
             // Grind and sample folding challenge beta

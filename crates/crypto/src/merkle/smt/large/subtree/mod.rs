@@ -665,8 +665,8 @@ impl Subtree {
         let (word_idx, bit_idx) = Self::bit_position(bit_offset);
         let mut count = 0;
 
-        for i in 0..word_idx {
-            count += self.child_bits[i].count_ones() as usize;
+        for word in &self.child_bits[..word_idx] {
+            count += word.count_ones() as usize;
         }
 
         if bit_idx > 0 {
