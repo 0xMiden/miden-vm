@@ -96,8 +96,9 @@ To execute a program using the Miden VM there needs to be a `.masm` file contain
 Use the `MIDEN_LOG` environment variable to select tracing targets and verbosity. The
 CLI defaults to `warn`. Successful proving emits no tracing output at `info`.
 Proving instrumentation uses `trace`. The `miden::vm` target contains the end-to-end
-`prove_program` span and the combined execution and trace-building span. Phase targets
-report their own work:
+`prove_program` span. With overlapped trace building enabled, it also contains the
+`execute_and_build_trace_sync` envelope. The buffered route records execution and trace
+construction separately under their phase targets. Phase targets report their own work:
 
 | Target | Operations |
 | --- | --- |
