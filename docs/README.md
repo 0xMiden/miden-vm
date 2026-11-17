@@ -36,9 +36,17 @@ The audit no longer accepts an exception for that advisory.
 
 `scripts/audit.mjs` checks the advisory ID and every affected locked version.
 It also accepts findings inherited solely from reviewed advisories, prints the
-full npm report, and fails when an exception expires or npm reports an available
-fix. Other advisories still fail CI. Run `npm audit` to see the raw report
+full npm report, and fails when an exception expires or an applicable fix is
+reported. Other advisories still fail CI. Run `npm audit` to see the raw report
 and remove the exception when upstream publishes a fix.
+
+npm sometimes suggests downgrading `@cmfcmf/docusaurus-search-local` to 0.11.0
+to address `picomatch`. That plugin version requires Docusaurus 2, which conflicts
+with this preview's Docusaurus 3 dependencies. The audit excludes only that exact
+recommendation from its available-fix check. A separate registry lookup must still
+report `picomatch` 4.0.7 as the latest release, and the advisory range must remain
+`<=4.0.7`. A changed registry result or advisory range fails the audit, as does any
+other fix recommendation. The locked-version and expiry checks still apply.
 
 The preview uses the docs plugin and classic theme directly. Installing the
 classic preset also pulls in unused analytics and Algolia search integrations,
