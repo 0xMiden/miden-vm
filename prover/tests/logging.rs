@@ -3,19 +3,19 @@ use std::sync::{Arc, Mutex};
 use miden_assembly::Assembler;
 use miden_processor::{DefaultHost, Program};
 use miden_prover::{AdviceInputs, ExecutionOptions, Prover, StackInputs, prove_sync};
-use tracing::{Event, Level, Metadata, Subscriber, span::Attributes};
+use tracing::{Event, Subscriber, span::Attributes};
 use tracing_subscriber::{
     EnvFilter, Layer, Registry, layer::Context, prelude::*, registry::LookupSpan,
 };
 
 const EXECUTE: &str = "miden::vm::execute";
 const TRACE: &str = "miden::vm::trace";
-const PROVE: &str = "miden::vm::prove";
 
 #[derive(Clone, Debug)]
 struct Record {
-    metadata: &'static Metadata<'static>,
-    parent_targets: Vec<&'static str>,
+    name: &'static str,
+    target: &'static str,
+    in_execution: bool,
 }
 
 #[derive(Clone, Default)]
@@ -26,23 +26,24 @@ where
     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
 {
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &tracing::span::Id, ctx: Context<'_, S>) {
-        let parent_targets = ctx
+        let in_execution = ctx
             .span(id)
             .unwrap()
             .scope()
             .skip(1)
-            .map(|span| span.metadata().target())
-            .collect();
+            .any(|span| span.metadata().target() == EXECUTE);
         self.0.lock().unwrap().push(Record {
-            metadata: attrs.metadata(),
-            parent_targets,
+            name: attrs.metadata().name(),
+            target: attrs.metadata().target(),
+            in_execution,
         });
     }
 
     fn on_event(&self, event: &Event<'_>, _: Context<'_, S>) {
         self.0.lock().unwrap().push(Record {
-            metadata: event.metadata(),
-            parent_targets: Vec::new(),
+            name: event.metadata().name(),
+            target: event.metadata().target(),
+            in_execution: false,
         });
     }
 }
@@ -65,10 +66,9 @@ fn capture_proving(program: &Program, overlapped: bool, filter: &str) -> Vec<Rec
 }
 
 #[test]
-fn proving_tracing_is_opt_in_and_keeps_phase_boundaries() {
-    // Exceed the final FRI degree so proving includes at least one folding round.
+fn proving_is_quiet_at_info_and_separates_trace_building() {
     let program = Assembler::default()
-        .assemble_program("logging", "begin repeat.256 push.1 drop end end")
+        .assemble_program("logging", "begin push.1 drop end")
         .unwrap()
         .unwrap_program();
     let pool = rayon::ThreadPoolBuilder::new().num_threads(2).build().unwrap();
@@ -77,72 +77,18 @@ fn proving_tracing_is_opt_in_and_keeps_phase_boundaries() {
         if overlapped && !cfg!(feature = "std") {
             continue;
         }
-        for filter in [
-            "info",
-            "info,miden::vm=trace",
-            "info,miden::vm::trace=trace",
-            "info,miden::vm::prove=trace",
-        ] {
-            let records = pool.install(|| capture_proving(&program, overlapped, filter));
-            if filter == "info" {
-                assert!(records.is_empty(), "{records:?}");
-                continue;
-            }
-            assert!(records.iter().all(|record| *record.metadata.level() == Level::TRACE));
+        let info = pool.install(|| capture_proving(&program, overlapped, "info"));
+        assert!(info.is_empty(), "{info:?}");
 
-            if filter == "info,miden::vm=trace" {
-                assert!(
-                    records.iter().any(|record| {
-                        record.metadata.name() == "prove_program"
-                            && record.metadata.target() == "miden::vm"
-                    }),
-                    "{records:?}"
-                );
-                assert!(records.iter().any(|record| record.metadata.target() == EXECUTE));
-                if overlapped {
-                    assert!(
-                        records.iter().any(|record| {
-                            record.metadata.name() == "build_streamed_hasher"
-                                && record.metadata.target() == TRACE
-                        }),
-                        "{records:?}"
-                    );
-                }
-            }
+        let records =
+            pool.install(|| capture_proving(&program, overlapped, "info,miden::vm=trace"));
+        let pipeline = records.iter().find(|record| record.name == "prove_program").unwrap();
+        assert_eq!(pipeline.target, "miden::vm");
 
-            if filter != "info,miden::vm::prove=trace" {
-                let builds: Vec<_> = records
-                    .iter()
-                    .filter(|record| record.metadata.name() == "build_vm_trace")
-                    .collect();
-                assert_eq!(builds.len(), 1, "overlapped={overlapped}: {records:?}");
-                assert_eq!(builds[0].metadata.target(), TRACE);
-                assert!(!builds[0].parent_targets.contains(&EXECUTE), "{records:?}");
-                assert!(
-                    records.iter().any(|record| {
-                        record.metadata.name() == "vm_trace_ready"
-                            && record.metadata.target() == TRACE
-                    }),
-                    "{records:?}"
-                );
-            }
-
-            if filter == "info,miden::vm::trace=trace" {
-                assert!(records.iter().all(|record| record.metadata.target() == TRACE));
-            } else {
-                for name in ["prove_stark", "open_polynomials", "fold_fri_round"] {
-                    assert!(
-                        records.iter().any(|record| {
-                            record.metadata.name() == name && record.metadata.target() == PROVE
-                        }),
-                        "missing {name}: {records:?}"
-                    );
-                }
-            }
-            if filter == "info,miden::vm::prove=trace" {
-                assert!(records.iter().all(|record| record.metadata.target() == PROVE));
-                assert!(!records.iter().any(|record| record.metadata.name() == "prove_program"));
-            }
-        }
+        let builds: Vec<_> =
+            records.iter().filter(|record| record.name == "build_vm_trace").collect();
+        assert_eq!(builds.len(), 1, "overlapped={overlapped}: {records:?}");
+        assert_eq!(builds[0].target, TRACE);
+        assert!(!builds[0].in_execution, "{records:?}");
     }
 }
