@@ -743,8 +743,8 @@ mod tests {
         let next = generate_test_row(opcodes::SPAN.into());
         for opcode in [opcodes::LOOP, opcodes::CALL, opcodes::SYSCALL] {
             let mut local = generate_test_row(opcode.into());
-            for lane in 0..4 {
-                local.decoder.hasher_state[lane] = Felt::from_u8(11 + lane as u8);
+            for (lane, value) in local.decoder.hasher_state[..4].iter_mut().enumerate() {
+                *value = Felt::from_u8(11 + lane as u8);
             }
             assert!(decoder_accepts(&local, &next), "opcode {opcode}: the child digest is free");
 
@@ -785,8 +785,8 @@ mod tests {
         let next = generate_test_row(opcodes::SPAN.into());
         for opcode in [opcodes::JOIN, opcodes::SPLIT] {
             let mut local = generate_test_row(opcode.into());
-            for lane in 0..8 {
-                local.decoder.hasher_state[lane] = Felt::from_u8(11 + lane as u8);
+            for (lane, value) in local.decoder.hasher_state.iter_mut().enumerate() {
+                *value = Felt::from_u8(11 + lane as u8);
             }
             assert!(decoder_accepts(&local, &next), "opcode {opcode} must keep both child words");
         }
