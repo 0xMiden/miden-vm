@@ -8,7 +8,7 @@
 //! 1. **In-span constraints**: Ensure the in-span flag transitions correctly.
 //! 2. **Op-bit binary constraints**: Ensure operation bits are binary.
 //! 3. **Extra columns (e0, e1)**: Degree-reduction columns for operation flag computation.
-//! 4. **Opcode-bit group constraints**: Reject unused encodings in the upper prefix groups.
+//! 4. **Opcode-bit group constraints**: Reject unused opcode encodings.
 //! 5. **General opcode-semantic constraints**: Per-operation invariants (SPLIT/LOOP, DYN, REPEAT,
 //!    END, HALT).
 //! 6. **Group count constraints**: Group-count transitions inside basic blocks.
@@ -197,10 +197,11 @@ pub fn enforce_main<AB>(
     // =============================================
     // Opcode-bit group constraints
     // =============================================
-    // Restrict unused opcode encodings in the upper prefix groups:
+    // Restrict unused opcode encodings:
     //
     //   b6 b5 b4 | Constraint
     //   ---------+----------------------
+    //   0  1  0  | exclude opcode 47
     //   1  0  0  | b0 = 0
     //   1  0  1  | exclude opcode 95
     //   1  1  *  | b0 = b1 = 0
@@ -213,6 +214,11 @@ pub fn enforce_main<AB>(
 
     // Prefix 11 also requires b1 = 0.
     builder.when(e1).assert_zero(b1);
+
+    // Opcode 47 is the only unused degree-7 encoding. The left-shift route covers its slot, so
+    // without this constraint it would execute as an unnamed DROP.
+    let unused_47 = b6.into().not() * b5 * b4.into().not() * b3 * b2 * b1 * b0;
+    builder.assert_zero(unused_47);
 
     // =============================================
     // General opcode-semantic constraints
@@ -506,7 +512,8 @@ mod tests {
     use miden_core::{
         Felt, ONE,
         field::{Field, PrimeCharacteristicRing, QuadFelt},
-        operations::opcodes,
+        operations::{Operation, opcodes},
+        serde::{Deserializable, SliceReader},
     };
 
     use super::{CONTROLLER_ROWS_PER_HASHER_OP_FELT, enforce_main};
@@ -708,9 +715,35 @@ mod tests {
             assert!(decoder_accepts(&local, &next), "opcode {opcode} must be accepted");
         }
 
-        for opcode in [65, 95, 97, 98] {
+        for opcode in [47, 65, 95, 97, 98] {
             set_opcode(&mut local, opcode);
             assert!(!decoder_accepts(&local, &next), "unused opcode {opcode} must be rejected");
+        }
+    }
+
+    /// Inside a span, the decoder admits exactly the basic-block operations of the native opcode
+    /// registry. Control-flow opcodes violate the in-span/control-flow exclusion, and every unused
+    /// encoding, including degree-7 slot 47, violates an opcode-bit constraint.
+    #[test]
+    fn in_span_opcodes_match_the_operation_registry() {
+        // ASSERT, U32ASSERT2, MPVERIFY and PUSH carry one field-element immediate on the wire.
+        let registered = |opcode: u8| {
+            let bytes = [opcode, 0, 0, 0, 0, 0, 0, 0, 0];
+            Operation::read_from(&mut SliceReader::new(&bytes)).is_ok()
+        };
+
+        for opcode in 0..128u8 {
+            let (mut local, mut next) = honest_in_span_pair();
+            set_opcode(&mut local, opcode.into());
+            if opcode == opcodes::PUSH {
+                // PUSH consumes the group holding its immediate.
+                next.decoder.group_count = Felt::ZERO;
+            }
+            assert_eq!(
+                decoder_accepts(&local, &next),
+                registered(opcode),
+                "in-span admission of opcode {opcode} must match the operation registry",
+            );
         }
     }
 
