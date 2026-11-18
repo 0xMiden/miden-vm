@@ -1,104 +1,174 @@
-// Allow unused assignments - required by miette::Diagnostic derive macro
-#![allow(unused_assignments)]
-
 use alloc::sync::Arc;
 
 use miden_debug_types::{SourceFile, SourceManager, SourceSpan};
 
 use crate::{
     ast::ItemIndex,
-    diagnostics::{Diagnostic, RelatedLabel, miette},
+    diagnostics::{Diagnostic, DiagnosticDetails, Label, RelatedLabel},
 };
 
 /// Represents an error that occurs during symbol resolution
-#[derive(Debug, Clone, thiserror::Error, Diagnostic)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum SymbolResolutionError {
     #[error("undefined symbol reference")]
-    #[diagnostic(help("maybe you are missing an import?"))]
     UndefinedSymbol {
-        #[label("this symbol path could not be resolved")]
         span: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
     },
     #[error("invalid symbol reference")]
-    #[diagnostic(help(
-        "references to a subpath of an imported symbol require the imported item to be a module"
-    ))]
     InvalidAliasTarget {
-        #[label("this reference specifies a subpath relative to an import")]
         span: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        #[related]
         relative_to: Option<RelatedLabel>,
     },
     #[error("invalid symbol path")]
-    #[diagnostic(help("all ancestors of a path must be modules"))]
     InvalidSubPath {
-        #[label("this path specifies a subpath relative to another item")]
         span: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        #[related]
         relative_to: Option<RelatedLabel>,
     },
     #[error("invalid symbol reference: wrong type")]
-    #[diagnostic()]
     InvalidSymbolType {
         expected: &'static str,
-        #[label("expected this symbol to reference a {expected} item")]
         span: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        #[related]
         actual: Option<RelatedLabel>,
     },
     #[error("private symbol reference")]
-    #[diagnostic(help("only public items can be referenced from another module"))]
     PrivateSymbol {
-        #[label("this symbol is private to another module")]
         span: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        #[related]
         defined: Option<RelatedLabel>,
     },
     #[error("type expression nesting depth exceeded")]
-    #[diagnostic(help("type expression nesting exceeded the maximum depth of {max_depth}"))]
     TypeExpressionDepthExceeded {
-        #[label("type expression nesting exceeded the configured depth limit")]
         span: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
         max_depth: usize,
     },
     #[error("alias expansion cycle detected")]
-    #[diagnostic(help("alias expansion encountered a cycle"))]
     AliasExpansionCycle {
-        #[label("this alias expansion is part of a cycle")]
         span: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
     },
     #[error("alias expansion depth exceeded")]
-    #[diagnostic(help("alias expansion exceeded the maximum depth of {max_depth}"))]
     AliasExpansionDepthExceeded {
-        #[label("alias expansion exceeded the configured depth limit")]
         span: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
         max_depth: usize,
     },
     #[error("too many items in module")]
-    #[diagnostic(help("break this module up into smaller modules"))]
     TooManyItemsInModule {
-        #[label("module item count exceeds the supported limit of {max_items}")]
         span: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
         max_items: usize,
     },
+}
+
+impl Diagnostic for SymbolResolutionError {
+    fn details(&self) -> DiagnosticDetails<'_> {
+        match self {
+            Self::UndefinedSymbol { span, source_file } => DiagnosticDetails {
+                source: source_file.as_deref(),
+                labels: alloc::vec![Label::new(*span, "this symbol path could not be resolved")]
+                    .into(),
+                help: Some("maybe you are missing an import?".into()),
+                ..DiagnosticDetails::default()
+            },
+            Self::InvalidAliasTarget { span, source_file, relative_to } => DiagnosticDetails {
+                source: source_file.as_deref(),
+                labels: alloc::vec![Label::new(
+                    *span,
+                    "this reference specifies a subpath relative to an import"
+                )]
+                .into(),
+                help: Some(
+                    "references to a subpath of an imported symbol require the imported item to \
+                     be a module"
+                        .into(),
+                ),
+                related: relative_to.iter().map(|error| error as &dyn Diagnostic).collect(),
+                ..DiagnosticDetails::default()
+            },
+            Self::InvalidSubPath { span, source_file, relative_to } => DiagnosticDetails {
+                source: source_file.as_deref(),
+                labels: alloc::vec![Label::new(
+                    *span,
+                    "this path specifies a subpath relative to another item"
+                )]
+                .into(),
+                help: Some("all ancestors of a path must be modules".into()),
+                related: relative_to.iter().map(|error| error as &dyn Diagnostic).collect(),
+                ..DiagnosticDetails::default()
+            },
+            Self::InvalidSymbolType { expected, span, source_file, actual } => DiagnosticDetails {
+                source: source_file.as_deref(),
+                labels: alloc::vec![Label::new(
+                    *span,
+                    format!("expected this symbol to reference a {expected} item")
+                )]
+                .into(),
+                related: actual.iter().map(|error| error as &dyn Diagnostic).collect(),
+                ..DiagnosticDetails::default()
+            },
+            Self::PrivateSymbol { span, source_file, defined } => DiagnosticDetails {
+                source: source_file.as_deref(),
+                labels: alloc::vec![Label::new(*span, "this symbol is private to another module")]
+                    .into(),
+                help: Some("only public items can be referenced from another module".into()),
+                related: defined.iter().map(|error| error as &dyn Diagnostic).collect(),
+                ..DiagnosticDetails::default()
+            },
+            Self::TypeExpressionDepthExceeded { span, source_file, max_depth } => {
+                DiagnosticDetails {
+                    source: source_file.as_deref(),
+                    labels: alloc::vec![Label::new(
+                        *span,
+                        "type expression nesting exceeded the configured depth limit"
+                    )]
+                    .into(),
+                    help: Some(
+                        format!(
+                            "type expression nesting exceeded the maximum depth of {max_depth}"
+                        )
+                        .into(),
+                    ),
+                    ..DiagnosticDetails::default()
+                }
+            },
+            Self::AliasExpansionCycle { span, source_file } => DiagnosticDetails {
+                source: source_file.as_deref(),
+                labels: alloc::vec![Label::new(*span, "this alias expansion is part of a cycle")]
+                    .into(),
+                help: Some("alias expansion encountered a cycle".into()),
+                ..DiagnosticDetails::default()
+            },
+            Self::AliasExpansionDepthExceeded { span, source_file, max_depth } => {
+                DiagnosticDetails {
+                    source: source_file.as_deref(),
+                    labels: alloc::vec![Label::new(
+                        *span,
+                        "alias expansion exceeded the configured depth limit"
+                    )]
+                    .into(),
+                    help: Some(
+                        format!("alias expansion exceeded the maximum depth of {max_depth}").into(),
+                    ),
+                    ..DiagnosticDetails::default()
+                }
+            },
+            Self::TooManyItemsInModule { span, source_file, max_items } => DiagnosticDetails {
+                source: source_file.as_deref(),
+                labels: alloc::vec![Label::new(
+                    *span,
+                    format!("module item count exceeds the supported limit of {max_items}")
+                )]
+                .into(),
+                help: Some("break this module up into smaller modules".into()),
+                ..DiagnosticDetails::default()
+            },
+        }
+    }
 }
 
 impl SymbolResolutionError {

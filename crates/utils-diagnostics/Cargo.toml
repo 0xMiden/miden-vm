@@ -16,12 +16,12 @@ exclude.workspace = true
 
 [features]
 default = ["std"]
-std = ["miette/fancy-no-syscall", "miette/std", "miden-debug-types/std"]
+std = ["miden-debug-types/std"]
 
 [dependencies]
 miden-debug-types.workspace = true
-miette = { workspace = true, features = ["derive"] }
 tracing.workspace = true
+unicode-width = { version = "0.2", default-features = false }
 
 [lints]
 workspace = true

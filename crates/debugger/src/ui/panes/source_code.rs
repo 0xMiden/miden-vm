@@ -9,7 +9,7 @@ use std::{
 
 use miden_assembly_syntax::{
     debuginfo::{SourceFile, SourceId, SourceSpan},
-    diagnostics::{Report, SourceCode},
+    diagnostics::Report,
 };
 use ratatui::{prelude::*, widgets::*};
 
@@ -20,7 +20,7 @@ use crate::{
         panes::Pane,
         state::State,
         syntax_highlighting::{
-            Highlighter, HighlighterState, NoopHighlighter, SyntectHighlighter,
+            HighlightSource, Highlighter, HighlighterState, NoopHighlighter, SyntectHighlighter,
             clamp_byte_selection_to_str,
         },
         tui::Frame,
@@ -57,11 +57,12 @@ impl SourceCodePane {
             .syntax_highlighting_states
             .entry(resolved.source_file.id())
             .or_insert_with(|| {
-                let span_contents = resolved
-                    .source_file
-                    .read_span(&resolved.source_file.source_span().into(), 0, 0)
-                    .expect("failed to read span of file");
-                self.syntax_highlighter.start_highlighter_state(span_contents.as_ref())
+                let file = &resolved.source_file;
+                self.syntax_highlighter.start_highlighter_state(HighlightSource {
+                    data: file.as_bytes(),
+                    name: Some(file.uri().as_ref()),
+                    language: Some(file.content().language()),
+                })
             });
         let resolved_span = resolved.span.into_slice_index();
         let content = resolved.source_file.content();

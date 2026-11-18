@@ -1,25 +1,29 @@
 #![no_std]
+#![forbid(unsafe_code)]
 
-#[macro_use]
 extern crate alloc;
 
-#[cfg(feature = "std")]
-extern crate std;
-
+mod diagnostic;
 mod label;
 mod related;
+mod report;
 pub mod reporting;
+#[cfg(test)]
+mod tests;
 
-pub use miette::{
-    self, Diagnostic, IntoDiagnostic, LabeledSpan, NamedSource, Report, Result, Severity,
-    SourceCode, WrapErr,
-};
 pub use tracing;
 
 pub use self::{
+    diagnostic::{Diagnostic, DiagnosticDetails, MessageDiagnostic, Severity},
     label::Label,
     related::{RelatedError, RelatedLabel},
+    report::{IntoDiagnostic, Report, Result, WrapErr},
 };
+
+pub type LabeledSpan = Label;
+
+#[doc(hidden)]
+pub use alloc::format;
 
 #[macro_export]
 macro_rules! report {
@@ -33,10 +37,10 @@ macro_rules! report {
 #[macro_export]
 macro_rules! diagnostic {
     ($fmt:literal $($arg:tt)*) => {{
-        $crate::miette::MietteDiagnostic::new(format!($fmt $($arg)*))
+        $crate::MessageDiagnostic::new($crate::format!($fmt $($arg)*))
     }};
     ($($key:ident = $value:expr,)+ $fmt:literal $($arg:tt)*) => {{
-        let mut diag = $crate::miette::MietteDiagnostic::new(format!($fmt $($arg)*));
+        let mut diag = $crate::MessageDiagnostic::new($crate::format!($fmt $($arg)*));
         $(diag.$key = Some($value.into());)*
         diag
     }};

@@ -294,12 +294,11 @@ fn program_with_reexported_proc_in_another_library() -> TestResult {
         context,
         source,
         "undefined item 'dummy2::math::u64'",
-        regex!(r#",-\[test[\d]+:2:13\]"#),
+        regex!(r#"--> test[\d]+:2:13$"#),
         "1 |",
         "2 |         use dummy2::math::u64",
         "  :             ^^^^^^^^^^^^^^^^^",
         "3 |         begin",
-        "  `----",
         "help: you might be missing an import, or the containing library has not been linked"
     );
     Ok(())
@@ -461,11 +460,10 @@ fn program_with_import_errors() {
         context,
         source,
         "undefined item 'miden::core::math::u512'",
-        regex!(r#",-\[test[\d]+:1:5\]"#),
+        regex!(r#"--> test[\d]+:1:5$"#),
         "1 | use miden::core::math::u512",
         "  :     ^^^^^^^^^^^^^^^^^^^^^^^",
         "2 |         begin push.4 push.3 exec.u512::iszero_unsafe end",
-        "  `----",
         "help: you might be missing an import, or the containing library has not been linked"
     );
 
@@ -484,11 +482,10 @@ fn program_with_import_errors() {
         context,
         source,
         "undefined item 'miden::core::math::u256'",
-        regex!(r#",-\[test[\d]+:1:5\]"#),
+        regex!(r#"--> test[\d]+:1:5$"#),
         "1 | use miden::core::math::u256",
         "  :     ^^^^^^^^^^^^^^^^^^^^^^^",
         "2 |         begin push.4 push.3 exec.u256::foo end",
-        "  `----",
         "help: you might be missing an import, or the containing library has not been linked"
     );
 }

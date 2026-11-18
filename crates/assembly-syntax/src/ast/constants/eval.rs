@@ -1,6 +1,3 @@
-// Allow unused assignments - required by miette::Diagnostic derive macro
-#![allow(unused_assignments)]
-
 use alloc::{sync::Arc, vec::Vec};
 
 use smallvec::SmallVec;
@@ -9,85 +6,124 @@ use crate::{
     Felt,
     ast::*,
     debuginfo::{SourceFile, SourceSpan, Span, Spanned},
-    diagnostics::{Diagnostic, RelatedLabel, miette},
+    diagnostics::{Diagnostic, DiagnosticDetails, Label, RelatedLabel},
     parser::IntValue,
 };
 
 /// An error raised during evaluation of a constant expression
-#[derive(Debug, thiserror::Error, Diagnostic)]
+#[derive(Debug, thiserror::Error)]
 pub enum ConstEvalError {
     #[error("undefined constant '{symbol}'")]
-    #[diagnostic(help("are you missing an import?"))]
     UndefinedSymbol {
-        #[label("the constant referenced here is not defined in the current scope")]
         symbol: Ident,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
     },
     #[error("undefined constant '{path}'")]
-    #[diagnostic(help(
-        "is the constant exported from its containing module? if the referenced module \
-        is in another library, make sure you provided it to the assembler"
-    ))]
     UndefinedPath {
         path: Arc<Path>,
-        #[label("this reference is invalid: no such definition found")]
         span: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
     },
     #[error("invalid immediate: value is larger than expected range")]
-    #[diagnostic()]
     ImmediateOverflow {
-        #[label]
         span: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
     },
     #[error("invalid constant expression: value is larger than expected range")]
-    #[diagnostic()]
     ConstExprOverflow {
-        #[label]
         span: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
     },
     #[error("invalid constant expression: division by zero")]
     DivisionByZero {
-        #[label]
         span: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
     },
     #[error("invalid constant")]
-    #[diagnostic(help("this constant does not resolve to a value of the right type"))]
     InvalidConstant {
         expected: &'static str,
-        #[label("expected {expected}")]
         span: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
     },
     #[error("constant evaluation failed")]
-    #[diagnostic(help("this constant cannot be evaluated, due to operands of incorrect type"))]
     InvalidConstExprOperand {
-        #[label]
         span: SourceSpan,
-        #[label("expected this operand to produce an integer value, but it does not")]
         operand: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
     },
     #[error("constant evaluation terminated due to infinite recursion")]
-    #[diagnostic(help("dependencies between constants must form an acyclic graph"))]
     ConstEvalCycle {
-        #[label("occurs while evaluating this expression")]
         start: SourceSpan,
-        #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        #[related]
         detected: [RelatedLabel; 1],
     },
+}
+
+impl Diagnostic for ConstEvalError {
+    fn details(&self) -> DiagnosticDetails<'_> {
+        match self {
+            Self::UndefinedSymbol { symbol, source_file } => DiagnosticDetails {
+                source: source_file.as_deref(),
+                labels: alloc::vec![Label::new(
+                    symbol.span(),
+                    "the constant referenced here is not defined in the current scope"
+                )]
+                .into(),
+                help: Some("are you missing an import?".into()),
+                ..DiagnosticDetails::default()
+            },
+            Self::UndefinedPath { span, source_file, .. } => DiagnosticDetails {
+                source: source_file.as_deref(),
+                labels: alloc::vec![Label::new(
+                    *span,
+                    "this reference is invalid: no such definition found"
+                )]
+                .into(),
+                help: Some(
+                    "is the constant exported from its containing module? if the referenced \
+                     module is in another library, make sure you provided it to the assembler"
+                        .into(),
+                ),
+                ..DiagnosticDetails::default()
+            },
+            Self::ImmediateOverflow { span, source_file }
+            | Self::ConstExprOverflow { span, source_file }
+            | Self::DivisionByZero { span, source_file } => DiagnosticDetails {
+                source: source_file.as_deref(),
+                labels: alloc::vec![Label::underline(*span)].into(),
+                ..DiagnosticDetails::default()
+            },
+            Self::InvalidConstant { expected, span, source_file } => DiagnosticDetails {
+                source: source_file.as_deref(),
+                labels: alloc::vec![Label::new(*span, format!("expected {expected}"))].into(),
+                help: Some("this constant does not resolve to a value of the right type".into()),
+                ..DiagnosticDetails::default()
+            },
+            Self::InvalidConstExprOperand { span, operand, source_file } => DiagnosticDetails {
+                source: source_file.as_deref(),
+                labels: alloc::vec![
+                    Label::underline(*span),
+                    Label::new(
+                        *operand,
+                        "expected this operand to produce an integer value, but it does not"
+                    )
+                ]
+                .into(),
+                help: Some(
+                    "this constant cannot be evaluated, due to operands of incorrect type".into(),
+                ),
+                ..DiagnosticDetails::default()
+            },
+            Self::ConstEvalCycle { start, source_file, detected } => DiagnosticDetails {
+                source: source_file.as_deref(),
+                labels: alloc::vec![Label::new(*start, "occurs while evaluating this expression")]
+                    .into(),
+                help: Some("dependencies between constants must form an acyclic graph".into()),
+                related: detected.iter().map(|error| error as &dyn Diagnostic).collect(),
+                ..DiagnosticDetails::default()
+            },
+        }
+    }
 }
 
 impl ConstEvalError {

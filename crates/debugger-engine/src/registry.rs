@@ -2,10 +2,7 @@ use alloc::{collections::BTreeMap, sync::Arc};
 #[cfg(feature = "std")]
 use std::path::{Path, PathBuf};
 
-use miden_assembly_syntax::{
-    Report,
-    diagnostics::{Diagnostic, miette},
-};
+use miden_assembly_syntax::{Report, diagnostics::Diagnostic};
 use miden_mast_package::Package;
 use miden_package_registry::{
     PackageCache, PackageId, PackageIndex, PackageProvider, PackageRecord, PackageRegistry,
@@ -17,7 +14,7 @@ type FxHashMap<K, V> = hashbrown::HashMap<K, V, rustc_hash::FxBuildHasher>;
 #[cfg(feature = "std")]
 use crate::LinkLibrary;
 
-#[derive(Debug, thiserror::Error, Diagnostic)]
+#[derive(Debug, thiserror::Error)]
 enum InstallPackageError {
     #[error("package {package}@{version} is already registered under a different digest")]
     AlreadyInstalledWithDifferentDigest {
@@ -25,6 +22,8 @@ enum InstallPackageError {
         version: miden_package_registry::Version,
     },
 }
+
+impl Diagnostic for InstallPackageError {}
 
 /// The in-memory package registry used during debugger execution.
 ///

@@ -19,7 +19,7 @@ use super::{
     MastNodeRef, PendingMastNode, PendingMastNodeKind, SourceNodeRef,
     compute_operations_and_adjust_mappings, remap_inline_ranges,
 };
-use crate::diagnostics::{Diagnostic, Report, miette};
+use crate::diagnostics::{Diagnostic, Report};
 
 /// Result of finalizing a [`super::MastForestBuilder`].
 pub(crate) struct BuiltMastForest {
@@ -50,7 +50,7 @@ impl BuiltMastForest {
 }
 
 /// Errors raised while converting builder-owned records into a finalized [`MastForest`].
-#[derive(Debug, thiserror::Error, Diagnostic)]
+#[derive(Debug, thiserror::Error)]
 pub(super) enum MastForestBuilderError {
     #[error("pending {node_kind} node {node_ref} has {actual} children, expected {expected}")]
     InvalidChildCount {
@@ -108,6 +108,8 @@ pub(super) enum MastForestBuilderError {
         source: MastForestError,
     },
 }
+
+impl Diagnostic for MastForestBuilderError {}
 
 /// Stateful finalization helper for converting live builder records into a [`MastForest`].
 ///

@@ -12,7 +12,7 @@ use miden_utils_diagnostics::LabeledSpan;
 use self::{context::LoweringContext, forms::lower_source_file};
 use crate::{
     Report, ast,
-    diagnostics::{Diagnostic, Severity, miette, miette::MietteDiagnostic},
+    diagnostics::{Diagnostic, DiagnosticDetails, MessageDiagnostic, Severity},
 };
 
 /// User-facing syntax diagnostics produced by the CST-backed parser entry point.
@@ -20,41 +20,58 @@ use crate::{
 /// The CST parser itself can accumulate multiple recovery diagnostics; this wrapper converts those
 /// diagnostics into the severity/label structure used by the existing `miden-assembly-syntax`
 /// parser surface.
-#[derive(Debug, thiserror::Error, Diagnostic)]
+#[derive(Debug, thiserror::Error)]
 pub enum SyntaxError {
     #[error("{message}")]
-    #[diagnostic(severity(Error))]
     Error {
         message: String,
-        #[label(collection)]
         labels: Vec<LabeledSpan>,
-        #[help]
         help: Option<String>,
     },
     #[error("{message}")]
-    #[diagnostic(severity(Warning))]
     Warning {
         message: String,
-        #[label(collection)]
         labels: Vec<LabeledSpan>,
-        #[help]
         help: Option<String>,
     },
     #[error("{message}")]
-    #[diagnostic(severity(Advice))]
     Advice {
         message: String,
-        #[label(collection)]
         labels: Vec<LabeledSpan>,
-        #[help]
         help: Option<String>,
     },
     #[error("invalid syntax")]
-    #[diagnostic(help("Multiple syntax errors were identified, see diagnostics for more details"))]
-    Multiple {
-        #[related]
-        diagnostics: Vec<SyntaxError>,
-    },
+    Multiple { diagnostics: Vec<SyntaxError> },
+}
+
+impl Diagnostic for SyntaxError {
+    fn severity(&self) -> Severity {
+        match self {
+            Self::Warning { .. } => Severity::Warning,
+            Self::Advice { .. } => Severity::Advice,
+            _ => Severity::Error,
+        }
+    }
+
+    fn details(&self) -> DiagnosticDetails<'_> {
+        match self {
+            Self::Error { labels, help, .. }
+            | Self::Warning { labels, help, .. }
+            | Self::Advice { labels, help, .. } => DiagnosticDetails {
+                labels: labels.as_slice().into(),
+                help: help.as_deref().map(Into::into),
+                ..DiagnosticDetails::default()
+            },
+            Self::Multiple { diagnostics } => DiagnosticDetails {
+                help: Some(
+                    "Multiple syntax errors were identified, see diagnostics for more details"
+                        .into(),
+                ),
+                related: diagnostics.iter().map(|error| error as &dyn Diagnostic).collect(),
+                ..DiagnosticDetails::default()
+            },
+        }
+    }
 }
 
 /// Parses zero or more AST forms from `source` using the CST-backed frontend.
@@ -104,8 +121,8 @@ pub fn parse_inline_masm(
 }
 
 /// Converts recovered CST diagnostics into the user-facing syntax error surface.
-impl From<Vec<MietteDiagnostic>> for SyntaxError {
-    fn from(mut diagnostics: Vec<MietteDiagnostic>) -> Self {
+impl From<Vec<MessageDiagnostic>> for SyntaxError {
+    fn from(mut diagnostics: Vec<MessageDiagnostic>) -> Self {
         if diagnostics.len() == 1 {
             Self::from(diagnostics.pop().unwrap())
         } else {
@@ -117,16 +134,9 @@ impl From<Vec<MietteDiagnostic>> for SyntaxError {
 }
 
 /// Converts a single CST diagnostic into the parser's severity-preserving syntax error wrapper.
-impl From<MietteDiagnostic> for SyntaxError {
-    fn from(value: MietteDiagnostic) -> Self {
-        let MietteDiagnostic {
-            message,
-            code: _,
-            severity,
-            help,
-            url: _,
-            labels,
-        } = value;
+impl From<MessageDiagnostic> for SyntaxError {
+    fn from(value: MessageDiagnostic) -> Self {
+        let MessageDiagnostic { message, severity, help, labels } = value;
 
         let severity = severity.unwrap_or(Severity::Error);
         match severity {

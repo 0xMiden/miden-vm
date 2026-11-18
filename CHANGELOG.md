@@ -6,6 +6,8 @@
 
 #### Changes
 
+- [BREAKING] Replaced Miette with local diagnostic types in `miden-utils-diagnostics`. Use the existing Miden `Report` re-export, implement `Diagnostic` for custom error metadata, and use `diagnostic!` for messages with labels. The renderer emits plain text.
+
 - Applied the routine-logging changes from [#4238](https://github.com/0xMiden/miden-vm/pull/4238) to the current VM and STARK crates. Successful proving is silent at `INFO`; profiling remains available at `TRACE`.
 
 - [BREAKING] Changed `Host::get_mast_forest` and `SyncHost::get_mast_forest` to return `Result<Option<LoadedMastForest>, MastForestLoadError>`. Retrieval failures preserve their source in `ExecutionError::MastForestError`, while `Ok(None)` still reports a missing procedure ([#4237](https://github.com/0xMiden/miden-vm/pull/4237)).

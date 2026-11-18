@@ -10,37 +10,24 @@ mod syntax {
     };
 }
 
-use miden_assembly_syntax::diagnostics::miette::SpanContents;
 use ratatui::{
     style::{Color, Modifier, Style},
     text::Span,
 };
 
-pub trait Highlighter {
-    ///  Creates a new [HighlighterState] to begin parsing and highlighting
-    /// a [SpanContents].
-    ///
-    /// The [GraphicalReportHandler](crate::GraphicalReportHandler) will call
-    /// this method at the start of rendering a [SpanContents].
-    ///
-    /// The [SpanContents] is provided as input only so that the [Highlighter]
-    /// can detect language syntax and make other initialization decisions prior
-    /// to highlighting, but it is not intended that the Highlighter begin
-    /// highlighting at this point. The returned [HighlighterState] is
-    /// responsible for the actual rendering.
-    fn start_highlighter_state(&self, source: &dyn SpanContents<'_>) -> Box<dyn HighlighterState>;
+/// Source metadata used to select syntax highlighting for a file.
+#[derive(Clone, Copy)]
+pub struct HighlightSource<'a> {
+    pub data: &'a [u8],
+    pub name: Option<&'a str>,
+    pub language: Option<&'a str>,
 }
 
-/// A stateful highlighter that incrementally highlights lines of a particular
-/// source code.
-///
-/// The [GraphicalReportHandler](crate::GraphicalReportHandler)
-/// will create a highlighter state by calling
-/// [start_highlighter_state](Highlighter::start_highlighter_state) at the
-/// start of rendering, then it will iteratively call
-/// [highlight_line](HighlighterState::highlight_line) to render individual
-/// highlighted lines. This allows [Highlighter] implementations to maintain
-/// mutable parsing and highlighting state.
+pub trait Highlighter {
+    fn start_highlighter_state(&self, source: HighlightSource<'_>) -> Box<dyn HighlighterState>;
+}
+
+/// A stateful highlighter that incrementally highlights lines of source text.
 pub trait HighlighterState {
     /// Highlight an individual line from the source code by returning a vector of [Styled]
     /// regions.
@@ -60,7 +47,7 @@ pub trait HighlighterState {
 pub struct NoopHighlighter;
 
 impl Highlighter for NoopHighlighter {
-    fn start_highlighter_state(&self, _source: &dyn SpanContents<'_>) -> Box<dyn HighlighterState> {
+    fn start_highlighter_state(&self, _source: HighlightSource<'_>) -> Box<dyn HighlighterState> {
         Box::new(NoopHighlighterState)
     }
 }
@@ -148,7 +135,7 @@ impl Default for SyntectHighlighter {
 }
 
 impl Highlighter for SyntectHighlighter {
-    fn start_highlighter_state(&self, source: &dyn SpanContents<'_>) -> Box<dyn HighlighterState> {
+    fn start_highlighter_state(&self, source: HighlightSource<'_>) -> Box<dyn HighlighterState> {
         if let Some(syntax) = self.detect_syntax(source) {
             let highlighter = syntax::Highlighter::new(self.theme);
             let parse_state = syntax::ParseState::new(syntax);
@@ -184,21 +171,23 @@ impl SyntectHighlighter {
         Self::new(syntax::SyntaxSet::load_defaults_nonewlines(), theme, use_bg_color)
     }
 
-    /// Determine syntect SyntaxReference to use for given SourceCode
-    fn detect_syntax(&self, contents: &dyn SpanContents<'_>) -> Option<&syntax::SyntaxReference> {
+    /// Determine syntect SyntaxReference to use for a source file
+    fn detect_syntax(&self, contents: HighlightSource<'_>) -> Option<&syntax::SyntaxReference> {
         // use language if given
-        if let Some(language) = contents.language() {
-            return self.syntax_set.find_syntax_by_name(language);
+        if let Some(language) = contents.language
+            && let Some(syntax) = self.syntax_set.find_syntax_by_token(language)
+        {
+            return Some(syntax);
         }
         // otherwise try to use any file extension provided in the name
-        if let Some(name) = contents.name()
+        if let Some(name) = contents.name
             && let Some(ext) = Path::new(name).extension()
         {
             return self.syntax_set.find_syntax_by_extension(ext.to_string_lossy().as_ref());
         }
         // finally, attempt to guess syntax based on first line
         self.syntax_set.find_syntax_by_first_line(
-            core::str::from_utf8(contents.data()).ok()?.split('\n').next()?,
+            core::str::from_utf8(contents.data).ok()?.split('\n').next()?,
         )
     }
 }

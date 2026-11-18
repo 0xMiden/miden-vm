@@ -1,7 +1,9 @@
 #[cfg(all(feature = "std", feature = "serde"))]
 mod graph;
 
-use alloc::{format, sync::Arc, vec};
+#[cfg(feature = "serde")]
+use alloc::format;
+use alloc::sync::Arc;
 use core::fmt;
 
 use miden_assembly_syntax::debuginfo::Spanned;
@@ -9,7 +11,7 @@ pub use miden_package_registry::{SemVer, Version, VersionReq, VersionRequirement
 
 #[cfg(all(feature = "std", feature = "serde"))]
 pub use self::graph::*;
-use crate::{Diagnostic, Linkage, SourceSpan, Span, Uri, miette};
+use crate::{Diagnostic, DiagnosticDetails, Label, Linkage, SourceSpan, Span, Uri};
 
 /// Represents a project/package dependency declaration
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,40 +143,46 @@ impl fmt::Display for GitRevision {
     }
 }
 
-#[derive(Debug, thiserror::Error, Diagnostic)]
+#[derive(Debug, thiserror::Error)]
 pub enum InvalidDependencySpecError {
     #[error("package is not a member of a workspace")]
-    NotAWorkspace {
-        #[label(primary)]
-        span: SourceSpan,
-    },
+    NotAWorkspace { span: SourceSpan },
     #[error("digests cannot be used with 'git' dependencies")]
-    #[diagnostic(help(
-        "Package digests are only valid when depending on an already-assembled package"
-    ))]
-    GitWithDigest {
-        #[label(primary)]
-        span: SourceSpan,
-    },
+    GitWithDigest { span: SourceSpan },
     #[error("'git' dependencies must also specify a revision using either 'branch' or 'rev'")]
-    MissingGitRevision {
-        #[label(primary)]
-        span: SourceSpan,
-    },
+    MissingGitRevision { span: SourceSpan },
     #[error(
         "conflicting 'git' revisions: 'branch' and 'rev' may refer to different commits, you cannot specify both"
     )]
-    ConflictingGitRevision {
-        #[label(primary)]
-        first: SourceSpan,
-        #[label]
-        second: SourceSpan,
-    },
+    ConflictingGitRevision { first: SourceSpan, second: SourceSpan },
     #[error("missing version: expected one of 'version', 'git', or 'digest' to be provided")]
-    MissingVersion {
-        #[label(primary)]
-        span: SourceSpan,
-    },
+    MissingVersion { span: SourceSpan },
+}
+
+impl Diagnostic for InvalidDependencySpecError {
+    fn details(&self) -> DiagnosticDetails<'_> {
+        match self {
+            Self::NotAWorkspace { span }
+            | Self::MissingGitRevision { span }
+            | Self::MissingVersion { span } => DiagnosticDetails {
+                labels: alloc::vec![Label::underline(*span).primary()].into(),
+                ..DiagnosticDetails::default()
+            },
+            Self::GitWithDigest { span } => DiagnosticDetails {
+                labels: alloc::vec![Label::underline(*span).primary()].into(),
+                help: Some(
+                    "Package digests are only valid when depending on an already-assembled package"
+                        .into(),
+                ),
+                ..DiagnosticDetails::default()
+            },
+            Self::ConflictingGitRevision { first, second } => DiagnosticDetails {
+                labels: alloc::vec![Label::underline(*first).primary(), Label::underline(*second)]
+                    .into(),
+                ..DiagnosticDetails::default()
+            },
+        }
+    }
 }
 
 #[cfg(feature = "serde")]
@@ -292,8 +300,6 @@ impl DependencyVersionScheme {
         spec: Span<&crate::ast::DependencySpec>,
         workspace: &crate::ast::WorkspaceFile,
     ) -> Result<Self, InvalidDependencySpecError> {
-        use alloc::format;
-
         match Self::try_from(spec)? {
             Self::Path { path: uri, version } => {
                 let workspace_path =

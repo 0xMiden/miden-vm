@@ -22,14 +22,14 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_assembly_syntax::{
     Report,
     debuginfo::{SourceSpan, Span},
-    diagnostics::{Diagnostic, miette},
+    diagnostics::{Diagnostic, DiagnosticDetails, Label},
 };
 // Re-exported for consistency
 pub use miden_assembly_syntax::{Word, debuginfo::Uri, semver};
 #[cfg(feature = "serde")]
 use miden_assembly_syntax::{
     debuginfo::{SourceFile, SourceId},
-    diagnostics::{Label, RelatedError, RelatedLabel},
+    diagnostics::{RelatedError, RelatedLabel},
 };
 pub use miden_mast_package::TargetType;
 #[cfg(feature = "serde")]

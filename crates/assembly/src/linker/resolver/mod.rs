@@ -380,7 +380,7 @@ impl<'a, 'b: 'a> Resolver<'a, 'b> {
         LinkerError::Related {
             errors: vec![RelatedError::from(Report::from(diagnostic!(
                 severity = Severity::Error,
-                labels = vec![LabeledSpan::at(context, err.to_string())],
+                labels = vec![LabeledSpan::new(context, err.to_string())],
                 "invalid recursive type"
             )))]
             .into_boxed_slice(),
@@ -458,7 +458,7 @@ impl<'a, 'b: 'a> Resolver<'a, 'b> {
                             return Err(LinkerError::Related {
                                 errors: vec![RelatedError::new(Report::from(diagnostic!(
                                     severity = Severity::Error,
-                                    labels = vec![LabeledSpan::at(
+                                    labels = vec![LabeledSpan::new(
                                         invalid.span(),
                                         "invalid enum discriminant: expected an integer"
                                     )],

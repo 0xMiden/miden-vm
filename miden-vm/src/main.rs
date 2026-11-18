@@ -127,8 +127,6 @@ pub fn main() -> Result<(), Report> {
     let parsed = MidenVmCli::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
     let cli: Cli = parsed.try_into()?;
 
-    initialize_diagnostics();
-
     // configure logging
     // if logging level is not specified, set level to "warn"
     if std::env::var("MIDEN_LOG").is_err() {
@@ -155,23 +153,6 @@ pub fn main() -> Result<(), Report> {
 
     // execute cli action
     cli.execute()
-}
-
-fn initialize_diagnostics() {
-    use miden_assembly::diagnostics::reporting::{self, ReportHandlerOpts};
-
-    #[cfg(feature = "std")]
-    {
-        let result = reporting::set_hook(Box::new(|_| Box::new(ReportHandlerOpts::new().build())));
-        if result.is_ok() {
-            reporting::set_panic_hook();
-        }
-    }
-
-    #[cfg(not(feature = "std"))]
-    {
-        let _ = reporting::set_hook(Box::new(|_| Box::new(ReportHandlerOpts::new().build())));
-    }
 }
 
 // TESTS

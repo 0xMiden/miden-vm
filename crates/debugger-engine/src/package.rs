@@ -3,7 +3,7 @@ use core::fmt;
 
 use miden_assembly_syntax::{
     Report,
-    diagnostics::{Diagnostic, miette},
+    diagnostics::{Diagnostic, DiagnosticDetails},
 };
 use miden_core::serde::DeserializationError;
 use miden_debug_types::Uri;
@@ -14,7 +14,7 @@ const TOOLCHAIN_HELP: &str = "package, MAST, and debug-info formats are tied to 
                               toolchain that produced them; rerun with that toolchain, for \
                               example `miden +0.16.0 debug <FILE>`";
 
-#[derive(Debug, thiserror::Error, Diagnostic)]
+#[derive(Debug, thiserror::Error)]
 enum PackageLoadError {
     #[error("failed to load Miden package from {input}")]
     DecodePackage {
@@ -23,13 +23,11 @@ enum PackageLoadError {
         cause: DeserializationError,
     },
     #[error("Miden package from {input} uses unsupported package format {version}")]
-    #[diagnostic(code(miden_debug::incompatible_package_format))]
     IncompatiblePackageFormat {
         input: Uri,
         version: PackageFormatVersion,
         #[source]
         cause: DeserializationError,
-        #[help]
         help: String,
     },
     #[error("failed to load debug information from Miden package {input}")]
@@ -39,14 +37,30 @@ enum PackageLoadError {
         cause: PackageDebugInfoError,
     },
     #[error("Miden package from {input} uses an unsupported debug-info format")]
-    #[diagnostic(code(miden_debug::incompatible_debug_info_format))]
     IncompatibleDebugInfoFormat {
         input: Uri,
         #[source]
         cause: PackageDebugInfoError,
-        #[help]
         help: String,
     },
+}
+
+impl Diagnostic for PackageLoadError {
+    fn details(&self) -> DiagnosticDetails<'_> {
+        match self {
+            Self::IncompatiblePackageFormat { help, .. } => DiagnosticDetails {
+                code: Some("miden_debug::incompatible_package_format"),
+                help: Some(help.as_str().into()),
+                ..DiagnosticDetails::default()
+            },
+            Self::IncompatibleDebugInfoFormat { help, .. } => DiagnosticDetails {
+                code: Some("miden_debug::incompatible_debug_info_format"),
+                help: Some(help.as_str().into()),
+                ..DiagnosticDetails::default()
+            },
+            _ => DiagnosticDetails::default(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

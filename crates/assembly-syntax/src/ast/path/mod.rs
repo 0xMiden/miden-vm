@@ -12,7 +12,7 @@ pub use self::{
 };
 #[cfg(feature = "serde")]
 use crate::debuginfo::Span;
-use crate::diagnostics::{Diagnostic, miette};
+use crate::diagnostics::Diagnostic;
 
 /// Represents errors that can occur when creating, parsing, or manipulating [Path]s
 #[derive(Debug, thiserror::Error)]
@@ -40,23 +40,21 @@ pub enum PathError {
 }
 
 /// Represents an error when parsing or validating a library namespace
-#[derive(Debug, thiserror::Error, Diagnostic)]
+#[derive(Debug, thiserror::Error)]
 pub enum NamespaceError {
     #[error("invalid library namespace name: cannot be empty")]
-    #[diagnostic()]
     Empty,
     #[error("invalid library namespace name: too many characters")]
-    #[diagnostic()]
     Length,
     #[error(
         "invalid character in library namespace: expected lowercase ascii-alphanumeric character or '_'"
     )]
-    #[diagnostic()]
     InvalidChars,
     #[error("invalid library namespace name: must start with lowercase ascii-alphabetic character")]
-    #[diagnostic()]
     InvalidStart,
 }
+
+impl Diagnostic for NamespaceError {}
 
 /// This trait abstracts over the concept of matching a prefix pattern against a path
 ///

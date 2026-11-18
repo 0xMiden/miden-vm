@@ -502,13 +502,20 @@ impl SetSourceId for ProjectFile {
 }
 
 /// An internal error type for representing information about build target conflicts
-#[derive(Debug, thiserror::Error, Diagnostic)]
+#[derive(Debug, thiserror::Error)]
 #[error("build target conflicts found")]
 struct TargetConflictError {
-    #[label]
     label: Label,
-    #[label(collection)]
     conflicts: Vec<Label>,
+}
+
+impl Diagnostic for TargetConflictError {
+    fn details(&self) -> DiagnosticDetails<'_> {
+        DiagnosticDetails {
+            labels: self.conflicts.as_slice().into(),
+            ..DiagnosticDetails::default()
+        }
+    }
 }
 
 impl Validate for ProjectFile {
