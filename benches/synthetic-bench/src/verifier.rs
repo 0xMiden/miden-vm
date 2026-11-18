@@ -9,7 +9,7 @@
 //!
 //! Soft reporting:
 //! - unpadded totals (`core_rows`, `chiplets_rows`, `eidos_compression_rows`) within
-//!   `PER_COMPONENT_TOLERANCE`
+//!   [`PER_COMPONENT_TOLERANCE`]
 //! - advisory breakdown deltas (info only)
 
 use std::fmt::{self, Display};
