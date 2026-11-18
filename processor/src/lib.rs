@@ -66,8 +66,8 @@ pub use fast::{
     ResumeContext,
 };
 pub use host::{
-    BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestStore, MemMastForestStore,
-    SyncHost,
+    BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestLoadError, MastForestStore,
+    MemMastForestStore, SyncHost,
     debug::{StdoutWriter, format_value, write_interval, write_stack},
     default::{DefaultHost, HostLibrary},
 };

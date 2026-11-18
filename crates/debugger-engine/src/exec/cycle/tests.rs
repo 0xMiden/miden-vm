@@ -18,7 +18,7 @@ use miden_debug_types::SourceManager;
 use miden_mast_package::Package;
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionError, FastProcessor, FutureMaybeSend, Host, LoadedMastForest,
-    ProcessorState, StackInputs, advice::AdviceMutation, event::EventError,
+    MastForestLoadError, ProcessorState, StackInputs, advice::AdviceMutation, event::EventError,
 };
 
 use super::*;
@@ -594,7 +594,7 @@ impl Host for YieldingHost {
     fn get_mast_forest(
         &self,
         node_digest: &Word,
-    ) -> impl FutureMaybeSend<Option<LoadedMastForest>> {
+    ) -> impl FutureMaybeSend<Result<Option<LoadedMastForest>, MastForestLoadError>> {
         self.answer(miden_processor::SyncHost::get_mast_forest(&self.inner, node_digest))
     }
 

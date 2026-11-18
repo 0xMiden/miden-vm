@@ -67,7 +67,7 @@ fn diagnostics_delegate_events_capture_state_and_preserve_execution_results() {
             .resolve_event(crate::exec::event::FRAME_START_EVENT.to_event_id())
             .is_some()
     );
-    assert!(poll_immediately(wrapper.get_mast_forest(&Word::default())).is_none());
+    assert!(poll_immediately(wrapper.get_mast_forest(&Word::default())).unwrap().is_none());
     let processor = FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default(),

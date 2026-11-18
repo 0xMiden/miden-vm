@@ -11,6 +11,52 @@ use miden_processor::event::EventHandler;
 use super::*;
 use crate::exec::{DebuggerHost, EventMutationRecorder};
 
+#[test]
+fn dap_wrapper_preserves_forest_lookup_errors() {
+    use miden_processor::{MastForestLoadError, SyncHost};
+
+    struct LoaderHost;
+
+    impl BaseHost for LoaderHost {
+        fn get_label_and_source_file(
+            &self,
+            _: &Location,
+        ) -> (miden_debug_types::SourceSpan, Option<Arc<miden_debug_types::SourceFile>>) {
+            (miden_debug_types::SourceSpan::UNKNOWN, None)
+        }
+    }
+
+    impl SyncHost for LoaderHost {
+        fn get_mast_forest(
+            &self,
+            _: &Word,
+        ) -> Result<Option<LoadedMastForest>, MastForestLoadError> {
+            Err(std::io::Error::other("store unavailable").into())
+        }
+
+        fn on_event(&mut self, _: &ProcessorState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
+            Ok(Vec::new())
+        }
+    }
+
+    let program = miden_assembly::Assembler::default()
+        .assemble_program("program", "begin dynexec end")
+        .unwrap()
+        .unwrap_program();
+    let forests = MastForestRecorder::new();
+    let mut host = LoaderHost;
+    let mut wrapper = DapHostWrapper::new(&mut host, None, Some(forests.clone()));
+    let error = poll_immediately(
+        FastProcessor::new(StackInputs::default()).execute(&program, &mut wrapper),
+    )
+    .unwrap_err();
+    let ExecutionError::MastForestError { error, .. } = error else {
+        panic!("expected the store error");
+    };
+    assert!(error.downcast_ref::<std::io::Error>().is_some());
+    assert!(forests.snapshot().is_empty());
+}
+
 struct PushSeven;
 
 #[test]

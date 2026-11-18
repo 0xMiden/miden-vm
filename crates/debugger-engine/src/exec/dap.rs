@@ -28,7 +28,8 @@ use miden_mast_package::{
 };
 use miden_processor::{
     BaseHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, FutureMaybeSend,
-    Host, LoadedMastForest, ProcessorState, ResumeContext, StackInputs, StackOutputs,
+    Host, LoadedMastForest, MastForestLoadError, ProcessorState, ResumeContext, StackInputs,
+    StackOutputs,
     advice::{AdviceInputs, AdviceMutation},
     event::{EventError, TraceError},
     trace::RowIndex,
@@ -230,7 +231,7 @@ impl<H: Host> Host for DapHostWrapper<'_, H> {
     fn get_mast_forest(
         &self,
         node_digest: &Word,
-    ) -> impl FutureMaybeSend<Option<LoadedMastForest>> {
+    ) -> impl FutureMaybeSend<Result<Option<LoadedMastForest>, MastForestLoadError>> {
         self.inner.get_mast_forest(node_digest)
     }
 

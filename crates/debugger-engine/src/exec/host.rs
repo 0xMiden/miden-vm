@@ -9,8 +9,8 @@ use miden_core::{
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_mast_package::Package;
 use miden_processor::{
-    BaseHost, ExecutionError, LoadedMastForest, MastForestStore, MemMastForestStore,
-    ProcessorState, SyncHost,
+    BaseHost, ExecutionError, LoadedMastForest, MastForestLoadError, MastForestStore,
+    MemMastForestStore, ProcessorState, SyncHost,
     advice::AdviceMutation,
     event::{EventError, EventHandler, EventHandlerRegistry},
 };
@@ -144,8 +144,11 @@ impl<S> SyncHost for DebuggerHost<S>
 where
     S: SourceManager + ?Sized,
 {
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<LoadedMastForest> {
-        self.store.get(node_digest)
+    fn get_mast_forest(
+        &self,
+        node_digest: &Word,
+    ) -> Result<Option<LoadedMastForest>, MastForestLoadError> {
+        Ok(self.store.get(node_digest))
     }
 
     fn on_event(
