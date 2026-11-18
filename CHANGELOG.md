@@ -12,7 +12,7 @@
 
 #### Fixes
 
-- [BREAKING] Rejected unused opcode 47, required zero padding in LOOP, CALL and SYSCALL hash inputs, and required short operation batches to be final in the VM decoder AIR. The VM proof relation and recursive VM verifier root change.
+- [BREAKING] Rejected unused opcode 47, required zero padding in LOOP, CALL and SYSCALL hash inputs, and required short operation batches to be final in the VM decoder AIR. The VM proof relation and recursive VM verifier root change ([#4239](https://github.com/0xMiden/miden-vm/pull/4239)).
 
 ## v1.0.0-rc.1 (2026-11-14)
 
