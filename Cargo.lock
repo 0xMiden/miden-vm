@@ -2899,7 +2899,6 @@ dependencies = [
 name = "miden-constraint-compiler"
 version = "1.0.0-rc.2"
 dependencies = [
- "hashbrown 0.17.1",
  "miden-core",
  "miden-crypto",
  "miden-stark",

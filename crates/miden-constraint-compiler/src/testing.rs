@@ -1,6 +1,5 @@
 //! Shared reference oracles for generated evaluator tests.
 
-use alloc::vec::Vec;
 use std::collections::HashMap;
 
 use miden_core::{Felt, field::QuadFelt};

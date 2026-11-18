@@ -3,9 +3,8 @@
 #[cfg(test)]
 mod tests;
 
-use alloc::{vec, vec::Vec};
+use std::collections::HashSet;
 
-use hashbrown::HashSet;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
@@ -13,7 +12,7 @@ use miden_core::{
 
 use super::{Graph, Leaf, Node, NodeId, OpKind};
 
-type Result<T> = core::result::Result<T, &'static str>;
+type Result<T> = std::result::Result<T, &'static str>;
 
 /// Bound extra polynomial identities by beta degree H*d at trace height H.
 ///

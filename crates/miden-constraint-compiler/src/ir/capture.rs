@@ -10,9 +10,8 @@
 //! and hash-conses structurally into the target [`GraphBuilder`]. Pointer identity
 //! is only an accelerator: structural interning defines node identity.
 
-use alloc::{sync::Arc, vec::Vec};
+use std::{collections::HashMap, sync::Arc};
 
-use hashbrown::HashMap;
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::BasedVectorSpace;
 use miden_stark::air::{
