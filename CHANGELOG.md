@@ -150,6 +150,12 @@
 - [BREAKING] Closed a constraint gap in `MRUPDATE` by requiring the old and new Merkle paths to use the same sibling at each level. Existing VM proofs are incompatible with the updated verifier ([#4002](https://github.com/0xMiden/miden-vm/pull/4002)).
 - [BREAKING] Closed a constraint gap in loop control flow by requiring `REPEAT`, like `LOOP`, to enter the body before the loop's `END`. Existing VM proofs are incompatible with the updated verifier ([#4002](https://github.com/0xMiden/miden-vm/pull/4002)).
 
+## v0.36.5 (2026-11-18)
+
+#### Changes
+
+- Moved routine VM execution, trace construction, and STARK proving instrumentation to `TRACE` under `miden::vm::{execute,trace,prove}`, keeping successful proving silent at `INFO` ([#4238](https://github.com/0xMiden/miden-vm/pull/4238)).
+
 ## v0.36.4 (2026-11-06)
 
 #### Changes
