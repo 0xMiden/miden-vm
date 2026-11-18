@@ -115,13 +115,16 @@ impl FlamegraphProfile {
     }
 
     /// Record `cycles` against an already formatted folded-stack path.
+    ///
+    /// Folded stacks are one sample per line, so a line break in `stack_path` would split one
+    /// sample into several. Line breaks are replaced with spaces, as they are in frame names.
     pub fn record_stack_path(&mut self, stack_path: impl Into<String>, cycles: usize) {
         if cycles == 0 {
             return;
         }
 
         self.total_cycles += cycles;
-        *self.samples.entry(stack_path.into()).or_default() += cycles;
+        *self.samples.entry(sanitize_stack_path(stack_path.into())).or_default() += cycles;
     }
 
     pub fn samples(&self) -> &Samples {
@@ -313,6 +316,11 @@ fn append_frame(path: &mut String, name: &str) {
         path.push(';');
     }
     append_sanitized_frame(path, name);
+}
+
+/// Replaces the line breaks that would split one folded-stack sample into several.
+fn sanitize_stack_path(stack_path: String) -> String {
+    stack_path.replace(['\n', '\r'], " ")
 }
 
 fn append_sanitized_frame(path: &mut String, name: &str) {
