@@ -1304,8 +1304,7 @@ impl RocksDbConfig {
     /// [`RocksDbStorage::open`] for one DB and its column families. It is not a process-wide
     /// budget across multiple RocksDB instances.
     #[must_use]
-    #[cfg(test)]
-    pub(crate) fn with_memory_budget(mut self, memory_budget: RocksDbMemoryBudget) -> Self {
+    pub fn with_memory_budget(mut self, memory_budget: RocksDbMemoryBudget) -> Self {
         let RocksDbMemoryBudget { block_cache_size, write_buffer_manager } = memory_budget;
         self.cache_size = block_cache_size;
         self.write_buffer_manager = write_buffer_manager;
@@ -1375,9 +1374,9 @@ pub enum RocksDbDurabilityMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RocksDbMemoryBudget {
     /// Block cache size for one RocksDB instance.
-    pub(crate) block_cache_size: usize,
+    pub block_cache_size: usize,
     /// Optional write-buffer manager for one RocksDB instance.
-    pub(crate) write_buffer_manager: Option<RocksDbWriteBufferManagerBudget>,
+    pub write_buffer_manager: Option<RocksDbWriteBufferManagerBudget>,
 }
 
 impl Default for RocksDbMemoryBudget {
@@ -1391,16 +1390,16 @@ impl Default for RocksDbMemoryBudget {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RocksDbWriteBufferManagerBudget {
-    pub(crate) buffer_size: usize,
-    pub(crate) allow_stall: bool,
-    pub(crate) charge_to_block_cache: bool,
+    pub buffer_size: usize,
+    pub allow_stall: bool,
+    pub charge_to_block_cache: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RocksDbTuningOptions {
     pub block_size: usize,
-    pub(crate) max_total_wal_size: u64,
-    pub(crate) bloom_filter_bits_per_key: RocksDbBloomFilterBitsPerKey,
+    pub max_total_wal_size: u64,
+    pub bloom_filter_bits_per_key: RocksDbBloomFilterBitsPerKey,
 }
 
 impl Default for RocksDbTuningOptions {
@@ -1416,13 +1415,13 @@ impl Default for RocksDbTuningOptions {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RocksDbBloomFilterBitsPerKey {
     pub leaves: f64,
-    pub(crate) in_mem_depth: f64,
-    pub(crate) subtree_16: f64,
-    pub(crate) subtree_24: f64,
-    pub(crate) subtree_32: f64,
-    pub(crate) subtree_40: f64,
-    pub(crate) subtree_48: f64,
-    pub(crate) subtree_56: f64,
+    pub in_mem_depth: f64,
+    pub subtree_16: f64,
+    pub subtree_24: f64,
+    pub subtree_32: f64,
+    pub subtree_40: f64,
+    pub subtree_48: f64,
+    pub subtree_56: f64,
 }
 
 impl Default for RocksDbBloomFilterBitsPerKey {

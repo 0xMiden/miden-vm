@@ -177,8 +177,7 @@ impl Config {
     /// flushed to disk, and hence the maximum amount of memory it can use.
     ///
     /// Defaults to 1 GiB.
-    #[cfg(test)]
-    pub(crate) fn with_max_wal_size(mut self, max_wal_size: u64) -> Self {
+    pub fn with_max_wal_size(mut self, max_wal_size: u64) -> Self {
         self.max_wal_size = max_wal_size;
         self
     }
@@ -191,8 +190,7 @@ impl Config {
     /// improvement from the bloom filter can become negligible.
     ///
     /// Defaults to 10.0.
-    #[cfg(test)]
-    pub(crate) fn with_bloom_filter_bits(mut self, bloom_filter_bits: f64) -> Self {
+    pub fn with_bloom_filter_bits(mut self, bloom_filter_bits: f64) -> Self {
         self.bloom_filter_bits = c_double::from(bloom_filter_bits);
         self
     }
@@ -203,8 +201,7 @@ impl Config {
     /// Database, and hence has an impact on file handle churn as the database performs operations.
     ///
     /// Defaults to 512 MiB.
-    #[cfg(test)]
-    pub(crate) fn with_target_file_size(mut self, target_file_size: u64) -> Self {
+    pub fn with_target_file_size(mut self, target_file_size: u64) -> Self {
         self.target_file_size = target_file_size;
         self
     }

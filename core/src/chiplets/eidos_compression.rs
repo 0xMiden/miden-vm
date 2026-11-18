@@ -14,7 +14,7 @@ use miden_crypto::{
 };
 
 /// Number of Felts in one Eidos compression stack window.
-pub(crate) const STATE_WIDTH: usize = 12;
+pub const STATE_WIDTH: usize = 12;
 
 /// Number of block Felts in the stack window.
 pub(crate) const BLOCK_LEN: usize = 8;

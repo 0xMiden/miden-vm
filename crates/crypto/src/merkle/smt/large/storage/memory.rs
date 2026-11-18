@@ -43,7 +43,7 @@ impl MemoryStorage {
     }
 
     /// Converts this storage into a read-only snapshot.
-    pub(crate) fn into_snapshot(self) -> MemoryStorageSnapshot {
+    pub fn into_snapshot(self) -> MemoryStorageSnapshot {
         MemoryStorageSnapshot(self)
     }
 }
@@ -312,8 +312,7 @@ impl SmtStorage for MemoryStorage {
         let StorageUpdateParts {
             leaf_updates,
             subtree_updates,
-            #[cfg(any(feature = "rocksdb", feature = "persistent-forest"))]
-                leaf_count_delta: _,
+            leaf_count_delta: _,
             entry_count_delta: _,
         } = updates.into_parts();
 

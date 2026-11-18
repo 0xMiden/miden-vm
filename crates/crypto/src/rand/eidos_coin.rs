@@ -134,8 +134,7 @@ impl EidosRandomCoin {
     ///
     /// The current output-block counter is bound into the new state. Any buffered output is
     /// discarded, and the block counter is reset to zero.
-    #[cfg(test)]
-    pub(crate) fn reseed(&mut self, data: Word) {
+    pub fn reseed(&mut self, data: Word) {
         let input = [
             self.state[0],
             self.state[1],
