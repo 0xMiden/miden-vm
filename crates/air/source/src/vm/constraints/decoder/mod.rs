@@ -9,8 +9,8 @@
 //! 2. **Op-bit binary constraints**: Ensure operation bits are binary.
 //! 3. **Extra columns (e0, e1)**: Degree-reduction columns for operation flag computation.
 //! 4. **Opcode-bit group constraints**: Reject unused opcode encodings.
-//! 5. **General opcode-semantic constraints**: Per-operation invariants (SPLIT/LOOP, DYN, REPEAT,
-//!    END, HALT).
+//! 5. **General opcode-semantic constraints**: Per-operation invariants (SPLIT, LOOP, CALL,
+//!    SYSCALL, DYN, REPEAT, END, HALT).
 //! 6. **Group count constraints**: Group-count transitions inside basic blocks.
 //! 7. **Op group decoding (h0) constraints**: Base-128 opcode packing in h0.
 //! 8. **Op index constraints**: Position tracking within an operation group.
@@ -48,6 +48,9 @@
 //! |Context    |h0         |h1..h3   |h4            |h5      |h6                   |h7      |
 //! |-----------|-----------|---------|--------------|--------|---------------------|--------|
 //! |SPAN/RESPAN|packed ops |op groups|op group      |op group|op group             |op group|
+//! |LOOP       |child hash₀|hash₁..₃ |0             |0       |0                    |0       |
+//! |CALL       |child hash₀|hash₁..₃ |0             |0       |0                    |0       |
+//! |SYSCALL    |child hash₀|hash₁..₃ |0             |0       |0                    |0       |
 //! |END        |block hash₀|hash₁..₃ |is_loop_body  |is_loop |restores_caller_frame|0       |
 //! |User ops   |packed ops |op groups|user_op_helper|...     |...                  |...     |
 //!
@@ -228,6 +231,9 @@ pub fn enforce_main<AB>(
     // Operation | Constraint                          | Why
     // ----------+-------------------------------------+------------------------------------
     // SPLIT     | s0 in {0, 1}                        | s0 selects true/false branch
+    // LOOP      | h4 = h5 = h6 = h7 = 0               | unary child followed by a zero word
+    // CALL      | h4 = h5 = h6 = h7 = 0               | unary child followed by a zero word
+    // SYSCALL   | h4 = h5 = h6 = h7 = 0               | unary child followed by a zero word
     // DYN       | h4 = h5 = h6 = h7 = 0               | callee digest lives in h0..h3 only
     // REPEAT    | s0 = 1                              | loop condition must be true
     // END+loop  | is_loop (h5) => s0 = 0              | exiting loop: condition became false
@@ -237,6 +243,15 @@ pub fn enforce_main<AB>(
     // SPLIT: branch selector must be binary.
     let branch_condition = local.stack.get(0);
     builder.when(op_flags.split()).assert_bool(branch_condition);
+
+    // LOOP, CALL and SYSCALL commit to one child. Their MAST digest hashes the child digest in
+    // h0..h3 followed by a zero word, so h4..h7 must be zero.
+    {
+        let unary_node = op_flags.loop_op() + op_flags.call() + op_flags.syscall();
+        let builder = &mut builder.when(unary_node);
+        let hasher_zeros = [hasher_state[4], hasher_state[5], hasher_state[6], hasher_state[7]];
+        builder.assert_zeros(hasher_zeros)
+    }
 
     // DYN uses h0..h3 for the callee digest in memory and block-hash lookups; h4..h7 are unused.
     {
@@ -744,6 +759,44 @@ mod tests {
                 registered(opcode),
                 "in-span admission of opcode {opcode} must match the operation registry",
             );
+        }
+    }
+
+    /// LOOP, CALL and SYSCALL commit a child digest followed by a zero word. The child lanes are
+    /// unrestricted, and each padding lane is rejected independently.
+    #[test]
+    fn unary_nodes_commit_a_zero_second_word() {
+        let next = generate_test_row(opcodes::SPAN.into());
+        for opcode in [opcodes::LOOP, opcodes::CALL, opcodes::SYSCALL] {
+            let mut local = generate_test_row(opcode.into());
+            for lane in 0..4 {
+                local.decoder.hasher_state[lane] = Felt::from_u8(11 + lane as u8);
+            }
+            assert!(decoder_accepts(&local, &next), "opcode {opcode}: the child digest is free");
+
+            for lane in 4..8 {
+                for value in [ONE, -ONE] {
+                    let mut padded = local.clone();
+                    padded.decoder.hasher_state[lane] = value;
+                    assert!(
+                        !decoder_accepts(&padded, &next),
+                        "opcode {opcode} must commit zero in lane {lane}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// JOIN and SPLIT commit two children, so both hasher words stay unrestricted.
+    #[test]
+    fn binary_nodes_keep_both_child_words() {
+        let next = generate_test_row(opcodes::SPAN.into());
+        for opcode in [opcodes::JOIN, opcodes::SPLIT] {
+            let mut local = generate_test_row(opcode.into());
+            for lane in 0..8 {
+                local.decoder.hasher_state[lane] = Felt::from_u8(11 + lane as u8);
+            }
+            assert!(decoder_accepts(&local, &next), "opcode {opcode} must keep both child words");
         }
     }
 

@@ -12,7 +12,7 @@
 
 #### Fixes
 
-- [BREAKING] Rejected unused opcode 47 in the VM decoder AIR. The VM proof relation and recursive VM verifier root change.
+- [BREAKING] Rejected unused opcode 47 and required zero padding in LOOP, CALL and SYSCALL hash inputs in the VM decoder AIR. The VM proof relation and recursive VM verifier root change.
 
 ## v1.0.0-rc.1 (2026-11-14)
 
