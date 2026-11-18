@@ -25,6 +25,15 @@ for the locked `minimatch` 3.1.5 until December 3, 2026. The advisory describes
 export. Forcing the patched version 11 would break that API. The exception
 covers this exact advisory and version in the local docs preview only.
 
+The audit also retains `main`'s exception for `picomatch` 2.3.2 until November
+24, 2026. GitHub withdrew
+[GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)
+on November 18, but npm still reports it. The exception requires the reviewed
+advisory range and checks that the latest registry release remains 4.0.7.
+Npm's suggested search plugin downgrade to 0.11.0 requires Docusaurus 2 and
+cannot fix this Docusaurus 3 preview. The audit permits that specific suggestion
+while continuing to reject available fixes.
+
 The former `braces` exception has been removed because
 [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)
 was withdrawn. The lockfile also updates `follow-redirects` to 1.16.2 and `joi`
@@ -35,10 +44,10 @@ The lockfile uses `http-cache-semantics` 4.3.0 to address
 The audit no longer accepts an exception for that advisory.
 
 `scripts/audit.mjs` checks the advisory ID and every affected locked version.
-It also accepts findings inherited solely from that advisory, prints the
-full npm report, and fails when the exception expires or a patched release is
+It also accepts findings inherited solely from reviewed advisories, prints the
+full npm report, and fails when an exception expires or a patched release is
 reported. Other advisories still fail CI. Run `npm audit` to see the raw report
-and remove the exception when the advisory range is corrected or a compatible
+and remove each exception when the advisory range is corrected or a compatible
 fix is available.
 
 The preview uses the docs plugin and classic theme directly. Installing the

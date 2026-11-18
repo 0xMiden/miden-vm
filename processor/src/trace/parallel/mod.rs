@@ -105,7 +105,6 @@ mod tests;
 ///
 /// assert_eq!(*trace.program_hash(), program.hash());
 /// ```
-#[instrument(name = "build_trace", skip_all)]
 pub fn build_trace(
     witness: VmWitness,
     budget: &ProvingBudget<MIDEN_AIR_COUNT>,
@@ -125,6 +124,7 @@ pub(crate) fn build_trace_with_prebuilt_hasher(
     build_trace_inner(witness, Some(prebuilt_hasher), budget)
 }
 
+#[instrument(target = "miden::vm::trace", name = "build_vm_trace", level = "trace", skip_all)]
 fn build_trace_inner(
     witness: VmWitness,
     prebuilt_hasher: Option<Hasher>,

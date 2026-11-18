@@ -170,7 +170,7 @@ pub(crate) fn prove(
     max_prover_memory_bytes: u64,
 ) -> Result<crate::prover::PrecompileProof, PrecompileProvingError> {
     let imported = {
-        let _span = tracing::info_span!("build_session").entered();
+        let _span = tracing::trace_span!(target: "miden::vm::trace", "build_session").entered();
         import_witnesses_with_roots(
             witnesses,
             verification_limits,
@@ -196,7 +196,7 @@ pub(crate) fn prove(
     }
 
     let traces = {
-        let _span = tracing::info_span!("build_trace").entered();
+        let _span = tracing::trace_span!(target: "miden::vm::trace", "build_trace").entered();
         imported.session.finish(imported.root)
     };
     Ok(crate::prover::PrecompileProof {

@@ -20,7 +20,7 @@ use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use thiserror::Error;
-use tracing::info_span;
+use tracing::trace_span;
 
 use crate::{
     StarkConfig,
@@ -130,7 +130,7 @@ where
                 let coset_shift = LiftedDomain::<F>::canonical_lde_shift(log_h + log_blowup)
                     .expect("preprocessed LDE order exceeds field two-adicity");
                 let width = trace.width();
-                info_span!("preprocessed LDE", air = air_idx, log_height = log_h, width).in_scope(
+                trace_span!(target: "miden::vm::prove", "preprocessed LDE", air = air_idx, log_height = log_h, width).in_scope(
                     || config.dft().coset_lde_batch(trace.clone(), log_blowup.into(), coset_shift),
                 )
             })

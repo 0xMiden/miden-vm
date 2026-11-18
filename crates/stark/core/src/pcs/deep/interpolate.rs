@@ -59,7 +59,7 @@ use p3_field::{
 use p3_matrix::Matrix;
 use p3_maybe_rayon::prelude::*;
 use p3_util::{linear_map::LinearMap, log2_strict_usize, reconstitute_from_base};
-use tracing::{debug_span, info_span};
+use tracing::{debug_span, trace_span};
 
 use crate::lmcs::row_list::RowList;
 
@@ -159,7 +159,9 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, const N: usize> PointQuotients<F, E
         // Domain points per inversion block.
         const BLOCK: usize = 1024;
 
-        let _span = info_span!("PointQuotients::new", n = coset_points.len()).entered();
+        let _span =
+            trace_span!(target: "miden::vm::prove", "PointQuotients::new", n = coset_points.len())
+                .entered();
         let n_points = coset_points.len();
 
         // Invert the differences [z₀ − x, z₁ − x, …] one block of domain points at a time, so each
@@ -206,7 +208,7 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, const N: usize> PointQuotients<F, E
         coset_points: &[F],
         log_blowup: u8,
     ) -> RowList<FieldArray<EF, N>> {
-        let _span = info_span!("batch_eval_lifted", n_groups = matrices_groups.len()).entered();
+        let _span = trace_span!(target: "miden::vm::prove", "batch_eval_lifted", n_groups = matrices_groups.len()).entered();
         let n = coset_points.len();
         let d = n >> log_blowup as usize;
         let log_d = log2_strict_usize(d);
@@ -233,7 +235,7 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, const N: usize> PointQuotients<F, E
         // For smaller domains, sum chunks (weight folding).
         let inv_points = self.points.map(|point| point.inverse());
         let barycentric_weights: LinearMap<usize, Vec<FieldArray<EF, N>>> =
-            debug_span!("barycentric_weights", d).in_scope(|| {
+            debug_span!(target: "miden::vm::prove", "barycentric_weights", d).in_scope(|| {
                 assert_eq!(*used_degrees.last().unwrap(), d);
                 // Initial weights at full domain size
                 let top_weights: Vec<FieldArray<EF, N>> =
@@ -266,7 +268,7 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, const N: usize> PointQuotients<F, E
                     let degree = m.height() >> log_blowup as usize;
                     let weights = &barycentric_weights[&degree];
                     let _guard =
-                        debug_span!("evaluate matrix", height = weights.len(), width = m.width())
+                        debug_span!(target: "miden::vm::prove", "evaluate matrix", height = weights.len(), width = m.width())
                             .entered();
                     let coset_rows = RowPrefix { inner: *m, height: degree };
                     let mut results = coset_rows.columnwise_dot_product_batched(weights);

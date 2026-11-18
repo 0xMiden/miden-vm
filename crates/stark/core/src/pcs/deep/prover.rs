@@ -6,7 +6,7 @@ use p3_field::{
 };
 use p3_matrix::Matrix;
 use p3_maybe_rayon::prelude::*;
-use tracing::info_span;
+use tracing::trace_span;
 
 use crate::{
     domain::{Coset, LiftedDomain},
@@ -85,7 +85,7 @@ impl<EF> DeepPoly<EF> {
             trace_trees.iter().map(|tree| tree.leaves().iter().collect()).collect();
 
         let quotient = PointQuotients::new(FieldArray::from(eval_points), &coset_points);
-        let batched_evals = info_span!("evaluate at OOD points")
+        let batched_evals = trace_span!(target: "miden::vm::prove", "evaluate at OOD points")
             .in_scope(|| quotient.batch_eval_lifted(&matrices_groups, &coset_points, log_blowup));
         // DEEP assembly reads only the point quotients, not the domain points themselves.
         drop(coset_points);
@@ -156,8 +156,9 @@ impl<EF> DeepPoly<EF> {
         }
 
         // 2. Grind for proof-of-work witness
-        let _pow_witness = info_span!("DEEP grind", bits = params.deep_pow_bits)
-            .in_scope(|| channel.grind(params.deep_pow_bits));
+        let _pow_witness =
+            trace_span!(target: "miden::vm::prove", "DEEP grind", bits = params.deep_pow_bits)
+                .in_scope(|| channel.grind(params.deep_pow_bits));
 
         // 3. Sample DEEP challenges
         let challenge_columns: EF = channel.sample_algebra_element();
@@ -213,103 +214,103 @@ impl<EF> DeepPoly<EF> {
         // vector is consumed in-place to produce `deep_evals`, avoiding a separate
         // full-domain allocation and improving cache locality.
 
-        let deep_evals = info_span!("DEEP reduce + assemble").in_scope(|| {
-            // Fast path: when every matrix has the same height (the common single-AIR /
-            // uniform-height case for `prove_*`), accumulate every group directly into one
-            // shared buffer.
-            let uniform_height =
-                matrices_groups.iter().flat_map(|g| g.iter()).all(|m| m.height() == n);
+        let deep_evals = trace_span!(target: "miden::vm::prove", "DEEP reduce + assemble")
+            .in_scope(|| {
+                // Fast path: when every matrix has the same height (the common single-AIR /
+                // uniform-height case for `prove_*`), accumulate every group directly into one
+                // shared buffer.
+                let uniform_height =
+                    matrices_groups.iter().flat_map(|g| g.iter()).all(|m| m.height() == n);
 
-            let mut neg_f_reduced = if uniform_height {
-                let mut neg_column_coeffs_iter = neg_column_coeffs.iter();
-                let mut acc = EF::zero_vec(n);
-                let mut packed_coeffs: Vec<EF::ExtensionPacking> = Vec::new();
-                for (matrices_group, &size) in zip(matrices_groups.iter(), &group_sizes) {
-                    let group_coeffs: Vec<&Vec<EF>> =
-                        neg_column_coeffs_iter.by_ref().take(size).collect();
-                    for (&matrix, coeffs) in zip(matrices_group, group_coeffs.iter()) {
-                        let active_coeffs = &coeffs[..matrix.width()];
-                        packed_coeffs.clear();
-                        packed_coeffs.extend(active_coeffs.chunks(w).map(|chunk| {
-                            if chunk.len() == w {
-                                EF::ExtensionPacking::from_ext_slice(chunk)
-                            } else {
-                                let mut padded = EF::zero_vec(w);
-                                padded[..chunk.len()].copy_from_slice(chunk);
-                                EF::ExtensionPacking::from_ext_slice(&padded)
-                            }
-                        }));
-                        matrix
-                            .rowwise_packed_dot_product::<EF>(&packed_coeffs)
-                            .zip(acc.par_iter_mut())
-                            .for_each(|(dot_result, acc_val)| {
-                                *acc_val += dot_result;
-                            });
+                let mut neg_f_reduced = if uniform_height {
+                    let mut neg_column_coeffs_iter = neg_column_coeffs.iter();
+                    let mut acc = EF::zero_vec(n);
+                    let mut packed_coeffs: Vec<EF::ExtensionPacking> = Vec::new();
+                    for (matrices_group, &size) in zip(matrices_groups.iter(), &group_sizes) {
+                        let group_coeffs: Vec<&Vec<EF>> =
+                            neg_column_coeffs_iter.by_ref().take(size).collect();
+                        for (&matrix, coeffs) in zip(matrices_group, group_coeffs.iter()) {
+                            let active_coeffs = &coeffs[..matrix.width()];
+                            packed_coeffs.clear();
+                            packed_coeffs.extend(active_coeffs.chunks(w).map(|chunk| {
+                                if chunk.len() == w {
+                                    EF::ExtensionPacking::from_ext_slice(chunk)
+                                } else {
+                                    let mut padded = EF::zero_vec(w);
+                                    padded[..chunk.len()].copy_from_slice(chunk);
+                                    EF::ExtensionPacking::from_ext_slice(&padded)
+                                }
+                            }));
+                            matrix
+                                .rowwise_packed_dot_product::<EF>(&packed_coeffs)
+                                .zip(acc.par_iter_mut())
+                                .for_each(|(dot_result, acc_val)| {
+                                    *acc_val += dot_result;
+                                });
+                        }
                     }
+                    acc
+                } else {
+                    // Preserve commitment-order coefficients when reordering matrices.
+                    let mut matrices: Vec<_> = matrices_groups
+                        .iter()
+                        .flatten()
+                        .copied()
+                        .zip(neg_column_coeffs.iter().map(Vec::as_slice))
+                        .collect();
+                    accumulate_matrices(&mut matrices)
+                };
+
+                // Pre-compute βʲ for all N points
+                let point_coeffs: [EF; N] =
+                    core::array::from_fn(|j| challenge_points.exp_u64(j as u64));
+
+                // Transform neg_f_reduced in-place into deep_evals.
+                // Q(x) = Σⱼ βʲ·qⱼ(x)·(f_reduced(zⱼ) + neg_f_reduced(x))
+                if w == 1 || n < w {
+                    neg_f_reduced.par_iter_mut().zip(point_quotient.par_iter()).for_each(
+                        |(neg, q)| {
+                            let mut result = q[0] * (f_reduced_at_points[0] + *neg);
+                            for j in 1..N {
+                                result += point_coeffs[j] * q[j] * (f_reduced_at_points[j] + *neg);
+                            }
+                            *neg = result;
+                        },
+                    );
+                } else {
+                    let f_reduced_packed: [EF::ExtensionPacking; N] =
+                        f_reduced_at_points.0.map(EF::ExtensionPacking::from);
+                    let point_coeffs_packed: [EF::ExtensionPacking; N] =
+                        point_coeffs.map(EF::ExtensionPacking::from);
+
+                    neg_f_reduced
+                        .par_chunks_exact_mut(w)
+                        .zip(point_quotient.par_chunks_exact(w))
+                        .for_each(|(neg_chunk, q_chunk)| {
+                            let neg_p = EF::ExtensionPacking::from_ext_slice(neg_chunk);
+
+                            // Transpose quotients: q_chunk[lane][point] -> q_packed[point] packs
+                            // all lanes
+                            let q_packed: [EF::ExtensionPacking; N] =
+                                EF::ExtensionPacking::pack_ext_columns(FieldArray::as_raw_slice(
+                                    q_chunk,
+                                ));
+
+                            // First point (j=0) has coefficient β⁰ = 1, compute directly
+                            let mut result_p = q_packed[0] * (f_reduced_packed[0] + neg_p);
+
+                            // Remaining points (j>0) multiply by βʲ
+                            for j in 1..N {
+                                result_p += point_coeffs_packed[j]
+                                    * q_packed[j]
+                                    * (f_reduced_packed[j] + neg_p);
+                            }
+                            result_p.to_ext_slice(neg_chunk);
+                        });
                 }
-                acc
-            } else {
-                // Preserve commitment-order coefficients when reordering matrices.
-                let mut matrices: Vec<_> = matrices_groups
-                    .iter()
-                    .flatten()
-                    .copied()
-                    .zip(neg_column_coeffs.iter().map(Vec::as_slice))
-                    .collect();
-                accumulate_matrices(&mut matrices)
-            };
 
-            // Pre-compute βʲ for all N points
-            let point_coeffs: [EF; N] =
-                core::array::from_fn(|j| challenge_points.exp_u64(j as u64));
-
-            // Transform neg_f_reduced in-place into deep_evals.
-            // Q(x) = Σⱼ βʲ·qⱼ(x)·(f_reduced(zⱼ) + neg_f_reduced(x))
-            if w == 1 || n < w {
-                neg_f_reduced
-                    .par_iter_mut()
-                    .zip(point_quotient.par_iter())
-                    .for_each(|(neg, q)| {
-                        let mut result = q[0] * (f_reduced_at_points[0] + *neg);
-                        for j in 1..N {
-                            result += point_coeffs[j] * q[j] * (f_reduced_at_points[j] + *neg);
-                        }
-                        *neg = result;
-                    });
-            } else {
-                let f_reduced_packed: [EF::ExtensionPacking; N] =
-                    f_reduced_at_points.0.map(EF::ExtensionPacking::from);
-                let point_coeffs_packed: [EF::ExtensionPacking; N] =
-                    point_coeffs.map(EF::ExtensionPacking::from);
-
-                neg_f_reduced
-                    .par_chunks_exact_mut(w)
-                    .zip(point_quotient.par_chunks_exact(w))
-                    .for_each(|(neg_chunk, q_chunk)| {
-                        let neg_p = EF::ExtensionPacking::from_ext_slice(neg_chunk);
-
-                        // Transpose quotients: q_chunk[lane][point] -> q_packed[point] packs all
-                        // lanes
-                        let q_packed: [EF::ExtensionPacking; N] =
-                            EF::ExtensionPacking::pack_ext_columns(FieldArray::as_raw_slice(
-                                q_chunk,
-                            ));
-
-                        // First point (j=0) has coefficient β⁰ = 1, compute directly
-                        let mut result_p = q_packed[0] * (f_reduced_packed[0] + neg_p);
-
-                        // Remaining points (j>0) multiply by βʲ
-                        for j in 1..N {
-                            result_p += point_coeffs_packed[j]
-                                * q_packed[j]
-                                * (f_reduced_packed[j] + neg_p);
-                        }
-                        result_p.to_ext_slice(neg_chunk);
-                    });
-            }
-
-            neg_f_reduced // now contains deep_evals
-        });
+                neg_f_reduced // now contains deep_evals
+            });
 
         (Self { deep_evals }, batched_evals)
     }

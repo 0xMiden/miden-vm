@@ -134,7 +134,18 @@ shear: ## Runs cargo-shear to find unused or misplaced dependencies
 .PHONY: lint
 lint: xclippy format-check shear ## Runs all lint checks without modifying files
 
+.PHONY: check-dependencies
+check-dependencies: ## Checks dependency policy with cargo-deny
+	cargo deny check
+
 # --- docs ----------------------------------------------------------------------------------------
+
+.PHONY: check-docs-site
+check-docs-site: ## Builds the documentation site and checks dependency audits
+	npm --prefix docs ci
+	npm --prefix docs run build:dev
+	npm --prefix docs run test:audit
+	npm --prefix docs run audit:ci
 
 .PHONY: doc
 doc: ## Generates & checks documentation for workspace crates only

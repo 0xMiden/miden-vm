@@ -2,21 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { checkAudit } from "./audit.mjs";
 
-function fixture() {
-  const vulnerabilities = {};
-  const packages = {};
-  for (const [name, version, id] of [
-    ["minimatch", "3.1.5", "GHSA-g3hv-75wg-m249"],
-  ]) {
-    vulnerabilities[name] = {
-      via: [{ name, url: `https://github.com/advisories/${id}`, severity: "moderate" }],
+function fixture(name = "minimatch", version = "3.1.5", id = "GHSA-g3hv-75wg-m249", severity = "moderate") {
+  const vulnerabilities = {
+    [name]: {
+      via: [{ name, url: `https://github.com/advisories/${id}`, severity }],
       nodes: [`node_modules/${name}`],
       fixAvailable: false,
-    };
-    packages[`node_modules/${name}`] = { version };
-  }
-  vulnerabilities.parent = { via: ["minimatch"] };
-  vulnerabilities.grandparent = { via: ["parent"] };
+    },
+    parent: { via: [name] },
+    grandparent: { via: ["parent"] },
+  };
+  const packages = { [`node_modules/${name}`]: { version } };
   return [{ auditReportVersion: 2, vulnerabilities }, { packages }];
 }
 
@@ -107,4 +103,52 @@ test("rejects the withdrawn braces exception", () => {
   };
   const lock = { packages: { "node_modules/braces": { version: "3.0.3" } } };
   assert.throws(() => checkAudit(report, lock, "2026-10-03"), /Unaccepted/);
+});
+
+test("picomatch exception requires reviewed versions and an unexpired date", () => {
+  const [report, lock] = fixture("picomatch", "2.3.2", "GHSA-fc5q-39xc-vjpf", "high");
+  report.vulnerabilities.picomatch.via[0].range = "<=4.0.7";
+  const reviewDate = "2026-11-18";
+  assert.equal(checkAudit(report, lock, reviewDate, "4.0.7"), 3);
+  assert.throws(() => checkAudit(report, lock, "2026-11-24", "4.0.7"), /Unaccepted/);
+
+  for (const version of ["4.0.7", undefined]) {
+    lock.packages["node_modules/picomatch"].version = version;
+    assert.throws(() => checkAudit(report, lock, reviewDate, "4.0.7"), /Unaccepted/);
+  }
+  lock.packages["node_modules/picomatch"].version = "2.3.2";
+  report.vulnerabilities.picomatch.via[0].severity = "critical";
+  assert.throws(() => checkAudit(report, lock, reviewDate, "4.0.7"), /Unaccepted/);
+});
+
+test("accepts only the reviewed inapplicable picomatch downgrade", () => {
+  const [report, lock] = fixture("picomatch", "2.3.2", "GHSA-fc5q-39xc-vjpf", "high");
+  const finding = report.vulnerabilities.picomatch;
+  finding.via[0].range = "<=4.0.7";
+  finding.fixAvailable = {
+    name: "@cmfcmf/docusaurus-search-local",
+    version: "0.11.0",
+    isSemVerMajor: true,
+  };
+  assert.equal(checkAudit(report, lock, "2026-11-18", "4.0.7"), 3);
+
+  for (const fix of [
+    true,
+    { name: "picomatch", version: "4.0.8", isSemVerMajor: true },
+    { name: "@cmfcmf/docusaurus-search-local", version: "0.11.1", isSemVerMajor: true },
+    { name: "@cmfcmf/docusaurus-search-local", version: "0.11.0", isSemVerMajor: false },
+  ]) {
+    finding.fixAvailable = fix;
+    assert.throws(() => checkAudit(report, lock, "2026-11-18", "4.0.7"), /Unaccepted/);
+  }
+});
+
+test("rejects changed or unverified picomatch registry data", () => {
+  const [report, lock] = fixture("picomatch", "2.3.2", "GHSA-fc5q-39xc-vjpf", "high");
+  report.vulnerabilities.picomatch.via[0].range = "<=4.0.7";
+  for (const latest of ["4.0.8", "2.3.3", undefined, null]) {
+    assert.throws(() => checkAudit(report, lock, "2026-11-18", latest), /Unaccepted/);
+  }
+  report.vulnerabilities.picomatch.via[0].range = "<2.3.2";
+  assert.throws(() => checkAudit(report, lock, "2026-11-18", "4.0.7"), /Unaccepted/);
 });
