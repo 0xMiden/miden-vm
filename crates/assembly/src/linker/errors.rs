@@ -399,7 +399,11 @@ impl Diagnostic for LinkerError {
                 help: Some("the item this path resolves to is not a constant definition".into()),
                 ..DiagnosticDetails::default()
             },
-            _ => DiagnosticDetails::default(),
+            Self::Empty
+            | Self::Cycle { .. }
+            | Self::DuplicateModule { .. }
+            | Self::TooManyModules
+            | Self::InvalidPackageModuleSurface { .. } => DiagnosticDetails::default(),
         }
     }
 }

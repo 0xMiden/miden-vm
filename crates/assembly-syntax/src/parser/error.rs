@@ -495,7 +495,7 @@ impl Diagnostic for ParsingError {
                 .into(),
                 ..DiagnosticDetails::default()
             },
-            _ => DiagnosticDetails::default(),
+            Self::Failed => DiagnosticDetails::default(),
         }
     }
 }

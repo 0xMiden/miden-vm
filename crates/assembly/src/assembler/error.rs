@@ -82,7 +82,7 @@ impl Diagnostic for AssemblerError {
                 ),
                 ..DiagnosticDetails::default()
             },
-            _ => DiagnosticDetails::default(),
+            Self::DuplicateExportPath { .. } => DiagnosticDetails::default(),
         }
     }
 }

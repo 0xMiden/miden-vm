@@ -109,7 +109,8 @@ impl Error for ReportInner {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match &self.error {
             ReportError::Context { cause, .. } => Some(cause.0.as_error()),
-            _ => self.as_error().source(),
+            ReportError::Diagnostic(error) => error.source(),
+            ReportError::Error(error) => error.source(),
         }
     }
 }

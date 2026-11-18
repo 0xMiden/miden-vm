@@ -181,7 +181,37 @@ impl Diagnostic for SemanticAnalysisError {
             | Self::UnusedDocstring { .. }
             | Self::TrailingDocstring { .. }
             | Self::ImportDocstring { .. } => Severity::Warning,
-            _ => Severity::Error,
+            Self::NamespaceConflict { .. }
+            | Self::InvalidNamespacePath { .. }
+            | Self::MisplacedNamespaceDeclaration { .. }
+            | Self::MissingNamespace
+            | Self::MissingEntrypoint
+            | Self::UnexpectedEntrypoint { .. }
+            | Self::MultipleEntrypoints { .. }
+            | Self::InvalidInvokePath { .. }
+            | Self::UnexpectedExport { .. }
+            | Self::InvalidEnumRepr { .. }
+            | Self::InvalidEnumDiscriminant { .. }
+            | Self::EnumDiscriminantConflict { .. }
+            | Self::SymbolConflict { .. }
+            | Self::ExternPackageConflict { .. }
+            | Self::PrivateTypeInExportedSignature { .. }
+            | Self::PrivateTypeInExportedType { .. }
+            | Self::MissingImport { .. }
+            | Self::ImportConflict { .. }
+            | Self::ReexportedModule { .. }
+            | Self::ReexportedKernelProcedure { .. }
+            | Self::ReexportFromKernel { .. }
+            | Self::InvalidSyscallTarget { .. }
+            | Self::InvalidInvokeTargetViaImport { .. }
+            | Self::InvalidRecursiveCall { .. }
+            | Self::SelfRecursive { .. }
+            | Self::InvalidRepeatCount { .. }
+            | Self::ImmediateOverflow { .. }
+            | Self::LimitExceeded { .. }
+            | Self::AdvMapKeyAlreadyDefined { .. } => Severity::Error,
+            Self::ConstEvalError(error) => error.severity(),
+            Self::SymbolResolutionError(error) => error.severity(),
         }
     }
 
@@ -389,7 +419,7 @@ impl Diagnostic for SemanticAnalysisError {
             },
             Self::ConstEvalError(error) => error.details(),
             Self::SymbolResolutionError(error) => error.details(),
-            _ => DiagnosticDetails::default(),
+            Self::InvalidNamespacePath { .. } => DiagnosticDetails::default(),
         }
     }
 }

@@ -58,7 +58,9 @@ impl Diagnostic for PackageLoadError {
                 help: Some(help.as_str().into()),
                 ..DiagnosticDetails::default()
             },
-            _ => DiagnosticDetails::default(),
+            Self::DecodePackage { .. } | Self::DecodeDebugInfo { .. } => {
+                DiagnosticDetails::default()
+            },
         }
     }
 }

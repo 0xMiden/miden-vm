@@ -49,7 +49,7 @@ impl Diagnostic for SyntaxError {
         match self {
             Self::Warning { .. } => Severity::Warning,
             Self::Advice { .. } => Severity::Advice,
-            _ => Severity::Error,
+            Self::Error { .. } | Self::Multiple { .. } => Severity::Error,
         }
     }
 

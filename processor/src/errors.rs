@@ -151,7 +151,15 @@ impl Diagnostic for ExecutionError {
                 at_instruction(DiagnosticDetails::default(), source_file.as_deref(), *label)
             },
             Self::MemoryErrorNoCtx(error) => error.details(),
-            _ => DiagnosticDetails::default(),
+            Self::CycleLimitExceeded(..)
+            | Self::Internal(..)
+            | Self::StackDepthLimitExceeded { .. }
+            | Self::TraceLenExceeded(..)
+            | Self::ProverMemoryExceeded { .. }
+            | Self::OutputStackOverflow(..)
+            | Self::ProvingError(..)
+            | Self::HostError(..)
+            | Self::PackageDebugInfoError(..) => DiagnosticDetails::default(),
         }
     }
 }
@@ -242,7 +250,7 @@ impl Diagnostic for IoError {
         match self {
             Self::Operation(error) => error.details(),
             Self::Execution(error) => error.details(),
-            _ => DiagnosticDetails::default(),
+            Self::Advice(..) | Self::Memory(..) => DiagnosticDetails::default(),
         }
     }
 }
@@ -296,7 +304,11 @@ impl Diagnostic for MemoryError {
                 ),
                 ..DiagnosticDetails::default()
             },
-            _ => DiagnosticDetails::default(),
+            Self::AddressOutOfBounds { .. }
+            | Self::IllegalMemoryAccess { .. }
+            | Self::InvalidMemoryRange { .. }
+            | Self::UnalignedWordAccess { .. }
+            | Self::MemoryReadFailed(..) => DiagnosticDetails::default(),
         }
     }
 }
@@ -321,7 +333,7 @@ impl Diagnostic for CryptoError {
     fn details(&self) -> DiagnosticDetails<'_> {
         match self {
             Self::Operation(error) => error.details(),
-            _ => DiagnosticDetails::default(),
+            Self::Advice(..) => DiagnosticDetails::default(),
         }
     }
 }
