@@ -27,7 +27,24 @@ impl<D: AsRef<dyn Diagnostic>> fmt::Display for PrintDiagnostic<D> {
 }
 
 pub(crate) fn render(out: &mut impl Write, diagnostic: &dyn Diagnostic) -> fmt::Result {
-    render_diagnostic(out, diagnostic, None, 0)
+    render_diagnostic(&mut PlainText(out), diagnostic, None, 0)
+}
+
+// Keep line breaks in diagnostic prose while escaping terminal controls from every field.
+struct PlainText<'a, W>(&'a mut W);
+
+impl<W: Write> Write for PlainText<'_, W> {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        let mut start = 0;
+        for (index, ch) in text.char_indices().filter(|&(_, ch)| ch != '\n' && ch.is_control()) {
+            self.0.write_str(&text[start..index])?;
+            for escaped in ch.escape_debug() {
+                self.0.write_char(escaped)?;
+            }
+            start = index + ch.len_utf8();
+        }
+        self.0.write_str(&text[start..])
+    }
 }
 
 fn render_diagnostic(
@@ -58,10 +75,26 @@ fn render_diagnostic(
     let source = details.source.or(inherited_source);
     let has_primary_label = details.labels.iter().any(|label| label.primary);
     for label in details.labels.iter() {
-        if let Some(excerpt) = source.and_then(|source| Excerpt::new(source, label)) {
-            let marker = if has_primary_label && !label.primary { '-' } else { '^' };
-            excerpt.render(out, label, marker)?;
-        } else if let Some(message) = label.label() {
+        if let Some(source) = source.filter(|_| !label.span.is_synthetic()) {
+            match Excerpt::new(source, label) {
+                Ok(excerpt) => {
+                    let marker = if has_primary_label && !label.primary { '-' } else { '^' };
+                    excerpt.render(out, label, marker)?;
+                    continue;
+                },
+                Err(reason) => {
+                    let range = label.span.into_range();
+                    writeln!(
+                        out,
+                        "  = source label unavailable (bytes {}..{} in {}): {reason}",
+                        range.start,
+                        range.end,
+                        source.uri(),
+                    )?;
+                },
+            }
+        }
+        if let Some(message) = label.label() {
             writeln!(out, "  = {message}")?;
         }
     }
@@ -83,17 +116,23 @@ struct Excerpt<'a> {
 }
 
 impl<'a> Excerpt<'a> {
-    fn new(source: &'a SourceFile, label: &Label) -> Option<Self> {
+    fn new(source: &'a SourceFile, label: &Label) -> Result<Self, &'static str> {
         let span = label.span;
         if !span.source_id().is_unknown() && span.source_id() != source.id() {
-            return None;
+            return Err("span belongs to another source file");
         }
-        source.source_slice(span)?;
+        let range = span.into_slice_index();
+        if range.start > range.end || range.end > source.len() {
+            return Err("range is out of bounds");
+        }
+        if source.source_slice(range).is_none() {
+            return Err("range splits a UTF-8 character");
+        }
         let content = source.content();
         let first_line = content.line_index(span.start());
         let last_byte = span.end().to_u32().saturating_sub(1).max(span.start().to_u32());
         let last_line = content.line_index(ByteIndex::new(last_byte));
-        Some(Self { source, first_line, last_line })
+        Ok(Self { source, first_line, last_line })
     }
 
     fn render(&self, out: &mut impl Write, label: &Label, marker: char) -> fmt::Result {

@@ -3,7 +3,7 @@ use core::{error::Error, fmt};
 
 use miden_debug_types::{SourceFile, SourceId, SourceLanguage, SourceSpan, Uri};
 
-use crate::{IntoDiagnostic, RelatedLabel, Report, WrapErr};
+use crate::{IntoDiagnostic, Label, RelatedLabel, Report, WrapErr};
 
 fn source(text: &str) -> Arc<SourceFile> {
     Arc::new(SourceFile::new(
@@ -36,12 +36,15 @@ fn renders_empty_source_and_retains_labels_when_an_excerpt_is_unavailable() {
     let error = RelatedLabel::error("unexpected EOF")
         .with_source_file(Some(file))
         .with_labeled_span(point, "expected a token")
-        .with_labeled_span(SourceSpan::new(point.source_id(), 1..2), "past the end");
+        .with_label(Label::underline(SourceSpan::new(point.source_id(), 1..2)));
 
     let rendered = format!("{:?}", Report::new(error));
     assert!(rendered.contains("test.masm:1:1"), "{rendered}");
     assert!(rendered.contains("^ expected a token"), "{rendered}");
-    assert!(rendered.contains("= past the end"), "{rendered}");
+    assert!(
+        rendered.contains("bytes 1..2 in test.masm): range is out of bounds"),
+        "{rendered}"
+    );
 
     let file = source("§");
     let invalid = SourceSpan::new(file.id(), 1..2);
@@ -49,14 +52,37 @@ fn renders_empty_source_and_retains_labels_when_an_excerpt_is_unavailable() {
     let error = RelatedLabel::error("invalid locations")
         .with_source_file(Some(file))
         .with_labeled_span(invalid, "inside a codepoint")
-        .with_labeled_span(foreign, "another file");
+        .with_labeled_span(foreign, "another file")
+        .with_labeled_span(SourceSpan::SYNTHETIC, "generated code");
     let rendered = format!("{:?}", Report::new(error));
+    assert!(rendered.contains("range splits a UTF-8 character"), "{rendered}");
+    assert!(rendered.contains("span belongs to another source file"), "{rendered}");
+    assert_eq!(rendered.matches("source label unavailable").count(), 2, "{rendered}");
     assert!(rendered.contains("= inside a codepoint"), "{rendered}");
     assert!(rendered.contains("= another file"), "{rendered}");
+    assert!(rendered.contains("= generated code"), "{rendered}");
     assert!(!rendered.contains("-->"), "{rendered}");
 
     let missing = RelatedLabel::error("missing source").with_labeled_span(point, "here");
-    assert!(format!("{:?}", Report::new(missing)).contains("= here"));
+    let rendered = format!("{:?}", Report::new(missing));
+    assert!(rendered.contains("= here"), "{rendered}");
+    assert!(!rendered.contains("source label unavailable"), "{rendered}");
+}
+
+#[test]
+fn escapes_controls_in_diagnostic_text_and_keeps_line_breaks() {
+    let file = source("\u{7}a");
+    let span = SourceSpan::new(file.id(), 0..1);
+    let error = RelatedLabel::error("\u{7} heading\nnext line")
+        .with_source_file(Some(file))
+        .with_labeled_span(span, "label \u{7}")
+        .with_help("watch for \u{85}");
+
+    let rendered = format!("{:?}", Report::new(error));
+    assert!(rendered.contains("error: \\u{7} heading\nnext line\n"), "{rendered}");
+    assert!(rendered.contains("1 | \u{fffd}a\n   : ^ label \\u{7}"), "{rendered}");
+    assert!(rendered.contains("help: watch for \\u{85}"), "{rendered}");
+    assert!(!rendered.chars().any(|ch| ch != '\n' && ch.is_control()), "{rendered}");
 }
 
 #[derive(Debug)]
