@@ -41,6 +41,25 @@ pub struct StepInfo<'a> {
     pub(crate) inline_frames: &'a [InlineCallFrame],
 }
 
+impl<'a> StepInfo<'a> {
+    /// Creates a step description without assembly metadata or inline call frames.
+    pub fn new(
+        op: Option<Operation>,
+        control: Option<ControlFlowOp>,
+        clk: RowIndex,
+        ctx: ContextId,
+    ) -> Self {
+        Self {
+            op,
+            control,
+            asmop: None,
+            clk,
+            ctx,
+            inline_frames: &[],
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InlineCallFrame {
     name: Arc<str>,

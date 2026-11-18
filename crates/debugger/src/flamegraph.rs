@@ -105,7 +105,7 @@ impl FlamegraphProfile {
     /// Record `cycles` against a stack of frame names.
     ///
     /// Frame names are sanitized for folded stack output, then joined with `;`.
-    pub(crate) fn record_stack<I, S>(&mut self, frames: I, cycles: usize)
+    pub fn record_stack<I, S>(&mut self, frames: I, cycles: usize)
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
@@ -115,7 +115,7 @@ impl FlamegraphProfile {
     }
 
     /// Record `cycles` against an already formatted folded-stack path.
-    pub(crate) fn record_stack_path(&mut self, stack_path: impl Into<String>, cycles: usize) {
+    pub fn record_stack_path(&mut self, stack_path: impl Into<String>, cycles: usize) {
         if cycles == 0 {
             return;
         }

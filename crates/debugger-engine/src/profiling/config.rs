@@ -14,7 +14,7 @@ pub struct ProfilerCliArgs {
     /// Enables profiling and sets the output dir for reports. Profiling
     /// instruments need to be enabled separately.
     #[arg(long = "profiling-reports-dir", value_name = "DIRECTORY")]
-    pub(crate) reports_dir: Option<PathBuf>,
+    pub reports_dir: Option<PathBuf>,
     #[arg(long = "profiling-instruments", value_name = "VALUE", value_delimiter = ',')]
     pub instruments: Vec<alloc::string::String>,
 }
@@ -25,7 +25,7 @@ pub struct ProfilerConfig {
     pub instruments: Vec<Box<dyn Instrument>>,
     /// The directory where profiling reports are written.
     #[cfg(feature = "std")]
-    pub(crate) reports_dir: Option<PathBuf>,
+    pub reports_dir: Option<PathBuf>,
 }
 
 #[cfg(feature = "std")]
