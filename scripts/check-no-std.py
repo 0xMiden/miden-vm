@@ -7,6 +7,14 @@ from pathlib import Path
 import subprocess
 
 
+REQUIRED_PACKAGES = {
+    "miden-air",
+    "miden-package-registry",
+    "miden-processor",
+    "miden-test-utils",
+}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", default="wasm32v1-none")
@@ -25,8 +33,9 @@ def main():
             for target in package["targets"]
         )
     )
-    if not packages:
-        raise SystemExit("No no_std libraries found")
+    missing = REQUIRED_PACKAGES.difference(packages)
+    if missing:
+        raise SystemExit(f"Required no_std libraries not found: {', '.join(sorted(missing))}")
     failed = []
     for package in packages:
         print(f"Checking {package} without std on {args.target}", flush=True)
