@@ -3390,6 +3390,7 @@ dependencies = [
  "miden-utils-diagnostics",
  "miden-utils-indexing",
  "miden-vm-stark",
+ "p3-maybe-rayon",
  "paste",
  "pretty_assertions",
  "proptest",

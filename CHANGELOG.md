@@ -16,6 +16,9 @@
 
 #### Fixes
 
+- Restored `no_std` builds for VM libraries by using `alloc` in the constraint compiler, building processor traces serially without `std`, and gating diagnostic rendering behind `std` ([#3934](https://github.com/0xMiden/miden-vm/pull/3934)).
+- Enabled `miden-test-utils` builds without `std` by keeping logging and test-only dependencies behind its `std` feature ([#3934](https://github.com/0xMiden/miden-vm/pull/3934)).
+
 ## v1.0.0-rc.1 (2026-11-14)
 
 #### Features

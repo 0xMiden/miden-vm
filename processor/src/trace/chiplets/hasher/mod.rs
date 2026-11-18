@@ -17,7 +17,7 @@ use miden_core::{
     chiplets::{eidos_compression, hasher::compress_state},
     utils::RowMajorMatrix,
 };
-use rayon::prelude::*;
+use p3_maybe_rayon::prelude::*;
 
 use super::{
     ChipletTraceFragment, Felt, HasherState, MerklePath, ONE, OpBatch, RangeChecker,
@@ -495,6 +495,12 @@ fn fill_eidos_compression_trace(
     let real_rows_len = requests.len() * EIDOS_COMPRESSION_CYCLE_LEN;
     let (real_rows, dummy_rows) = rows.split_at_mut(real_rows_len);
 
+    let merge_counts = |mut left: Vec<u64>, right: Vec<u64>| {
+        for (left, right) in left.iter_mut().zip(right) {
+            *left += right;
+        }
+        left
+    };
     let mut counts = real_rows
         .par_chunks_mut(EIDOS_COMPRESSION_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
         .zip(requests.par_chunks(BLOCKS_PER_FILL_CHUNK))
@@ -520,13 +526,7 @@ fn fill_eidos_compression_trace(
             }
             local_counts
         })
-        .reduce_with(|mut left, right| {
-            for (left, right) in left.iter_mut().zip(right) {
-                *left += right;
-            }
-            left
-        })
-        .unwrap_or_else(|| vec![0u64; BYTE_LOOKUP_COUNT_LEN]);
+        .par_fold_reduce(|| vec![0u64; BYTE_LOOKUP_COUNT_LEN], merge_counts, merge_counts);
 
     if !dummy_rows.is_empty() {
         let zero_state = [0u64; STATE_WIDTH];
@@ -589,6 +589,12 @@ fn fill_ordered_eidos_compression_trace(requests: &[StateKey], trace: &mut [Felt
     let real_rows_len = requests.len() * EIDOS_COMPRESSION_CYCLE_LEN;
     let (real_rows, dummy_rows) = rows.split_at_mut(real_rows_len);
 
+    let merge_counts = |mut left: Vec<u64>, right: Vec<u64>| {
+        for (left, right) in left.iter_mut().zip(right) {
+            *left += right;
+        }
+        left
+    };
     let mut counts = real_rows
         .par_chunks_mut(EIDOS_COMPRESSION_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
         .zip(requests.par_chunks(BLOCKS_PER_FILL_CHUNK))
@@ -616,13 +622,7 @@ fn fill_ordered_eidos_compression_trace(requests: &[StateKey], trace: &mut [Felt
             }
             local_counts
         })
-        .reduce_with(|mut left, right| {
-            for (left, right) in left.iter_mut().zip(right) {
-                *left += right;
-            }
-            left
-        })
-        .unwrap_or_else(|| vec![0u64; BYTE_LOOKUP_COUNT_LEN]);
+        .par_fold_reduce(|| vec![0u64; BYTE_LOOKUP_COUNT_LEN], merge_counts, merge_counts);
 
     if !dummy_rows.is_empty() {
         let zero_state = [0u64; STATE_WIDTH];
