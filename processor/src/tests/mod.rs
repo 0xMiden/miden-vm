@@ -14,8 +14,8 @@ use miden_utils_testing::crypto::{init_merkle_leaves, init_merkle_store};
 
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
 use crate::{
-    BaseHost, DefaultHost, FastProcessor, KernelDescriptor, LoadedMastForest, ONE, ProcessorState,
-    Program, StackInputs, SyncHost, Word, ZERO,
+    BaseHost, DefaultHost, FastProcessor, KernelDescriptor, LoadedMastForest, MastForestLoadError,
+    ONE, ProcessorState, Program, StackInputs, SyncHost, Word, ZERO,
     advice::{AdviceInputs, AdviceMap, AdviceMutation},
     event::{EventError, EventHandler, EventName, TraceError, TraceHandler},
     operation::Operation,
@@ -120,8 +120,11 @@ impl BaseHost for MalformedMastForestHost {
 }
 
 impl SyncHost for MalformedMastForestHost {
-    fn get_mast_forest(&self, _node_digest: &Word) -> Option<LoadedMastForest> {
-        Some(LoadedMastForest::new(self.mast_forest.clone()))
+    fn get_mast_forest(
+        &self,
+        _node_digest: &Word,
+    ) -> Result<Option<LoadedMastForest>, MastForestLoadError> {
+        Ok(Some(LoadedMastForest::new(self.mast_forest.clone())))
     }
 
     fn on_event(&mut self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {

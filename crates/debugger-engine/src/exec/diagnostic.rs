@@ -3,7 +3,7 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_core::{Word, events::EventId, program::Program};
 use miden_processor::{
     BaseHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, Felt,
-    FutureMaybeSend, Host, LoadedMastForest, ProcessorState, StackInputs,
+    FutureMaybeSend, Host, LoadedMastForest, MastForestLoadError, ProcessorState, StackInputs,
     advice::{AdviceInputs, AdviceMutation},
     event::{EventError, TraceError},
     trace::RowIndex,
@@ -84,7 +84,7 @@ impl<H: Host> Host for DiagnosticHostWrapper<'_, H> {
     fn get_mast_forest(
         &self,
         node_digest: &Word,
-    ) -> impl FutureMaybeSend<Option<LoadedMastForest>> {
+    ) -> impl FutureMaybeSend<Result<Option<LoadedMastForest>, MastForestLoadError>> {
         self.inner.get_mast_forest(node_digest)
     }
 

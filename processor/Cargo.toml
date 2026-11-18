@@ -16,7 +16,7 @@ exclude = ["*.snap"]
 
 [lib]
 bench = false
-doctest = false
+doctest = true
 
 [features]
 concurrent = ["std", "miden-air-definitions/concurrent"]

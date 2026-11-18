@@ -3,7 +3,7 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_core::Word;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
-    BaseHost, FutureMaybeSend, Host, LoadedMastForest, ProcessorState,
+    BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestLoadError, ProcessorState,
     advice::AdviceMutation,
     event::{EventError, EventId, EventName, TraceError},
 };
@@ -56,17 +56,17 @@ impl<H: Host> Host for RecordingHost<'_, H> {
     fn get_mast_forest(
         &self,
         node_digest: &Word,
-    ) -> impl FutureMaybeSend<Option<LoadedMastForest>> {
+    ) -> impl FutureMaybeSend<Result<Option<LoadedMastForest>, MastForestLoadError>> {
         // Record every forest the inner host resolves, so a replay session can load the same
         // code for `call`/`dyncall` targets. The recorder deduplicates.
         let forest_recorder = self.forest_recorder.clone();
         let fut = self.inner.get_mast_forest(node_digest);
         async move {
-            let forest = fut.await;
+            let forest = fut.await?;
             if let (Some(recorder), Some(forest)) = (&forest_recorder, &forest) {
                 recorder.record(forest.clone());
             }
-            forest
+            Ok(forest)
         }
     }
 

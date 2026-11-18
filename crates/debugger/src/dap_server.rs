@@ -8,8 +8,8 @@ use miden_debug_types::{Location, SourceFile, SourceManager, SourceManagerExt, S
 use miden_mast_package::Package;
 use miden_package_registry::PackageRegistry;
 use miden_processor::{
-    BaseHost, DefaultHost, FutureMaybeSend, Host, HostLibrary, LoadedMastForest, ProcessorState,
-    advice::AdviceMutation, event::EventError,
+    BaseHost, DefaultHost, FutureMaybeSend, Host, HostLibrary, LoadedMastForest,
+    MastForestLoadError, ProcessorState, advice::AdviceMutation, event::EventError,
 };
 
 use crate::{DapConfig, DapExecutor, DebuggerConfig};
@@ -109,7 +109,7 @@ impl Host for StandaloneDapHost {
     fn get_mast_forest(
         &self,
         node_digest: &Word,
-    ) -> impl FutureMaybeSend<Option<LoadedMastForest>> {
+    ) -> impl FutureMaybeSend<Result<Option<LoadedMastForest>, MastForestLoadError>> {
         self.inner.get_mast_forest(node_digest)
     }
 

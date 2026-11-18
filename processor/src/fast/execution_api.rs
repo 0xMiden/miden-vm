@@ -1311,8 +1311,20 @@ impl FastProcessor {
         let was_cached = cached.is_some();
         let loaded_mast_forest = match cached {
             Some(mast_forest) => mast_forest,
-            None => host.get_mast_forest(&node_digest).ok_or_else(|| {
-                match (package_debug_info, source_node_id) {
+            None => host
+                .get_mast_forest(&node_digest)
+                .map_err(|error| match (package_debug_info, source_node_id) {
+                    (Some(debug_info), Some(source_node_id)) => {
+                        crate::errors::mast_forest_error_with_package_source_context(
+                            node_digest,
+                            error,
+                            PackageSourceDebugContext::new(debug_info, source_node_id),
+                            host,
+                        )
+                    },
+                    _ => crate::errors::mast_forest_error_with_context(node_digest, error),
+                })?
+                .ok_or_else(|| match (package_debug_info, source_node_id) {
                     (Some(debug_info), Some(source_node_id)) => {
                         crate::errors::procedure_not_found_with_package_source_context(
                             node_digest,
@@ -1321,8 +1333,7 @@ impl FastProcessor {
                         )
                     },
                     _ => crate::errors::procedure_not_found_with_context(node_digest),
-                }
-            })?,
+                })?,
         };
         let mast_forest = loaded_mast_forest.mast_forest().clone();
 
@@ -1371,7 +1382,21 @@ impl FastProcessor {
         let loaded_mast_forest = match cached {
             Some(mast_forest) => mast_forest,
             None => {
-                if let Some(mast_forest) = host.get_mast_forest(&node_digest).await {
+                if let Some(mast_forest) =
+                    host.get_mast_forest(&node_digest).await.map_err(|error| {
+                        match (package_debug_info, source_node_id) {
+                            (Some(debug_info), Some(source_node_id)) => {
+                                crate::errors::mast_forest_error_with_package_source_context(
+                                    node_digest,
+                                    error,
+                                    PackageSourceDebugContext::new(debug_info, source_node_id),
+                                    host,
+                                )
+                            },
+                            _ => crate::errors::mast_forest_error_with_context(node_digest, error),
+                        }
+                    })?
+                {
                     mast_forest
                 } else {
                     return Err(match (package_debug_info, source_node_id) {
