@@ -85,6 +85,31 @@ fn escapes_controls_in_diagnostic_text_and_keeps_line_breaks() {
     assert!(!rendered.chars().any(|ch| ch != '\n' && ch.is_control()), "{rendered}");
 }
 
+#[test]
+fn keeps_source_paths_and_inline_labels_on_one_line() {
+    let file = Arc::new(SourceFile::new(
+        SourceId::new(1),
+        SourceLanguage::Masm,
+        Uri::new("my\nfile.masm"),
+        "begin\n",
+    ));
+    let span = SourceSpan::new(file.id(), 0..5);
+    let invalid = SourceSpan::new(file.id(), 7..8);
+    let error = RelatedLabel::error("syntax error")
+        .with_source_file(Some(file))
+        .with_labeled_span(span, "first\nsecond line")
+        .with_labeled_span(invalid, "past\nend");
+
+    let rendered = format!("{:?}", Report::new(error));
+    assert!(rendered.contains("  --> my\\nfile.masm:1:1\n"), "{rendered}");
+    assert!(rendered.contains("^^^^^ first\\nsecond line\n"), "{rendered}");
+    assert!(
+        rendered.contains("bytes 7..8 in my\\nfile.masm): range is out of bounds\n"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("= past\\nend\n"), "{rendered}");
+}
+
 #[derive(Debug)]
 struct OriginalError;
 

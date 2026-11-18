@@ -27,24 +27,34 @@ impl<D: AsRef<dyn Diagnostic>> fmt::Display for PrintDiagnostic<D> {
 }
 
 pub(crate) fn render(out: &mut impl Write, diagnostic: &dyn Diagnostic) -> fmt::Result {
-    render_diagnostic(&mut PlainText(out), diagnostic, None, 0)
+    render_diagnostic(&mut PlainText { out, allow_newlines: true }, diagnostic, None, 0)
 }
 
-// Keep line breaks in diagnostic prose while escaping terminal controls from every field.
-struct PlainText<'a, W>(&'a mut W);
+struct PlainText<'a, W> {
+    out: &'a mut W,
+    allow_newlines: bool,
+}
 
 impl<W: Write> Write for PlainText<'_, W> {
     fn write_str(&mut self, text: &str) -> fmt::Result {
         let mut start = 0;
-        for (index, ch) in text.char_indices().filter(|&(_, ch)| ch != '\n' && ch.is_control()) {
-            self.0.write_str(&text[start..index])?;
+        for (index, ch) in text.char_indices() {
+            if !ch.is_control() || (ch == '\n' && self.allow_newlines) {
+                continue;
+            }
+            self.out.write_str(&text[start..index])?;
             for escaped in ch.escape_debug() {
-                self.0.write_char(escaped)?;
+                self.out.write_char(escaped)?;
             }
             start = index + ch.len_utf8();
         }
-        self.0.write_str(&text[start..])
+        self.out.write_str(&text[start..])
     }
+}
+
+// Structural fields must stay on one line even when they contain arbitrary input.
+fn write_inline(out: &mut impl Write, text: fmt::Arguments<'_>) -> fmt::Result {
+    PlainText { out, allow_newlines: false }.write_fmt(text)
 }
 
 fn render_diagnostic(
@@ -61,7 +71,7 @@ fn render_diagnostic(
     let details = diagnostic.details();
     write!(out, "{}", diagnostic.severity())?;
     if let Some(code) = details.code {
-        write!(out, "[{code}]")?;
+        write_inline(out, format_args!("[{code}]"))?;
     }
     writeln!(out, ": {diagnostic}")?;
 
@@ -84,18 +94,22 @@ fn render_diagnostic(
                 },
                 Err(reason) => {
                     let range = label.span.into_range();
-                    writeln!(
+                    write_inline(
                         out,
-                        "  = source label unavailable (bytes {}..{} in {}): {reason}",
-                        range.start,
-                        range.end,
-                        source.uri(),
+                        format_args!(
+                            "  = source label unavailable (bytes {}..{} in {}): {reason}",
+                            range.start,
+                            range.end,
+                            source.uri(),
+                        ),
                     )?;
+                    out.write_char('\n')?;
                 },
             }
         }
         if let Some(message) = label.label() {
-            writeln!(out, "  = {message}")?;
+            write_inline(out, format_args!("  = {message}"))?;
+            out.write_char('\n')?;
         }
     }
     if let Some(help) = details.help {
@@ -145,7 +159,11 @@ impl<'a> Excerpt<'a> {
             && let Some(prefix) = self.source.as_str().get(start.to_usize()..span.start)
         {
             let column = display_column(prefix.trim_end_matches(['\r', '\n']), 0);
-            writeln!(out, "  --> {}:{}:{}", self.source.uri(), first + 1, column + 1)?;
+            write_inline(
+                out,
+                format_args!("  --> {}:{}:{}", self.source.uri(), first + 1, column + 1),
+            )?;
+            out.write_char('\n')?;
         }
 
         let context_start = first.saturating_sub(1);
@@ -186,7 +204,7 @@ impl<'a> Excerpt<'a> {
             if index == last
                 && let Some(message) = label.label()
             {
-                write!(out, " {message}")?;
+                write_inline(out, format_args!(" {message}"))?;
             }
             out.write_char('\n')?;
         }
