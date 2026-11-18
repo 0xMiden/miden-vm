@@ -14,7 +14,7 @@
 //! 6. **Group count constraints**: Group-count transitions inside basic blocks.
 //! 7. **Op group decoding (h0) constraints**: Base-128 opcode packing in h0.
 //! 8. **Op index constraints**: Position tracking within an operation group.
-//! 9. **Batch encoding constraints**: Batch size encoding and unused-lane zeroing.
+//! 9. **Batch encoding constraints**: Batch sizes, unused lanes, and final short batches.
 //! 10. **Block address (addr) constraints**: Hasher-table address management.
 //! 11. **Control flow constraint**: Mutual exclusivity of `in_span` and `f_ctrl`.
 //!
@@ -326,8 +326,8 @@ pub fn enforce_main<AB>(
     //
     // ## Lifecycle
     //
-    // 1. SPAN/RESPAN: the prover sets group_count non-deterministically to the batch's group count.
-    //    The constraint below forces delta_group_count = 1 on these rows.
+    // 1. SPAN/RESPAN: group_count is the block's remaining group count, including this batch. Entry
+    //    consumes the first group, so delta_group_count = 1 on these rows.
     // 2. Normal execution: each time a group is fully decoded (h0 reaches 0) or a PUSH consumes an
     //    immediate, group_count decrements by 1 (delta_group_count = 1).
     // 3. END: group_count must be 0 — all groups in the span have been consumed.
@@ -453,8 +453,8 @@ pub fn enforce_main<AB>(
     // Operation-batch encoding constraints
     // =============================================
     // `full_batch` and `batch_size_code` encode the number of op groups in the current batch.
-    // This matters for the last batch in a basic block (or the only batch), since all
-    // other batches must be completely full (8 groups).
+    // Every batch except the last one in a basic block must be full (8 groups): a short batch's
+    // remaining group count must equal its width, so no later batch remains.
     //
     // The valid active encodings are (1, 0), (0, 1), (0, -1), and (0, 0), corresponding to
     // 8, 4, 2, and 1 groups. Inactive rows are pinned to (0, 0); the SPAN/RESPAN opcode
@@ -473,6 +473,7 @@ pub fn enforce_main<AB>(
         op_flags.span() + op_flags.respan(),
         full_batch,
         batch_size_code,
+        group_count,
         &hasher_state,
     );
 
@@ -602,7 +603,7 @@ mod tests {
     fn span_row_with_single_group() -> CoreCols<Felt> {
         let mut row = generate_test_row(opcodes::SPAN.into());
         row.decoder.addr = Felt::new_unchecked(17);
-        row.decoder.group_count = Felt::new_unchecked(2);
+        row.decoder.group_count = Felt::ONE;
         row
     }
 
@@ -624,21 +625,6 @@ mod tests {
         assert!(
             decoder_accepts(&in_span_local, &in_span_next),
             "an ordinary in-span transition must be accepted"
-        );
-
-        let span = span_row_with_single_group();
-        let mut first_op = generate_test_row(opcodes::NOOP.into());
-        first_op.decoder.addr = span.decoder.addr;
-        first_op.decoder.in_span = Felt::ONE;
-        first_op.decoder.group_count = Felt::ONE;
-        assert!(decoder_accepts(&span, &first_op), "SPAN must be allowed to enter a basic block");
-
-        let mut respan = span_row_with_single_group();
-        set_opcode(&mut respan, opcodes::RESPAN.into());
-        first_op.decoder.addr = respan.decoder.addr + CONTROLLER_ROWS_PER_HASHER_OP_FELT;
-        assert!(
-            decoder_accepts(&respan, &first_op),
-            "RESPAN must be allowed to enter the next batch"
         );
 
         for exit_opcode in [opcodes::END, opcodes::RESPAN] {
@@ -711,8 +697,10 @@ mod tests {
         let span = span_row_with_single_group();
         let mut end = generate_test_row(opcodes::END.into());
         end.decoder.addr = span.decoder.addr;
-        for mut entry in [generate_test_row(opcodes::LOOP.into()), repeat_row_with_true_condition()]
-        {
+        let mut loop_entry = generate_test_row(opcodes::LOOP.into());
+        // LOOP uses this column for body multiplicity, outside the batch-count rule.
+        loop_entry.decoder.group_count = Felt::from_u8(5);
+        for mut entry in [loop_entry, repeat_row_with_true_condition()] {
             entry.decoder.addr = span.decoder.addr;
             assert!(
                 decoder_accepts(&entry, &span),
@@ -784,6 +772,26 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn span_and_respan_check_the_short_batch_count() {
+        for (opcode, addr_offset) in [
+            (opcodes::SPAN, Felt::ZERO),
+            (opcodes::RESPAN, CONTROLLER_ROWS_PER_HASHER_OP_FELT),
+        ] {
+            let mut entry = span_row_with_single_group();
+            set_opcode(&mut entry, opcode.into());
+            let mut first_op = generate_test_row(opcodes::NOOP.into());
+            first_op.decoder.in_span = ONE;
+            first_op.decoder.addr = entry.decoder.addr + addr_offset;
+            assert!(decoder_accepts(&entry, &first_op), "opcode {opcode}: final short batch");
+
+            // Preserve the one-group decrement at entry while leaving an extra group.
+            entry.decoder.group_count += ONE;
+            first_op.decoder.group_count += ONE;
+            assert!(!decoder_accepts(&entry, &first_op), "opcode {opcode}: non-final short batch");
         }
     }
 
