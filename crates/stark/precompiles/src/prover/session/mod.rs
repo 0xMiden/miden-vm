@@ -528,7 +528,7 @@ impl Session {
     pub fn finish(mut self, root: Truthy) -> SessionTraces {
         macro_rules! trace_span {
             ($name:literal, $expr:expr) => {{
-                let _span = tracing::info_span!($name).entered();
+                let _span = tracing::trace_span!(target: "miden::vm::trace", $name).entered();
                 $expr
             }};
         }

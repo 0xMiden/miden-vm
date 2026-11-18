@@ -16,7 +16,7 @@ use p3_field::{
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use p3_util::{log2_strict_usize, reverse_bits_len};
-use tracing::info_span;
+use tracing::trace_span;
 
 use crate::{
     StarkConfig,
@@ -181,7 +181,7 @@ where
     let log_n = log2_strict_usize(n);
 
     let lde =
-        info_span!("quotient LDE", dims = %format!("{lde_height}x{base_width}")).in_scope(|| {
+        trace_span!(target: "miden::vm::prove", "quotient LDE", dims = %format!("{lde_height}x{base_width}")).in_scope(|| {
             config.dft().coset_lde_batch_with_transform(
                 coeffs,
                 added_bits,

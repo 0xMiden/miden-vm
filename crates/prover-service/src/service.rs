@@ -229,7 +229,7 @@ impl State {
 
 #[tonic::async_trait]
 impl<P: InputPolicy> Rpc for ProvingService<P> {
-    #[tracing::instrument(name = "prover_service.prove", skip_all)]
+    #[tracing::instrument(name = "prover_service.prove", level = "debug", skip_all)]
     async fn prove(
         &self,
         request: Request<ProveRequest>,

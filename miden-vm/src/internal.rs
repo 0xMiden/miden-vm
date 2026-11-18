@@ -97,7 +97,7 @@ impl InputFile {
 
     /// Reads input JSON from a regular file of at most [`Self::MAX_FILE_SIZE`] bytes.
     /// Symlinks to regular files are accepted.
-    #[instrument(name = "read_input_file", skip_all)]
+    #[instrument(target = "miden::cli", level = "trace", name = "read_input_file", skip_all)]
     pub fn read(inputs_path: &Option<PathBuf>, program_path: &Path) -> Result<Self, Report> {
         // If inputs_path has been provided then use this as path. Alternatively we will
         // replace the program_path extension with .inputs and use this as a default.

@@ -164,7 +164,7 @@ impl RunCmd {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-#[instrument(name = "run_program", skip_all)]
+#[instrument(target = "miden::cli", level = "trace", name = "run_program", skip_all)]
 fn run_masp_program(
     params: &RunCmd,
     exec_options: ExecutionOptions,
@@ -203,7 +203,7 @@ fn run_masp_program(
     Ok((trace, program_hash))
 }
 
-#[instrument(name = "run_program", skip_all)]
+#[instrument(target = "miden::cli", level = "trace", name = "run_program", skip_all)]
 fn run_masm_program(
     params: &RunCmd,
     exec_options: ExecutionOptions,

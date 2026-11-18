@@ -9,7 +9,7 @@ use miden_stark::{
 };
 use p3_field::{Algebra, ExtensionField, Field, PrimeField64, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
-use tracing::info_span;
+use tracing::trace_span;
 
 use crate::{
     RunResult,
@@ -130,7 +130,7 @@ where
     let prover_instance =
         ProverInstance::new(config, prover_statement, None).expect("no preprocessed columns");
 
-    let (output, statement) = info_span!("prove")
+    let (output, statement) = trace_span!(target: "miden::bench", "prove")
         .in_scope(|| prover_instance.prove(config.challenger()).expect("proving failed"));
 
     let result = RunResult {
@@ -140,7 +140,7 @@ where
     };
 
     if !cli.no_verify {
-        info_span!("verify").in_scope(|| {
+        trace_span!(target: "miden::bench", "verify").in_scope(|| {
             let digest = VerifierInstance::new(config, &statement, None)
                 .expect("no preprocessed columns")
                 .verify(&output.proof, config.challenger())

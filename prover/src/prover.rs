@@ -152,14 +152,11 @@ impl Prover {
 
     /// Materializes and proves the VM trace represented by `witness`.
     fn prove_vm(&self, witness: VmWitness) -> Result<VmProof, ProverError> {
-        let trace = {
-            let _span = tracing::info_span!("build_miden_vm_trace").entered();
-            build_trace(
-                witness,
-                &miden_vm_stark::memory::canonical_budget(self.max_prover_memory_bytes),
-            )
-            .map_err(ProverError::TraceGeneration)?
-        };
+        let trace = build_trace(
+            witness,
+            &miden_vm_stark::memory::canonical_budget(self.max_prover_memory_bytes),
+        )
+        .map_err(ProverError::TraceGeneration)?;
 
         self.prove_vm_trace(trace)
     }
@@ -240,7 +237,7 @@ impl Prover {
 /// When enabled in `execution_options`, the processor may build the hasher chiplet alongside
 /// execution. A caller with no separate Rayon worker uses compact buffered replay. Both cases use
 /// the same private VM STARK and complete-local packaging implementation.
-#[tracing::instrument(name = "prove_program_sync", skip_all)]
+#[tracing::instrument(target = "miden::vm", level = "trace", name = "prove_program", skip_all)]
 pub fn prove_sync(
     prover: &Prover,
     program: &Program,
@@ -256,14 +253,11 @@ pub fn prove_sync(
 
     #[cfg(feature = "std")]
     if overlapped_trace_build {
-        let (trace, precompile) = {
-            let _span = tracing::info_span!("execute_miden_vm").entered();
-            processor.execute_and_build_trace_sync(
-                program,
-                host,
-                &miden_vm_stark::memory::canonical_budget(prover.max_prover_memory_bytes()),
-            )?
-        };
+        let (trace, precompile) = processor.execute_and_build_trace_sync(
+            program,
+            host,
+            &miden_vm_stark::memory::canonical_budget(prover.max_prover_memory_bytes()),
+        )?;
         let stack_outputs = *trace.stack_outputs();
         let proof = prover
             .prove_full_trace(trace, precompile)
@@ -271,10 +265,7 @@ pub fn prove_sync(
         return Ok((stack_outputs, proof));
     }
 
-    let witness = {
-        let _span = tracing::info_span!("execute_miden_vm").entered();
-        processor.execute_for_proving_sync(program, host)?
-    };
+    let witness = processor.execute_for_proving_sync(program, host)?;
     let stack_outputs = *witness.claim().stack_outputs();
     let proof = prover.prove_full(witness).map_err(ProverError::into_execution_error)?;
     Ok((stack_outputs, proof))
