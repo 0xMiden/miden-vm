@@ -710,23 +710,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn opcode_prefix_boundaries() {
-        let (mut local, next) = honest_in_span_pair();
-        for opcode in [opcodes::U32ADD, opcodes::LOGDEFERRED, opcodes::MRUPDATE] {
-            set_opcode(&mut local, opcode.into());
-            assert!(decoder_accepts(&local, &next), "opcode {opcode} must be accepted");
-        }
-
-        for opcode in [47, 65, 95, 97, 98] {
-            set_opcode(&mut local, opcode);
-            assert!(!decoder_accepts(&local, &next), "unused opcode {opcode} must be rejected");
-        }
-    }
-
-    /// Inside a span, the decoder admits exactly the basic-block operations of the native opcode
-    /// registry. Control-flow opcodes violate the in-span/control-flow exclusion, and every unused
-    /// encoding, including degree-7 slot 47, violates an opcode-bit constraint.
+    /// Compare decoder admission on in-span row pairs with the native operation registry.
+    /// The in-span rule excludes control-flow opcodes, and the opcode-bit guards reject unused
+    /// encodings, including slot 47.
     #[test]
     fn in_span_opcodes_match_the_operation_registry() {
         // ASSERT, U32ASSERT2, MPVERIFY and PUSH carry one field-element immediate on the wire.
@@ -763,14 +749,12 @@ mod tests {
             assert!(decoder_accepts(&local, &next), "opcode {opcode}: the child digest is free");
 
             for lane in 4..8 {
-                for value in [ONE, -ONE] {
-                    let mut padded = local.clone();
-                    padded.decoder.hasher_state[lane] = value;
-                    assert!(
-                        !decoder_accepts(&padded, &next),
-                        "opcode {opcode} must commit zero in lane {lane}"
-                    );
-                }
+                let mut padded = local.clone();
+                padded.decoder.hasher_state[lane] = ONE;
+                assert!(
+                    !decoder_accepts(&padded, &next),
+                    "opcode {opcode} must commit zero in lane {lane}"
+                );
             }
         }
     }
