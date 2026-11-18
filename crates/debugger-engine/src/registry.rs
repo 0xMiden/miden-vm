@@ -9,7 +9,7 @@ use miden_assembly_syntax::{
 use miden_mast_package::Package;
 use miden_package_registry::{
     PackageCache, PackageId, PackageIndex, PackageProvider, PackageRecord, PackageRegistry,
-    PackageStore, PackageVersions, VersionRequirement,
+    PackageStore, PackageVersions, VersionRequirement, insert_package_record,
 };
 
 type FxHashMap<K, V> = hashbrown::HashMap<K, V, rustc_hash::FxBuildHasher>;
@@ -114,8 +114,6 @@ impl HybridPackageRegistry {
         &mut self,
         package: Arc<Package>,
     ) -> Result<miden_package_registry::Version, InstallPackageError> {
-        use alloc::collections::btree_map::Entry as BTreeMapEntry;
-
         use hashbrown::hash_map::Entry;
 
         let version = miden_package_registry::Version::new(
@@ -138,28 +136,33 @@ impl HybridPackageRegistry {
         match self.packages.entry(package.name.clone()) {
             Entry::Occupied(mut entry) => {
                 let versions = entry.get_mut();
-                match versions.entry(package.version.clone()) {
-                    BTreeMapEntry::Occupied(mut prev) => {
-                        let prev_digest = prev.get().digest().copied();
-                        if prev_digest.is_none_or(|prev_digest| {
-                            prev_digest == package.dependency_commitment()
-                        }) {
-                            prev.insert(record);
-                        } else {
-                            log::trace!(target: "package-registry", "package already installed: {}@{version}", package.name);
-                            return Err(InstallPackageError::AlreadyInstalledWithDifferentDigest {
-                                package: package.name.clone(),
-                                version,
-                            });
-                        }
-                    },
-                    BTreeMapEntry::Vacant(entry) => {
-                        entry.insert(record);
-                    },
+                if let Some(prev) = versions
+                    .iter_mut()
+                    .find(|(existing, _)| existing.cmp_precedence(&package.version).is_eq())
+                    .map(|(_, record)| record)
+                {
+                    let prev_digest = prev.digest().copied();
+                    if prev_digest
+                        .is_none_or(|prev_digest| prev_digest == package.dependency_commitment())
+                    {
+                        *prev = record;
+                    } else {
+                        log::trace!(target: "package-registry", "package already installed: {}@{version}", package.name);
+                        return Err(InstallPackageError::AlreadyInstalledWithDifferentDigest {
+                            package: package.name.clone(),
+                            version,
+                        });
+                    }
+                } else {
+                    insert_package_record(versions, record)
+                        .expect("semantic-version availability was checked before insertion");
                 }
             },
             Entry::Vacant(entry) => {
-                entry.insert([(package.version.clone(), record)].into_iter().collect());
+                let mut versions = PackageVersions::new();
+                insert_package_record(&mut versions, record)
+                    .expect("an empty package-version map accepts its first record");
+                entry.insert(versions);
             },
         }
 
@@ -174,15 +177,6 @@ impl HybridPackageRegistry {
     }
 }
 
-impl HybridPackageRegistry {
-    fn insert_record(&mut self, id: PackageId, record: PackageRecord) {
-        self.packages
-            .entry(id)
-            .or_default()
-            .insert(record.semantic_version().clone(), record);
-    }
-}
-
 impl PackageRegistry for HybridPackageRegistry {
     fn available_versions(&self, package: &PackageId) -> Option<&PackageVersions> {
         self.packages.get(package)
@@ -193,14 +187,8 @@ impl PackageIndex for HybridPackageRegistry {
     type Error = Report;
 
     fn register(&mut self, name: PackageId, record: PackageRecord) -> Result<(), Self::Error> {
-        if self.is_semver_available(&name, record.semantic_version()) {
-            return Err(Report::msg(format!(
-                "cannot register {name}: version {} is already registered",
-                record.semantic_version()
-            )));
-        }
-        self.insert_record(name, record);
-        Ok(())
+        insert_package_record(self.packages.entry(name.clone()).or_default(), record)
+            .map_err(|error| Report::msg(format!("cannot register {name}: {error}")))
     }
 }
 
@@ -210,7 +198,12 @@ impl PackageProvider for HybridPackageRegistry {
         package: &PackageId,
         version: &miden_package_registry::Version,
     ) -> Result<Arc<Package>, Report> {
-        let found = self.artifacts.get(package).and_then(|versions| versions.get(&version.version));
+        let found = self.artifacts.get(package).and_then(|versions| {
+            versions
+                .iter()
+                .find(|(candidate, _)| candidate.version.cmp_precedence(&version.version).is_eq())
+                .map(|(_, artifact)| artifact)
+        });
         match found {
             Some(artifact) if version.digest != Some(artifact.dependency_commitment()) => {
                 Err(Report::msg(format!(

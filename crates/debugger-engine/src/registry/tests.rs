@@ -15,18 +15,32 @@ fn package(source: &str) -> Arc<Package> {
 
 #[test]
 fn cache_publish_and_load_preserve_versions_and_digests() {
-    let original = package("begin push.1 end");
+    let mut original = (*package("begin push.1 end")).clone();
+    original.version = "1.0.0+first".parse().unwrap();
+    let original = Arc::new(original);
     let mut registry = HybridPackageRegistry::empty();
     let version = registry.cache_package(original.clone()).unwrap();
-    assert_eq!(registry.available_versions(&original.name).unwrap().len(), 1);
+    let versions = registry.available_versions(&original.name).unwrap();
+    assert_eq!(versions.len(), 1);
+    assert_eq!(versions.first_key_value().unwrap().0, &"1.0.0".parse().unwrap());
     assert_eq!(registry.publish_package(original.clone()).unwrap(), version);
     assert!(Arc::ptr_eq(
         &registry.load_package(&original.name, &version).unwrap(),
         &original
     ));
+    let metadata_alias = miden_package_registry::Version::new(
+        "1.0.0+second".parse().unwrap(),
+        original.dependency_commitment(),
+    );
+    assert!(Arc::ptr_eq(
+        &registry.load_package(&original.name, &metadata_alias).unwrap(),
+        &original
+    ));
     assert_eq!(registry.all().into_iter().count(), 1);
 
-    let conflicting = package("begin push.2 end");
+    let mut conflicting = (*package("begin push.2 end")).clone();
+    conflicting.version = "1.0.0+second".parse().unwrap();
+    let conflicting = Arc::new(conflicting);
     assert_ne!(original.dependency_commitment(), conflicting.dependency_commitment());
     let error = registry.cache_package(conflicting.clone()).unwrap_err();
     assert!(error.to_string().contains("different digest"));
@@ -47,7 +61,7 @@ fn cache_publish_and_load_preserve_versions_and_digests() {
     ));
 
     let mut newer = (*original).clone();
-    newer.version = "1.0.0".parse().unwrap();
+    newer.version = "2.0.0".parse().unwrap();
     let newer = Arc::new(newer);
     let newer_version = registry.publish_package(newer.clone()).unwrap();
     assert_eq!(registry.available_versions(&original.name).unwrap().len(), 2);
@@ -70,17 +84,27 @@ fn cache_publish_and_load_preserve_versions_and_digests() {
 
 #[test]
 fn registration_rejects_duplicates_without_replacing_records() {
-    let original = package("begin push.1 end");
+    let mut original = (*package("begin push.1 end")).clone();
+    original.version = "1.0.0+first".parse().unwrap();
+    let original = Arc::new(original);
     let version = miden_package_registry::Version::new(
         original.version.clone(),
         original.dependency_commitment(),
     );
     let record = PackageRecord::new(version.clone(), []);
     let mut registry = HybridPackageRegistry::empty();
-    registry.register(original.name.clone(), record.clone()).unwrap();
-    let error = registry.register(original.name.clone(), record).unwrap_err();
+    registry.register(original.name.clone(), record).unwrap();
+    let metadata_alias = miden_package_registry::Version::new(
+        "1.0.0+second".parse().unwrap(),
+        original.dependency_commitment(),
+    );
+    let error = registry
+        .register(original.name.clone(), PackageRecord::new(metadata_alias, []))
+        .unwrap_err();
     assert!(error.to_string().contains("already registered"));
-    assert_eq!(registry.available_versions(&original.name).unwrap().len(), 1);
+    let versions = registry.available_versions(&original.name).unwrap();
+    assert_eq!(versions.len(), 1);
+    assert_eq!(versions.first_key_value().unwrap().0, &"1.0.0".parse().unwrap());
     assert_eq!(registry.cache_package(original).unwrap(), version);
     assert_eq!(registry.all().into_iter().count(), 1);
 }
