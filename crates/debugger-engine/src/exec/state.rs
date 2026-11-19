@@ -58,8 +58,6 @@ pub struct DebugExecutor {
     pub current_proc: Option<Arc<str>>,
     /// Debug variable tracker for source-level variable inspection
     pub debug_vars: DebugVarTracker,
-    /// Number of debug variable location records observed during the most recent step.
-    pub(crate) last_debug_var_count: usize,
     /// A sliding window of the last 5 operations successfully executed by the VM
     pub recent: VecDeque<Operation>,
     /// The current clock cycle: the stepper's, mirrored after each step so that a session that
@@ -140,7 +138,6 @@ impl DebugExecutor {
             callstack: CallStack::new(events),
             current_proc: None,
             debug_vars: DebugVarTracker::new(debug_var_events),
-            last_debug_var_count: 0,
             recent: VecDeque::with_capacity(5),
             cycle,
             stopped: false,
@@ -241,7 +238,6 @@ impl DebugExecutor {
         // the state for inspection stays as it is.
         if self.stopped || self.stepper.stopped() {
             self.stopped = true;
-            self.last_debug_var_count = 0;
             return Ok(None);
         }
 
@@ -258,7 +254,6 @@ impl DebugExecutor {
                 source.source_operation(),
                 asmop.as_ref(),
             );
-            let debug_var_count = debug_var_infos.len();
             self.debug_vars.observe_execution(
                 self.callstack.invocation_ids(),
                 self.callstack.current_invocation(),
@@ -282,7 +277,6 @@ impl DebugExecutor {
                 op,
                 control_flow_kind,
                 asmop,
-                debug_var_count,
                 inline_frames: source.inline_frames().to_vec(),
             }
         });
@@ -293,7 +287,6 @@ impl DebugExecutor {
                         op,
                         control_flow_kind,
                         asmop: source_asmop,
-                        debug_var_count,
                         inline_frames,
                     },
                 running: true,
@@ -336,8 +329,6 @@ impl DebugExecutor {
                 };
                 let exited = self.callstack.next(&step_info);
 
-                self.last_debug_var_count = debug_var_count;
-
                 Ok(exited)
             },
             // The stepper comes back empty only when it was already stopped, which the guard
@@ -348,7 +339,6 @@ impl DebugExecutor {
                 // Program completed: no invocation remains available for inspection.
                 self.debug_vars.reset();
                 self.stopped = true;
-                self.last_debug_var_count = 0;
                 let state = self.stepper.processor().state();
                 self.current_stack = state.get_stack_state();
 
@@ -368,7 +358,6 @@ impl DebugExecutor {
                 // A cycle that completes and then trips a limit is on the clock.
                 self.cycle = self.stepper.cycle();
                 self.stopped = true;
-                self.last_debug_var_count = 0;
                 Err(err)
             },
         }
@@ -519,8 +508,6 @@ struct DescribedStep {
     control_flow_kind: Option<ControlFlowOp>,
     /// The assembly operation the cycle belongs to.
     asmop: Option<AssemblyOp>,
-    /// Number of declarations observed for the cycle.
-    debug_var_count: usize,
     /// The inline call frames active for the cycle, innermost first.
     inline_frames: Vec<InlineCallFrame>,
 }
