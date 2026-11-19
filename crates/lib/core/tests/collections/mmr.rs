@@ -40,45 +40,42 @@ fn test_num_leaves_to_num_peaks() {
 
 /// Reads `expected` for `id` from the shared assembly cycle fixture TOML.
 fn fixture_expected_cycles(fixture_id: &str) -> u64 {
-    // Shared with scripts/check_user_doc_cycles.py and processor assembly fixtures.
+    // Shared with processor assembly fixtures (`toml::Table`, same as the processor loader).
     const FIXTURES: &str =
         include_str!("../../../../../processor/src/tests/assembly-cycle-fixtures.toml");
 
-    let id_line = format!("id = \"{fixture_id}\"");
-    let mut in_matching_case = false;
-    for line in FIXTURES.lines() {
-        let trimmed = line.trim();
-        if trimmed == "[[case]]" {
-            in_matching_case = false;
+    let table: toml::Table =
+        FIXTURES.parse().expect("assembly-cycle-fixtures.toml should be valid TOML");
+    let cases = table
+        .get("case")
+        .and_then(toml::Value::as_array)
+        .expect("assembly-cycle-fixtures.toml should contain a [[case]] array");
+
+    for case in cases {
+        let case = case.as_table().expect("each [[case]] entry should be a table");
+        let id = case.get("id").and_then(toml::Value::as_str);
+        if id != Some(fixture_id) {
             continue;
         }
-        if trimmed == id_line {
-            in_matching_case = true;
-            continue;
-        }
-        if !in_matching_case {
-            continue;
-        }
-        if let Some(raw) = trimmed.strip_prefix("expected = ") {
-            let text = raw.trim().trim_matches('"');
-            return text
-                .split_whitespace()
-                .next()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or_else(|| {
-                    panic!("could not parse cycle count from fixture {fixture_id}: {raw}")
-                });
-        }
+        let expected = case
+            .get("expected")
+            .and_then(toml::Value::as_str)
+            .unwrap_or_else(|| panic!("fixture {fixture_id:?} is missing `expected`"));
+        return expected
+            .split_whitespace()
+            .next()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or_else(|| {
+                panic!("could not parse cycle count from fixture {fixture_id}: {expected}")
+            });
     }
-    panic!(
-        "fixture id {fixture_id:?} with an `expected` field not found in assembly-cycle-fixtures.toml"
-    );
+    panic!("fixture id {fixture_id:?} not found in assembly-cycle-fixtures.toml");
 }
 
 /// Measures `mmr::num_leaves_to_num_peaks` via the core-library harness (real packaged exec).
 ///
 /// Expected count comes from `processor/src/tests/assembly-cycle-fixtures.toml`
-/// (`id = "num_leaves_to_num_peaks"`), which the user-doc cycle checker also uses.
+/// (`id = "num_leaves_to_num_peaks"`).
 #[test]
 fn test_num_leaves_to_num_peaks_cycle_count() {
     let expected_cycles = fixture_expected_cycles("num_leaves_to_num_peaks");

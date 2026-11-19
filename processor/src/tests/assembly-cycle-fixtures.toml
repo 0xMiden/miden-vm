@@ -1,12 +1,11 @@
 # Assembly instruction cycle fixtures measured with clk.
-# Source of truth for assembly cycle fixtures (shared by processor tests and scripts/check_user_doc_cycles.py).
+# Source of truth for measured cycle counts (processor + miden-core-lib tests).
 # See processor::tests::user_doc_assembly_cycle_fixtures_match_documentation and issue #3111.
 #
-# Cases with `doc` + `marker` are measured by the processor fixture test and checked against
-# assembly user docs.
-# Cases without those fields are core-lib-only: measured in miden-core-lib tests (reading
-# `expected` from this file) and referenced from scripts/user-doc-cycle-mappings.toml via
-# `fixture_id`.
+# Cases with `doc` + `marker` are measured here and checked against the marked assembly user-doc
+# row when the workspace docs tree is available.
+# Cases without those fields are core-lib-only: measured in miden-core-lib tests that read
+# `expected` from this file.
 
 [[case]]
 id = "u32popcnt"
@@ -27,7 +26,6 @@ expected = "38"
 # Core-lib mmr::num_leaves_to_num_peaks: packaged-exec cost measured in miden-core-lib
 # (`test_num_leaves_to_num_peaks_cycle_count`), not here — processor must not depend on
 # unpublished miden-core-lib for crates.io package dry-run.
-# No assembly doc marker: used by scripts/user-doc-cycle-mappings.toml via fixture_id.
 # `program` documents the measured shape; expected=46 is the packaged-exec delta
 # (body u32popcnt=38 + call boundary).
 [[case]]

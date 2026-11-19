@@ -29,7 +29,7 @@ help:
 	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
 	@printf "  make test-skip-proptests         # All tests except proptests\n"
 	@printf "  make check-features              # Check all feature combinations with cargo-hack\n"
-	@printf "  make check-user-doc-cycles       # Check user doc cycle counts against core-lib docs\n\n"
+	@printf "  make check-user-doc-cycles       # Diff generated core-lib docs + run clk cycle fixtures\n\n"
 
 
 # -- environment toggles --------------------------------------------------------------------------
@@ -255,7 +255,7 @@ check-features: ## Checks all feature combinations compile without warnings usin
 	@scripts/check-features.sh
 
 .PHONY: check-user-doc-cycles
-check-user-doc-cycles: ## Checks user doc cycle counts against generated core-lib docs
+check-user-doc-cycles: ## Diffs generated core-lib docs and runs clk cycle fixtures
 	@bash scripts/check-user-doc-cycles.sh
 
 # --- building ------------------------------------------------------------------------------------

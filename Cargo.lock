@@ -2307,6 +2307,7 @@ dependencies = [
  "rstest",
  "thiserror",
  "tokio",
+ "toml",
 ]
 
 [[package]]

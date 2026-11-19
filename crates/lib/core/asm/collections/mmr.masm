@@ -156,9 +156,10 @@ end
 #! Output: [...]
 #!
 #! Where:
-#!  - HASH binds `num_leaves` in the `MMR_PEAKS` initial chaining word and hashes `padded_peaks`.
-#!  - The advice map must contain a key with HASH, and its value is
-#!    `[num_leaves, 0, 0 , 0] || padded_peaks`.
+#!  - HASH binds `num_leaves` in the domain-separated `MMR_PEAKS` initial chaining word and
+#!    hashes only `padded_peaks`.
+#!  - The advice map must contain a key with HASH, and its value is the serialized
+#!    header-plus-peaks `[num_leaves, 0, 0, 0] || padded_peaks`.
 #!  - mmr_ptr: the memory location where the MMR data will be written to,
 #!    starting with the MMR forest (its total leaves count) followed by its peaks.
 #!    The address is expected to be word-aligned.
@@ -222,10 +223,18 @@ pub proc unpack(hash: eidos::Digest, mmr_ptr: MmrPtr)
   drop drop
 end
 
-#! Computes the hash of the given MMR and copies it to the Advice Map using its hash as a key.
+#! Computes a commitment to the given MMR and copies the MMR to the Advice Map using the
+#! commitment as a key.
 #!
 #! Input: [mmr_ptr, ...]
 #! Output: [HASH, ...]
+#!
+#! Where:
+#!  - HASH binds `num_leaves` in the domain-separated `MMR_PEAKS` initial chaining word and
+#!    hashes only `padded_peaks`.
+#!  - The advice map stores the serialized header-plus-peaks value
+#!    `[num_leaves, 0, 0, 0] || padded_peaks` under key HASH.
+#!
 #! Cycles: 198 + 6 * extra_peak_pair cycles
 #!    where `extra_peak_pair` is the number of peak pairs beyond the first 16
 #!    peaks (zero when `num_of_peaks <= 16`), i.e.

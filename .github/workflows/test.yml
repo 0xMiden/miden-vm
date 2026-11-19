@@ -343,7 +343,7 @@ jobs:
         run: make check-features
 
   check-user-doc-cycles:
-    name: check user doc cycle counts
+    name: check generated core-lib docs and clk cycle fixtures
     runs-on: warp-ubuntu-latest-x64-8x
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -356,7 +356,7 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
-      - name: Check user doc cycle counts
+      - name: Diff generated core-lib docs and run clk cycle fixtures
         run: make check-user-doc-cycles
 
   wasm-handlers-host:

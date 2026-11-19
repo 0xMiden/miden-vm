@@ -86,6 +86,7 @@ rand = { workspace = true, features = ["std", "std_rng", "thread_rng"] }
 rand_chacha = { workspace = true }
 rstest = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
+toml = { workspace = true, features = ["parse"] }
 
 [build-dependencies]
 env_logger.workspace = true

@@ -1,4 +1,7 @@
 #!/bin/bash
+# Guardrails for issue #3111:
+# 1. Regenerated core-lib docs under crates/lib/core/docs/ must match what is committed.
+# 2. clk measurement fixtures for assembly / core-lib cycle counts must still pass.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -7,21 +10,20 @@ cd "${ROOT}"
 echo "Regenerating core library docs..."
 MIDEN_BUILD_LIB_DOCS=1 cargo check -p miden-core-lib
 
-if command -v python3.12 >/dev/null 2>&1; then
-    PYTHON=python3.12
-elif command -v python3.11 >/dev/null 2>&1; then
-    PYTHON=python3.11
-else
-    PYTHON=python3
-fi
-if ! "$PYTHON" -c 'import tomllib' 2>/dev/null; then
-    echo "error: Python 3.11+ required (tomllib). Use python3.11 or python3.12." >&2
+if [ -n "$(git status --porcelain crates/lib/core/docs)" ]; then
+    echo "ERROR: Found uncommitted changes in crates/lib/core/docs/" >&2
+    echo "Assembly comments changed but generated documentation was not committed." >&2
+    echo "" >&2
+    echo "To fix:" >&2
+    echo "  1. MIDEN_BUILD_LIB_DOCS=1 cargo build -p miden-core-lib" >&2
+    echo "  2. Commit the changes under crates/lib/core/docs/" >&2
+    echo "" >&2
+    git status crates/lib/core/docs >&2
+    echo "" >&2
+    git diff crates/lib/core/docs >&2
     exit 1
 fi
-echo "Running user-doc cycle checker unit tests..."
-"$PYTHON" scripts/check_user_doc_cycles.py test
-echo "Checking user doc cycle counts..."
-"$PYTHON" scripts/check_user_doc_cycles.py
+echo "Generated core-lib docs match the committed tree."
 
 echo "Checking assembly cycle fixtures..."
 # Processor VM tests need a larger stack than the default test thread stack (see Makefile TEST_RUST_MIN_STACK).

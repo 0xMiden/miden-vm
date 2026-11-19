@@ -1539,8 +1539,12 @@ fn test_assert_message_without_debug_info_reports_error_code() {
 /// Core-lib-only fixtures (no `doc`/`marker`) are measured in `miden-core-lib` tests so
 /// this crate does not need a `miden-core-lib` dependency (unpublished on crates.io during
 /// the 0.34 development cycle, which breaks `cargo package` / release dry-run).
+///
+/// When the workspace `docs/` tree is present, also checks that each marked assembly user-doc
+/// row still shows the fixture's expected cycle text.
 #[test]
 fn user_doc_assembly_cycle_fixtures_match_documentation() {
+    let workspace_root = workspace_docs_root();
     for case in load_assembly_cycle_fixtures() {
         if !case.measured_here {
             continue;
@@ -1553,6 +1557,22 @@ fn user_doc_assembly_cycle_fixtures_match_documentation() {
             "fixture {}: program should measure {} cycles (measured {measured}, baseline {baseline})",
             case.id, case.expected_cycles,
         );
+
+        if let Some(root) = workspace_root.as_ref() {
+            let doc = case.doc.as_deref().expect("measured fixtures declare doc");
+            let marker = case.marker.as_deref().expect("measured fixtures declare marker");
+            let content = std::fs::read_to_string(root.join(doc))
+                .unwrap_or_else(|err| panic!("failed to read {doc}: {err}"));
+            let actual = extract_cycle_cell_from_marked_row(&content, marker).unwrap_or_else(|| {
+                panic!("{doc}: marker {marker:?} row has no cycle cell matching {}", case.expected_text)
+            });
+            assert!(
+                fixture_expected_matches_cycles(&case.expected_text, &actual),
+                "{doc}: marker {:?} cycle cell is {actual:?}, expected {:?}",
+                marker,
+                case.expected_text
+            );
+        }
     }
 }
 
@@ -1561,6 +1581,9 @@ struct AssemblyCycleFixture {
     program: String,
     baseline_program: String,
     expected_cycles: u32,
+    expected_text: String,
+    doc: Option<String>,
+    marker: Option<String>,
     /// `true` when this crate measures the case (assembly doc fixtures with `doc`+`marker`).
     measured_here: bool,
 }
@@ -1583,14 +1606,16 @@ fn load_assembly_cycle_fixtures() -> Vec<AssemblyCycleFixture> {
             let expected = case
                 .get("expected")
                 .and_then(toml::Value::as_str)
-                .expect("fixture should declare expected cycle text");
+                .expect("fixture should declare expected cycle text")
+                .to_string();
             let expected_cycles = expected
                 .split_whitespace()
                 .next()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or_else(|| panic!("could not parse cycle count from {expected:?}"));
-            let has_doc = case.get("doc").and_then(toml::Value::as_str).is_some();
-            let has_marker = case.get("marker").and_then(toml::Value::as_str).is_some();
+            let doc = case.get("doc").and_then(toml::Value::as_str).map(str::to_string);
+            let marker = case.get("marker").and_then(toml::Value::as_str).map(str::to_string);
+            let measured_here = doc.is_some() && marker.is_some();
 
             AssemblyCycleFixture {
                 id: case.get("id").and_then(toml::Value::as_str).expect("id").to_string(),
@@ -1605,10 +1630,117 @@ fn load_assembly_cycle_fixtures() -> Vec<AssemblyCycleFixture> {
                     .expect("baseline_program")
                     .to_string(),
                 expected_cycles,
-                measured_here: has_doc && has_marker,
+                expected_text: expected,
+                doc,
+                marker,
+                measured_here,
             }
         })
         .collect()
+}
+
+fn workspace_docs_root() -> Option<std::path::PathBuf> {
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = manifest.parent()?;
+    root.join("docs/src/user_docs").is_dir().then(|| root.to_path_buf())
+}
+
+fn fixture_expected_matches_cycles(fixture_expected: &str, doc_cycles: &str) -> bool {
+    let expected = fixture_expected.trim().to_lowercase();
+    let actual = doc_cycles.trim().to_lowercase();
+    if expected == actual {
+        return true;
+    }
+    if expected.strip_suffix(" cycles").is_some_and(|stripped| stripped == actual) {
+        return true;
+    }
+    if actual.strip_suffix(" cycles").is_some_and(|stripped| stripped == expected) {
+        return true;
+    }
+    false
+}
+
+fn extract_cycle_cell_from_marked_row(content: &str, marker: &str) -> Option<String> {
+    let tag = format!("<!-- cycle-check: {marker} -->");
+    let marker_at = content.find(&tag)?;
+    let row_start = content[..marker_at].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let row_end = content[marker_at..].find('\n').map(|i| marker_at + i).unwrap_or(content.len());
+    let row = &content[row_start..row_end];
+
+    let header_cells = table_header_cells(content, row_start);
+    let cells: Vec<&str> = row.trim().trim_matches('|').split('|').map(str::trim).collect();
+
+    if let Some(header_cells) = header_cells.as_ref() {
+        if let Some(idx) = header_cells.iter().position(|name| name.contains("cycle")) {
+            let text = cells.get(idx).copied().unwrap_or("").replace('`', "");
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            if text.is_empty() {
+                return None;
+            }
+            return Some(text.to_lowercase());
+        }
+        let instruction_idx = header_cells
+            .iter()
+            .position(|name| name.contains("instruction"))
+            .unwrap_or(0);
+        return cells
+            .get(instruction_idx)
+            .copied()
+            .and_then(embedded_cycles_in_instruction);
+    }
+
+    embedded_cycles_in_instruction(cells.first().copied().unwrap_or(""))
+}
+
+fn table_header_cells(content: &str, row_start: usize) -> Option<Vec<String>> {
+    let prefix = &content[..row_start];
+    let lines: Vec<&str> = prefix.lines().collect();
+    for idx in (1..lines.len()).rev() {
+        let line = lines[idx];
+        if line.starts_with('|') && line.contains("---") {
+            let header = lines[idx - 1];
+            if header.starts_with('|') {
+                return Some(
+                    header
+                        .trim()
+                        .trim_matches('|')
+                        .split('|')
+                        .map(|c| c.trim().to_lowercase())
+                        .collect(),
+                );
+            }
+        }
+    }
+    None
+}
+
+fn embedded_cycles_in_instruction(cell: &str) -> Option<String> {
+    let lower = cell.to_lowercase();
+    let mut i = 0;
+    while i + 2 < lower.len() {
+        if &lower[i..i + 2] != "*(" {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 2;
+        while j < lower.len() && lower.as_bytes()[j].is_ascii_digit() {
+            j += 1;
+        }
+        if j == i + 2 {
+            i += 2;
+            continue;
+        }
+        let number = &lower[i + 2..j];
+        let rest = lower[j..].trim_start();
+        if rest.starts_with("cycles)") {
+            return Some(format!("{number} cycles"));
+        }
+        if rest.starts_with("cycle)") {
+            return Some(format!("{number} cycle"));
+        }
+        i += 2;
+    }
+    None
 }
 
 fn measure_program_cycles(program: &str) -> u32 {
