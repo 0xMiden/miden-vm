@@ -4,13 +4,11 @@ use alloc::{
     vec::Vec,
 };
 use std::{
-    cell::RefCell,
     collections::{BTreeMap, BTreeSet, btree_map::Entry},
     eprintln,
     io::{BufReader, BufWriter},
     net::TcpListener,
     path::{Path, PathBuf},
-    rc::Rc,
     sync::{
         Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
@@ -1182,7 +1180,7 @@ struct DapDebugVarState {
 impl DapDebugVarState {
     fn new() -> Self {
         Self {
-            debug_vars: DebugVarTracker::new(Rc::new(RefCell::new(BTreeMap::new()))),
+            debug_vars: DebugVarTracker::new(),
             source_breakpoints: SourceBreakpoints::default(),
         }
     }

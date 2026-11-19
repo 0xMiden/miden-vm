@@ -1,11 +1,9 @@
 use alloc::{
     collections::BTreeMap,
-    rc::Rc,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
 };
-use core::cell::RefCell;
 
 use miden_assembly_syntax::ast::{
     DebugFrameBase, DebugLocationExpression, DebugLocationExpressionOp, DebugVarInfo,
@@ -15,9 +13,6 @@ use miden_core::Felt;
 use miden_processor::{ContextId, FastProcessor, trace::RowIndex};
 
 use super::InvocationId;
-
-type DebugVarEvents = Rc<RefCell<BTreeMap<RowIndex, Vec<DebugVarInfo>>>>;
-type CapturedDebugValues = Rc<RefCell<BTreeMap<(RowIndex, Arc<str>), Vec<Felt>>>>;
 
 /// A snapshot of a debug variable at a specific clock cycle.
 #[derive(Debug, Clone)]
@@ -70,35 +65,16 @@ impl InvocationVariables {
 }
 
 /// Tracks debug variable snapshots, mapping variable names to their most recent location info.
+#[derive(Default)]
 pub struct DebugVarTracker {
     invocations: BTreeMap<InvocationId, InvocationVariables>,
     current_invocation: Option<InvocationId>,
-    invocation_mode: bool,
-    /// All debug variable events recorded during execution, keyed by clock cycle.
-    events: DebugVarEvents,
-    /// Canonical values frozen at transient debug decorators.
-    captured_values: CapturedDebugValues,
-    /// Current view of variables - maps variable name to most recent info.
-    current_vars: BTreeMap<String, DebugVarSnapshot>,
-    /// Canonical values captured for currently visible transient variables.
-    current_captured_values: BTreeMap<String, Vec<Felt>>,
-    /// The clock cycle up to which we've processed events.
-    processed_up_to: RowIndex,
 }
 
 impl DebugVarTracker {
-    /// Create a new tracker using the given shared event store.
-    pub fn new(events: DebugVarEvents) -> Self {
-        Self {
-            invocations: BTreeMap::new(),
-            current_invocation: None,
-            invocation_mode: false,
-            events,
-            captured_values: Rc::new(Default::default()),
-            current_vars: BTreeMap::new(),
-            current_captured_values: BTreeMap::new(),
-            processed_up_to: RowIndex::from(0),
-        }
+    /// Create a new tracker with no observed invocation.
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn current_invocation(&self) -> Option<InvocationId> {
@@ -147,7 +123,6 @@ impl DebugVarTracker {
         {
             frame.refresh_storage(processor);
         }
-        self.invocation_mode = true;
         self.current_invocation = current;
         let live_ids = live_ids.into_iter().collect::<alloc::collections::BTreeSet<_>>();
         self.invocations.retain(|id, _| live_ids.contains(id));
@@ -233,79 +208,14 @@ impl DebugVarTracker {
         Some(ResolvedDebugVariable { raw, value, type_name })
     }
 
-    /// Record debug variable events at the given clock cycle.
-    pub fn record_events(&self, clk: RowIndex, infos: Vec<DebugVarInfo>) {
-        if !infos.is_empty() {
-            self.events.borrow_mut().entry(clk).or_default().extend(infos);
-        }
-    }
-
-    /// Record debug variable events after freezing transient stack-backed values.
-    #[cfg(test)]
-    pub(crate) fn record_events_with_stack(
-        &self,
-        clk: RowIndex,
-        mut infos: Vec<DebugVarInfo>,
-        stack: &[Felt],
-    ) {
-        let names = infos.iter().map(|info| info.name().clone()).collect::<Vec<_>>();
-        let captured_values = snapshot_transient_debug_values(&mut infos, stack);
-        {
-            let mut stored_values = self.captured_values.borrow_mut();
-            for name in names {
-                stored_values.remove(&(clk, name));
-            }
-            stored_values
-                .extend(captured_values.into_iter().map(|(name, values)| ((clk, name), values)));
-        }
-        self.record_events(clk, infos);
-    }
-
-    /// Process all events up to and including `clk`, updating current variable state.
-    pub fn update_to_cycle(&mut self, clk: RowIndex) {
-        let events = self.events.borrow();
-        let captured_values = self.captured_values.borrow();
-
-        // Process events from processed_up_to to clk
-        for (event_clk, var_infos) in events.range(self.processed_up_to..=clk) {
-            for info in var_infos {
-                if is_debug_var_kill(info) {
-                    self.current_vars.remove(info.name().as_ref());
-                    self.current_captured_values.remove(info.name().as_ref());
-                    continue;
-                }
-                let snapshot = DebugVarSnapshot { clk: *event_clk, info: info.clone() };
-                let name = info.name().to_string();
-                match captured_values.get(&(*event_clk, info.name().clone())) {
-                    Some(values) => {
-                        self.current_captured_values.insert(name.clone(), values.clone());
-                    },
-                    None => {
-                        self.current_captured_values.remove(&name);
-                    },
-                }
-                self.current_vars.insert(name, snapshot);
-            }
-        }
-
-        self.processed_up_to = clk;
-    }
-
     /// Reset the tracker to the beginning of execution.
     pub fn reset(&mut self) {
         self.invocations.clear();
         self.current_invocation = None;
-        self.current_vars.clear();
-        self.current_captured_values.clear();
-        self.processed_up_to = RowIndex::from(0);
     }
 
     fn active_variables(&self) -> Option<&BTreeMap<String, DebugVarSnapshot>> {
-        if self.invocation_mode {
-            Some(&self.invocations.get(&self.current_invocation?)?.variables)
-        } else {
-            Some(&self.current_vars)
-        }
+        Some(&self.invocations.get(&self.current_invocation?)?.variables)
     }
 
     /// Get all currently visible variables.
@@ -320,15 +230,11 @@ impl DebugVarTracker {
 
     /// Returns canonical values captured at the variable's latest debug decorator.
     pub fn captured_values(&self, name: &str) -> Option<&[Felt]> {
-        if self.invocation_mode {
-            self.invocations
-                .get(&self.current_invocation?)?
-                .captured
-                .get(name)
-                .map(Vec::as_slice)
-        } else {
-            self.current_captured_values.get(name).map(Vec::as_slice)
-        }
+        self.invocations
+            .get(&self.current_invocation?)?
+            .captured
+            .get(name)
+            .map(Vec::as_slice)
     }
 
     /// Get the number of tracked variables.

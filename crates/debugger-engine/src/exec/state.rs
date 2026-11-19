@@ -124,7 +124,6 @@ impl DebugExecutor {
         profiler: Profiler,
     ) -> Self {
         let root_context = ContextId::root();
-        let debug_var_events = alloc::rc::Rc::new(core::cell::RefCell::new(Default::default()));
         let cycle = stepper.cycle();
         Self {
             stepper,
@@ -137,7 +136,7 @@ impl DebugExecutor {
             current_context: root_context,
             callstack: CallStack::new(events),
             current_proc: None,
-            debug_vars: DebugVarTracker::new(debug_var_events),
+            debug_vars: DebugVarTracker::new(),
             recent: VecDeque::with_capacity(5),
             cycle,
             stopped: false,
