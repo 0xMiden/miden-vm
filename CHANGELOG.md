@@ -38,6 +38,8 @@
 
 #### Changes
 
+- Added `scripts/check-user-doc-cycles.sh` so CI regenerates `crates/lib/core/docs/` from MASM comments (failing on drift) and runs measured `clk` assembly/core-lib cycle fixtures ([#3111](https://github.com/0xMiden/miden-vm/issues/3111)).
+- Added `scripts/check-user-doc-cycles.sh` to verify user-facing core library and assembly instruction cycle counts against generated MASM docs and measured `clk` fixtures ([#3111](https://github.com/0xMiden/miden-vm/issues/3111)).
 - [BREAKING] Reduced recursive VM/PVM verification cycles and unified memory-layout, LogUp, and DEEP code generation. LogUp separator powers follow native message widths. Both recursive verifier roots change ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
 - [BREAKING] Replaced recursive-verifier address accessors and runtime public-input address helpers with direct constants: import shared protocol addresses from `stark::constants` and relation addresses from their layout/parameter modules. LogUp correction helpers return extension values on the stack, and `vm::aux_trace::push_canonical_log_heights` is removed. `set_up_auxiliary_inputs_ace` additionally requires a proof-order table pointer ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
 - [BREAKING] Derived FRI schedules and remainder sizes from native parameters independently of LDE blowup. Renamed `frie2f4::verify_query_{64,128}` to `verify_query_{half,max}` and replaced `helper::get_fri_remainder_poly_max_degree_plus_1_half` with `helper::REMAINDER_HALF_COEFFICIENTS` ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
@@ -261,6 +263,7 @@
 
 #### Changes
 
+- [BREAKING] Removed the custom `Randomizable` trait and random test wrappers. Use `rand` distributions instead. `Word` now implements `StandardUniform`, and `Felt`'s default Proptest strategy is shrinkable and covers canonical and non-canonical representations. Tests that require one representation can use `arb_felt_canonical()` or `arb_felt_noncanonical()` ([#3873](https://github.com/0xMiden/miden-vm/pull/3873)).
 - Reworked the `MastForest` `Arbitrary` impl. `GenerationMode::Executable` (the default) yields forests whose procedure roots run to completion on any operand stack: infallible, stack-balanced basic blocks, binary split and loop conditions, externals that resolve to local roots, and syscalls into a paired `KernelDescriptor` exposed through `forest_kernel_strategy`. `GenerationMode::StructureOnly` keeps the permissive behavior ([#3158](https://github.com/0xMiden/miden-vm/pull/3158)).
 - Improved lifted STARK prover performance: LogUp fractions are built and accumulated in row chunks with a parallel accumulator scan, and DEEP reduction avoids element-wise buffer swaps and per-height group buffers ([#3851](https://github.com/0xMiden/miden-vm/pull/3851)).
 - [BREAKING] Made the public `ParsingError` enum `#[non_exhaustive]` and restored separate variants for protocol ABI conflicts ([#3859](https://github.com/0xMiden/miden-vm/pull/3859)).

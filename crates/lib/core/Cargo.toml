@@ -89,6 +89,7 @@ rand_chacha = { workspace = true }
 rstest = { workspace = true }
 serde-wincode.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
+toml = { workspace = true, features = ["parse"] }
 
 [build-dependencies]
 env_logger.workspace = true

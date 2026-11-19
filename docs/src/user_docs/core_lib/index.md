@@ -12,6 +12,8 @@ The goals of Miden core library are:
 
 The second goal can be achieved because calls to procedures in the core library can always be serialized as 32 bytes, regardless of how large the procedure is.
 
+Where procedure docs list cycle counts, prefer the generated tables under `crates/lib/core/docs/` (regenerated from MASM comments; CI fails if they drift). Absolute counts that CI measures with `clk` live in `processor/src/tests/assembly-cycle-fixtures.toml`. Surrounding code — padding, stack setup, and call overhead — can change the observed cost of a call site even when the procedure body is unchanged.
+
 ### Terms and notations
 In this document we use the following terms and notations:
 

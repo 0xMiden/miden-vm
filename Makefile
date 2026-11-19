@@ -29,7 +29,8 @@ help:
 	@printf "  make test-air test=\"some_test\" # Test specific function\n"
 	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
 	@printf "  make test-skip-proptests         # All tests except proptests\n"
-	@printf "  make check-features              # Check all feature combinations with cargo-hack\n\n"
+	@printf "  make check-features              # Check all feature combinations with cargo-hack\n"
+	@printf "  make check-user-doc-cycles       # Diff generated core-lib docs + run clk cycle fixtures\n\n"
 
 
 # -- environment toggles --------------------------------------------------------------------------
@@ -285,6 +286,9 @@ check: ## Checks all targets and features for errors without code generation
 check-features: ## Checks each workspace feature without warnings using cargo-hack
 	@scripts/check-features.sh
 
+.PHONY: check-user-doc-cycles
+check-user-doc-cycles: ## Diffs generated core-lib docs and runs clk cycle fixtures
+	@bash scripts/check-user-doc-cycles.sh
 .PHONY: check-no-std
 check-no-std: ## Checks each no_std library on a target without std
 	python3 scripts/check-no-std.py --target $(BARE_METAL_TARGET)

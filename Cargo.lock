@@ -2969,6 +2969,7 @@ dependencies = [
  "serde-wincode",
  "thiserror 2.0.19",
  "tokio",
+ "toml",
 ]
 
 [[package]]
@@ -3399,6 +3400,7 @@ dependencies = [
  "rstest",
  "thiserror 2.0.19",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]
