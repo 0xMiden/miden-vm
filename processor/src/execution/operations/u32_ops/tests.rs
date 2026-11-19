@@ -13,7 +13,7 @@ use super::{
     op_u32sub, op_u32xor,
 };
 use crate::{
-    DefaultHost, ExecutionError,
+    DefaultHost, ExecutionError, ExecutionRequest,
     execution::operations::execute_op,
     fast::{FastProcessor, NoopTracer},
     operation::{Operation, OperationError},
@@ -193,7 +193,7 @@ fn test_op_u32assert2_valid_inputs_succeed_with_nonzero_err_code() {
 // ASSEMBLED PROGRAM TESTS
 // --------------------------------------------------------------------------------------------
 //
-// These tests use the full assembler + FastProcessor::execute_sync pipeline to verify that
+// These tests use the full assembler and ordinary processor execution to verify that
 // `.err="..."` lowers to the expected assertion error code.
 
 #[test]
@@ -212,9 +212,9 @@ fn test_op_u32assert2_assembled_err_msg_lookup() {
         .unwrap_program();
 
     let mut host = DefaultHost::default();
-    let processor = FastProcessor::new(StackInputs::default());
-    let exec_err = processor
-        .execute_sync(&program, &mut host)
+    let exec_err = ExecutionRequest::new(&program)
+        .execute()
+        .run_sync(&mut host)
         .expect_err("expected u32 assertion failure");
 
     // Unwrap the OperationError from the ExecutionError wrapper.
@@ -249,8 +249,9 @@ fn test_u32assert_err_wrapper_assembled() {
         .unwrap_program();
 
     let mut host = DefaultHost::default();
-    let exec_err = FastProcessor::new(StackInputs::default())
-        .execute_sync(&program, &mut host)
+    let exec_err = ExecutionRequest::new(&program)
+        .execute()
+        .run_sync(&mut host)
         .expect_err("expected u32 assertion failure");
 
     let op_err = match exec_err {
@@ -286,8 +287,9 @@ fn test_u32assertw_err_wrapper_assembled() {
         .unwrap_program();
 
     let mut host = DefaultHost::default();
-    let exec_err = FastProcessor::new(StackInputs::default())
-        .execute_sync(&program, &mut host)
+    let exec_err = ExecutionRequest::new(&program)
+        .execute()
+        .run_sync(&mut host)
         .expect_err("expected u32 assertion failure");
 
     let op_err = match exec_err {

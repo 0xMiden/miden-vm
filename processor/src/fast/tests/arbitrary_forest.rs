@@ -13,7 +13,7 @@ use miden_core::{
 };
 use proptest::prelude::*;
 
-use crate::{DefaultHost, FastProcessor};
+use crate::{DefaultHost, ExecutionRequest};
 
 fn params() -> MastForestParams {
     MastForestParams {
@@ -39,8 +39,10 @@ fn run_every_root(
     for &root in forest.procedure_roots() {
         let program = Program::with_kernel(forest.clone(), root, kernel.clone());
         let inputs = StackInputs::new(stack).map_err(|err| err.to_string())?;
-        FastProcessor::new(inputs)
-            .execute_sync(&program, &mut host)
+        ExecutionRequest::new(&program)
+            .with_stack_inputs(inputs)
+            .execute()
+            .run_sync(&mut host)
             .map_err(|err| format!("root {root} failed: {err}"))?;
     }
     Ok(())

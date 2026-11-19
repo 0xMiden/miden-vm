@@ -1,6 +1,6 @@
 use miden_assembly::Assembler;
 use miden_crypto::merkle::{MerkleTree, NodeIndex, store::MerkleStore};
-use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor, Felt, StackInputs, Word};
+use miden_processor::{DefaultHost, ExecutionRequest, Felt, StackInputs, WitnessOutput, Word};
 use miden_prover::{AdviceInputs, Prover};
 use miden_verifier::Verifier;
 
@@ -37,24 +37,22 @@ async fn execution_witness_retains_final_advice_and_proves() {
         .unwrap()
         .unwrap_program();
 
-    let sync_result = FastProcessor::new_with_options(
-        stack_inputs,
-        advice_inputs.clone(),
-        ExecutionOptions::default(),
-    )
-    .unwrap()
-    .execute_for_proving_with_advice_sync(&program, &mut DefaultHost::default())
-    .unwrap();
-    let async_result =
-        FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
-            .unwrap()
-            .execute_for_proving_with_advice(&program, &mut DefaultHost::default())
-            .await
-            .unwrap();
+    let request = || ExecutionRequest::new(&program).with_stack_inputs(stack_inputs);
+    let sync_result = request()
+        .with_advice(advice_inputs.clone())
+        .record_witness()
+        .run_sync(&mut DefaultHost::default())
+        .unwrap();
+    let async_result = request()
+        .with_advice(advice_inputs)
+        .record_witness()
+        .run(&mut DefaultHost::default())
+        .await
+        .unwrap();
 
-    assert_eq!(sync_result.0.claim(), async_result.0.claim());
-    assert_eq!(sync_result.1, async_result.1);
-    for (witness, advice) in [sync_result, async_result] {
+    assert_eq!(sync_result.claim, async_result.claim);
+    assert_eq!(sync_result.advice, async_result.advice);
+    for WitnessOutput { claim, witness, advice } in [sync_result, async_result] {
         assert_eq!(advice.get_mapped_values(&Word::empty()), Some([Felt::from_u32(42)].as_slice()));
         let (_, _, store) = advice.into_parts();
         assert_eq!(store.get_node(tree.root(), NodeIndex::new(1, 1).unwrap()).unwrap(), new_leaf);
@@ -62,7 +60,6 @@ async fn execution_witness_retains_final_advice_and_proves() {
             store.get_node(old_root, NodeIndex::new(1, 1).unwrap()).unwrap(),
             Word::from([5, 6, 7, 8u32])
         );
-        let claim = witness.claim();
         assert_eq!(claim.stack_inputs(), &stack_inputs);
         let proof = Prover::new().prove_full(witness).unwrap();
         assert!(Verifier::new().verify(&claim, &proof).unwrap().is_complete());

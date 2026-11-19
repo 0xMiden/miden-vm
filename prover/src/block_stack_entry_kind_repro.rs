@@ -15,7 +15,7 @@
 
 use miden_air_definitions::vm::trace::RowIndex;
 use miden_core::{Felt, field::Field, operations::opcodes, utils::RowMajorMatrix};
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use miden_processor::{DefaultHost, ExecutionRequest, TraceOutput};
 
 use crate::repro_harness::{ReproTrace, core_row_mut};
 
@@ -38,13 +38,11 @@ fn build_fixture() -> Fixture {
         .unwrap_program();
 
     let mut host = DefaultHost::default();
-    let (trace, precompile_witness) = FastProcessor::new(StackInputs::default())
-        .execute_and_build_trace_sync(
-            &program,
-            &mut host,
-            &miden_vm_stark::memory::default_budget(),
-        )
+    let TraceOutput { trace: execution_trace, .. } = ExecutionRequest::new(&program)
+        .build_trace(miden_vm_stark::memory::default_budget())
+        .run_sync(&mut host)
         .unwrap();
+    let (trace, precompile_witness) = execution_trace.into_parts();
     assert!(precompile_witness.is_none());
 
     let main = trace.main_trace();

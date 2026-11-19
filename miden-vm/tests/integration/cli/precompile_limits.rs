@@ -7,9 +7,9 @@ use miden_core::{
 };
 use miden_precompiles::{UintDomain, UintPrecompile};
 use miden_vm::{
-    Assembler, DefaultHost, ExecutionProof, FastProcessor, PrecompileProof, PrecompileStatus,
-    PrecompileWitness, Program, StackInputs, StarkProof, VmProof,
-    default_verification_precompile_limits, serde::Serializable,
+    Assembler, DefaultHost, ExecutionProof, PrecompileProof, PrecompileStatus, PrecompileWitness,
+    Processor, Program, StarkProof, VmProof, default_verification_precompile_limits,
+    serde::Serializable,
 };
 use predicates::prelude::*;
 use tempfile::TempDir;
@@ -179,8 +179,10 @@ fn cli_precompile_execution_and_export_limits_cover_masm_and_masp() {
     // while the library continues to account for both scopes independently.
     for requests in [1, 3] {
         let program = write_program(dir.path(), &precompile_source(requests, 1));
-        let (_, portable) = FastProcessor::new(StackInputs::default())
-            .execute_for_proving_sync(&program, &mut DefaultHost::default())
+        let (_, portable) = Processor::new(&program)
+            .record_witness()
+            .run_sync(&mut DefaultHost::default())
+            .map(|output| output.witness)
             .unwrap()
             .into_parts();
         let prepared = portable

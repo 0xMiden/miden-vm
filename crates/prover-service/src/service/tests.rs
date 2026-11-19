@@ -9,7 +9,7 @@ use std::{
 
 use miden_assembly::{Assembler, Linkage};
 use miden_core::serde::Serializable;
-use miden_processor::{DefaultHost, ExecutionWitness, FastProcessor, StackInputs};
+use miden_processor::{DefaultHost, ExecutionRequest, ExecutionWitness};
 use prost::Message;
 use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
 
@@ -65,8 +65,10 @@ fn config() -> ServerConfig {
 
 fn witness(source: &str) -> ExecutionWitness {
     let program = Assembler::default().assemble_program("test", source).unwrap().unwrap_program();
-    FastProcessor::new(StackInputs::default())
-        .execute_for_proving_sync(&program, &mut DefaultHost::default())
+    ExecutionRequest::new(&program)
+        .record_witness()
+        .run_sync(&mut DefaultHost::default())
+        .map(|recorded| recorded.witness)
         .unwrap()
 }
 
@@ -82,8 +84,10 @@ fn keccak_witness() -> ExecutionWitness {
     let program = assembler.assemble_program("keccak", "begin push.256 push.1 push.128 exec.::miden::core::precompiles::hashes::keccak256::hash_bytes_mem end")
         .unwrap().unwrap_program();
     let mut host = DefaultHost::default().with_library(&library).unwrap();
-    FastProcessor::new(StackInputs::default())
-        .execute_for_proving_sync(&program, &mut host)
+    ExecutionRequest::new(&program)
+        .record_witness()
+        .run_sync(&mut host)
+        .map(|recorded| recorded.witness)
         .unwrap()
 }
 

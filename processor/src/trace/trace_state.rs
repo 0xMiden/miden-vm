@@ -1287,7 +1287,7 @@ pub enum ResolvedHasherOp<'a> {
 /// replayed during hasher chiplet trace generation. In streamed mode
 /// ([`HasherRequestReplay::streamed`]) each request is resolved at record time and forwarded to
 /// a hasher-chiplet builder running concurrently with execution; see
-/// `FastProcessor::execute_and_build_trace_sync`.
+/// [`crate::ExecutionRequest::build_trace`].
 #[derive(Debug, Default)]
 #[cfg_attr(
     all(feature = "arbitrary", test),

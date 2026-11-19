@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use miden_assembly::Assembler;
-use miden_processor::{DefaultHost, Program};
-use miden_prover::{AdviceInputs, ExecutionOptions, Prover, StackInputs, prove_sync};
+use miden_processor::{DefaultHost, ExecutionOptions, ExecutionRequest, Program};
+use miden_prover::Prover;
 use tracing::{Event, Subscriber, span::Attributes};
 use tracing_subscriber::{
     EnvFilter, Layer, Registry, layer::Context, prelude::*, registry::LookupSpan,
@@ -52,15 +52,13 @@ fn capture_proving(program: &Program, overlapped: bool, filter: &str) -> Vec<Rec
     let capture = Capture::default();
     let subscriber = Registry::default().with(EnvFilter::new(filter)).with(capture.clone());
     tracing::subscriber::with_default(subscriber, || {
-        prove_sync(
-            &Prover::new(),
-            program,
-            StackInputs::default(),
-            AdviceInputs::default(),
-            &mut DefaultHost::default(),
-            ExecutionOptions::default().with_overlapped_trace_build(overlapped),
-        )
-        .unwrap();
+        let prover = Prover::new();
+        let output = ExecutionRequest::new(program)
+            .with_options(ExecutionOptions::default().with_overlapped_trace_build(overlapped))
+            .build_trace(prover.trace_budget())
+            .run_sync(&mut DefaultHost::default())
+            .unwrap();
+        prover.prove_full_trace(output.trace).unwrap();
     });
     capture.0.lock().unwrap().clone()
 }
@@ -82,8 +80,8 @@ fn proving_is_quiet_at_info_and_separates_trace_building() {
 
         let records =
             pool.install(|| capture_proving(&program, overlapped, "info,miden::vm=trace"));
-        let pipeline = records.iter().find(|record| record.name == "prove_program").unwrap();
-        assert_eq!(pipeline.target, "miden::vm");
+        let execution = records.iter().find(|record| record.name == "execute_program").unwrap();
+        assert_eq!(execution.target, EXECUTE);
 
         let streamed_hasher = records.iter().find(|record| record.name == "build_streamed_hasher");
         assert_eq!(streamed_hasher.is_some(), overlapped, "{records:?}");

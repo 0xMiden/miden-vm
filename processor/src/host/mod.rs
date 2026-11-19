@@ -168,8 +168,8 @@ pub trait SyncHost: BaseHost {
 ///
 /// ```
 /// use miden_processor::{
-///     BaseHost, ExecutionError, FastProcessor, FutureMaybeSend, Host,
-///     LoadedMastForest, MastForestLoadError, ProcessorState, StackInputs, Word,
+///     BaseHost, ExecutionError, ExecutionRequest, FutureMaybeSend, Host,
+///     LoadedMastForest, MastForestLoadError, ProcessorState, Word,
 ///     advice::AdviceMutation, event::EventError,
 /// };
 /// # use std::sync::Arc;
@@ -198,8 +198,11 @@ pub trait SyncHost: BaseHost {
 /// # let program = miden_assembly::Assembler::default()
 /// #     .assemble_program("program", "begin dynexec end").unwrap().unwrap_program();
 /// let mut host = DatabaseHost;
-/// let error = FastProcessor::new(StackInputs::default())
-///     .execute(&program, &mut host).await.unwrap_err();
+/// let error = ExecutionRequest::new(&program)
+///     .execute()
+///     .run(&mut host)
+///     .await
+///     .unwrap_err();
 /// let ExecutionError::MastForestError { error, .. } = error else {
 ///     panic!("expected the database error");
 /// };

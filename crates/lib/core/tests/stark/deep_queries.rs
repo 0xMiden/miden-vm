@@ -103,8 +103,9 @@ fn assert_stored_queries(test: &miden_utils_testing::Test, expected: &[[Felt; 4]
         expected.windows(2).any(|pair| pair[0][1] != pair[1][1]),
         "fixture must distinguish a repeated-query bug"
     );
-    let (processor, ctx) = super::ace_read_check::execute_verifier(test);
-    let read = |addr| processor.memory().read_element(ctx, Felt::from_u32(addr)).unwrap();
+    let (session, ctx) = super::ace_read_check::execute_verifier(test);
+    let state = session.state();
+    let read = |addr| state.get_mem_value(ctx, addr).unwrap_or(Felt::ZERO);
     assert_eq!(read(stark_constant("NUM_QUERIES_PTR")), Felt::from_usize(expected.len()));
     let start =
         u32::try_from(read(stark_constant("FRI_QUERIES_ADDRESS_PTR")).as_canonical_u64()).unwrap();

@@ -11,8 +11,8 @@ use miden_utils_testing::{
     PrimeField64, recursive_verifier::generate_request_inputs, stack_inputs_from_ints,
 };
 use miden_vm::{
-    DefaultHost, ExecutionOptions, FastProcessor, HashFunction, ProgramInfo, Prover, StackInputs,
-    StackOutputs, VerificationOutcome, Verifier, advice::AdviceInputs,
+    DefaultHost, HashFunction, Processor, Prover, ProvingOutput, StackInputs, VerificationOutcome,
+    Verifier,
 };
 
 /// Applies the integration tests' policy to all STARK components in a verification outcome.
@@ -46,30 +46,30 @@ fn assert_prove_verify(
         .unwrap()
         .unwrap_program();
     let stack_inputs = stack_inputs_from_ints([0, 1]);
-    let advice_inputs = AdviceInputs::default();
     let mut host =
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
     println!("Proving with {hash_name}...");
-    let witness =
-        FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
-            .expect("processor initialization failed")
-            .execute_for_proving_sync(&program, &mut host)
-            .expect("execution failed");
-    let stack_outputs = *witness.claim().stack_outputs();
-    let proof = Prover::new().with_hash_fn(hash_fn).prove_full(witness).expect("Proving failed");
+    let prover = Prover::new().with_hash_fn(hash_fn);
+    let ProvingOutput { claim, proof, .. } = Processor::new(&program)
+        .with_stack_inputs(stack_inputs)
+        .prove_complete(&prover)
+        .run_sync(&mut host)
+        .expect("Proving failed");
+    assert_eq!(claim.to_program_info(), program.to_info());
+    assert_eq!(claim.stack_inputs(), &stack_inputs);
+    let proof = proof.as_inner();
 
     println!("Proof generated successfully!");
     if print_stack_outputs {
-        println!("Stack outputs: {stack_outputs:?}");
+        println!("Stack outputs: {:?}", claim.stack_outputs());
     }
 
     if verify_recursively {
-        assert_recursive_verify(program.to_info(), stack_inputs, stack_outputs, &proof);
+        assert_recursive_verify(&claim, proof);
     }
 
     println!("Verifying proof...");
-    let claim = ExecutionClaim::from_program_info(program.into(), stack_inputs, stack_outputs);
-    let outcome = Verifier::new().verify(&claim, &proof).expect("Verification failed");
+    let outcome = Verifier::new().verify(&claim, proof).expect("Verification failed");
     assert!(outcome.is_complete());
 
     println!(
@@ -78,15 +78,9 @@ fn assert_prove_verify(
     );
 }
 
-fn assert_recursive_verify(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    proof: &ExecutionProof,
-) {
-    let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
+fn assert_recursive_verify(claim: &ExecutionClaim, proof: &ExecutionProof) {
     let verifier_root = CoreLibrary::default().vm_recursive_verifier_root();
-    let verifier_inputs = generate_request_inputs(verifier_root, proof, &claim)
+    let verifier_inputs = generate_request_inputs(verifier_root, proof, claim)
         .expect("recursive verifier request construction failed");
 
     let source = "
@@ -200,25 +194,21 @@ fn test_keccak_precompile_wrapper_prove_verify_final() {
         .assemble_program("keccak_precompile_wrapper_test", &source)
         .expect("failed to assemble Keccak precompile wrapper test")
         .unwrap_program();
-    let stack_inputs = StackInputs::default();
-    let advice_inputs = AdviceInputs::default();
     let mut host = DefaultHost::default()
         .with_library(&core_lib)
         .expect("failed to load CoreLibrary into the host");
 
-    let witness =
-        FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
-            .expect("processor initialization failed")
-            .execute_for_proving_sync(&program, &mut host)
-            .expect("failed to execute Keccak precompile program");
-    let stack_outputs = *witness.claim().stack_outputs();
-    let proof = Prover::new()
-        .prove_full(witness)
+    let prover = Prover::new();
+    let ProvingOutput { claim, proof, .. } = Processor::new(&program)
+        .prove_complete(&prover)
+        .run_sync(&mut host)
         .expect("failed to prove Keccak precompile execution");
+    assert_eq!(claim.to_program_info(), program.to_info());
+    assert_eq!(claim.stack_inputs(), &StackInputs::default());
+    let proof = proof.as_inner();
 
     assert!(matches!(proof.precompile(), miden_vm::PrecompileStatus::Proven(_)));
-    let claim = ExecutionClaim::from_program_info(program.into(), stack_inputs, stack_outputs);
-    let outcome = Verifier::new().verify(&claim, &proof).expect("Verification failed");
+    let outcome = Verifier::new().verify(&claim, proof).expect("Verification failed");
     assert!(outcome.is_complete());
     assert_eq!(outcome.outstanding_precompile_root(), None);
 }
@@ -320,32 +310,25 @@ fn test_eidos_recursive_verify_with_precompile_requests() {
         .expect("failed to assemble keccak precompile fixture")
         .unwrap_program();
 
-    let stack_inputs = StackInputs::default();
     let mut host = DefaultHost::default()
         .with_library(&core_lib)
         .expect("failed to load core library into the host");
-    let witness = FastProcessor::new_with_options(
-        stack_inputs,
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    )
-    .expect("processor initialization failed")
-    .execute_for_proving_sync(&program, &mut host)
-    .expect("execution failed");
-    let stack_outputs = *witness.claim().stack_outputs();
-    let proof = Prover::new()
-        .with_hash_fn(HashFunction::Eidos)
-        .prove_full(witness)
+    let prover = Prover::new().with_hash_fn(HashFunction::Eidos);
+    let ProvingOutput { claim, proof, .. } = Processor::new(&program)
+        .prove_complete(&prover)
+        .run_sync(&mut host)
         .expect("Proving failed");
+    assert_eq!(claim.to_program_info(), program.to_info());
+    assert_eq!(claim.stack_inputs(), &StackInputs::default());
+    let proof = proof.as_inner();
 
     // The precompile request left non-trivial deferred material behind.
     assert!(matches!(proof.precompile(), miden_vm::PrecompileStatus::Proven(_)));
     assert_ne!(proof.vm().precompile_root, miden_core::deferred::TRUE_DIGEST);
 
-    assert_recursive_verify(program.to_info(), stack_inputs, stack_outputs, &proof);
+    assert_recursive_verify(&claim, proof);
 
-    let claim = ExecutionClaim::from_program_info(program.into(), stack_inputs, stack_outputs);
-    let outcome = Verifier::new().verify(&claim, &proof).expect("Verification failed");
+    let outcome = Verifier::new().verify(&claim, proof).expect("Verification failed");
     assert!(outcome.is_complete());
 }
 
@@ -361,9 +344,9 @@ mod prover_api_lifecycle {
     use miden_precompiles::{UintDomain, UintPrecompile};
     use miden_vm::{
         DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionProof, ExecutionWitness,
-        FastProcessor, HashFunction, PrecompileLimits, PrecompileProof, PrecompileStatus,
-        PrecompileWitness, Program, Prover, ProverError, StackInputs, StackOutputs, StarkProof,
-        VerificationError, VerificationOutcome, Verifier, advice::AdviceInputs, prove_sync,
+        HashFunction, PrecompileLimits, PrecompileProof, PrecompileStatus, PrecompileWitness,
+        Processor, Program, Prover, ProverError, ProvingOutput, StackInputs, StackOutputs,
+        StarkProof, VerificationError, VerificationOutcome, Verifier,
     };
 
     use super::minimum_conjectured_security_level;
@@ -376,8 +359,10 @@ mod prover_api_lifecycle {
     }
 
     fn execute(program: &Program) -> ExecutionWitness {
-        FastProcessor::new(StackInputs::default())
-            .execute_for_proving_sync(program, &mut DefaultHost::default())
+        Processor::new(program)
+            .record_witness()
+            .run_sync(&mut DefaultHost::default())
+            .map(|output| output.witness)
             .expect("execution should produce a witness")
     }
 
@@ -507,7 +492,7 @@ mod prover_api_lifecycle {
     }
 
     #[test]
-    fn configured_prove_sync_matches_buffered_and_overlapped_routes() {
+    fn configured_builder_matches_buffered_and_overlapped_routes() {
         let stack_inputs = StackInputs::default();
         let prover = Prover::new();
         let execution_options = ExecutionOptions::default()
@@ -516,26 +501,32 @@ mod prover_api_lifecycle {
 
         for program in [assemble("begin push.1 drop end"), u256_program(1)] {
             let mut buffered_host = DefaultHost::default();
-            let (buffered_outputs, buffered_proof) = prove_sync(
-                &prover,
-                &program,
-                stack_inputs,
-                AdviceInputs::default(),
-                &mut buffered_host,
-                execution_options.clone().with_overlapped_trace_build(false),
-            )
-            .expect("buffered execute-and-prove should succeed");
+            let ProvingOutput {
+                claim: buffered_claim,
+                proof: buffered_proof,
+                ..
+            } = Processor::new(&program)
+                .with_options(execution_options.clone().with_overlapped_trace_build(false))
+                .with_stack_inputs(stack_inputs)
+                .prove_complete(&prover)
+                .run_sync(&mut buffered_host)
+                .expect("buffered execute-and-prove should succeed");
+            let buffered_outputs = *buffered_claim.stack_outputs();
+            let buffered_proof = buffered_proof.into_inner();
 
             let mut overlapped_host = DefaultHost::default();
-            let (overlapped_outputs, overlapped_proof) = prove_sync(
-                &prover,
-                &program,
-                stack_inputs,
-                AdviceInputs::default(),
-                &mut overlapped_host,
-                execution_options.clone().with_overlapped_trace_build(true),
-            )
-            .expect("overlapped execute-and-prove should succeed");
+            let ProvingOutput {
+                claim: overlapped_claim,
+                proof: overlapped_proof,
+                ..
+            } = Processor::new(&program)
+                .with_options(execution_options.clone().with_overlapped_trace_build(true))
+                .with_stack_inputs(stack_inputs)
+                .prove_complete(&prover)
+                .run_sync(&mut overlapped_host)
+                .expect("overlapped execute-and-prove should succeed");
+            let overlapped_outputs = *overlapped_claim.stack_outputs();
+            let overlapped_proof = overlapped_proof.into_inner();
 
             assert_eq!(buffered_outputs, overlapped_outputs);
             assert_eq!(buffered_proof.vm().precompile_root, overlapped_proof.vm().precompile_root);
@@ -760,15 +751,12 @@ mod execution_witness_serialization {
         operations::Operation,
         serde::Serializable,
     };
-    use miden_processor::{
-        DefaultHost, FastProcessor, HostLibrary, StackInputs, advice::AdviceInputs,
-        trace::build_trace,
-    };
+    use miden_processor::{DefaultHost, HostLibrary, StackInputs, trace::build_trace};
     use miden_prover::{HashFunction, Prover};
     #[cfg(feature = "arbitrary")]
     use miden_utils_testing::proptest::prelude::*;
     use miden_verifier::Verifier;
-    use miden_vm::{ExecutionWitness, Program};
+    use miden_vm::{ExecutionWitness, Processor, Program, WitnessOutput};
 
     fn default_source_manager_host() -> DefaultHost {
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()))
@@ -826,8 +814,11 @@ mod execution_witness_serialization {
             .expect("program should compile")
             .unwrap_program();
         let mut host = default_source_manager_host();
-        FastProcessor::new(stack_inputs)
-            .execute_for_proving_sync(&program, &mut host)
+        Processor::new(&program)
+            .with_stack_inputs(stack_inputs)
+            .record_witness()
+            .run_sync(&mut host)
+            .map(|output| output.witness)
             .expect("execution should produce a witness")
     }
 
@@ -879,12 +870,14 @@ mod execution_witness_serialization {
             prop_assert_eq!(restored.claim(), expected_claim);
             prop_assert_eq!(restored.to_bytes(), witness_bytes);
 
-            let (original_vm, _) = witness.into_parts();
-            let (restored_vm, _) = restored.into_parts();
-            let original_trace =
-                build_trace(original_vm, &miden_vm_stark::memory::default_budget()).expect("original generated witness should build a trace");
-            let restored_trace =
-                build_trace(restored_vm, &miden_vm_stark::memory::default_budget()).expect("restored generated witness should build a trace");
+            let (original_trace, _) = witness
+                .build_trace(miden_vm_stark::memory::default_budget())
+                .expect("original generated witness should build a trace")
+                .into_parts();
+            let (restored_trace, _) = restored
+                .build_trace(miden_vm_stark::memory::default_budget())
+                .expect("restored generated witness should build a trace")
+                .into_parts();
             prop_assert_eq!(restored_trace.stack_outputs(), original_trace.stack_outputs());
             prop_assert_eq!(restored_trace.program_info(), original_trace.program_info());
             prop_assert_eq!(
@@ -911,18 +904,13 @@ mod execution_witness_serialization {
 
     fn execution_witness_round_trip_proves_external_library_program() {
         let program = external_program();
-        let stack_inputs = StackInputs::default();
-        let advice_inputs = AdviceInputs::default();
         let mut host = default_source_manager_host();
         host.load_library(create_simple_library())
             .expect("failed to load test library into host");
-        let witness =
-            FastProcessor::new_with_options(stack_inputs, advice_inputs, Default::default())
-                .expect("invalid advice inputs")
-                .execute_for_proving_sync(&program, &mut host)
-                .expect("execution should produce a witness");
-
-        let claim = witness.claim();
+        let WitnessOutput { claim, witness, .. } = Processor::new(&program)
+            .record_witness()
+            .run_sync(&mut host)
+            .expect("execution should produce a witness");
         let witness_bytes = witness.to_bytes();
         let (restored_vm, _) = ExecutionWitness::read_from_bytes(&witness_bytes)
             .expect("witness round trip")
@@ -932,9 +920,10 @@ mod execution_witness_serialization {
             "expected dynamic library execution to serialize multiple MAST forests"
         );
 
-        let (vm, _) = witness.into_parts();
-        let original_trace = build_trace(vm, &miden_vm_stark::memory::default_budget())
-            .expect("original witness builds trace");
+        let (original_trace, _) = witness
+            .build_trace(miden_vm_stark::memory::default_budget())
+            .expect("original witness builds trace")
+            .into_parts();
         let restored_trace = build_trace(restored_vm, &miden_vm_stark::memory::default_budget())
             .expect("restored witness builds trace");
         assert_eq!(restored_trace.stack_outputs(), original_trace.stack_outputs());
@@ -973,8 +962,10 @@ mod execution_witness_serialization {
             .expect("program should compile")
             .unwrap_program();
         let mut host = default_source_manager_host();
-        let witness = FastProcessor::new(StackInputs::default())
-            .execute_for_proving_sync(&program, &mut host)
+        let witness = Processor::new(&program)
+            .record_witness()
+            .run_sync(&mut host)
+            .map(|output| output.witness)
             .expect("execution should produce a witness");
 
         let witness_bytes = witness.to_bytes();
@@ -987,8 +978,12 @@ mod execution_witness_serialization {
 
         let proving =
             ExecutionWitness::read_from_bytes(&witness_bytes).expect("witness round trip");
-        let proof = Prover::new()
-            .prove(proving)
+        let prover = Prover::new();
+        let trace = proving
+            .build_trace(prover.trace_budget())
+            .expect("restored witness should build a checked execution trace");
+        let proof = prover
+            .prove_trace(trace)
             .expect("portable partial proof should be produced from the restored witness");
 
         let miden_vm::PrecompileStatus::Deferred(portable) = proof.precompile() else {

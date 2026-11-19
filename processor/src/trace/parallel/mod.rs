@@ -73,6 +73,9 @@ mod tests;
 
 /// Builds the main trace from the provided trace states in parallel.
 ///
+/// This is the VM-only trace builder. To retain and validate an execution's matching precompile
+/// witness, use [`ExecutionWitness::build_trace`](crate::ExecutionWitness::build_trace).
+///
 /// The caller supplies the relation's proof-memory model and byte limit. The model must describe
 /// the VM AIRs in [`AIRS`] order and match the intended prover configuration.
 /// `ProvingBudget<MIDEN_AIR_COUNT>` checks the number of AIRs, but does not check their identities,
@@ -87,7 +90,7 @@ mod tests;
 /// # Example
 /// ```
 /// use miden_assembly::Assembler;
-/// use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+/// use miden_processor::{DefaultHost, ExecutionRequest};
 ///
 /// let program = Assembler::default()
 ///     .assemble_program("program", "begin push.1 drop end")
@@ -95,9 +98,11 @@ mod tests;
 ///     .unwrap_program();
 /// let mut host = DefaultHost::default();
 ///
-/// let execution_witness = FastProcessor::new(StackInputs::default())
-///     .execute_for_proving_sync(&program, &mut host)
-///     .unwrap();
+/// let execution_witness = ExecutionRequest::new(&program)
+///     .record_witness()
+///     .run_sync(&mut host)
+///     .unwrap()
+///     .witness;
 /// let (vm_witness, _) = execution_witness.into_parts();
 /// let trace =
 ///     miden_processor::trace::build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
@@ -114,7 +119,7 @@ pub fn build_trace(
 
 /// Same as [`build_trace`], but with a hasher chiplet that was already built — used
 /// by the streaming path, where the hasher builder runs concurrently with program execution
-/// (`FastProcessor::execute_and_build_trace_sync`, std-only).
+/// ([`crate::ExecutionRequest::build_trace`], std-only).
 #[cfg(feature = "std")]
 pub(crate) fn build_trace_with_prebuilt_hasher(
     witness: VmWitness,

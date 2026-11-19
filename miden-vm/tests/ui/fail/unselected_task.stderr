@@ -1,0 +1,11 @@
+error[E0599]: no method named `run_sync` found for struct `Processor<'p>` in the current scope
+ --> tests/ui/fail/unselected_task.rs:4:37
+  |
+4 |     let _ = Processor::new(program).run_sync(&mut DefaultHost::default());
+  |                                     ^^^^^^^^ method not found in `Processor<'_>`
+
+error[E0599]: no method named `run_sync` found for struct `ExecutionRequest<'p>` in the current scope
+ --> tests/ui/fail/unselected_task.rs:8:44
+  |
+8 |     let _ = ExecutionRequest::new(program).run_sync(&mut DefaultHost::default());
+  |                                            ^^^^^^^^ method not found in `ExecutionRequest<'_>`

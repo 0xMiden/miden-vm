@@ -586,7 +586,7 @@ fn callable_from_a_kernel_procedure() {
     };
     use miden_core::program::{StackInputs, StackOutputs};
     use miden_core_lib::CoreLibrary;
-    use miden_processor::{DefaultHost, FastProcessor};
+    use miden_processor::{DefaultHost, ExecutionRequest};
 
     let secret = sample();
     let public_key = recipient().public_key();
@@ -634,14 +634,15 @@ fn callable_from_a_kernel_procedure() {
         let inputs = StackInputs::new(commitment.as_elements()).unwrap();
         let mut host = DefaultHost::default().with_library(&core).unwrap();
         host.load_library(kernel.mast_forest()).unwrap();
-        let witness = FastProcessor::new(inputs)
+        let output = ExecutionRequest::new(&program)
+            .with_stack_inputs(inputs)
             .with_advice(advice)
-            .unwrap()
-            .execute_for_proving_sync(&program, &mut host)
+            .execute()
+            .run_sync(&mut host)
             .unwrap();
         let expected: Vec<_> =
             expected(&secret, &public_key).into_iter().map(Felt::new_unchecked).collect();
-        assert_eq!(witness.claim().stack_outputs(), &StackOutputs::new(&expected).unwrap());
+        assert_eq!(output.stack, StackOutputs::new(&expected).unwrap());
     }
 }
 
@@ -1335,7 +1336,7 @@ fn prove_seal_and_commit_from_advice() {
     use miden_core::program::{ExecutionClaim, StackInputs, StackOutputs};
     use miden_core_lib::CoreLibrary;
     use miden_crypto::ies::ecgfp5_eidos::{self, Envelope};
-    use miden_processor::{DefaultHost, FastProcessor};
+    use miden_processor::{DefaultHost, ExecutionRequest, WitnessOutput};
     use miden_prover::Prover;
     use miden_verifier::Verifier;
 
@@ -1379,10 +1380,11 @@ fn prove_seal_and_commit_from_advice() {
     };
 
     let key = recipient().public_key().to_commitment();
-    let (witness, advice) = FastProcessor::new(stack_inputs(key))
+    let WitnessOutput { witness, advice, .. } = ExecutionRequest::new(&program)
+        .with_stack_inputs(stack_inputs(key))
         .with_advice(AdviceInputs::default().with_stack(plaintext.to_vec().into()))
-        .unwrap()
-        .execute_for_proving_with_advice_sync(&program, &mut host)
+        .record_witness()
+        .run_sync(&mut host)
         .unwrap();
     let commitment = witness.claim().stack_outputs().get_word(0).unwrap();
     let envelope = Envelope::from_elements(advice.get_mapped_values(&commitment).unwrap()).unwrap();

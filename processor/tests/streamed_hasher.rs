@@ -6,8 +6,8 @@
 
 use miden_assembly::Assembler;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor, Felt, StackInputs, advice::AdviceInputs,
-    trace::build_trace,
+    DefaultHost, ExecutionOptions, ExecutionRequest, Felt, Program, StackInputs,
+    advice::AdviceInputs,
 };
 use miden_utils_testing::crypto::{MerkleTree, init_merkle_leaf, init_merkle_store};
 
@@ -50,16 +50,15 @@ begin
 end
 ";
 
-fn processor(stack: &[u64], advice: AdviceInputs) -> FastProcessor {
+fn request<'p>(program: &'p Program, stack: &[u64], advice: AdviceInputs) -> ExecutionRequest<'p> {
     let stack: Vec<Felt> = stack.iter().map(|&v| Felt::new(v).unwrap()).collect();
-    FastProcessor::new_with_options(
-        StackInputs::new(&stack).unwrap(),
-        advice,
-        ExecutionOptions::default()
-            .with_core_trace_fragment_size(64)
-            .expect("valid fragment size"),
-    )
-    .unwrap()
+    let options = ExecutionOptions::default()
+        .with_core_trace_fragment_size(64)
+        .expect("valid fragment size");
+    ExecutionRequest::new(program)
+        .with_stack_inputs(StackInputs::new(&stack).unwrap())
+        .with_advice(advice)
+        .with_options(options)
 }
 
 /// Runs `program_src` through both trace-build paths and asserts byte-for-byte
@@ -72,25 +71,28 @@ fn assert_overlapped_matches_buffered(program_src: &str, stack: &[u64], advice: 
 
     let buffered = {
         let mut host = DefaultHost::default();
-        let execution_witness = processor(stack, advice.clone())
-            .execute_for_proving_sync(&program, &mut host)
+        let execution_witness = request(&program, stack, advice.clone())
+            .record_witness()
+            .run_sync(&mut host)
+            .map(|output| output.witness)
             .unwrap();
-        let (vm_witness, precompiles_witness) = execution_witness.into_parts();
+        let (trace, precompiles_witness) = execution_witness
+            .build_trace(miden_vm_stark::memory::default_budget())
+            .unwrap()
+            .into_parts();
         assert!(precompiles_witness.is_none());
-        build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
+        trace
     };
 
     let streamed = {
         let mut host = DefaultHost::default();
-        let (trace, precompiles_witness) = processor(stack, advice.clone())
-            .execute_and_build_trace_sync(
-                &program,
-                &mut host,
-                &miden_vm_stark::memory::default_budget(),
-            )
-            .unwrap();
-        assert!(precompiles_witness.is_none());
-        trace
+        let trace = request(&program, stack, advice.clone())
+            .build_trace(miden_vm_stark::memory::default_budget())
+            .run_sync(&mut host)
+            .unwrap()
+            .trace;
+        assert!(trace.precompile_witness().is_none());
+        trace.into_vm_trace()
     };
 
     assert_eq!(buffered.program_hash(), streamed.program_hash());
@@ -182,7 +184,7 @@ fn overlap_builder_thread_enters_the_instrument_span() {
             id: &Id,
             _ctx: tracing_subscriber::layer::Context<'_, S>,
         ) {
-            if attrs.metadata().name() == "execute_and_build_trace_sync" {
+            if attrs.metadata().name() == "build_trace_sync" {
                 *self.target.lock().unwrap() = Some(id.clone());
             }
         }
@@ -205,12 +207,9 @@ fn overlap_builder_thread_enters_the_instrument_span() {
     let caller = std::thread::current().id();
     tracing::subscriber::with_default(subscriber, || {
         let mut host = DefaultHost::default();
-        processor(&[1], AdviceInputs::default())
-            .execute_and_build_trace_sync(
-                &program,
-                &mut host,
-                &miden_vm_stark::memory::default_budget(),
-            )
+        request(&program, &[1], AdviceInputs::default())
+            .build_trace(miden_vm_stark::memory::default_budget())
+            .run_sync(&mut host)
             .unwrap();
     });
 

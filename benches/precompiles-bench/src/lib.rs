@@ -3,9 +3,10 @@
 use miden_core::{Felt, Word, deferred::PrecompileWitness, program::ExecutionClaim};
 use miden_core_lib::CoreLibrary;
 use miden_vm::{
-    Assembler, DefaultHost, ExecutionOptions, ExecutionProof, FastProcessor, HashFunction,
-    PrecompileLimits, Program, Prover, StackInputs, StackOutputs, Verifier, advice::AdviceInputs,
+    Assembler, DefaultHost, ExecutionOptions, ExecutionProof, HashFunction, PrecompileLimits,
+    Program, Prover, StackInputs, StackOutputs, Verifier, advice::AdviceInputs,
     default_execution_precompile_limits, default_verification_precompile_limits,
+    processor::ExecutionRequest,
 };
 
 use self::input_generation::generate_advice_inputs;
@@ -53,14 +54,15 @@ impl PrecompileFixture {
         let mut host = DefaultHost::default()
             .with_library(&CoreLibrary::default())
             .expect("load precompile workload library");
-        let output = FastProcessor::new_with_options(
-            self.stack_inputs,
-            self.advice_inputs.clone(),
-            self.execution_options.clone(),
-        )
-        .expect("construct precompile workload processor")
-        .execute_sync(&self.program, &mut host)
-        .expect("execute precompile workload");
+        let output = ExecutionRequest::new(&self.program)
+            .with_stack_inputs(self.stack_inputs)
+            .with_advice(self.advice_inputs.clone())
+            .with_options(self.execution_options.clone())
+            .execute()
+            .prepare()
+            .expect("construct precompile workload processor")
+            .run_sync(&mut host)
+            .expect("execute precompile workload");
         let root = output.precompile_root();
         let witness = output.precompile_witness.expect("workload must authenticate deferred work");
         (witness, root)
@@ -147,14 +149,16 @@ pub fn prove_once(fixture: &PrecompileFixture) -> (StackOutputs, ExecutionProof)
     let mut host = DefaultHost::default()
         .with_library(&CoreLibrary::default())
         .expect("failed to load core library into host");
-    let witness = FastProcessor::new_with_options(
-        fixture.stack_inputs,
-        fixture.advice_inputs.clone(),
-        fixture.execution_options.clone(),
-    )
-    .expect("failed to initialize precompile benchmark processor")
-    .execute_for_proving_sync(&fixture.program, &mut host)
-    .expect("failed to execute precompile benchmark");
+    let witness = ExecutionRequest::new(&fixture.program)
+        .with_stack_inputs(fixture.stack_inputs)
+        .with_advice(fixture.advice_inputs.clone())
+        .with_options(fixture.execution_options.clone())
+        .record_witness()
+        .prepare()
+        .expect("failed to initialize precompile benchmark processor")
+        .run_sync(&mut host)
+        .expect("failed to execute precompile benchmark")
+        .witness;
     let stack_outputs = *witness.claim().stack_outputs();
     let proof = Prover::new()
         .with_hash_fn(HashFunction::Eidos)

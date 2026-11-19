@@ -1,0 +1,15 @@
+error[E0061]: this method takes 1 argument but 0 arguments were supplied
+ --> tests/ui/fail/trace_requires_budget.rs:4:37
+  |
+4 |     let _ = Processor::new(program).build_trace();
+  |                                     ^^^^^^^^^^^-- argument #1 of type `ProvingBudget<4>` is missing
+  |
+note: method defined here
+ --> src/execution.rs
+  |
+  |     pub fn build_trace(self, budget: VmTraceBudget) -> Execution<'p, Trace> {
+  |            ^^^^^^^^^^^
+help: provide the argument
+  |
+4 |     let _ = Processor::new(program).build_trace(/* ProvingBudget<4> */);
+  |                                                 ++++++++++++++++++++++

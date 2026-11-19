@@ -3,11 +3,8 @@ use std::{path::PathBuf, time::Instant};
 use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor,
-    trace::{VmTrace, build_trace},
-};
-use miden_vm::internal::InputFile;
+use miden_processor::{DefaultHost, ExecutionOptions, PackageSourceDebugContext, trace::VmTrace};
+use miden_vm::{Processor, TraceOutput, internal::InputFile};
 use miden_vm_stark::memory::{DEFAULT_MAX_PROVER_MEMORY_BYTES, canonical_budget};
 use tracing::instrument;
 
@@ -190,17 +187,15 @@ fn run_masp_program(
 
     let program_hash: [u8; 32] = program.hash().into();
 
-    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
-        .map_err(|err| Report::msg(format!("{err}")))?;
+    let TraceOutput { trace, .. } = Processor::new(&program)
+        .with_options(exec_options)
+        .with_stack_inputs(stack_inputs)
+        .with_advice(advice_inputs)
+        .build_trace(canonical_budget(params.max_prover_memory))
+        .run_sync(&mut host)
+        .wrap_err("Failed to execute program and build trace")?;
 
-    let witness = processor
-        .execute_for_proving_sync(&program, &mut host)
-        .wrap_err("Failed to execute program")?;
-    let (vm_witness, _) = witness.into_parts();
-    let trace = build_trace(vm_witness, &canonical_budget(params.max_prover_memory))
-        .wrap_err("Failed to build trace")?;
-
-    Ok((trace, program_hash))
+    Ok((trace.into_vm_trace(), program_hash))
 }
 
 #[instrument(target = "miden::cli", level = "trace", name = "run_program", skip_all)]
@@ -252,28 +247,17 @@ fn run_masm_program(
 
     let program_hash: [u8; 32] = program.hash().into();
 
-    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
-        .map_err(|err| Report::msg(format!("{err}")))?;
+    let source = package_debug_info
+        .as_ref()
+        .map(|info| PackageSourceDebugContext::new_optional(info, entrypoint_source_node));
+    let TraceOutput { trace, .. } = Processor::new(&program)
+        .with_options(exec_options)
+        .with_stack_inputs(stack_inputs)
+        .with_advice(advice_inputs)
+        .with_source_context(source)
+        .build_trace(canonical_budget(params.max_prover_memory))
+        .run_sync(&mut host)
+        .wrap_err("Failed to execute program and build trace")?;
 
-    let execution_witness = match (package_debug_info.as_ref(), entrypoint_source_node) {
-        (Some(debug_info), Some(entrypoint_source_node_id)) => processor
-            .execute_for_proving_with_package_debug_info_at_source_node_sync(
-                &program,
-                debug_info,
-                entrypoint_source_node_id,
-                &mut host,
-            )
-            .wrap_err("Failed to execute program")?,
-        (Some(debug_info), None) => processor
-            .execute_for_proving_with_package_debug_info_sync(&program, debug_info, &mut host)
-            .wrap_err("Failed to execute program")?,
-        (None, _) => processor
-            .execute_for_proving_sync(&program, &mut host)
-            .wrap_err("Failed to execute program")?,
-    };
-    let (vm_witness, _) = execution_witness.into_parts();
-    let trace = build_trace(vm_witness, &canonical_budget(params.max_prover_memory))
-        .wrap_err("Failed to build trace")?;
-
-    Ok((trace, program_hash))
+    Ok((trace.into_vm_trace(), program_hash))
 }

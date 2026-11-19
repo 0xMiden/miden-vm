@@ -7,7 +7,7 @@ use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_event_handler_abi::ABI_VERSION;
 use miden_mast_package::{EventHandlerManifestEntry, EventHandlerSection, Package};
 use miden_processor::{
-    DefaultHost, FastProcessor, StackInputs,
+    DefaultHost, ExecutionRequest,
     serde::{Deserializable, Serializable},
 };
 use miden_wasm_event_handlers::{WasmHandlerLimits, host_library_from_package};
@@ -65,8 +65,9 @@ fn program_verifies_advice_from_a_packaged_wasm_handler() {
     host.load_library(library).expect("handlers register");
 
     let program = decoded.unwrap_program();
-    FastProcessor::new(StackInputs::default())
-        .execute_sync(&program, &mut host)
+    ExecutionRequest::new(&program)
+        .execute()
+        .run_sync(&mut host)
         .expect("the handler's advice satisfies the in-VM check");
 }
 
@@ -116,8 +117,9 @@ fn packaged_handler_reads_vm_memory() {
     let mut host = DefaultHost::default();
     host.load_library(library).expect("handlers register");
 
-    FastProcessor::new(StackInputs::default())
-        .execute_sync(&program, &mut host)
+    ExecutionRequest::new(&program)
+        .execute()
+        .run_sync(&mut host)
         .expect("the batch memory read matches what the program wrote");
 }
 
@@ -211,8 +213,9 @@ fn rust_guest_fixture_end_to_end() {
     let mut host = DefaultHost::default();
     host.load_library(library).expect("handlers register");
 
-    FastProcessor::new(StackInputs::default())
-        .execute_sync(&decoded.unwrap_program(), &mut host)
+    ExecutionRequest::new(&decoded.unwrap_program())
+        .execute()
+        .run_sync(&mut host)
         .expect("the Rust handler's advice satisfies the in-VM check");
 }
 
@@ -265,8 +268,9 @@ fn rust_guest_merges_words() {
     let mut host = DefaultHost::default();
     host.load_library(library).expect("handlers register");
 
-    FastProcessor::new(StackInputs::default())
-        .execute_sync(&program, &mut host)
+    ExecutionRequest::new(&program)
+        .execute()
+        .run_sync(&mut host)
         .expect("the handler's digest matches the natively computed merge");
 }
 
@@ -295,8 +299,9 @@ fn rust_guest_panic_reaches_the_host() {
     let mut host = DefaultHost::default();
     host.load_library(library).expect("handlers register");
 
-    let err = FastProcessor::new(StackInputs::default())
-        .execute_sync(&program, &mut host)
+    let err = ExecutionRequest::new(&program)
+        .execute()
+        .run_sync(&mut host)
         .expect_err("the handler panics");
 
     // The guest's message sits in the error source chain, below the processor's event context.
@@ -358,8 +363,9 @@ fn program_fails_without_the_packaged_handlers() {
 
     // A host that ignores the package's handlers cannot serve the event.
     let mut host = DefaultHost::default();
-    let err = FastProcessor::new(StackInputs::default())
-        .execute_sync(&program, &mut host)
+    let err = ExecutionRequest::new(&program)
+        .execute()
+        .run_sync(&mut host)
         .expect_err("the event has no handler");
     assert!(err.to_string().contains("event"), "unexpected error: {err}");
 }

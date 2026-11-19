@@ -14,8 +14,8 @@ use miden_utils_testing::crypto::{init_merkle_leaves, init_merkle_store};
 
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
 use crate::{
-    BaseHost, DefaultHost, FastProcessor, KernelDescriptor, LoadedMastForest, MastForestLoadError,
-    ONE, ProcessorState, Program, StackInputs, SyncHost, Word, ZERO,
+    BaseHost, DefaultHost, ExecutionRequest, KernelDescriptor, LoadedMastForest,
+    MastForestLoadError, ONE, ProcessorState, Program, SyncHost, Word, ZERO,
     advice::{AdviceInputs, AdviceMap, AdviceMutation},
     event::{EventError, EventHandler, EventName, TraceError, TraceHandler},
     operation::Operation,
@@ -190,8 +190,7 @@ fn test_diagnostic_advice_map_key_already_present() {
 
     let program = Program::new(mast_forest.into(), basic_block_id);
 
-    let processor = FastProcessor::new(StackInputs::default());
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = ExecutionRequest::new(&program).execute().run_sync(&mut host).unwrap_err();
 
     assert_diagnostic_lines!(
         err,
@@ -264,11 +263,13 @@ fn test_diagnostic_host_event_error_uses_emit_location() {
     let mut host = DefaultHost::default().with_source_manager(source_manager);
     host.register_handler(event.clone(), Arc::new(AlwaysFailEventHandler)).unwrap();
 
-    let processor = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits");
-    let err = processor
-        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+    let err = ExecutionRequest::new(&program)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
+            &debug_info,
+            None,
+        )))
+        .execute()
+        .run_sync(&mut host)
         .expect_err("expected error");
     #[rustfmt::skip]
     assert_diagnostic_lines!(
@@ -304,11 +305,13 @@ fn test_diagnostic_host_trace_error_uses_trace_location() {
     host.register_trace_handler(trace.clone(), Arc::new(AlwaysFailTraceHandler))
         .unwrap();
 
-    let processor = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits");
-    let err = processor
-        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+    let err = ExecutionRequest::new(&program)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
+            &debug_info,
+            None,
+        )))
+        .execute()
+        .run_sync(&mut host)
         .expect_err("expected error");
     #[rustfmt::skip]
     assert_diagnostic_lines!(
@@ -341,11 +344,14 @@ fn test_diagnostic_host_event_advice_error_uses_emit_location() {
     let mut host = DefaultHost::default().with_source_manager(source_manager);
     host.register_handler(event, Arc::new(DuplicateMapMutationHandler)).unwrap();
 
-    let processor = FastProcessor::new(StackInputs::default())
+    let err = ExecutionRequest::new(&program)
         .with_advice(AdviceInputs::default().with_map([(Word::default(), vec![ZERO])]))
-        .expect("advice inputs should fit advice map limits");
-    let err = processor
-        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
+            &debug_info,
+            None,
+        )))
+        .execute()
+        .run_sync(&mut host)
         .expect_err("expected error");
     #[rustfmt::skip]
     assert_diagnostic_lines!(
@@ -975,11 +981,13 @@ fn test_diagnostic_procedure_not_found_call() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits");
-    let err = processor
-        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+    let err = ExecutionRequest::new(&program)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
+            &debug_info,
+            None,
+        )))
+        .execute()
+        .run_sync(&mut host)
         .unwrap_err();
     assert_diagnostic_lines!(
         err,
@@ -1034,11 +1042,13 @@ fn test_diagnostic_procedure_not_found_join() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits");
-    let err = processor
-        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+    let err = ExecutionRequest::new(&program)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
+            &debug_info,
+            None,
+        )))
+        .execute()
+        .run_sync(&mut host)
         .unwrap_err();
     assert_diagnostic_lines!(
         err,
@@ -1100,11 +1110,13 @@ fn test_diagnostic_procedure_not_found_loop() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits");
-    let err = processor
-        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+    let err = ExecutionRequest::new(&program)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
+            &debug_info,
+            None,
+        )))
+        .execute()
+        .run_sync(&mut host)
         .unwrap_err();
     assert_diagnostic_lines!(
         err,
@@ -1166,11 +1178,13 @@ fn test_diagnostic_procedure_not_found_split() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits");
-    let err = processor
-        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+    let err = ExecutionRequest::new(&program)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
+            &debug_info,
+            None,
+        )))
+        .execute()
+        .run_sync(&mut host)
         .unwrap_err();
     assert_diagnostic_lines!(
         err,
@@ -1214,9 +1228,13 @@ fn test_diagnostic_malformed_mast_forest_in_host() {
         mast_forest: malformed_forest.into(),
     };
 
-    let processor = FastProcessor::new(StackInputs::default());
-    let err = processor
-        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+    let err = ExecutionRequest::new(&program)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
+            &debug_info,
+            None,
+        )))
+        .execute()
+        .run_sync(&mut host)
         .unwrap_err();
 
     assert_diagnostic_lines!(
@@ -1450,11 +1468,10 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits");
-    let err = processor
-        .execute_with_package_debug_info_sync(&program.0, &program.1, &mut host)
+    let err = ExecutionRequest::new(&program.0)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(&program.1, None)))
+        .execute()
+        .run_sync(&mut host)
         .unwrap_err();
     assert_diagnostic_lines!(
         err,

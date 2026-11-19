@@ -6,7 +6,7 @@ use miden_core::{
     events::{EventId, EventName},
 };
 use miden_debug_types::{ByteIndex, Location, SourceManagerExt, Uri};
-use miden_processor::event::EventHandler;
+use miden_processor::{ExecutionRequest, event::EventHandler};
 
 use super::*;
 use crate::exec::{DebuggerHost, EventMutationRecorder};
@@ -46,10 +46,8 @@ fn dap_wrapper_preserves_forest_lookup_errors() {
     let forests = MastForestRecorder::new();
     let mut host = LoaderHost;
     let mut wrapper = DapHostWrapper::new(&mut host, None, Some(forests.clone()));
-    let error = poll_immediately(
-        FastProcessor::new(StackInputs::default()).execute(&program, &mut wrapper),
-    )
-    .unwrap_err();
+    let error =
+        poll_immediately(ExecutionRequest::new(&program).execute().run(&mut wrapper)).unwrap_err();
     let ExecutionError::MastForestError { error, .. } = error else {
         panic!("expected the store error");
     };
@@ -77,7 +75,7 @@ fn trace_handler_errors_preserve_the_registered_name_through_dap() {
     .unwrap();
     let mut wrapper = DapHostWrapper::new(&mut host, None, None);
     let error = poll_immediately(
-        FastProcessor::new(StackInputs::default()).execute(&package.unwrap_program(), &mut wrapper),
+        ExecutionRequest::new(&package.unwrap_program()).execute().run(&mut wrapper),
     )
     .expect_err("the trace handler must reject execution");
     let ExecutionError::EventError { event_id, event_name, error, .. } = error else {

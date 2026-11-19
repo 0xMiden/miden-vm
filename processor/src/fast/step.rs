@@ -3,7 +3,10 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
-use miden_core::{mast::MastForest, program::KernelDescriptor};
+use miden_core::{
+    mast::MastForest,
+    program::{KernelDescriptor, StackOutputs},
+};
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
@@ -68,6 +71,23 @@ impl ResumeContext {
     /// Returns a reference to the kernel being currently executed.
     pub fn kernel(&self) -> &KernelDescriptor {
         &self.kernel
+    }
+}
+
+pub(crate) enum ResumeOutcome {
+    Suspended(ResumeContext),
+    Halted {
+        stack: StackOutputs,
+        kernel: KernelDescriptor,
+    },
+}
+
+impl ResumeOutcome {
+    pub(super) fn into_resume_context(self) -> Option<ResumeContext> {
+        match self {
+            Self::Suspended(context) => Some(context),
+            Self::Halted { .. } => None,
+        }
     }
 }
 

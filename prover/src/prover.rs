@@ -6,9 +6,7 @@ use miden_core::{
     proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus, VmProof},
 };
 use miden_processor::{
-    ExecutionError, ExecutionOptions, ExecutionTrace, ExecutionWitness, FastProcessor,
-    PrecompileWitness, Program, StackInputs, StackOutputs, SyncHost, VmTraceBudget, VmWitness,
-    advice::AdviceInputs,
+    ExecutionError, ExecutionTrace, ExecutionWitness, PrecompileWitness, VmTraceBudget, VmWitness,
     trace::{VmTrace, build_trace},
 };
 
@@ -303,48 +301,6 @@ impl Prover {
     }
 }
 
-/// Executes and fully proves a program synchronously.
-///
-/// This FastProcessor-backed orchestration function preserves the optimized overlapped
-/// execution/trace-building path. Proving policy belongs on [`Prover`].
-///
-/// When enabled in `execution_options`, the processor may build the hasher chiplet alongside
-/// execution. A caller with no separate Rayon worker uses compact buffered replay. Both cases use
-/// the same private VM STARK and complete-local packaging implementation.
-#[tracing::instrument(target = "miden::vm", level = "trace", name = "prove_program", skip_all)]
-pub fn prove_sync(
-    prover: &Prover,
-    program: &Program,
-    stack_inputs: StackInputs,
-    advice_inputs: AdviceInputs,
-    host: &mut impl SyncHost,
-    execution_options: ExecutionOptions,
-) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
-    #[cfg(feature = "std")]
-    let overlapped_trace_build = execution_options.overlapped_trace_build();
-    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
-        .map_err(ExecutionError::advice_error_no_context)?;
-
-    #[cfg(feature = "std")]
-    if overlapped_trace_build {
-        let (trace, precompile) = processor.execute_and_build_trace_sync(
-            program,
-            host,
-            &miden_vm_stark::memory::canonical_budget(prover.max_prover_memory_bytes()),
-        )?;
-        let stack_outputs = *trace.stack_outputs();
-        let proof = prover
-            .prove_full_trace_parts(trace, precompile)
-            .map_err(ProverError::into_execution_error)?;
-        return Ok((stack_outputs, proof));
-    }
-
-    let witness = processor.execute_for_proving_sync(program, host)?;
-    let stack_outputs = *witness.claim().stack_outputs();
-    let proof = prover.prove_full(witness).map_err(ProverError::into_execution_error)?;
-    Ok((stack_outputs, proof))
-}
-
 impl Default for Prover {
     fn default() -> Self {
         Self::new()
@@ -367,18 +323,6 @@ pub enum ProverError {
     /// The deferred precompile witness could not be proved.
     #[error("failed to prove precompile witness: {0}")]
     PrecompileProofGeneration(#[source] PrecompileProvingError),
-}
-
-impl ProverError {
-    fn into_execution_error(self) -> ExecutionError {
-        match self {
-            Self::VmWitnessHasPrecompiles => ExecutionError::ProvingError(self.to_string()),
-            Self::TraceGeneration(error) | Self::VmProofGeneration(error) => error,
-            Self::PrecompileProofGeneration(error) => {
-                ExecutionError::ProvingError(error.to_string())
-            },
-        }
-    }
 }
 
 #[cfg(test)]

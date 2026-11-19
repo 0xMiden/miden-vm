@@ -6,7 +6,7 @@ use miden_precompiles::{CurveId, CurvePrecompile};
 
 use super::helpers::{
     TRUNCATE_STACK_TO_OUTPUT_PROC, assert_precompile_witness_round_trips, expect_precompile_trap,
-    expect_precompile_trap_with_processor, read_stack_felts, run_precompile_program,
+    expect_precompile_trap_with_stack, read_stack_felts, run_precompile_program,
 };
 
 const REGISTER_DATA_CV_OFFSET: usize = 2;
@@ -51,7 +51,7 @@ fn msm_mem_runtime_frames_match_pair_counts() {
     for curve in supported_curves() {
         for n_pairs in [1, 3] {
             let source = curve_msm_mem_source(curve, n_pairs, 1);
-            let (error, processor) = expect_precompile_trap_with_processor(&source);
+            let (error, stack) = expect_precompile_trap_with_stack(&source);
             assert!(
                 matches!(
                     error,
@@ -64,7 +64,9 @@ fn msm_mem_runtime_frames_match_pair_counts() {
                 curve.module,
             );
             assert_eq!(
-                processor.stack_get_word(REGISTER_DATA_CV_OFFSET),
+                Word::new(
+                    stack[REGISTER_DATA_CV_OFFSET..REGISTER_DATA_CV_OFFSET + 4].try_into().unwrap()
+                ),
                 CurvePrecompile::msm_frame(n_pairs).initial_chaining_word(),
                 "{} msm_mem injected {n_pairs} into the wrong CV lane",
                 curve.module,
@@ -92,9 +94,11 @@ fn msm_mem_rejects_zero_pairs() {
 fn msm_mem_max_count_reaches_state_size_check() {
     for curve in supported_curves() {
         let source = curve_msm_mem_source(curve, u32::MAX, 0);
-        let (error, processor) = expect_precompile_trap_with_processor(&source);
+        let (error, stack) = expect_precompile_trap_with_stack(&source);
         assert_eq!(
-            processor.stack_get_word(REGISTER_DATA_CV_OFFSET),
+            Word::new(
+                stack[REGISTER_DATA_CV_OFFSET..REGISTER_DATA_CV_OFFSET + 4].try_into().unwrap()
+            ),
             CurvePrecompile::msm_frame(u32::MAX).initial_chaining_word(),
             "{} msm_mem injected u32::MAX into the wrong CV lane",
             curve.module,

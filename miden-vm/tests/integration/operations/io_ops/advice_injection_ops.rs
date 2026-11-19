@@ -1,10 +1,8 @@
 use miden_assembly::Assembler;
 use miden_core::{Felt, Word};
-use miden_processor::{
-    ExecutionError, ExecutionOptions, FastProcessor, StackInputs, TestHost,
-    advice::{AdviceError, AdviceInputs},
-};
+use miden_processor::{TestHost, advice::AdviceError};
 use miden_utils_testing::{build_test, crypto::MerkleStore};
+use miden_vm::{ExecutionError, ExecutionOptions, Processor};
 
 // ADVICE INJECTION
 // ================================================================================================
@@ -558,9 +556,7 @@ fn run_insert_mem_with_max_value_elements_and_repeats(
     let options =
         ExecutionOptions::default().with_max_advice_size_bytes(base_store_bytes + map_entry_bytes);
 
-    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
-        .map_err(ExecutionError::advice_error_no_context)?
-        .execute_sync(&program, &mut host)?;
+    Processor::new(&program).with_options(options).execute().run_sync(&mut host)?;
     Ok(())
 }
 
@@ -587,9 +583,7 @@ fn run_insert_mem_after_empty_insertion(range_len: u32) -> Result<(), ExecutionE
     let options = ExecutionOptions::default()
         .with_max_advice_size_bytes(base_store_bytes + Word::SERIALIZED_SIZE);
 
-    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
-        .map_err(ExecutionError::advice_error_no_context)?
-        .execute_sync(&program, &mut host)?;
+    Processor::new(&program).with_options(options).execute().run_sync(&mut host)?;
     Ok(())
 }
 
@@ -616,8 +610,6 @@ fn run_conflicting_insert(max_advice_size_bytes: usize) -> Result<(), ExecutionE
     let mut host = TestHost::default();
     let options = ExecutionOptions::default().with_max_advice_size_bytes(max_advice_size_bytes);
 
-    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
-        .map_err(ExecutionError::advice_error_no_context)?
-        .execute_sync(&program, &mut host)?;
+    Processor::new(&program).with_options(options).execute().run_sync(&mut host)?;
     Ok(())
 }
