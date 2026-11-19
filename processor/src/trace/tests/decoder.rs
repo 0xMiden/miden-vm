@@ -1300,6 +1300,9 @@ fn system_state_changes_across_end_imply_a_caller_frame_flag() {
     }
 
     let observe_and_check = |label: &str, trace: &VmTrace| {
+        // Every fixture is an honest trace, so it must also satisfy the full AIR, including the
+        // unary-node padding of LOOP, CALL and SYSCALL and DYNCALL's saved-frame lanes.
+        miden_vm_stark::debug::check_constraints(trace);
         let main = trace.main_trace();
         let mut observations = EndObservations::default();
         for row in 0..(main.core_height() - 1) {

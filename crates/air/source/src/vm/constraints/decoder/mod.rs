@@ -8,13 +8,13 @@
 //! 1. **In-span constraints**: Ensure the in-span flag transitions correctly.
 //! 2. **Op-bit binary constraints**: Ensure operation bits are binary.
 //! 3. **Extra columns (e0, e1)**: Degree-reduction columns for operation flag computation.
-//! 4. **Opcode-bit group constraints**: Reject unused encodings in the upper prefix groups.
-//! 5. **General opcode-semantic constraints**: Per-operation invariants (SPLIT/LOOP, DYN, REPEAT,
-//!    END, HALT).
+//! 4. **Opcode-bit group constraints**: Reject unused opcode encodings.
+//! 5. **General opcode-semantic constraints**: Per-operation invariants (SPLIT, LOOP, CALL,
+//!    SYSCALL, DYN, REPEAT, END, HALT).
 //! 6. **Group count constraints**: Group-count transitions inside basic blocks.
 //! 7. **Op group decoding (h0) constraints**: Base-128 opcode packing in h0.
 //! 8. **Op index constraints**: Position tracking within an operation group.
-//! 9. **Batch encoding constraints**: Batch size encoding and unused-lane zeroing.
+//! 9. **Batch encoding constraints**: Batch sizes, unused lanes, and final short batches.
 //! 10. **Block address (addr) constraints**: Hasher-table address management.
 //! 11. **Control flow constraint**: Mutual exclusivity of `in_span` and `f_ctrl`.
 //!
@@ -48,6 +48,9 @@
 //! |Context    |h0         |h1..h3   |h4            |h5      |h6                   |h7      |
 //! |-----------|-----------|---------|--------------|--------|---------------------|--------|
 //! |SPAN/RESPAN|packed ops |op groups|op group      |op group|op group             |op group|
+//! |LOOP       |child hash₀|hash₁..₃ |0             |0       |0                    |0       |
+//! |CALL       |child hash₀|hash₁..₃ |0             |0       |0                    |0       |
+//! |SYSCALL    |child hash₀|hash₁..₃ |0             |0       |0                    |0       |
 //! |END        |block hash₀|hash₁..₃ |is_loop_body  |is_loop |restores_caller_frame|0       |
 //! |User ops   |packed ops |op groups|user_op_helper|...     |...                  |...     |
 //!
@@ -197,10 +200,11 @@ pub fn enforce_main<AB>(
     // =============================================
     // Opcode-bit group constraints
     // =============================================
-    // Restrict unused opcode encodings in the upper prefix groups:
+    // Restrict unused opcode encodings:
     //
     //   b6 b5 b4 | Constraint
     //   ---------+----------------------
+    //   0  1  0  | exclude opcode 47
     //   1  0  0  | b0 = 0
     //   1  0  1  | exclude opcode 95
     //   1  1  *  | b0 = b1 = 0
@@ -214,6 +218,11 @@ pub fn enforce_main<AB>(
     // Prefix 11 also requires b1 = 0.
     builder.when(e1).assert_zero(b1);
 
+    // Opcode 47 is the only unused degree-7 encoding. The left-shift route covers its slot, so
+    // without this constraint it would execute as an unnamed DROP.
+    let unused_47 = b6.into().not() * b5 * b4.into().not() * b3 * b2 * b1 * b0;
+    builder.assert_zero(unused_47);
+
     // =============================================
     // General opcode-semantic constraints
     // =============================================
@@ -222,6 +231,9 @@ pub fn enforce_main<AB>(
     // Operation | Constraint                          | Why
     // ----------+-------------------------------------+------------------------------------
     // SPLIT     | s0 in {0, 1}                        | s0 selects true/false branch
+    // LOOP      | h4 = h5 = h6 = h7 = 0               | unary child followed by a zero word
+    // CALL      | h4 = h5 = h6 = h7 = 0               | unary child followed by a zero word
+    // SYSCALL   | h4 = h5 = h6 = h7 = 0               | unary child followed by a zero word
     // DYN       | h4 = h5 = h6 = h7 = 0               | callee digest lives in h0..h3 only
     // REPEAT    | s0 = 1                              | loop condition must be true
     // END+loop  | is_loop (h5) => s0 = 0              | exiting loop: condition became false
@@ -231,6 +243,15 @@ pub fn enforce_main<AB>(
     // SPLIT: branch selector must be binary.
     let branch_condition = local.stack.get(0);
     builder.when(op_flags.split()).assert_bool(branch_condition);
+
+    // LOOP, CALL and SYSCALL commit to one child. Their MAST digest hashes the child digest in
+    // h0..h3 followed by a zero word, so h4..h7 must be zero.
+    {
+        let unary_node = op_flags.loop_op() + op_flags.call() + op_flags.syscall();
+        let builder = &mut builder.when(unary_node);
+        let hasher_zeros = [hasher_state[4], hasher_state[5], hasher_state[6], hasher_state[7]];
+        builder.assert_zeros(hasher_zeros)
+    }
 
     // DYN uses h0..h3 for the callee digest in memory and block-hash lookups; h4..h7 are unused.
     {
@@ -305,8 +326,8 @@ pub fn enforce_main<AB>(
     //
     // ## Lifecycle
     //
-    // 1. SPAN/RESPAN: the prover sets group_count non-deterministically to the batch's group count.
-    //    The constraint below forces delta_group_count = 1 on these rows.
+    // 1. SPAN/RESPAN: group_count is the block's remaining group count, including this batch. Entry
+    //    consumes the first group, so delta_group_count = 1 on these rows.
     // 2. Normal execution: each time a group is fully decoded (h0 reaches 0) or a PUSH consumes an
     //    immediate, group_count decrements by 1 (delta_group_count = 1).
     // 3. END: group_count must be 0 — all groups in the span have been consumed.
@@ -432,8 +453,8 @@ pub fn enforce_main<AB>(
     // Operation-batch encoding constraints
     // =============================================
     // `full_batch` and `batch_size_code` encode the number of op groups in the current batch.
-    // This matters for the last batch in a basic block (or the only batch), since all
-    // other batches must be completely full (8 groups).
+    // Every batch except the last one in a basic block must be full (8 groups): a short batch's
+    // remaining group count must equal its width, so no later batch remains.
     //
     // The valid active encodings are (1, 0), (0, 1), (0, -1), and (0, 0), corresponding to
     // 8, 4, 2, and 1 groups. Inactive rows are pinned to (0, 0); the SPAN/RESPAN opcode
@@ -452,6 +473,7 @@ pub fn enforce_main<AB>(
         op_flags.span() + op_flags.respan(),
         full_batch,
         batch_size_code,
+        group_count,
         &hasher_state,
     );
 
@@ -506,7 +528,8 @@ mod tests {
     use miden_core::{
         Felt, ONE,
         field::{Field, PrimeCharacteristicRing, QuadFelt},
-        operations::opcodes,
+        operations::{Operation, opcodes},
+        serde::{Deserializable, SliceReader},
     };
 
     use super::{CONTROLLER_ROWS_PER_HASHER_OP_FELT, enforce_main};
@@ -580,7 +603,7 @@ mod tests {
     fn span_row_with_single_group() -> CoreCols<Felt> {
         let mut row = generate_test_row(opcodes::SPAN.into());
         row.decoder.addr = Felt::new_unchecked(17);
-        row.decoder.group_count = Felt::new_unchecked(2);
+        row.decoder.group_count = Felt::ONE;
         row
     }
 
@@ -602,21 +625,6 @@ mod tests {
         assert!(
             decoder_accepts(&in_span_local, &in_span_next),
             "an ordinary in-span transition must be accepted"
-        );
-
-        let span = span_row_with_single_group();
-        let mut first_op = generate_test_row(opcodes::NOOP.into());
-        first_op.decoder.addr = span.decoder.addr;
-        first_op.decoder.in_span = Felt::ONE;
-        first_op.decoder.group_count = Felt::ONE;
-        assert!(decoder_accepts(&span, &first_op), "SPAN must be allowed to enter a basic block");
-
-        let mut respan = span_row_with_single_group();
-        set_opcode(&mut respan, opcodes::RESPAN.into());
-        first_op.decoder.addr = respan.decoder.addr + CONTROLLER_ROWS_PER_HASHER_OP_FELT;
-        assert!(
-            decoder_accepts(&respan, &first_op),
-            "RESPAN must be allowed to enter the next batch"
         );
 
         for exit_opcode in [opcodes::END, opcodes::RESPAN] {
@@ -689,8 +697,10 @@ mod tests {
         let span = span_row_with_single_group();
         let mut end = generate_test_row(opcodes::END.into());
         end.decoder.addr = span.decoder.addr;
-        for mut entry in [generate_test_row(opcodes::LOOP.into()), repeat_row_with_true_condition()]
-        {
+        let mut loop_entry = generate_test_row(opcodes::LOOP.into());
+        // LOOP uses this column for body multiplicity, outside the batch-count rule.
+        loop_entry.decoder.group_count = Felt::from_u8(5);
+        for mut entry in [loop_entry, repeat_row_with_true_condition()] {
             entry.decoder.addr = span.decoder.addr;
             assert!(
                 decoder_accepts(&entry, &span),
@@ -700,17 +710,85 @@ mod tests {
         }
     }
 
+    /// Compare decoder admission on in-span row pairs with the native operation registry.
+    /// The in-span rule excludes control-flow opcodes, and the opcode-bit guards reject unused
+    /// encodings, including slot 47.
     #[test]
-    fn opcode_prefix_boundaries() {
-        let (mut local, next) = honest_in_span_pair();
-        for opcode in [opcodes::U32ADD, opcodes::LOGDEFERRED, opcodes::MRUPDATE] {
-            set_opcode(&mut local, opcode.into());
-            assert!(decoder_accepts(&local, &next), "opcode {opcode} must be accepted");
-        }
+    fn in_span_opcodes_match_the_operation_registry() {
+        // ASSERT, U32ASSERT2, MPVERIFY and PUSH carry one field-element immediate on the wire.
+        let registered = |opcode: u8| {
+            let bytes = [opcode, 0, 0, 0, 0, 0, 0, 0, 0];
+            Operation::read_from(&mut SliceReader::new(&bytes)).is_ok()
+        };
 
-        for opcode in [65, 95, 97, 98] {
-            set_opcode(&mut local, opcode);
-            assert!(!decoder_accepts(&local, &next), "unused opcode {opcode} must be rejected");
+        for opcode in 0..128u8 {
+            let (mut local, mut next) = honest_in_span_pair();
+            set_opcode(&mut local, opcode.into());
+            if opcode == opcodes::PUSH {
+                // PUSH consumes the group holding its immediate.
+                next.decoder.group_count = Felt::ZERO;
+            }
+            assert_eq!(
+                decoder_accepts(&local, &next),
+                registered(opcode),
+                "in-span admission of opcode {opcode} must match the operation registry",
+            );
+        }
+    }
+
+    /// LOOP, CALL and SYSCALL commit a child digest followed by a zero word. The child lanes are
+    /// unrestricted, and each padding lane is rejected independently.
+    #[test]
+    fn unary_nodes_commit_a_zero_second_word() {
+        let next = generate_test_row(opcodes::SPAN.into());
+        for opcode in [opcodes::LOOP, opcodes::CALL, opcodes::SYSCALL] {
+            let mut local = generate_test_row(opcode.into());
+            for (lane, value) in local.decoder.hasher_state[..4].iter_mut().enumerate() {
+                *value = Felt::from_u8(11 + lane as u8);
+            }
+            assert!(decoder_accepts(&local, &next), "opcode {opcode}: the child digest is free");
+
+            for lane in 4..8 {
+                let mut padded = local.clone();
+                padded.decoder.hasher_state[lane] = ONE;
+                assert!(
+                    !decoder_accepts(&padded, &next),
+                    "opcode {opcode} must commit zero in lane {lane}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn span_and_respan_check_the_short_batch_count() {
+        for (opcode, addr_offset) in [
+            (opcodes::SPAN, Felt::ZERO),
+            (opcodes::RESPAN, CONTROLLER_ROWS_PER_HASHER_OP_FELT),
+        ] {
+            let mut entry = span_row_with_single_group();
+            set_opcode(&mut entry, opcode.into());
+            let mut first_op = generate_test_row(opcodes::NOOP.into());
+            first_op.decoder.in_span = ONE;
+            first_op.decoder.addr = entry.decoder.addr + addr_offset;
+            assert!(decoder_accepts(&entry, &first_op), "opcode {opcode}: final short batch");
+
+            // Preserve the one-group decrement at entry while leaving an extra group.
+            entry.decoder.group_count += ONE;
+            first_op.decoder.group_count += ONE;
+            assert!(!decoder_accepts(&entry, &first_op), "opcode {opcode}: non-final short batch");
+        }
+    }
+
+    /// JOIN and SPLIT commit two children, so both hasher words stay unrestricted.
+    #[test]
+    fn binary_nodes_keep_both_child_words() {
+        let next = generate_test_row(opcodes::SPAN.into());
+        for opcode in [opcodes::JOIN, opcodes::SPLIT] {
+            let mut local = generate_test_row(opcode.into());
+            for (lane, value) in local.decoder.hasher_state.iter_mut().enumerate() {
+                *value = Felt::from_u8(11 + lane as u8);
+            }
+            assert!(decoder_accepts(&local, &next), "opcode {opcode} must keep both child words");
         }
     }
 

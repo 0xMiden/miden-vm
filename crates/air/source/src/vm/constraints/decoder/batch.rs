@@ -38,12 +38,14 @@ where
     }
 }
 
-/// Enforces the operation-batch encoding and zeroes hasher lanes unused by short batches.
+/// Enforces the operation-batch encoding, zeroes hasher lanes unused by short batches, and requires
+/// a short batch to be the last batch of its basic block.
 pub(super) fn enforce<AB>(
     builder: &mut AB,
     span_or_respan: AB::Expr,
     full_batch: AB::Var,
     batch_size_code: AB::Var,
+    group_count: AB::Var,
     hasher_state: &[AB::Var; 8],
 ) where
     AB: MidenAirBuilder,
@@ -63,12 +65,12 @@ pub(super) fn enforce<AB>(
 
     let selectors = OpBatchSelectors::new(full_batch.into(), batch_size_code.into());
     let groups_1 = selectors.groups_1(span_or_respan.clone());
-    let groups_1_or_2 = groups_1.clone() + selectors.groups_2;
+    let groups_1_or_2 = groups_1.clone() + selectors.groups_2.clone();
     let groups_1_or_2_or_4 = span_or_respan - selectors.groups_8;
 
     // Fewer than 8 groups: h4..h7 are unused and must be zero.
     {
-        let builder = &mut builder.when(groups_1_or_2_or_4);
+        let builder = &mut builder.when(groups_1_or_2_or_4.clone());
         for lane in &hasher_state[4..8] {
             builder.assert_zero(*lane);
         }
@@ -84,6 +86,13 @@ pub(super) fn enforce<AB>(
 
     // Only 1 group: h1 is also unused.
     builder.when(groups_1).assert_zero(hasher_state[1]);
+
+    // group_count is the block's remaining group count, including this batch. A short batch must
+    // exhaust it, so no later batch remains: the count equals the width 1, 2 or 4, which makes
+    // count - 1 equal to groups_2 + 3 * groups_4.
+    let count_minus_one: AB::Expr = group_count.into() - AB::Expr::ONE;
+    let width_minus_one = selectors.groups_2 + selectors.groups_4 * Felt::from_u8(3);
+    builder.assert_zero(groups_1_or_2_or_4 * count_minus_one - width_minus_one);
 }
 
 #[cfg(test)]
@@ -103,39 +112,55 @@ mod tests {
         },
     };
 
-    const NUM_BATCH_CONSTRAINTS: usize = 12;
+    const NUM_BATCH_CONSTRAINTS: usize = 13;
+
+    /// Index of the remaining-count constraint, which `enforce` emits last.
+    const SHORT_BATCH_COUNT: usize = 12;
 
     fn evaluate(
         span_or_respan: Felt,
         [full_batch, batch_size_code]: [Felt; 2],
+        group_count: Felt,
         hasher_state: [Felt; 8],
     ) -> Vec<QuadFelt> {
         let mut builder = ConstraintEvalBuilder::new();
-        enforce(&mut builder, span_or_respan, full_batch, batch_size_code, &hasher_state);
+        enforce(
+            &mut builder,
+            span_or_respan,
+            full_batch,
+            batch_size_code,
+            group_count,
+            &hasher_state,
+        );
         assert_eq!(builder.evaluations.len(), NUM_BATCH_CONSTRAINTS);
         builder.evaluations
     }
 
-    fn assert_accepts(span_or_respan: Felt, encoding: [Felt; 2], hasher_state: [Felt; 8]) {
-        assert!(
-            evaluate(span_or_respan, encoding, hasher_state)
-                .into_iter()
-                .all(|value| value == QuadFelt::ZERO),
-        );
-    }
-
-    fn assert_only_constraint_rejects(
-        expected_constraint: usize,
+    fn assert_accepts(
         span_or_respan: Felt,
         encoding: [Felt; 2],
+        group_count: Felt,
         hasher_state: [Felt; 8],
     ) {
-        let rejected: Vec<_> = evaluate(span_or_respan, encoding, hasher_state)
+        assert_rejects(&[], span_or_respan, encoding, group_count, hasher_state);
+    }
+
+    fn assert_rejects(
+        expected: &[usize],
+        span_or_respan: Felt,
+        encoding: [Felt; 2],
+        group_count: Felt,
+        hasher_state: [Felt; 8],
+    ) {
+        let rejected: Vec<_> = evaluate(span_or_respan, encoding, group_count, hasher_state)
             .into_iter()
             .enumerate()
             .filter_map(|(idx, value)| (value != QuadFelt::ZERO).then_some(idx))
             .collect();
-        assert_eq!(rejected, [expected_constraint]);
+        assert_eq!(
+            rejected, expected,
+            "SPAN/RESPAN {span_or_respan}, encoding {encoding:?}, group count {group_count}"
+        );
     }
 
     #[test]
@@ -165,41 +190,44 @@ mod tests {
     }
 
     #[test]
-    fn constraints_accept_exactly_the_canonical_encodings() {
-        let nonzero = Felt::new_unchecked(7);
-        assert_accepts(ONE, OP_BATCH_8_GROUPS, [nonzero; 8]);
-        assert_accepts(
-            ONE,
-            OP_BATCH_4_GROUPS,
-            [nonzero, nonzero, nonzero, nonzero, ZERO, ZERO, ZERO, ZERO],
-        );
-        assert_accepts(
-            ONE,
-            OP_BATCH_2_GROUPS,
-            [nonzero, nonzero, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO],
-        );
-        assert_accepts(ONE, OP_BATCH_1_GROUPS, [nonzero, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO]);
-        assert_accepts(ZERO, OP_BATCH_1_GROUPS, [nonzero; 8]);
+    fn canonical_batches_accept_payloads_and_enforce_short_counts() {
+        let cases = [(OP_BATCH_1_GROUPS, 1), (OP_BATCH_2_GROUPS, 2), (OP_BATCH_4_GROUPS, 4)];
+        let payload = Felt::from_u8(7);
+        for (encoding, width) in cases {
+            let mut lanes = [ZERO; 8];
+            lanes[..usize::from(width)].fill(payload);
+            assert_accepts(ONE, encoding, Felt::from_u8(width), lanes);
+            for count in [width - 1, width + 1] {
+                assert_rejects(&[SHORT_BATCH_COUNT], ONE, encoding, Felt::from_u8(count), lanes);
+            }
+        }
+
+        // A full batch may have successors. An inactive row may use the count for another purpose.
+        assert_accepts(ONE, OP_BATCH_8_GROUPS, Felt::from_u8(9), [payload; 8]);
+        assert_accepts(ZERO, OP_BATCH_1_GROUPS, Felt::from_u8(5), [payload; 8]);
     }
 
     #[test]
-    fn each_encoding_constraint_rejects_independently() {
-        assert_only_constraint_rejects(0, ONE, [Felt::from_u8(2), ZERO], [ZERO; 8]);
-        assert_only_constraint_rejects(1, ONE, [ZERO, Felt::from_u8(2)], [ZERO; 8]);
-        assert_only_constraint_rejects(2, ONE, [ONE, ONE], [ZERO; 8]);
-        assert_only_constraint_rejects(3, ZERO, [ONE, ZERO], [ZERO; 8]);
-        assert_only_constraint_rejects(4, ZERO, [ZERO, ONE], [ZERO; 8]);
+    fn invalid_encodings_trigger_expected_constraints() {
+        // Each group count satisfies the remaining-count constraint where any count can.
+        assert_rejects(&[0], ONE, [Felt::from_u8(2), ZERO], ONE, [ZERO; 8]);
+        assert_rejects(&[1], ONE, [ZERO, Felt::from_u8(2)], Felt::from_u8(11), [ZERO; 8]);
+        assert_rejects(&[3], ZERO, [ONE, ZERO], ONE, [ZERO; 8]);
+
+        // A nonzero size code with a full flag or on an inactive row also has no valid count.
+        assert_rejects(&[2, SHORT_BATCH_COUNT], ONE, [ONE, ONE], ONE, [ZERO; 8]);
+        assert_rejects(&[4, SHORT_BATCH_COUNT], ZERO, [ZERO, ONE], ONE, [ZERO; 8]);
     }
 
     #[test]
     fn each_unused_hasher_lane_is_pinned_independently() {
         let cases = [
-            (OP_BATCH_4_GROUPS, 4..8, 5),
-            (OP_BATCH_2_GROUPS, 2..8, 9),
-            (OP_BATCH_1_GROUPS, 1..8, 11),
+            (OP_BATCH_4_GROUPS, 4, 4..8, 5),
+            (OP_BATCH_2_GROUPS, 2, 2..8, 9),
+            (OP_BATCH_1_GROUPS, 1, 1..8, 11),
         ];
 
-        for (encoding, unused_lanes, first_constraint) in cases {
+        for (encoding, width, unused_lanes, first_constraint) in cases {
             for lane in unused_lanes {
                 let mut hasher_state = [ZERO; 8];
                 hasher_state[lane] = ONE;
@@ -209,7 +237,7 @@ mod tests {
                     1 => first_constraint,
                     _ => unreachable!(),
                 };
-                assert_only_constraint_rejects(constraint, ONE, encoding, hasher_state);
+                assert_rejects(&[constraint], ONE, encoding, Felt::from_u8(width), hasher_state);
             }
         }
     }
