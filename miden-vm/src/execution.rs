@@ -124,6 +124,10 @@ impl ExecutionTask for ProveComplete<'_> {
         Trace::new(self.prover.trace_budget())
     }
 
+    fn run_span(&self) -> tracing::Span {
+        prove_program_span()
+    }
+
     fn finish(self, output: TraceOutput) -> Result<Self::Output, Self::Error> {
         let TraceOutput { claim, trace, advice } = output;
         let proof = self.prover.prove_full_trace(trace)?;
@@ -140,9 +144,17 @@ impl ExecutionTask for ProveDeferred<'_> {
         Trace::new(self.prover.trace_budget())
     }
 
+    fn run_span(&self) -> tracing::Span {
+        prove_program_span()
+    }
+
     fn finish(self, output: TraceOutput) -> Result<Self::Output, Self::Error> {
         let TraceOutput { claim, trace, advice } = output;
         let proof = self.prover.prove_trace(trace)?;
         Ok(ProvingOutput { claim, proof, advice })
     }
+}
+
+fn prove_program_span() -> tracing::Span {
+    tracing::trace_span!(target: "miden::vm", "prove_program")
 }

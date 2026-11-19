@@ -4,6 +4,8 @@
 
 #### Features
 
+- Added a typed execution and proving builder in `miden-vm`, with synchronous, asynchronous, and resumable execution and explicit complete/deferred proving tasks. `miden-processor` owns the shared request, execution, session, completion, and public output types; the facade adds concrete proving tasks. `ExecutionTrace` holds the VM trace and its matching optional precompile witness for direct use by the prover. `ExecutionWitness::build_trace` checks this pairing when materializing a stored witness, and `Prover::trace_budget` supplies the prover's configured VM budget ([#4232](https://github.com/0xMiden/miden-vm/pull/4232)).
+
 #### Changes
 
 - Applied the routine-logging changes from [#4238](https://github.com/0xMiden/miden-vm/pull/4238) to the current VM and STARK crates. Successful proving is silent at `INFO`; profiling remains available at `TRACE`.
@@ -11,6 +13,8 @@
 - [BREAKING] Changed `Host::get_mast_forest` and `SyncHost::get_mast_forest` to return `Result<Option<LoadedMastForest>, MastForestLoadError>`. Retrieval failures preserve their source in `ExecutionError::MastForestError`, while `Ok(None)` still reports a missing procedure ([#4237](https://github.com/0xMiden/miden-vm/pull/4237)).
 
 - Updated development and coverage to Rust 1.100 with Cargo dependency checks enforced in CI. Reduced dependencies in builds with fewer features while keeping MSRV at 1.96.1 ([#4234](https://github.com/0xMiden/miden-vm/pull/4234)).
+- [BREAKING] Select `execute`, `record_witness`, and `build_trace` on `ExecutionRequest` or `miden_vm::Processor` in place of the task methods on `FastProcessor`. Call `Execution::prepare()` if you want to initialize the machine and validate initial advice before a run or session. Supply source context on the request before selecting a task. Removed free `prove_sync` and the `ProgramExecutor` trait. Native witness and trace tasks return the shared `WitnessOutput` and `TraceOutput` structs. Advanced processor interfaces are exposed through `miden_vm::processor` ([#4232](https://github.com/0xMiden/miden-vm/pull/4232)).
+- [BREAKING] Replaced `FastProcessor::execute_by_step*` and `execute_mut*` with owned execution sessions. Sessions can step one cycle at a time or run to halt by mutable borrow. They retain inspectable state after halt, failure, or cancellation, and completed sessions expose their state until `finish()` exports outputs and the deferred precompile witness ([#4232](https://github.com/0xMiden/miden-vm/pull/4232)).
 - Increased in-memory SMT insert benchmark batches to 4,096 and 16,384 entries and fixed the SMT CodSpeed job at eight Rayon threads ([#4220](https://github.com/0xMiden/miden-vm/pull/4220)).
 - Added workspace test coverage collection with `make coverage` and CI reports on `next`/`main` pushes and manual runs ([#4218](https://github.com/0xMiden/miden-vm/pull/4218)).
 
