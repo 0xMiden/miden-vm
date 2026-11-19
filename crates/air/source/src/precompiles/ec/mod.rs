@@ -222,6 +222,17 @@ impl air::LiftedAir for EcPointStoreAir {
     }
 }
 
+impl air::ProverAir<QuadFelt> for EcPointStoreAir {
+    type Error = lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
+    }
+}
+
 /// Evaluate this component's base constraints in a main-trace column band.
 pub(crate) fn eval_point_store_main<AB>(
     frame: &air::Frame<'_, AB>,

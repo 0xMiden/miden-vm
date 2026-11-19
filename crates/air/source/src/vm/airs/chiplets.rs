@@ -118,6 +118,16 @@ impl<LB: NativeChipletLookupBuilder> lookup::LookupAir<LB> for ChipletsAir {
     }
 }
 
+impl<EF: ExtensionField<Felt>> air::ProverAir<EF> for ChipletsAir {
+    type Error = lookup::LookupError;
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, EF>,
+    ) -> Result<air::AuxTrace<EF>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use miden_core::{
@@ -160,5 +170,52 @@ mod tests {
         );
         #[cfg(feature = "std")]
         miden_stark::lookup::validate_native(&ChipletsAir, spec).unwrap();
+    }
+
+    #[test]
+    fn native_chiplet_witness_matches_slow_fractions_and_exports() {
+        let main = RowMajorMatrix::new(
+            (0..8)
+                .flat_map(|row| {
+                    let mut values = [Felt::ZERO; NUM_CHIPLETS_COLS];
+                    values[23] = Felt::from_usize(row + 1);
+                    values
+                })
+                .collect(),
+            NUM_CHIPLETS_COLS,
+        );
+        let challenges = [QuadFelt::from_u32(7), QuadFelt::from_u32(11)];
+        let native = air::ProverAir::build_aux_trace(
+            &ChipletsAir,
+            air::AuxTraceInputs {
+                main: &main,
+                preprocessed: None,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        )
+        .unwrap();
+        let spec = air::LiftedAir::spec(&ChipletsAir);
+        let encoding = Challenges::new(
+            challenges[0],
+            challenges[1],
+            crate::vm::logup::MIDEN_MAX_MESSAGE_WIDTH,
+            crate::vm::logup::BusId::COUNT,
+        );
+        let fractions = lookup::build_lookup_fractions(
+            &ChipletsAir,
+            &main,
+            None,
+            &spec.periodic_columns,
+            &encoding,
+        );
+        let (expected, sigma) = accumulate_slow(&fractions);
+        for (row, values) in native.columns.values.chunks_exact(expected.len()).enumerate() {
+            for (column, value) in values.iter().enumerate() {
+                assert_eq!(*value, expected[column][row]);
+            }
+        }
+        assert_eq!(native.exports, [sigma]);
     }
 }

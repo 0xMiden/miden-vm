@@ -259,7 +259,19 @@ fn build_aux(
 ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<QuadFelt>, QuadFelt) {
     let main = generate_trace(requires);
     let flat = test_alpha_beta();
-    let (aux, aux_values) = BytePairLutAir.build_aux_trace(&main, &[], &[], &flat);
+    let preprocessed = miden_stark::air::LiftedAir::build_preprocessed_trace(&BytePairLutAir);
+    let miden_stark::air::AuxTrace { columns: aux, exports: aux_values } =
+        miden_stark::air::ProverAir::build_aux_trace(
+            &BytePairLutAir,
+            miden_stark::air::AuxTraceInputs {
+                main: &main,
+                preprocessed: preprocessed.as_ref(),
+                public_values: &[],
+                statement: &[],
+                challenges: &flat,
+            },
+        )
+        .expect("table witness inputs are valid");
     assert_eq!(aux_values.len(), 1, "byte-pair table exposes one centered residue");
     (main, aux, aux_values[0])
 }

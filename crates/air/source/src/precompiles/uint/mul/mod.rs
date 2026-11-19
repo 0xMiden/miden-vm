@@ -827,3 +827,13 @@ impl air::LiftedAir for UintMulAir {
         lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
+
+impl air::ProverAir<QuadFelt> for UintMulAir {
+    type Error = lookup::LookupError;
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        aux::build_aux(inputs)
+    }
+}

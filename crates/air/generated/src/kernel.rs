@@ -85,6 +85,21 @@ macro_rules! define_dispatch {
                 miden_stark::air::LiftedAir::eval(&self.0, frame, inputs, sink);
             }
         }
+
+        impl<EF> miden_stark::air::ProverAir<EF> for $wrapper
+        where
+            EF: p3_field::ExtensionField<miden_core::Felt>,
+            $source: miden_stark::air::ProverAir<EF>,
+        {
+            type Error = <$source as miden_stark::air::ProverAir<EF>>::Error;
+
+            fn build_aux_trace(
+                &self,
+                inputs: miden_stark::air::AuxTraceInputs<'_, miden_core::Felt, EF>,
+            ) -> Result<miden_stark::air::AuxTrace<EF>, Self::Error> {
+                miden_stark::air::ProverAir::build_aux_trace(&self.0, inputs)
+            }
+        }
     };
 }
 

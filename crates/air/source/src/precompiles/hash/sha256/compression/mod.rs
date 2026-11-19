@@ -141,6 +141,17 @@ impl air::LiftedAir for Sha256CompressionAir {
     }
 }
 
+impl air::ProverAir<QuadFelt> for Sha256CompressionAir {
+    type Error = lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
+    }
+}
+
 pub fn eval_main<AB: air::LiftedAirBuilder<F = Felt>>(
     frame: &air::Frame<'_, AB>,
     builder: &mut AB,

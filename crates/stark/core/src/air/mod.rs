@@ -1,7 +1,7 @@
 //! Authored relations, prepared execution, and validated statements.
 //!
-//! A [`LiftedAir`] defines equations and shape. Checked descriptors and
-//! [`AirKernel`] bind prepared evaluation to its
+//! A [`LiftedAir`] defines equations and shape; [`ProverAir`] additionally constructs concrete
+//! auxiliary witnesses. Checked descriptors and [`AirKernel`] bind prepared evaluation to its
 //! inputs. [`MultiAir`] defines the trusted collection and cross-AIR hooks; [`Statement`] and
 //! [`ProverStatement`] validate each proof's caller inputs and main traces. Fixed matrices are
 //! constructed by setup, not by source capture or row evaluation.
@@ -27,7 +27,7 @@ pub use analysis::{
 };
 pub use builder::{ConstraintMeta, ConstraintPath, Filtered, LiftedAirBuilder, Named};
 pub use capture::{Assertion, SymbolicSink};
-pub use contracts::{LiftedAir, MultiAir, ReductionError};
+pub use contracts::{AuxTrace, AuxTraceInputs, LiftedAir, MultiAir, ProverAir, ReductionError};
 pub use descriptor::{
     AirDescriptor, Capture, DescriptorError, DescriptorParts, capture, capture_from_spec,
     capture_with,

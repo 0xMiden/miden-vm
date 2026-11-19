@@ -90,6 +90,17 @@ impl air::LiftedAir for EidosCompressionAir {
     }
 }
 
+impl<EF: ExtensionField<Felt>> air::ProverAir<EF> for EidosCompressionAir {
+    type Error = crate::shared::eidos::EidosWitnessError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, EF>,
+    ) -> Result<air::AuxTrace<EF>, Self::Error> {
+        crate::shared::eidos::build_aux_trace(self, inputs, AUX_REGISTER_COL)
+    }
+}
+
 impl<LB: lookup::LookupBuilder<F = Felt>> lookup::LookupAir<LB> for EidosCompressionAir {
     fn column_shape(&self) -> &[usize] {
         &EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE

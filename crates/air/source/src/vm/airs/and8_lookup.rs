@@ -63,6 +63,10 @@ impl air::LiftedAir for And8LookupAir {
         }
     }
 
+    fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
+        Some(self.preprocessed_trace())
+    }
+
     fn eval<B: air::LiftedAirBuilder<F = Felt>>(
         &self,
         frame: &air::Frame<'_, B>,
@@ -88,6 +92,16 @@ impl<LB: lookup::LookupBuilder<F = Felt>> lookup::LookupAir<LB> for And8LookupAi
     }
 }
 
+impl<EF: ExtensionField<Felt>> air::ProverAir<EF> for And8LookupAir {
+    type Error = lookup::LookupError;
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, EF>,
+    ) -> Result<air::AuxTrace<EF>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::vec;
@@ -97,7 +111,7 @@ mod tests {
         field::{PrimeCharacteristicRing, QuadFelt},
         utils::RowMajorMatrix,
     };
-    use miden_stark::air;
+    use miden_stark::{air, lookup::LookupError};
 
     use super::And8LookupAir;
 
@@ -118,5 +132,27 @@ mod tests {
         assert_eq!(captured.descriptor.analysis().counts().ext, 5);
         #[cfg(feature = "std")]
         miden_stark::lookup::validate_native(&And8LookupAir, spec).unwrap();
+    }
+
+    #[test]
+    fn native_table_witness_requires_the_supplied_fixed_cache() {
+        let main = RowMajorMatrix::new(vec![Felt::ZERO; 2 * 7], 7);
+        let wrong_height = RowMajorMatrix::new(vec![Felt::ZERO; 2 * 5], 5);
+        let challenges = [QuadFelt::from_u32(7), QuadFelt::from_u32(11)];
+        // Neither missing data nor a short supplied matrix triggers a factory fallback. Setup
+        // must supply the declared log16 table matching the full multiplicity trace height.
+        for preprocessed in [None, Some(&wrong_height)] {
+            let result = air::ProverAir::build_aux_trace(
+                &And8LookupAir,
+                air::AuxTraceInputs {
+                    main: &main,
+                    preprocessed,
+                    public_values: &[],
+                    statement: &[],
+                    challenges: &challenges,
+                },
+            );
+            assert!(matches!(result, Err(LookupError::PreprocessedShape)));
+        }
     }
 }

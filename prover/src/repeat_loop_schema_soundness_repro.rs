@@ -27,7 +27,7 @@ use miden_processor::{
     trace::{VmTrace, chiplets::build_external_eidos_compression_traces},
 };
 use miden_stark::{
-    air::BaseAir,
+    air::LiftedAir,
     lookup::{Challenges, LookupMessage, build_lookup_fractions},
 };
 
@@ -167,11 +167,16 @@ fn assert_lookup_delta(
     .zip([&core, &chiplets, &compression, &and8])
     .zip(forged)
     {
-        let preprocessed = air.preprocessed_trace();
-        let periodic = BaseAir::<Felt>::periodic_columns(&air);
+        let preprocessed = air.build_preprocessed_trace();
+        let periodic = air.spec().periodic_columns.into_owned();
         for (matrix, sign) in [(honest, -Felt::ONE), (forged, Felt::ONE)] {
-            let fractions =
-                build_lookup_fractions(&air, matrix, preprocessed.as_ref(), &periodic, &challenges);
+            let fractions = build_lookup_fractions(
+                &air.0,
+                matrix,
+                preprocessed.as_ref(),
+                &periodic,
+                &challenges,
+            );
             for &(multiplicity, denominator) in fractions.fractions() {
                 *delta.entry(denominator).or_insert(Felt::ZERO) += sign * multiplicity;
             }

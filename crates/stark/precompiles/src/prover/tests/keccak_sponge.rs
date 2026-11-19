@@ -441,68 +441,43 @@ fn corruption_seq_id_breaks_row_counter_transition() {
 fn corruption_aux_cell_breaks_logup_recurrence() {
     // Rebuilding the auxiliary trace after main-trace corruption produces a consistent witness.
     // Perturbing the built accumulator instead directly exercises the centered recurrence.
-    // `check_local` obtains the auxiliary trace through `LiftedAir::build_aux_trace`, so the test
-    // wrapper overrides that method to inject the corruption.
-    use miden_core::{field::PrimeCharacteristicRing, utils::RowMajorMatrix};
-    use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
+    // The wrapper keeps the same relation and perturbs only the constructed auxiliary witness.
+    use miden_core::field::PrimeCharacteristicRing;
+    use miden_stark::{air, lookup};
 
     use crate::prover::hash::keccak::sponge::NUM_AUX_COLS;
 
     #[derive(Debug, Clone, Copy)]
     struct AuxCorruptAir;
 
-    impl BaseAir<Felt> for AuxCorruptAir {
-        fn width(&self) -> usize {
-            <KeccakSpongeAir as BaseAir<Felt>>::width(&KeccakSpongeAir)
+    impl air::LiftedAir for AuxCorruptAir {
+        type F = Felt;
+
+        fn spec(&self) -> air::AirSpec<'_, Felt> {
+            air::LiftedAir::spec(&KeccakSpongeAir)
         }
 
-        fn num_public_values(&self) -> usize {
-            <KeccakSpongeAir as BaseAir<Felt>>::num_public_values(&KeccakSpongeAir)
-        }
-
-        fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-            Cow::Owned(
-                <KeccakSpongeAir as BaseAir<Felt>>::periodic_columns(&KeccakSpongeAir).into_owned(),
-            )
+        fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
+            &self,
+            frame: &air::Frame<'_, AB>,
+            inputs: air::Inputs<'_, AB>,
+            builder: &mut AB,
+        ) {
+            air::LiftedAir::eval(&KeccakSpongeAir, frame, inputs, builder);
         }
     }
 
-    impl LiftedAir<Felt, QuadFelt> for AuxCorruptAir {
-        type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-        fn num_randomness(&self) -> usize {
-            <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::num_randomness(&KeccakSpongeAir)
-        }
-
-        fn aux_width(&self) -> usize {
-            <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::aux_width(&KeccakSpongeAir)
-        }
-
-        fn num_aux_values(&self) -> usize {
-            <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::num_aux_values(&KeccakSpongeAir)
-        }
+    impl air::ProverAir<QuadFelt> for AuxCorruptAir {
+        type Error = lookup::LookupError;
 
         fn build_aux_trace(
             &self,
-            main: &RowMajorMatrix<Felt>,
-            air_inputs: &[Felt],
-            aux_inputs: &[Felt],
-            challenges: &[QuadFelt],
-        ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-            let (mut aux, normalized_sum) =
-                <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::build_aux_trace(
-                    &KeccakSpongeAir,
-                    main,
-                    air_inputs,
-                    aux_inputs,
-                    challenges,
-                );
-            aux.values[NUM_AUX_COLS] += QuadFelt::ONE;
-            (aux, normalized_sum)
-        }
-
-        fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-            <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::eval(&KeccakSpongeAir, builder, &());
+            inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+        ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+            let mut auxiliary = air::ProverAir::build_aux_trace(&KeccakSpongeAir, inputs)?;
+            // Preserve the existing negative witness: row1, column0 alone is changed.
+            auxiliary.columns.values[NUM_AUX_COLS] += QuadFelt::ONE;
+            Ok(auxiliary)
         }
     }
 

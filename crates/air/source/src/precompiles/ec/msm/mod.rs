@@ -555,6 +555,17 @@ impl air::LiftedAir for EcMsmAir {
     }
 }
 
+impl air::ProverAir<QuadFelt> for EcMsmAir {
+    type Error = lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
+    }
+}
+
 // LOOKUP AIR
 // ================================================================================================
 

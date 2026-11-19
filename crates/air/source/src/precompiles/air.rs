@@ -102,6 +102,10 @@ impl air::LiftedAir for ChipletAir {
         with_source!(self, |air| air::LiftedAir::spec(air))
     }
 
+    fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
+        with_source!(self, |air| air::LiftedAir::build_preprocessed_trace(air))
+    }
+
     fn eval<B: air::LiftedAirBuilder<F = Felt>>(
         &self,
         frame: &air::Frame<'_, B>,
@@ -109,6 +113,17 @@ impl air::LiftedAir for ChipletAir {
         sink: &mut B,
     ) {
         with_source!(self, |air| air::LiftedAir::eval(air, frame, inputs, sink));
+    }
+}
+
+impl air::ProverAir<QuadFelt> for ChipletAir {
+    type Error = crate::shared::WitnessError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        with_source!(self, |air| air::ProverAir::build_aux_trace(air, inputs).map_err(Into::into))
     }
 }
 

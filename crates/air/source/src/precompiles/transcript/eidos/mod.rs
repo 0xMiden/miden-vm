@@ -409,6 +409,16 @@ impl air::LiftedAir for EidosCompressionAir {
     }
 }
 
+impl air::ProverAir<QuadFelt> for EidosCompressionAir {
+    type Error = crate::shared::eidos::EidosWitnessError;
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        crate::shared::eidos::build_aux_trace(self, inputs, AUX_REGISTER_COL)
+    }
+}
+
 impl air::LiftedAir for EidosCompressionInterfaceAir {
     type F = Felt;
     fn spec(&self) -> air::AirSpec<'_, Felt> {
@@ -430,6 +440,16 @@ impl air::LiftedAir for EidosCompressionInterfaceAir {
     ) {
         enforce_interface_constraints(frame, builder);
         lookup::eval_lookup(self, frame, inputs, builder);
+    }
+}
+
+impl air::ProverAir<QuadFelt> for EidosCompressionInterfaceAir {
+    type Error = lookup::LookupError;
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 #[cfg(test)]
@@ -562,7 +582,17 @@ mod tests {
         let main = RowMajorMatrix::new(rows.as_flattened().to_vec(), NUM_MAIN_COLS);
         let challenges =
             [QuadFelt::from_u32(7), QuadFelt::new([Felt::from_u32(11), Felt::from_u32(13)])];
-        let (aux, sums) = air.build_aux_trace(&main, &[], &[], &challenges);
+        let air::AuxTrace { columns: aux, exports: sums } = air::ProverAir::build_aux_trace(
+            &air,
+            air::AuxTraceInputs {
+                main: &main,
+                preprocessed: None,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        )
+        .unwrap();
         assert_ne!(sums[0], QuadFelt::ZERO);
 
         for row in 0..BLOCK_PERIOD {
@@ -575,7 +605,8 @@ mod tests {
                 .copy_from_slice(&aux.values[next * PVM_AUX_COLS..(next + 1) * PVM_AUX_COLS]);
             builder.randomness = challenges.to_vec();
             builder.permutation_values = sums.clone();
-            LiftedAir::eval(&air, &mut builder, &());
+            builder
+                .eval_with(|frame, inputs, sink| air::LiftedAir::eval(&air, frame, inputs, sink));
             assert!(builder.base_evaluations.iter().all(|v| *v == Felt::ZERO), "row {row}");
             assert!(
                 builder.extension_evaluations.iter().all(|v| *v == QuadFelt::ZERO),

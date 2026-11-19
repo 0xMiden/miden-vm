@@ -218,6 +218,17 @@ impl air::LiftedAir for KeccakRoundAir {
     }
 }
 
+impl air::ProverAir<QuadFelt> for KeccakRoundAir {
+    type Error = lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
+    }
+}
+
 /// The value this row writes to `ip` on the Memory64 bus. Active operation rows authenticate
 /// `x_bytes` as canonical XOR bytes through BytePairLut.
 /// ANDNOT rows reconstruct `(x - a + b) / 2`; rotation rows use XOR directly.
@@ -567,6 +578,29 @@ mod tests {
         let mut sink = ZeroRowSink::default();
         kernel.bind(inputs).unwrap().eval(&frame, &mut sink);
         assert_eq!((sink.base, sink.ext), (11, 9));
+    }
+
+    #[test]
+    fn native_round_witness_rejects_wrong_main_width() {
+        let main = RowMajorMatrix::new(vec![Felt::ZERO; NUM_MAIN_COLS - 1], NUM_MAIN_COLS - 1);
+        let challenges = [QuadFelt::from_u8(7), QuadFelt::from_u8(11)];
+        let result = <KeccakRoundAir as air::ProverAir<QuadFelt>>::build_aux_trace(
+            &KeccakRoundAir,
+            air::AuxTraceInputs {
+                main: &main,
+                preprocessed: None,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            lookup::LookupError::MainWidth {
+                expected: NUM_MAIN_COLS,
+                actual: NUM_MAIN_COLS - 1,
+            }
+        );
     }
 
     #[test]

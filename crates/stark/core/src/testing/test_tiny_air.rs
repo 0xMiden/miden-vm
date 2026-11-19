@@ -2,16 +2,14 @@
 //! single-column AIR with periodic columns and auxiliary traces.
 
 use alloc::{borrow::Cow, vec, vec::Vec};
+use core::convert::Infallible;
 
-use p3_field::{Algebra, PrimeCharacteristicRing};
+use p3_field::{Dup, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    ProverInstance, VerifierError, VerifierInstance,
-    air::{
-        AirBuilder, BaseAir, ExtensionBuilder, InstanceError, LiftedAir, LiftedAirBuilder,
-        ProverStatement, Statement, WindowAccess,
-    },
+    ProverInstance, VerifierError, VerifierInstance, air,
+    air::{InstanceError, LiftedAirBuilder as _, ProverStatement, Statement},
     domain::DomainError,
     order::{ShapeError, TraceOrder},
     proof::{TranscriptData, TranscriptError},
@@ -56,87 +54,63 @@ impl TinyAir {
     }
 }
 
-impl BaseAir<Felt> for TinyAir {
-    fn width(&self) -> usize {
-        1
+impl air::LiftedAir for TinyAir {
+    type F = Felt;
+
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
+            main_width: 1,
+            aux_width: 1,
+            num_public_values: self.num_public_values,
+            num_challenges: 1,
+            num_exports: 1,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(&self.periodic_cols),
+        }
     }
 
-    fn num_public_values(&self) -> usize {
-        self.num_public_values
-    }
+    fn eval<B: air::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &air::Frame<'_, B>,
+        inputs: air::Inputs<'_, B>,
+        sink: &mut B,
+    ) {
+        let local = frame.main.current;
+        let next = frame.main.next;
+        let public_sum =
+            inputs.public_values.iter().fold(B::Expr::ZERO, |sum, value| sum + value.dup());
 
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Owned(self.periodic_cols.clone())
+        // Preserve both expression construction and global assertion order.
+        sink.when(frame.first_row()).assert_eq(local[0].dup(), public_sum.dup());
+        sink.when(frame.transition())
+            .assert_eq(next[0].dup(), local[0].dup().exp_power_of_2(2));
+        for periodic in frame.periodic {
+            sink.when(frame.first_row()).assert_one(periodic.dup());
+            sink.when(frame.last_row()).assert_one(periodic.dup());
+        }
+
+        let aux = frame.aux.current[0].dup();
+        sink.when(frame.first_row())
+            .assert_eq_ext(aux.dup(), inputs.challenges[0].dup() + B::ExtExpr::from(public_sum));
+        sink.when(frame.transition())
+            .assert_eq_ext(frame.aux.next[0].dup(), aux.exp_power_of_2(2));
     }
 }
 
-impl LiftedAir<Felt, QuadFelt> for TinyAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        1
-    }
-
-    fn aux_width(&self) -> usize {
-        1
-    }
-
-    fn num_aux_values(&self) -> usize {
-        1
-    }
+impl air::ProverAir<QuadFelt> for TinyAir {
+    type Error = Infallible;
 
     fn build_aux_trace(
         &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
         let (mut trace, values) = tiny_aux(
-            main,
-            challenges[0] + QuadFelt::from(air_inputs.iter().copied().sum::<Felt>()),
+            inputs.main,
+            inputs.challenges[0]
+                + QuadFelt::from(inputs.public_values.iter().copied().sum::<Felt>()),
         );
         trace.values[0] += QuadFelt::from(self.aux_offset);
-        (trace, values)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        let main = builder.main();
-        let public_sum = builder
-            .public_values()
-            .iter()
-            .fold(AB::Expr::ZERO, |sum, &value| sum + Into::<AB::Expr>::into(value));
-        let periodic = builder.periodic_values().to_vec();
-        let (local, next) = (main.current_slice(), main.next_slice());
-
-        // First row: main[0] is the sum of this AIR's public values.
-        builder.when_first_row().assert_eq(local[0], public_sum.clone());
-
-        // Transition: main_next = main^4
-        let main_pow4: AB::Expr = local[0].into().exp_power_of_2(2);
-        builder.when_transition().assert_eq(next[0], main_pow4);
-
-        // Periodic column constraints: first and last row see 1
-        for p in &periodic {
-            let p_expr: AB::Expr = (*p).into();
-            builder.when_first_row().assert_one(p_expr.clone());
-            builder.when_last_row().assert_one(p_expr);
-        }
-
-        // Aux trace constraints
-        let aux = builder.permutation();
-        let aux_local = aux.current_slice();
-        let aux_next = aux.next_slice();
-        let challenge: AB::ExprEF = builder.permutation_randomness()[0].into();
-
-        let aux_local_ef: AB::ExprEF = aux_local[0].into();
-        let public_sum_ext: AB::ExprEF = public_sum.into();
-        builder
-            .when_first_row()
-            .assert_eq_ext(aux_local_ef.clone(), challenge + public_sum_ext);
-
-        let aux_pow4: AB::ExprEF = aux_local_ef.exp_power_of_2(2);
-        builder.when_transition().assert_eq_ext(aux_next[0].into(), aux_pow4);
+        Ok(air::AuxTrace { columns: trace, exports: values })
     }
 }
 
@@ -159,6 +133,14 @@ fn tiny_aux(
     (aux_trace, aux_values)
 }
 
+fn tiny_multi_air(airs: Vec<TinyAir>) -> TestMultiAir<air::DirectKernel<TinyAir>> {
+    TestMultiAir::new(
+        airs.into_iter()
+            .map(|air| air::DirectKernel::new(air).expect("valid TinyAir source"))
+            .collect(),
+    )
+}
+
 /// Build a [`ProverStatement`] for tests.
 ///
 /// Returns `Err` if validation fails (so callers can exercise error paths).
@@ -166,8 +148,9 @@ fn tiny_prover_statement(
     airs: Vec<TinyAir>,
     traces: Vec<RowMajorMatrix<Felt>>,
     air_inputs: Vec<(usize, Vec<Felt>)>,
-) -> Result<ProverStatement<Felt, QuadFelt, TestMultiAir<TinyAir>>, InstanceError> {
-    let statement = Statement::new(TestMultiAir::new(airs), air_inputs, Vec::new())?;
+) -> Result<ProverStatement<Felt, QuadFelt, TestMultiAir<air::DirectKernel<TinyAir>>>, InstanceError>
+{
+    let statement = Statement::new(tiny_multi_air(airs), air_inputs, Vec::new())?;
     ProverStatement::new(statement, traces)
 }
 
@@ -202,8 +185,7 @@ fn statement_inputs_are_indexed_and_required() {
             .map(|(i, values)| (i, values.into_iter().map(Felt::from_u64).collect()))
             .collect();
         let statement =
-            Statement::<Felt, QuadFelt, _>::new(TestMultiAir::new(airs), entries, Vec::new())
-                .unwrap();
+            Statement::<Felt, QuadFelt, _>::new(tiny_multi_air(airs), entries, Vec::new()).unwrap();
         crate::air::debug::assert_multi_air_valid(statement.multi_air());
         let expected: Vec<Vec<_>> = expected
             .into_iter()
@@ -214,7 +196,7 @@ fn statement_inputs_are_indexed_and_required() {
 
     let statement = |entries| {
         Statement::<Felt, QuadFelt, _>::new(
-            TestMultiAir::new(vec![
+            tiny_multi_air(vec![
                 TinyAir { num_public_values: 2, ..TinyAir::new([]) },
                 TinyAir { num_public_values: 0, ..TinyAir::new([]) },
             ]),
@@ -303,6 +285,25 @@ fn malformed_transcript_is_rejected() {
 }
 
 #[test]
+fn prover_instance_rejects_insufficient_blowup_without_fixed_data() {
+    let mut config = test_config();
+    config.pcs = crate::pcs::params::PcsParams::new(1, 2, 2, 0, 0, 2, 0).unwrap();
+    let prover_statement = tiny_prover_statement(
+        vec![TinyAir::new([])],
+        vec![trace_of_height(4)],
+        vec![(0, vec![Felt::from_u64(START)])],
+    )
+    .unwrap();
+
+    assert!(matches!(
+        ProverInstance::new(&config, prover_statement, None),
+        Err(crate::ProverError::Plan(crate::PlanError::Domain(
+            DomainError::ConstraintDegreeTooHigh { log_blowup: 1, .. }
+        )))
+    ));
+}
+
+#[test]
 fn malformed_log_trace_heights_is_rejected() {
     let config = test_config();
     let prover_statement = tiny_prover_statement(
@@ -331,7 +332,10 @@ fn malformed_log_trace_heights_is_rejected() {
         .expect_err("oversized log trace height should fail verification");
     assert!(matches!(
         err,
-        VerifierError::Shape(ShapeError::LogTraceHeightTooLarge { log_h: 200, .. })
+        VerifierError::Plan(crate::PlanError::Shape(ShapeError::LogTraceHeightTooLarge {
+            log_h: 200,
+            ..
+        }))
     ));
 
     // log_h = 30 with log_blowup = 3 and Felt::TWO_ADICITY = 32 overflows the LDE
@@ -341,7 +345,10 @@ fn malformed_log_trace_heights_is_rejected() {
     let err = stark_statement
         .verify(&bad_proof, test_challenger())
         .expect_err("log_h + log_blowup exceeding two-adicity should fail verification");
-    assert!(matches!(err, VerifierError::Domain(DomainError::LdeOrderTooLarge { .. })));
+    assert!(matches!(
+        err,
+        VerifierError::Plan(crate::PlanError::Domain(DomainError::LdeOrderTooLarge { .. }))
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -419,7 +426,7 @@ fn constraint_checker_rejects_invalid_aux_trace() {
         vec![(0, vec![Felt::from_u64(START)])],
     )
     .unwrap();
-    crate::debug::check_constraints(&prover_statement, test_challenger());
+    crate::debug::check_constraints(&prover_statement, None, test_challenger());
 }
 
 #[test]
@@ -438,7 +445,7 @@ fn air_order_reflects_caller_order() {
     let traces = [(7, 16), (0, 8), (11, 4)]
         .map(|(start, height)| generate_pow4_trace(Felt::from_u64(start), height));
     let prover_statement = tiny_prover_statement(airs.clone(), traces.to_vec(), inputs).unwrap();
-    crate::debug::check_constraints(&prover_statement, test_challenger());
+    crate::debug::check_constraints(&prover_statement, None, test_challenger());
     let (output, statement) = ProverInstance::new(&config, prover_statement, None)
         .unwrap()
         .prove(test_challenger())
@@ -450,7 +457,7 @@ fn air_order_reflects_caller_order() {
     assert_eq!(digest, output.digest);
     let explicit_inputs = statement.air_inputs().iter().cloned().enumerate().collect();
     let explicit_statement =
-        Statement::new(TestMultiAir::new(airs.clone()), explicit_inputs, Vec::new()).unwrap();
+        Statement::new(tiny_multi_air(airs.clone()), explicit_inputs, Vec::new()).unwrap();
     assert_eq!(
         VerifierInstance::new(&config, &explicit_statement, None)
             .unwrap()
@@ -459,11 +466,9 @@ fn air_order_reflects_caller_order() {
         digest
     );
     assert_eq!(output.proof.log_trace_heights.as_slice(), &[4, 3, 2]);
-    let trace_order = TraceOrder::from_log_heights::<Felt, QuadFelt, _>(
-        statement.airs(),
-        output.proof.log_trace_heights.clone(),
-    )
-    .unwrap();
+    let trace_order =
+        TraceOrder::from_log_heights(statement.airs(), output.proof.log_trace_heights.clone())
+            .unwrap();
     assert_eq!(trace_order.instance_indices(), &[2, 1, 0]);
     for bad_inputs in [
         vec![
@@ -478,7 +483,7 @@ fn air_order_reflects_caller_order() {
         ],
     ] {
         let statement =
-            Statement::new(TestMultiAir::new(airs.clone()), bad_inputs, Vec::new()).unwrap();
+            Statement::new(tiny_multi_air(airs.clone()), bad_inputs, Vec::new()).unwrap();
         assert!(
             VerifierInstance::new(&config, &statement, None)
                 .unwrap()
@@ -560,4 +565,297 @@ fn block_hashing_preserves_proof_transcript() {
         .verify(&blocks.proof, test_challenger())
         .unwrap();
     assert_eq!(digest, blocks.digest);
+}
+
+// Direct execution uses the same private source as the legacy proof fixtures above. These pilots
+// instantiate native scalar, packed and non-Copy symbolic inputs without another equation body.
+mod native_kernel_pilot {
+    use alloc::{format, vec, vec::Vec};
+
+    use p3_field::{Algebra, BasedVectorSpace, PackedValue, PrimeCharacteristicRing};
+    use p3_matrix::{Matrix, dense::RowMajorMatrix};
+
+    use super::{Felt, QuadFelt, START, TinyAir, trace_of_height};
+    use crate::{
+        air,
+        air::{AirKernel, LiftedAirBuilder},
+        testing::configs::{PackedFelt, PackedQuadFelt},
+    };
+
+    enum Emission<B, E> {
+        Base(B),
+        Extension(E),
+    }
+
+    struct Sink<B, E> {
+        emissions: Vec<Emission<B, E>>,
+    }
+
+    impl<B, E> Default for Sink<B, E> {
+        fn default() -> Self {
+            Self { emissions: Vec::new() }
+        }
+    }
+
+    impl<B: Algebra<Felt>, E: Algebra<B>> LiftedAirBuilder for Sink<B, E> {
+        type F = Felt;
+        type Expr = B;
+        type ExtExpr = E;
+
+        fn emit_base(&mut self, value: B, _meta: air::ConstraintMeta<'_>) {
+            self.emissions.push(Emission::Base(value));
+        }
+
+        fn emit_ext(&mut self, value: E, _meta: air::ConstraintMeta<'_>) {
+            self.emissions.push(Emission::Extension(value));
+        }
+    }
+
+    impl<B, E> Sink<B, E> {
+        fn classes(&self) -> Vec<bool> {
+            self.emissions
+                .iter()
+                .map(|value| matches!(value, Emission::Extension(_)))
+                .collect()
+        }
+    }
+
+    struct ConcretePilot {
+        kernel: air::DirectKernel<TinyAir>,
+        main: RowMajorMatrix<Felt>,
+        public: [Felt; 2],
+        challenges: [QuadFelt; 1],
+        auxiliary: air::AuxTrace<QuadFelt>,
+    }
+
+    impl ConcretePilot {
+        fn new(height: usize) -> Self {
+            let source = TinyAir {
+                num_public_values: 2,
+                ..TinyAir::new([2, 4])
+            };
+            let kernel = air::DirectKernel::new(source).unwrap();
+            let main = trace_of_height(height);
+            let public = [Felt::ONE, Felt::from_u64(START - 1)];
+            let challenges =
+                [QuadFelt::from_basis_coefficients_slice(&[Felt::from_u64(3), Felt::from_u64(5)])
+                    .unwrap()];
+            let auxiliary = air::ProverAir::build_aux_trace(
+                &kernel,
+                air::AuxTraceInputs {
+                    main: &main,
+                    preprocessed: None,
+                    public_values: &public,
+                    statement: &[],
+                    challenges: &challenges,
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                auxiliary.columns.values[0],
+                challenges[0] + QuadFelt::from(Felt::from_u64(START))
+            );
+            assert_eq!(auxiliary.exports, vec![auxiliary.columns.values[height - 1]]);
+            let layout = kernel.descriptor().analysis().layout();
+            assert_eq!(layout.base_indices(), &[0, 1, 2, 3, 4, 5]);
+            assert_eq!(layout.ext_indices(), &[6, 7]);
+            Self {
+                kernel,
+                main,
+                public,
+                challenges,
+                auxiliary,
+            }
+        }
+    }
+
+    fn indicator(value: bool) -> Felt {
+        if value { Felt::ONE } else { Felt::ZERO }
+    }
+
+    #[test]
+    fn direct_tiny_scalar_session_accepts_known_pow4_rows_and_cyclic_next() {
+        let pilot = ConcretePilot::new(8);
+        let session = pilot
+            .kernel
+            .bind(air::UniformInputs {
+                public_values: &pilot.public,
+                challenges: &pilot.challenges,
+                exports: &pilot.auxiliary.exports,
+            })
+            .unwrap();
+        for row in 0..pilot.main.height() {
+            let next = (row + 1) % pilot.main.height();
+            let periodic: Vec<_> = session
+                .descriptor()
+                .spec()
+                .periodic_columns
+                .iter()
+                .map(|column| column[row % column.len()])
+                .collect();
+            let frame = air::AirFrame {
+                main: air::Rows {
+                    current: &pilot.main.values[row..row + 1],
+                    next: &pilot.main.values[next..next + 1],
+                },
+                preprocessed: air::Rows { current: &[], next: &[] },
+                aux: air::Rows {
+                    current: &pilot.auxiliary.columns.values[row..row + 1],
+                    next: &pilot.auxiliary.columns.values[next..next + 1],
+                },
+                periodic: &periodic,
+                selectors: air::Selectors {
+                    first: indicator(row == 0),
+                    last: indicator(row + 1 == pilot.main.height()),
+                    transition: indicator(row + 1 != pilot.main.height()),
+                },
+            };
+            let mut sink = Sink::<Felt, QuadFelt>::default();
+            session.eval(&frame, &mut sink);
+            assert_eq!(sink.classes(), vec![false, false, false, false, false, false, true, true]);
+            for value in sink.emissions {
+                match value {
+                    Emission::Base(value) => assert_eq!(value, Felt::ZERO),
+                    Emission::Extension(value) => assert_eq!(value, QuadFelt::ZERO),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn direct_tiny_packed_session_uses_real_goldilocks_packing_and_shared_uniforms() {
+        let height = PackedFelt::WIDTH.max(8).next_power_of_two();
+        let pilot = ConcretePilot::new(height);
+        let public = pilot.public.map(PackedFelt::from);
+        let challenges = pilot.challenges.map(PackedQuadFelt::from);
+        let exports: Vec<_> =
+            pilot.auxiliary.exports.iter().copied().map(PackedQuadFelt::from).collect();
+        let session = pilot
+            .kernel
+            .bind(air::UniformInputs {
+                public_values: &public,
+                challenges: &challenges,
+                exports: &exports,
+            })
+            .unwrap();
+        assert!(height.is_multiple_of(PackedFelt::WIDTH));
+        for start in (0..height).step_by(PackedFelt::WIDTH) {
+            let main = [PackedFelt::from_fn(|lane| pilot.main.values[start + lane])];
+            let next = [PackedFelt::from_fn(|lane| pilot.main.values[(start + lane + 1) % height])];
+            let pack_aux = |offset: usize| {
+                <PackedQuadFelt as BasedVectorSpace<PackedFelt>>::from_basis_coefficients_fn(
+                    |coefficient| {
+                        PackedFelt::from_fn(|lane| {
+                            pilot.auxiliary.columns.values[(start + lane + offset) % height]
+                                .as_basis_coefficients_slice()[coefficient]
+                        })
+                    },
+                )
+            };
+            let auxiliary = [pack_aux(0)];
+            let next_auxiliary = [pack_aux(1)];
+            let periodic: Vec<_> = session
+                .descriptor()
+                .spec()
+                .periodic_columns
+                .iter()
+                .map(|column| PackedFelt::from_fn(|lane| column[(start + lane) % column.len()]))
+                .collect();
+            let frame = air::AirFrame {
+                main: air::Rows { current: &main, next: &next },
+                preprocessed: air::Rows { current: &[], next: &[] },
+                aux: air::Rows {
+                    current: &auxiliary,
+                    next: &next_auxiliary,
+                },
+                periodic: &periodic,
+                selectors: air::Selectors {
+                    first: PackedFelt::from_fn(|lane| indicator(start + lane == 0)),
+                    last: PackedFelt::from_fn(|lane| indicator(start + lane + 1 == height)),
+                    transition: PackedFelt::from_fn(|lane| indicator(start + lane + 1 != height)),
+                },
+            };
+            let mut sink = Sink::<PackedFelt, PackedQuadFelt>::default();
+            session.eval(&frame, &mut sink);
+            assert_eq!(sink.classes(), vec![false, false, false, false, false, false, true, true]);
+            for value in sink.emissions {
+                match value {
+                    Emission::Base(value) => {
+                        assert!(value.as_slice().iter().all(|value| *value == Felt::ZERO));
+                    },
+                    Emission::Extension(value) => {
+                        let coefficients: &[PackedFelt] = value.as_basis_coefficients_slice();
+                        for coefficient in coefficients {
+                            assert!(
+                                coefficient.as_slice().iter().all(|value| *value == Felt::ZERO)
+                            );
+                        }
+                    },
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn direct_tiny_symbolic_session_preserves_non_copy_inputs_and_capture_order() {
+        use crate::air::symbolic::{
+            AuxInput, BaseInput, BaseLeaf, RowOffset, SymbolicExpression, SymbolicExpressionExt,
+        };
+        type B = SymbolicExpression<Felt>;
+        type E = SymbolicExpressionExt<Felt, Felt>;
+
+        let source = TinyAir {
+            num_public_values: 2,
+            ..TinyAir::new([2, 4])
+        };
+        let capture = air::capture(&source).unwrap();
+        let kernel = air::DirectKernel::new(source).unwrap();
+        assert_eq!(kernel.descriptor().fingerprint(), capture.descriptor.fingerprint());
+        let main = [B::input(BaseInput::Main { offset: RowOffset::Current, index: 0 })];
+        let next = [B::input(BaseInput::Main { offset: RowOffset::Next, index: 0 })];
+        let auxiliary = [E::input(AuxInput::Trace { offset: RowOffset::Current, index: 0 })];
+        let next_auxiliary = [E::input(AuxInput::Trace { offset: RowOffset::Next, index: 0 })];
+        let periodic = [B::input(BaseInput::Periodic(0)), B::input(BaseInput::Periodic(1))];
+        let public = [B::input(BaseInput::Public(0)), B::input(BaseInput::Public(1))];
+        let challenges = [E::input(AuxInput::Challenge(0))];
+        let exports = [E::input(AuxInput::Export(0))];
+        let session = kernel
+            .bind(air::UniformInputs {
+                public_values: &public,
+                challenges: &challenges,
+                exports: &exports,
+            })
+            .unwrap();
+        let frame = air::AirFrame {
+            main: air::Rows { current: &main, next: &next },
+            preprocessed: air::Rows { current: &[], next: &[] },
+            aux: air::Rows {
+                current: &auxiliary,
+                next: &next_auxiliary,
+            },
+            periodic: &periodic,
+            selectors: air::Selectors {
+                first: B::Leaf(BaseLeaf::IsFirstRow),
+                last: B::Leaf(BaseLeaf::IsLastRow),
+                transition: B::Leaf(BaseLeaf::IsTransition),
+            },
+        };
+        let mut sink = Sink::<B, E>::default();
+        session.eval(&frame, &mut sink);
+        assert_eq!(sink.classes(), vec![false, false, false, false, false, false, true, true]);
+        assert_eq!(sink.emissions.len(), capture.assertions.len());
+        for (actual, expected) in sink.emissions.into_iter().zip(capture.assertions) {
+            match (actual, expected) {
+                (Emission::Base(actual), air::Assertion::Base(expected)) => {
+                    assert_eq!(actual.degree_multiple(), expected.degree_multiple());
+                    assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+                },
+                (Emission::Extension(actual), air::Assertion::Extension(expected)) => {
+                    assert_eq!(actual.degree_multiple(), expected.degree_multiple());
+                    assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+                },
+                _ => panic!("direct session changed assertion class/global order"),
+            }
+        }
+    }
 }

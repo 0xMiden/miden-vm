@@ -3,7 +3,11 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
-    utils::{Matrix, RowMajorMatrix},
+    utils::Matrix,
+};
+use miden_stark::{
+    air::{AuxTrace, AuxTraceInputs},
+    lookup::LookupError,
 };
 
 use super::{
@@ -17,16 +21,13 @@ use crate::precompiles::uint::mul::{
 };
 
 pub(crate) fn build_aux(
-    main: &RowMajorMatrix<Felt>,
-    challenges: &[QuadFelt],
-) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    let (mut aux, sigma) = miden_stark::lookup::build_logup_aux_trace_with_width(
-        &UintStoreMulAir,
-        main,
-        None,
-        challenges,
-        AUX_WIDTH,
-    );
+    inputs: AuxTraceInputs<'_, Felt, QuadFelt>,
+) -> Result<AuxTrace<QuadFelt>, LookupError> {
+    let main = inputs.main;
+    let challenges = inputs.challenges;
+    let witness = miden_stark::lookup::build_logup_aux_trace(&UintStoreMulAir, inputs)?;
+    let mut aux = witness.columns;
+    let sigma = witness.exports;
     assert_eq!(aux.width(), AUX_WIDTH);
     let beta = challenges[1];
 
@@ -203,5 +204,5 @@ pub(crate) fn build_aux(
             }
         });
 
-    (aux, sigma)
+    Ok(AuxTrace { columns: aux, exports: sigma })
 }

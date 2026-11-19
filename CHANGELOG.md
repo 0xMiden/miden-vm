@@ -6,6 +6,8 @@
 
 #### Changes
 
+- [BREAKING] Separate authored native AIR equations, fallible auxiliary witnesses and prepared execution under `miden_stark::air`. `MultiAir` now groups `AirKernel` values. Fixed setup construction returns `Result<Option<_>>`, and verifiers own an optional trusted `SetupIdentity`. Fixed heights are declared in `AirSpec`; the combined builder/preparation interfaces and legacy generated ABI are retired.
+
 - Applied the routine-logging changes from [#4238](https://github.com/0xMiden/miden-vm/pull/4238) to the current VM and STARK crates. Successful proving is silent at `INFO`; profiling remains available at `TRACE`.
 
 - [BREAKING] Changed `Host::get_mast_forest` and `SyncHost::get_mast_forest` to return `Result<Option<LoadedMastForest>, MastForestLoadError>`. Retrieval failures preserve their source in `ExecutionError::MastForestError`, while `Ok(None)` still reports a missing procedure ([#4237](https://github.com/0xMiden/miden-vm/pull/4237)).

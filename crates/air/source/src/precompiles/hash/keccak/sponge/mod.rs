@@ -200,6 +200,17 @@ impl air::LiftedAir for KeccakSpongeAir {
     }
 }
 
+impl air::ProverAir<QuadFelt> for KeccakSpongeAir {
+    type Error = lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
+    }
+}
+
 /// Evaluate this component's base constraints in a main-trace column band.
 pub(crate) fn eval_main<AB>(frame: &air::Frame<'_, AB>, builder: &mut AB, main_col_offset: usize)
 where

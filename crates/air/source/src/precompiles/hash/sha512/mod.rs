@@ -146,6 +146,17 @@ impl air::LiftedAir for Sha512Air {
     }
 }
 
+impl air::ProverAir<QuadFelt> for Sha512Air {
+    type Error = lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
+    }
+}
+
 impl<LB: lookup::LookupBuilder<F = Felt>> lookup::LookupAir<LB> for Sha512Air {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -233,7 +244,7 @@ mod tests {
         max_period: usize,
         base_count: usize,
     ) where
-        A: air::LiftedAir<F = Felt>,
+        A: air::ProverAir<QuadFelt, F = Felt, Error = lookup::LookupError>,
     {
         // Capture the authored source with owned non-Copy trees before inspecting direct execution.
         let captured = air::capture_with::<_, QuadFelt>(&air).unwrap();
@@ -258,6 +269,30 @@ mod tests {
             &(base_count..base_count + ext_count).collect::<Vec<_>>()
         );
         assert!(descriptor.analysis().raw_degrees().max() <= 5);
+
+        let main = miden_core::utils::RowMajorMatrix::new(
+            vec![Felt::ZERO; main_width - 1],
+            main_width - 1,
+        );
+        let challenges = [QuadFelt::from_u8(17), QuadFelt::from_u8(31)];
+        let error = air::ProverAir::build_aux_trace(
+            &air,
+            air::AuxTraceInputs {
+                main: &main,
+                preprocessed: None,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            lookup::LookupError::MainWidth {
+                expected: main_width,
+                actual: main_width - 1,
+            }
+        );
 
         let kernel = air::DirectKernel::new(air).unwrap();
         let direct =

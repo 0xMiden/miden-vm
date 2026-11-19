@@ -33,9 +33,9 @@ pub fn default_budget() -> ProvingBudget<MIDEN_AIR_COUNT> {
 
 #[cfg(test)]
 mod tests {
-    use miden_air::vm::{AIRS, BaseAir, LiftedAir, MidenAir, config::pcs_params};
+    use miden_air::vm::{AIRS, MidenAir, config::pcs_params};
     use miden_air_definitions::vm::trace::and8_lookup::AND8_LOOKUP_TRACE_HEIGHT;
-    use miden_stark::log_quotient_degree;
+    use miden_stark::{air::AirKernel, log_quotient_degree};
 
     use super::*;
 
@@ -56,13 +56,18 @@ mod tests {
                 MidenAir::AND8_LOOKUP,
             ]
         );
-        assert_eq!(AIRS.map(|air| air.width()), [48, 24, 104, 7]);
+        assert_eq!(AIRS.map(|air| air.descriptor().spec().main_width), [48, 24, 104, 7]);
+        assert_eq!(AIRS.map(|air| air.descriptor().spec().aux_width), [4, 4, 19, 4]);
         assert_eq!(
-            AIRS.map(|air| <MidenAir as LiftedAir<Felt, QuadFelt>>::aux_width(&air)),
-            [4, 4, 19, 4]
+            AIRS.map(
+                |air| log_quotient_degree(&air).expect("canonical quotient allocation is valid")
+            ),
+            [3, 3, 1, 1]
         );
-        assert_eq!(AIRS.map(|air| log_quotient_degree::<Felt, QuadFelt, _>(&air)), [3, 3, 1, 1]);
-        assert_eq!(AIRS.map(|air| BaseAir::<Felt>::preprocessed_width(&air)), [0, 0, 0, 5]);
+        assert_eq!(
+            AIRS.map(|air| air.descriptor().spec().preprocessed.map_or(0, |shape| shape.width)),
+            [0, 0, 0, 5]
+        );
         assert_eq!(params.log_blowup(), 3);
         assert_eq!(AND8_LOOKUP_TRACE_HEIGHT, 1 << 16);
 

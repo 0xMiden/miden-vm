@@ -18,4 +18,4 @@ pub use contracts::{LookupAir, LookupBuilder, LookupFrame};
 #[cfg(feature = "std")]
 pub use debug::validation::{NativeValidationBuilder, validate_native};
 pub use message::LookupMessage;
-pub use prover::{ProverLookupBuilder, build_lookup_fractions};
+pub use prover::{LookupError, ProverLookupBuilder, build_logup_aux_trace, build_lookup_fractions};

@@ -129,6 +129,17 @@ impl air::LiftedAir for Sha256Air {
     }
 }
 
+impl air::ProverAir<QuadFelt> for Sha256Air {
+    type Error = lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
+    }
+}
+
 impl<LB: lookup::LookupBuilder<F = Felt>> lookup::LookupAir<LB> for Sha256Air {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -201,11 +212,14 @@ mod tests {
         Felt,
         field::{PrimeCharacteristicRing, QuadFelt},
     };
-    use miden_stark::air::{self, AirKernel};
+    use miden_stark::{
+        air::{self, AirKernel},
+        lookup,
+    };
 
     fn native_geometry<A>(air: A, main_width: usize, periodic_columns: usize, base_count: usize)
     where
-        A: air::LiftedAir<F = Felt>,
+        A: air::ProverAir<QuadFelt, F = Felt, Error = lookup::LookupError>,
     {
         // The expected relation comes from the authored source, instantiated with non-Copy trees.
         // Direct execution is the comparison subject, rather than a source of expected metadata.
@@ -230,6 +244,30 @@ mod tests {
             &(base_count..base_count + 5).collect::<Vec<_>>()
         );
         assert!(descriptor.analysis().raw_degrees().max() <= 5);
+
+        let main = miden_core::utils::RowMajorMatrix::new(
+            vec![Felt::ZERO; main_width - 1],
+            main_width - 1,
+        );
+        let challenges = [QuadFelt::from_u8(17), QuadFelt::from_u8(31)];
+        let error = air::ProverAir::build_aux_trace(
+            &air,
+            air::AuxTraceInputs {
+                main: &main,
+                preprocessed: None,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            lookup::LookupError::MainWidth {
+                expected: main_width,
+                actual: main_width - 1,
+            }
+        );
 
         let kernel = air::DirectKernel::new(air).unwrap();
         let direct =

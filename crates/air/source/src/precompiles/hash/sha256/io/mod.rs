@@ -100,6 +100,17 @@ impl air::LiftedAir for Sha256IoAir {
     }
 }
 
+impl air::ProverAir<QuadFelt> for Sha256IoAir {
+    type Error = lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
+    }
+}
+
 /// Evaluate the local constraints in an independent main/periodic column band.
 pub fn eval_main<AB: air::LiftedAirBuilder<F = Felt>>(
     frame: &air::Frame<'_, AB>,

@@ -9,10 +9,7 @@ use core::marker::PhantomData;
 
 use p3_field::{Algebra, BasedVectorSpace, ExtensionField, Field, PackedField};
 
-use crate::{
-    air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow},
-    selectors::Selectors,
-};
+use crate::air;
 
 /// Packed constraint folder for SIMD-optimized prover evaluation.
 ///
@@ -36,23 +33,6 @@ where
     P: PackedField<Scalar = F>,
     PE: Algebra<EF> + Algebra<P> + BasedVectorSpace<P> + Copy + Send + Sync,
 {
-    /// Main trace two-row window (packed base field)
-    pub main: RowWindow<'a, P>,
-    /// Preprocessed trace two-row window (packed base field); empty when the
-    /// AIR declares no preprocessed columns.
-    pub preprocessed: RowWindow<'a, P>,
-    /// Aux/permutation trace two-row window (packed extension field)
-    pub aux: RowWindow<'a, PE>,
-    /// Randomness for aux trace (packed extension field)
-    pub packed_randomness: &'a [PE],
-    /// Public values (base field scalars)
-    pub public_values: &'a [F],
-    /// Periodic column values (packed base field)
-    pub periodic_values: &'a [P],
-    /// Permutation values (packed extension field)
-    pub permutation_values: &'a [PE],
-    /// Constraint selectors (packed base field)
-    pub selectors: Selectors<P>,
     /// Base-field alpha powers, reordered to match base constraint emission order.
     /// `base_alpha_powers[d][j]` = d-th basis coefficient of alpha power for j-th base constraint.
     pub base_alpha_powers: &'a [Vec<F>],
@@ -76,6 +56,24 @@ where
     P: PackedField<Scalar = F>,
     PE: Algebra<EF> + Algebra<P> + BasedVectorSpace<P> + Copy + Send + Sync,
 {
+    #[inline]
+    fn record_base(&mut self, value: P) {
+        self.base_constraints.push(value);
+        self.constraint_index += 1;
+    }
+
+    #[inline]
+    fn record_bases<const N: usize>(&mut self, values: [P; N]) {
+        self.base_constraints.extend(values);
+        self.constraint_index += N;
+    }
+
+    #[inline]
+    fn record_ext(&mut self, value: PE) {
+        self.ext_constraints.push(value);
+        self.constraint_index += 1;
+    }
+
     /// Combine all collected constraints with their pre-computed alpha powers.
     ///
     /// Base constraints use `Algebra::batched_linear_combination` per basis dimension,
@@ -107,7 +105,7 @@ where
     }
 }
 
-impl<'a, F, EF, P, PE> AirBuilder for ProverConstraintFolder<'a, F, EF, P, PE>
+impl<F, EF, P, PE> air::LiftedAirBuilder for ProverConstraintFolder<'_, F, EF, P, PE>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -116,105 +114,166 @@ where
 {
     type F = F;
     type Expr = P;
-    type Var = P;
-    type PreprocessedWindow = RowWindow<'a, P>;
-    type MainWindow = RowWindow<'a, P>;
-    type PublicVar = F;
-    type PeriodicVar = P;
+    type ExtExpr = PE;
 
     #[inline]
-    fn main(&self) -> Self::MainWindow {
-        self.main
+    fn emit_base(&mut self, value: P, _meta: air::ConstraintMeta<'_>) {
+        self.record_base(value);
     }
 
     #[inline]
-    fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        &self.preprocessed
+    fn emit_ext(&mut self, value: PE, _meta: air::ConstraintMeta<'_>) {
+        self.record_ext(value);
     }
 
     #[inline]
-    fn is_first_row(&self) -> Self::Expr {
-        self.selectors.is_first_row
-    }
-
-    #[inline]
-    fn is_last_row(&self) -> Self::Expr {
-        self.selectors.is_last_row
-    }
-
-    #[inline]
-    fn is_transition(&self) -> Self::Expr {
-        self.selectors.is_transition
-    }
-
-    #[inline]
-    fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
-        self.base_constraints.push(x.into());
-        self.constraint_index += 1;
-    }
-
-    #[inline]
-    fn assert_zeros<const N: usize, I: Into<Self::Expr>>(&mut self, array: [I; N]) {
-        let expr_array = array.map(Into::into);
-        self.base_constraints.extend(expr_array);
-        self.constraint_index += N;
-    }
-
-    #[inline]
-    fn public_values(&self) -> &[Self::PublicVar] {
-        self.public_values
-    }
-
-    #[inline]
-    fn periodic_values(&self) -> &[Self::PeriodicVar] {
-        self.periodic_values
+    fn assert_zeros<const N: usize, I: Into<P>>(&mut self, values: [I; N]) {
+        self.record_bases(values.map(Into::into));
     }
 }
 
-impl<'a, F, EF, P, PE> ExtensionBuilder for ProverConstraintFolder<'a, F, EF, P, PE>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    P: PackedField<Scalar = F>,
-    PE: Algebra<EF> + Algebra<P> + BasedVectorSpace<P> + Copy + Send + Sync,
-{
-    type EF = EF;
-    type ExprEF = PE;
-    type VarEF = PE;
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
 
-    #[inline]
-    fn assert_zero_ext<I>(&mut self, x: I)
-    where
-        I: Into<Self::ExprEF>,
-    {
-        self.ext_constraints.push(x.into());
-        self.constraint_index += 1;
-    }
-}
+    use p3_field::{PackedValue, PrimeCharacteristicRing};
 
-impl<'a, F, EF, P, PE> PermutationAirBuilder for ProverConstraintFolder<'a, F, EF, P, PE>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    P: PackedField<Scalar = F>,
-    PE: Algebra<EF> + Algebra<P> + BasedVectorSpace<P> + Copy + Send + Sync,
-{
-    type MP = RowWindow<'a, PE>;
-    type RandomVar = PE;
-    type PermutationVar = PE;
+    use super::*;
+    use crate::testing::configs::{Felt, PackedFelt, PackedQuadFelt, QuadFelt};
 
-    #[inline]
-    fn permutation(&self) -> Self::MP {
-        self.aux
+    type Folder<'a> = ProverConstraintFolder<'a, Felt, QuadFelt, PackedFelt, PackedQuadFelt>;
+
+    fn folder<'a>(base: &'a [Vec<Felt>], ext: &'a [QuadFelt]) -> Folder<'a> {
+        // Evaluation borrows its frame and uniform inputs separately from this assertion sink.
+        ProverConstraintFolder {
+            base_alpha_powers: base,
+            ext_alpha_powers: ext,
+            constraint_index: 0,
+            constraint_count: base.first().map_or(0, Vec::len) + ext.len(),
+            base_constraints: Vec::new(),
+            ext_constraints: Vec::new(),
+            _phantom: PhantomData,
+        }
     }
 
-    #[inline]
-    fn permutation_randomness(&self) -> &[Self::RandomVar] {
-        self.packed_randomness
+    fn pack_extension(value: impl Fn(usize) -> QuadFelt) -> PackedQuadFelt {
+        <PackedQuadFelt as BasedVectorSpace<PackedFelt>>::from_basis_coefficients_fn(
+            |coefficient| {
+                PackedFelt::from_fn(|lane| value(lane).as_basis_coefficients_slice()[coefficient])
+            },
+        )
     }
 
-    #[inline]
-    fn permutation_values(&self) -> &[Self::PermutationVar] {
-        self.permutation_values
+    fn extension_lane(value: PackedQuadFelt, lane: usize) -> QuadFelt {
+        let coefficients: &[PackedFelt] = value.as_basis_coefficients_slice();
+        QuadFelt::from_basis_coefficients_fn(|coefficient| {
+            coefficients[coefficient].as_slice()[lane]
+        })
+    }
+
+    #[test]
+    fn native_packed_fold_preserves_interleaved_classes_zeros_and_repeats() {
+        let layout = air::ConstraintLayout::new(vec![1, 2, 4, 6], vec![0, 3, 5, 7]).unwrap();
+        let alpha = QuadFelt::new([Felt::from_u64(17), Felt::from_u64(19)]);
+        let (base_weights, ext_weights) = layout.decompose_alpha(alpha);
+        let base0 = PackedFelt::from_fn(|lane| Felt::from_usize(3 + lane));
+        let base1 = PackedFelt::from_fn(|lane| Felt::from_usize(7 + 3 * lane));
+        let ext0 = pack_extension(|lane| {
+            QuadFelt::new([Felt::from_usize(2 + lane), Felt::from_usize(5 + 2 * lane)])
+        });
+        let ext1 = pack_extension(|lane| {
+            QuadFelt::new([Felt::from_usize(11 + lane), Felt::from_usize(13 + lane)])
+        });
+        let mut native = folder(&base_weights, &ext_weights);
+        air::LiftedAirBuilder::emit_ext(&mut native, ext0, air::ConstraintMeta::default());
+        air::LiftedAirBuilder::assert_zeros(&mut native, [base0, PackedFelt::ZERO]);
+        air::LiftedAirBuilder::emit_ext(&mut native, ext0, air::ConstraintMeta::default());
+        air::LiftedAirBuilder::emit_base(&mut native, base0, air::ConstraintMeta::default());
+        air::LiftedAirBuilder::emit_ext(
+            &mut native,
+            PackedQuadFelt::ZERO,
+            air::ConstraintMeta::default(),
+        );
+        air::LiftedAirBuilder::emit_base(&mut native, base1, air::ConstraintMeta::default());
+        air::LiftedAirBuilder::emit_ext(&mut native, ext1, air::ConstraintMeta::default());
+
+        assert_eq!(native.constraint_index, 8);
+        assert_eq!(native.base_constraints.len(), 4);
+        assert_eq!(native.ext_constraints.len(), 4);
+        let actual = native.finalize_constraints();
+        for lane in 0..PackedFelt::WIDTH {
+            // Global weights descend from alpha^7 to alpha^0; zeros still occupy their slots.
+            let expected = extension_lane(ext0, lane) * (alpha.exp_u64(7) + alpha.exp_u64(4))
+                + QuadFelt::from(base0.as_slice()[lane]) * (alpha.exp_u64(6) + alpha.exp_u64(3))
+                + QuadFelt::from(base1.as_slice()[lane]) * alpha
+                + extension_lane(ext1, lane);
+            assert_eq!(extension_lane(actual, lane), expected);
+        }
+    }
+
+    #[test]
+    fn direct_dummy_kernel_binds_packed_uniforms_across_independent_row_buffers() {
+        use crate::{air::AirKernel, testing::airs::miden::DummyMidenAir};
+
+        let kernel = air::DirectKernel::new(DummyMidenAir::<Felt>::new(9, 2)).unwrap();
+        let layout = kernel.descriptor().analysis().layout();
+        assert_eq!(layout.base_indices(), &[0]);
+        assert!(layout.ext_indices().is_empty());
+        let alpha = QuadFelt::new([Felt::from_u64(17), Felt::from_u64(19)]);
+        let (base_weights, ext_weights) = layout.decompose_alpha(alpha);
+
+        // Uniform conversion/storage outlives the session; row buffers are independent per pass.
+        let public: [PackedFelt; 0] = [];
+        let challenges = [
+            PackedQuadFelt::from(QuadFelt::from_u64(7)),
+            PackedQuadFelt::from(QuadFelt::from_u64(13)),
+        ];
+        let exports = [PackedQuadFelt::ZERO; 2];
+        let session = kernel
+            .bind(air::UniformInputs {
+                public_values: &public,
+                challenges: &challenges,
+                exports: &exports,
+            })
+            .unwrap();
+        for block in 0..2 {
+            let main: Vec<_> = (0..9)
+                .map(|column| {
+                    PackedFelt::from_fn(|lane| Felt::from_usize(2 + column + 3 * lane + 31 * block))
+                })
+                .collect();
+            let next: Vec<_> = (0..9)
+                .map(|column| {
+                    PackedFelt::from_fn(|lane| Felt::from_usize(101 + column + lane + block))
+                })
+                .collect();
+            let aux = [PackedQuadFelt::ONE; 2];
+            let aux_next = [PackedQuadFelt::from(QuadFelt::from_u64(23)); 2];
+            let frame = air::AirFrame {
+                main: air::Rows { current: &main, next: &next },
+                preprocessed: air::Rows { current: &[], next: &[] },
+                aux: air::Rows { current: &aux, next: &aux_next },
+                periodic: &[],
+                selectors: air::Selectors {
+                    first: PackedFelt::from_fn(|lane| Felt::from_bool(lane == 0)),
+                    last: PackedFelt::from_fn(|lane| {
+                        Felt::from_bool(lane + 1 == PackedFelt::WIDTH)
+                    }),
+                    transition: PackedFelt::from_fn(|lane| {
+                        Felt::from_bool((lane + block).is_multiple_of(2))
+                    }),
+                },
+            };
+            let mut sink = folder(&base_weights, &ext_weights);
+            session.eval(&frame, &mut sink);
+            assert_eq!(sink.constraint_index, 1);
+            let actual = sink.finalize_constraints();
+            for lane in 0..PackedFelt::WIDTH {
+                let expected = (0..9)
+                    .map(|column| Felt::from_usize(2 + column + 3 * lane + 31 * block))
+                    .product::<Felt>();
+                assert_eq!(extension_lane(actual, lane), QuadFelt::from(expected));
+            }
+        }
     }
 }

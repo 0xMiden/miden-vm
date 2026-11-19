@@ -56,6 +56,17 @@ impl air::LiftedAir for EcPointStoreGroupsAir {
     }
 }
 
+impl air::ProverAir<QuadFelt> for EcPointStoreGroupsAir {
+    type Error = lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
+    }
+}
+
 impl<LB> lookup::LookupAir<LB> for EcPointStoreGroupsAir
 where
     LB: lookup::LookupBuilder<F = Felt>,

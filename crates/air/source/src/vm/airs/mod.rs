@@ -77,6 +77,10 @@ impl air::LiftedAir for MidenAir {
         with_source!(self, |air| air::LiftedAir::spec(air))
     }
 
+    fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
+        with_source!(self, |air| air::LiftedAir::build_preprocessed_trace(air))
+    }
+
     fn eval<B: air::LiftedAirBuilder<F = Felt>>(
         &self,
         frame: &air::Frame<'_, B>,
@@ -84,6 +88,17 @@ impl air::LiftedAir for MidenAir {
         sink: &mut B,
     ) {
         with_source!(self, |air| air::LiftedAir::eval(air, frame, inputs, sink));
+    }
+}
+
+impl<EF: ExtensionField<Felt>> air::ProverAir<EF> for MidenAir {
+    type Error = crate::shared::WitnessError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, EF>,
+    ) -> Result<air::AuxTrace<EF>, Self::Error> {
+        with_source!(self, |air| air::ProverAir::build_aux_trace(air, inputs).map_err(Into::into))
     }
 }
 

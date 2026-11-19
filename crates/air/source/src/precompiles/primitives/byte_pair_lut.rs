@@ -405,6 +405,9 @@ impl air::LiftedAir for BytePairLutAir {
             periodic_columns: Cow::Borrowed(&[]),
         }
     }
+    fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
+        Some(preprocessed_table())
+    }
     fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
         frame: &air::Frame<'_, AB>,
@@ -412,6 +415,16 @@ impl air::LiftedAir for BytePairLutAir {
         builder: &mut AB,
     ) {
         lookup::eval_lookup(self, frame, inputs, builder);
+    }
+}
+
+impl air::ProverAir<QuadFelt> for BytePairLutAir {
+    type Error = lookup::LookupError;
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
@@ -481,5 +494,53 @@ mod tests {
                 assert_ne!(encodings[left], encodings[right]);
             }
         }
+    }
+    #[test]
+    fn borrowed_byte_table_matches_slow_fractions_and_chiplet_dispatch() {
+        let air = BytePairLutAir;
+        let preprocessed = preprocessed_table();
+        let main = RowMajorMatrix::new(
+            (0..TRACE_HEIGHT * NUM_MAIN_COLS)
+                .map(|i| Felt::from_usize(i % 17 + 1))
+                .collect(),
+            NUM_MAIN_COLS,
+        );
+        let challenges = [QuadFelt::new([Felt::from_u32(7), Felt::ONE]), QuadFelt::from_u32(13)];
+        let inputs = air::AuxTraceInputs {
+            main: &main,
+            preprocessed: Some(&preprocessed),
+            public_values: &[],
+            statement: &[],
+            challenges: &challenges,
+        };
+        let borrowed = air::ProverAir::build_aux_trace(&air, inputs).unwrap();
+        let encoding =
+            Challenges::new(challenges[0], challenges[1], MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+        let fractions =
+            lookup::build_lookup_fractions(&air, &main, Some(&preprocessed), &[], &encoding);
+        let (expected, sigma) = miden_stark::lookup::accumulate_slow(&fractions);
+        let (rows, remainder) = borrowed.columns.values.as_chunks::<NUM_AUX_COLS>();
+        assert!(remainder.is_empty());
+        for (row, values) in rows.iter().enumerate() {
+            for (column, value) in values.iter().enumerate() {
+                assert_eq!(*value, expected[column][row]);
+            }
+        }
+        assert_eq!(borrowed.exports, [sigma]);
+        let dispatched = air::ProverAir::build_aux_trace(
+            &crate::precompiles::air::ChipletAir::BytePairLut,
+            inputs,
+        )
+        .unwrap();
+        assert_eq!(dispatched.columns.values, borrowed.columns.values);
+        assert_eq!(dispatched.exports, borrowed.exports);
+        assert!(
+            air::ProverAir::build_aux_trace(
+                &crate::precompiles::air::ChipletAir::BytePairLut,
+                air::AuxTraceInputs { preprocessed: None, ..inputs }
+            )
+            .is_err(),
+            "chiplet dispatch must reach the borrowed hook's setup validation"
+        );
     }
 }

@@ -5,8 +5,8 @@ use p3_matrix::dense::RowMajorMatrix;
 use thiserror::Error;
 
 use super::{
-    AirDescriptor, AirFrame, AirSpec, ConstraintDegrees, DescriptorError, Frame, Inputs,
-    LiftedAir, LiftedAirBuilder, UniformInputs,
+    AirDescriptor, AirFrame, AirSpec, AuxTrace, AuxTraceInputs, ConstraintDegrees, DescriptorError,
+    Frame, Inputs, LiftedAir, LiftedAirBuilder, ProverAir, UniformInputs,
 };
 
 /// A uniform input slice does not match the analyzed relation's declaration.
@@ -280,6 +280,8 @@ impl<A: LiftedAir> AirKernel for DirectKernel<A> {
     }
 }
 
+// ProverAir inherits the source capability. This source view forwards to the same authored body;
+// it is not an additional equation implementation or a source preparation interface.
 impl<A: LiftedAir> LiftedAir for DirectKernel<A> {
     type F = A::F;
 
@@ -301,15 +303,32 @@ impl<A: LiftedAir> LiftedAir for DirectKernel<A> {
     }
 }
 
+impl<A, EF> ProverAir<EF> for DirectKernel<A>
+where
+    A: ProverAir<EF>,
+    EF: ExtensionField<A::F>,
+{
+    type Error = A::Error;
+
+    fn build_aux_trace(
+        &self,
+        inputs: AuxTraceInputs<'_, A::F, EF>,
+    ) -> Result<AuxTrace<EF>, Self::Error> {
+        self.source.build_aux_trace(inputs)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::{borrow::Cow, vec, vec::Vec};
     use core::{
         cell::Cell,
+        convert::Infallible,
         sync::atomic::{AtomicUsize, Ordering},
     };
 
     use p3_field::{Dup, PrimeCharacteristicRing};
+    use p3_matrix::Matrix;
 
     use super::*;
     use crate::{
@@ -361,6 +380,20 @@ mod tests {
             sink: &mut S,
         ) {
             relation(frame, inputs, inputs.challenge(0) * inputs.challenge(0), sink);
+        }
+    }
+
+    impl ProverAir<QuadFelt> for Fixture {
+        type Error = Infallible;
+
+        fn build_aux_trace(
+            &self,
+            inputs: AuxTraceInputs<'_, Felt, QuadFelt>,
+        ) -> Result<AuxTrace<QuadFelt>, Infallible> {
+            Ok(AuxTrace {
+                columns: RowMajorMatrix::new(vec![QuadFelt::ZERO; inputs.main.height()], 1),
+                exports: vec![inputs.challenges[0] * inputs.challenges[0]],
+            })
         }
     }
 
@@ -529,6 +562,43 @@ mod tests {
         assert_eq!(sink.ext, vec![QuadFelt::ZERO; 4]);
         assert_eq!(kernel.direct.source.spec_reads.load(Ordering::Relaxed), 1);
         assert_eq!(kernel.direct.source.fixed_builds.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn direct_kernel_forwards_optional_witness_and_explicit_setup_capabilities() {
+        let kernel = CountingKernel::new().direct;
+        let fixed = kernel.build_preprocessed_trace().unwrap();
+        assert_eq!(kernel.source.fixed_builds.load(Ordering::Relaxed), 1);
+        let main = RowMajorMatrix::new(vec![Felt::from_u64(7); 2], 1);
+        let public = [Felt::from_u64(7)];
+        let challenges = [QuadFelt::from(Felt::from_u64(3))];
+        let aux = kernel
+            .build_aux_trace(AuxTraceInputs {
+                main: &main,
+                preprocessed: Some(&fixed),
+                public_values: &public,
+                statement: &[],
+                challenges: &challenges,
+            })
+            .unwrap();
+        assert_eq!(aux.columns.width(), 1);
+        assert_eq!(aux.columns.height(), 2);
+        assert_eq!(aux.exports, vec![QuadFelt::from(Felt::from_u64(9))]);
+        let session = kernel
+            .bind(UniformInputs {
+                public_values: &public,
+                challenges: &challenges,
+                exports: &aux.exports,
+            })
+            .unwrap();
+        let mut sink = Collector::default();
+        session.eval(
+            &frame(&main.values[..1], &fixed.values[..1], &aux.columns.values[..1]),
+            &mut sink,
+        );
+        assert_eq!(sink.base, vec![Felt::ZERO]);
+        assert_eq!(sink.ext, vec![QuadFelt::ZERO]);
+        assert_eq!(kernel.source.fixed_builds.load(Ordering::Relaxed), 1);
     }
 
     #[test]

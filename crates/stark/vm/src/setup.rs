@@ -44,7 +44,10 @@ pub mod config {
                 vec![],
             )
             .expect("canonical VM statement");
-            Preprocessed::build(&statement, config).expect("fixed And8 setup").commitment()
+            Preprocessed::build(&statement, config)
+                .expect("canonical setup is valid")
+                .expect("fixed And8 setup")
+                .commitment()
         }
 
         /// Each pinned And8 setup commitment must be the one its configuration builds from the

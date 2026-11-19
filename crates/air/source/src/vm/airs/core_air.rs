@@ -122,6 +122,17 @@ impl<LB: NativeMainLookupBuilder> lookup::LookupAir<LB> for CoreAir {
     }
 }
 
+impl<EF: ExtensionField<Felt>> air::ProverAir<EF> for CoreAir {
+    type Error = lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, EF>,
+    ) -> Result<air::AuxTrace<EF>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::vec;
@@ -189,5 +200,51 @@ mod tests {
 
         #[cfg(feature = "std")]
         miden_stark::lookup::validate_native(&CoreAir, spec).unwrap();
+    }
+
+    #[test]
+    fn native_core_witness_matches_slow_fractions_and_normalized_export() {
+        let mut current = generate_test_row(opcodes::PUSH.into());
+        let mut next = generate_test_row(opcodes::END.into());
+        current.system.clk = Felt::from_u32(19);
+        next.system.clk = Felt::from_u32(41);
+        let main = RowMajorMatrix::new(
+            current.as_slice().iter().chain(next.as_slice()).copied().collect(),
+            NUM_CORE_COLS,
+        );
+        let public = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
+        let challenges = [QuadFelt::from_u32(7), QuadFelt::from_u32(11)];
+        let native = air::ProverAir::build_aux_trace(
+            &CoreAir,
+            air::AuxTraceInputs {
+                main: &main,
+                preprocessed: None,
+                public_values: &public,
+                statement: &[],
+                challenges: &challenges,
+            },
+        )
+        .unwrap();
+        let spec = air::LiftedAir::spec(&CoreAir);
+        let encoding = Challenges::new(
+            challenges[0],
+            challenges[1],
+            crate::vm::logup::MIDEN_MAX_MESSAGE_WIDTH,
+            crate::vm::logup::BusId::COUNT,
+        );
+        let fractions = lookup::build_lookup_fractions(
+            &CoreAir,
+            &main,
+            None,
+            &spec.periodic_columns,
+            &encoding,
+        );
+        let (expected, sigma) = accumulate_slow(&fractions);
+        for (row, values) in native.columns.values.chunks_exact(expected.len()).enumerate() {
+            for (column, value) in values.iter().enumerate() {
+                assert_eq!(*value, expected[column][row]);
+            }
+        }
+        assert_eq!(native.exports, [sigma]);
     }
 }

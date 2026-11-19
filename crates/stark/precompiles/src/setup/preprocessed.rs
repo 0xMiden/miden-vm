@@ -12,7 +12,7 @@ use miden_air::precompiles::{ChipletAir, ChipletMultiAir, policy::precompile_pcs
 use miden_core::{Felt, field::QuadFelt};
 use miden_stark::{
     Preprocessed, StarkConfig,
-    air::{BaseAir, Statement},
+    air::{AirKernel, Statement},
     config::{Blake3Config, KeccakConfig, blake3_256_config, keccak_config},
     lmcs::Lmcs,
 };
@@ -56,7 +56,7 @@ fn scratch_statement() -> Statement<Felt, QuadFelt, ChipletMultiAir> {
         ChipletMultiAir::new(),
         vec![(
             ChipletAir::TRANSCRIPT_EVAL_INDEX,
-            vec![Felt::ZERO; ChipletAir::TRANSCRIPT_EVAL.num_public_values()],
+            vec![Felt::ZERO; ChipletAir::TRANSCRIPT_EVAL.descriptor().spec().num_public_values],
         )],
         vec![],
     )
@@ -69,6 +69,7 @@ where
 {
     let statement = scratch_statement();
     Preprocessed::build(&statement, config)
+        .expect("canonical chiplet fixed setup is valid")
         .expect("chiplet stack always declares BytePairLut preprocessed columns")
 }
 

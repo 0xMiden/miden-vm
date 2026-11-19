@@ -73,31 +73,48 @@ pub(crate) mod constraints;
 pub(crate) mod periodic;
 pub(crate) mod quotient;
 
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 
 use commit::commit_traces;
-use constraints::{evaluate_constraints_into, layout::get_constraint_layout};
+use constraints::evaluate_constraints_into;
 use p3_challenger::CanObserve;
 use p3_field::{BasedVectorSpace, ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use p3_maybe_rayon::prelude::*;
-use periodic::PeriodicLde;
+use periodic::{PeriodicLde, periodic_matrix};
 use thiserror::Error;
 use tracing::{instrument, trace_span};
 
 use crate::{
-    StarkConfig,
-    air::{
-        BaseAir, InstanceError, LiftedAir, MultiAir, ProverStatement, ReductionError, Statement,
-    },
-    domain::{Coset, DomainError, LiftedDomain, log_quotient_degree},
+    StarkConfig, air,
+    air::{AirKernel, MultiAir, ProverStatement, ReductionError, Statement, log2_strict_u8},
+    domain::Coset,
     lmcs::Lmcs,
-    order::TraceOrder,
     pcs::prover::open_with_channel,
-    preprocessed::{Preprocessed, PreprocessedValidationError, validate_preprocessed},
+    plan::{ExecutionPlan, PlanError},
+    preprocessed::{
+        Preprocessed, PreprocessedValidationError, SetupIdentity, validate_preprocessed,
+    },
     proof::{StarkOutput, StarkProofData},
     transcript::{Channel, ProverChannel, ProverTranscript},
 };
+
+/// Prepared state shared by packed constraint evaluation.
+///
+/// Concurrent proving shares one evaluation session across worker threads and therefore requires
+/// `Sync`. Serial proving keeps that session on the calling thread and imposes no such bound.
+#[cfg(feature = "concurrent")]
+pub trait PackedPreparation: Sync {}
+
+#[cfg(feature = "concurrent")]
+impl<T: Sync> PackedPreparation for T {}
+
+/// Prepared state used by serial packed constraint evaluation.
+#[cfg(not(feature = "concurrent"))]
+pub trait PackedPreparation {}
+
+#[cfg(not(feature = "concurrent"))]
+impl<T> PackedPreparation for T {}
 
 // ============================================================================
 // ProverInstance
@@ -106,10 +123,9 @@ use crate::{
 /// Prover-side bundle containing a [`StarkConfig`], a statement with owned main
 /// traces, and optional borrowed [`Preprocessed`] data.
 ///
-/// Construction validates preprocessed presence parity (and, when present, the
-/// bundle's shape against the AIRs and STARK config), so holding a
-/// `ProverInstance` is a guarantee its preprocessed shape is consistent;
-/// proving never re-checks it.
+/// Construction validates the execution plan and preprocessed presence/shape against the AIRs,
+/// trace heights and STARK config. The instance owns that checked plan, which proving reuses
+/// without repeating preflight validation.
 pub struct ProverInstance<'a, F, EF, MA, SC>
 where
     F: TwoAdicField,
@@ -121,6 +137,7 @@ where
     statement: Statement<F, EF, MA>,
     traces: Vec<RowMajorMatrix<F>>,
     preprocessed: Option<&'a Preprocessed<F, SC::Lmcs>>,
+    plan: ExecutionPlan<F>,
 }
 
 impl<'a, F, EF, MA, SC> ProverInstance<'a, F, EF, MA, SC>
@@ -135,24 +152,35 @@ where
     /// `preprocessed` must be `Some` exactly when some AIR declares preprocessed
     /// columns; otherwise this errors with
     /// [`PreprocessedValidationError::PresenceMismatch`]. When both hold, the
-    /// bundle's raw and committed shapes are validated against the AIRs and
-    /// config.
+    /// bundle's raw and committed shapes are validated against the AIRs and config. Execution
+    /// allocation, actual-height degree capacity and LDE domains are also checked here, even
+    /// when no preprocessed data is declared.
     pub fn new(
         config: &'a SC,
         prover_statement: ProverStatement<F, EF, MA>,
         preprocessed: Option<&'a Preprocessed<F, SC::Lmcs>>,
-    ) -> Result<Self, PreprocessedValidationError> {
-        let expected =
-            prover_statement.statement().airs().iter().any(|a| a.preprocessed_width() > 0);
+    ) -> Result<Self, ProverError> {
+        let (statement, traces) = prover_statement.into_parts();
+        let plan = ExecutionPlan::new(
+            statement.airs(),
+            traces.iter().map(|trace| log2_strict_u8(trace.height())).collect(),
+            config.pcs().log_blowup(),
+        )?;
+        let expected = !plan.preprocessed_trace_to_air.is_empty();
         let actual = preprocessed.is_some();
         if expected != actual {
-            return Err(PreprocessedValidationError::PresenceMismatch { expected, actual });
+            return Err(PreprocessedValidationError::PresenceMismatch { expected, actual }.into());
         }
         if let Some(p) = preprocessed {
-            validate_preprocessed(config, &prover_statement, p)?;
+            validate_preprocessed::<F, EF, _, _>(config, statement.airs(), &plan, p)?;
         }
-        let (statement, traces) = prover_statement.into_parts();
-        Ok(Self { config, statement, traces, preprocessed })
+        Ok(Self {
+            config,
+            statement,
+            traces,
+            preprocessed,
+            plan,
+        })
     }
 
     /// Consume this instance and return the proof with its verifier statement.
@@ -161,7 +189,8 @@ where
         challenger: SC::Challenger,
     ) -> Result<(StarkOutput<F, EF, SC>, Statement<F, EF, MA>), ProverError>
     where
-        <MA::Air as LiftedAir<F, EF>>::EvalData<F::Packing, EF::ExtensionPacking>: Sync,
+        MA::Air: air::ProverAir<EF> + air::LiftedAir<F = F>,
+        <MA::Air as AirKernel>::Prepared<F::Packing, EF::ExtensionPacking>: PackedPreparation,
     {
         prove(self, challenger)
     }
@@ -187,6 +216,11 @@ where
     pub fn preprocessed_commitment(&self) -> Option<<SC::Lmcs as Lmcs>::Commitment> {
         self.preprocessed.map(Preprocessed::commitment)
     }
+
+    /// Trusted fixed-setup association, reusable by a verifier without constructing tables.
+    pub fn preprocessed_identity(&self) -> Option<&SetupIdentity<<SC::Lmcs as Lmcs>::Commitment>> {
+        self.preprocessed.map(Preprocessed::identity)
+    }
 }
 
 /// Prove a [`ProverInstance`].
@@ -199,16 +233,16 @@ where
 ///
 /// # Trust contract
 ///
-/// `prove` validates ONLY untrusted runtime inputs and returns typed
-/// [`ProverError`] on failure. AIR structural correctness is the
-/// implementer's contract — call [`crate::debug::assert_prover_setup`]
+/// Instance construction validates untrusted runtime inputs before proving. Auxiliary witness
+/// construction and external assertion failures return typed [`ProverError`]. AIR structural
+/// correctness is the implementer's contract — call [`crate::debug::assert_prover_setup`]
 /// from your test harness to enforce it in debug builds.
 ///
-/// ## Validated
+/// ## Validated before proving
 /// - per AIR: `air.num_public_values() == statement.air_inputs()[i].len()`
 /// - `statement.aux_inputs().len() <= multi_air.max_aux_inputs()`
 /// - `prover_statement.traces().len() == statement.airs().len()` and `<= u8::MAX + 1`
-/// - per AIR: `trace.width() == air.width()`
+/// - per AIR: `trace.width() == air.descriptor().spec().main_width`
 /// - per AIR: `trace.height().is_power_of_two()`
 /// - per AIR: `trace.height() >= max periodic column length`
 /// - per AIR: `log_quotient_degree(air) <= config.pcs().log_blowup()`
@@ -217,10 +251,8 @@ where
 ///   construction
 ///
 /// ## Trusted (NOT validated)
-/// - AIR structural shape (positive `aux_width`, power-of-two periodic columns, window size 2)
-/// - [`crate::air::ProverStatement::build_aux_traces`] output dimensions — a malformed output is
-///   caught by the LDE/commit (panic) or by verification, since the verifier re-derives these
-///   shapes.
+/// - Authored equations and their correspondence with the checked descriptor.
+/// - Auxiliary witness output dimensions, which the prover asserts before commitment.
 ///
 /// # Arguments
 /// - `instance`: the config, the validated prover statement (AIRs, per-AIR `air_inputs`, and
@@ -239,22 +271,20 @@ where
     EF: ExtensionField<F>,
     SC: StarkConfig<F, EF>,
     MA: MultiAir<F, EF>,
-    <MA::Air as LiftedAir<F, EF>>::EvalData<F::Packing, EF::ExtensionPacking>: Sync,
+    MA::Air: air::ProverAir<EF> + air::LiftedAir<F = F>,
+    <MA::Air as AirKernel>::Prepared<F::Packing, EF::ExtensionPacking>: PackedPreparation,
 {
-    let ProverInstance { config, statement, traces, preprocessed } = instance;
+    let ProverInstance {
+        config,
+        statement,
+        traces,
+        preprocessed,
+        plan,
+    } = instance;
     let airs = statement.airs();
     let air_inputs = statement.air_inputs();
-    let trace_heights: Vec<usize> = traces.iter().map(Matrix::height).collect();
-    let trace_order = TraceOrder::from_trace_heights::<F, EF, _>(airs, &trace_heights)
-        .expect("prover setup and AIR contracts should ensure valid trace heights");
-
-    // Map each AIR to its preprocessed trace index. Only used when a preprocessed
-    // tree is present.
-    let air_to_preprocessed_trace = if preprocessed.is_some() {
-        trace_order.preprocessed_trace_index_for_air::<F, EF, _>(airs)
-    } else {
-        Vec::new()
-    };
+    let trace_order = &plan.order;
+    let air_to_preprocessed_trace = &plan.air_to_preprocessed_trace;
 
     // Borrow each AIR and trace, then reorder both into ascending-height (proof)
     // order. AIRs are passed as `&MA::Air` (the existing constraint code expects
@@ -263,13 +293,8 @@ where
     let proof_ordered_airs = trace_order.to_proof_order(&air_refs);
 
     let log_blowup = config.pcs().log_blowup();
-    let log_max_trace_height = trace_order.max_log_height();
-    let max_lde_domain = LiftedDomain::<F>::try_canonical(log_max_trace_height, log_blowup)?;
-    let instance_domains: Vec<_> = trace_order
-        .log_heights_proof()
-        .iter()
-        .map(|&log_h| max_lde_domain.try_sub_domain(log_h))
-        .collect::<Result<_, _>>()?;
+    let max_lde_domain = plan.max_lde_domain;
+    let instance_domains = &plan.domains;
 
     // Observe the preprocessed commitment first (when present); it is part of
     // the statement and binds Fiat-Shamir before any other instance data.
@@ -284,23 +309,8 @@ where
 
     let mut channel = ProverTranscript::new(challenger);
 
-    // Infer per-AIR quotient degrees from symbolic analysis (per-AIR optimization).
-    let log_quotient_degrees: Vec<u8> = proof_ordered_airs
-        .iter()
-        .map(|&air| log_quotient_degree::<F, EF, _>(air))
-        .collect();
-    let log_quotient_degree = log_quotient_degrees
-        .iter()
-        .copied()
-        .max()
-        .expect("TraceOrder construction rejects empty AIR sets");
-    if log_quotient_degree > log_blowup {
-        return Err(DomainError::ConstraintDegreeTooHigh {
-            log_quotient: log_quotient_degree,
-            log_blowup,
-        }
-        .into());
-    }
+    let log_quotient_degrees = &plan.log_quotient_degrees;
+    let log_quotient_degree = plan.max_log_quotient_degree;
 
     // Pair the max LDE domain with the quotient degree. The `EvaluationDomain`
     // now flows through the constraint and quotient layers. Per-instance variants
@@ -340,12 +350,15 @@ where
         })
         .collect();
     let main_committed = trace_span!(target: "miden::vm::prove", "commit to main traces")
-        .in_scope(|| commit_traces(config, &instance_domains, main_traces));
+        .in_scope(|| commit_traces(config, instance_domains, main_traces));
     channel.send_commitment(main_committed.root());
 
     // 2. Sample randomness, build aux traces, and commit them
-    let max_num_randomness =
-        proof_ordered_airs.iter().map(|air| air.num_randomness()).max().unwrap_or(0);
+    let max_num_randomness = proof_ordered_airs
+        .iter()
+        .map(|air| air.descriptor().spec().num_challenges)
+        .max()
+        .unwrap_or(0);
 
     let randomness: Vec<EF> = (0..max_num_randomness)
         .map(|_| channel.sample_algebra_element::<EF>())
@@ -356,37 +369,48 @@ where
     // LDE/commit or by verification.
     let preprocessed_traces = preprocessed.map(Preprocessed::raw_traces);
     let aux_inputs = statement.aux_inputs();
-    let (mut aux_traces_ef, mut all_aux_values): (Vec<_>, Vec<_>) =
-        trace_span!(target: "miden::vm::prove", "build aux traces").in_scope(|| {
+    let auxiliaries: Vec<_> = trace_span!(target: "miden::vm::prove", "build aux traces")
+        .in_scope(|| {
             airs.par_iter()
                 .zip(traces.par_iter())
                 .enumerate()
                 .map(|(air_index, (air, main))| {
-                    let num_randomness = air.num_randomness();
-                    debug_assert!(
-                        randomness.len() >= num_randomness,
-                        "AIR requested more aux randomness than the shared challenge pool contains",
+                    let spec = air.descriptor().spec();
+                    let auxiliary = air::ProverAir::build_aux_trace(
+                        air,
+                        air::AuxTraceInputs {
+                            main,
+                            preprocessed: preprocessed_traces
+                                .and_then(|traces| traces[air_index].as_ref()),
+                            public_values: &air_inputs[air_index],
+                            statement: aux_inputs,
+                            challenges: &randomness[..spec.num_challenges],
+                        },
+                    )
+                    .map_err(|source| ProverError::Auxiliary {
+                        air: air_index,
+                        source: Box::new(source),
+                    })?;
+                    assert_eq!(
+                        auxiliary.columns.width(),
+                        spec.aux_width,
+                        "aux trace width mismatch"
                     );
-                    let preprocessed_trace =
-                        preprocessed_traces.and_then(|traces| traces[air_index].as_ref());
-                    let (trace, values) = air.build_aux_trace_with_preprocessed(
-                        main,
-                        preprocessed_trace,
-                        &air_inputs[air_index],
-                        aux_inputs,
-                        &randomness[..num_randomness],
+                    assert_eq!(
+                        auxiliary.columns.values.len(),
+                        main.height() * spec.aux_width,
+                        "aux trace storage mismatch"
                     );
-                    debug_assert_eq!(trace.height(), main.height(), "aux trace height mismatch");
-                    debug_assert_eq!(trace.width(), air.aux_width(), "aux trace width mismatch");
-                    debug_assert_eq!(
-                        values.len(),
-                        air.num_aux_values(),
-                        "aux values length mismatch"
+                    assert_eq!(
+                        auxiliary.exports.len(),
+                        spec.num_exports,
+                        "aux export count mismatch"
                     );
-                    (trace, values)
+                    Ok((auxiliary.columns, auxiliary.exports))
                 })
-                .unzip()
-        });
+                .collect::<Result<Vec<_>, ProverError>>()
+        })?;
+    let (mut aux_traces_ef, mut all_aux_values): (Vec<_>, Vec<_>) = auxiliaries.into_iter().unzip();
 
     // Mirror the verifier's external assertion evaluation while aux values are
     // still in instance order. This is cheap and catches malformed statements
@@ -422,7 +446,7 @@ where
         .collect();
 
     let aux_committed = trace_span!(target: "miden::vm::prove", "commit to aux traces")
-        .in_scope(|| commit_traces(config, &instance_domains, aux_traces));
+        .in_scope(|| commit_traces(config, instance_domains, aux_traces));
     channel.send_commitment(aux_committed.root());
 
     // Observe aux values into the transcript (binds to Fiat-Shamir state).
@@ -448,12 +472,6 @@ where
     // Contributions supply the accumulator's storage, so reserving here would be discarded
     // on the first fold.
     let mut accumulator: Vec<EF> = Vec::new();
-
-    // Pre-compute per-AIR constraint layouts.
-    let layouts: Vec<_> = proof_ordered_airs
-        .iter()
-        .map(|&air| get_constraint_layout::<F, EF, _>(air))
-        .collect();
 
     trace_span!(target: "miden::vm::prove", "evaluate constraints").in_scope(|| {
         for (i, &air) in proof_ordered_airs.iter().enumerate() {
@@ -488,8 +506,10 @@ where
                 })
             });
 
-            let periodic_lde =
-                PeriodicLde::build(&this_quotient_eval_domain, air.periodic_columns_matrix());
+            let periodic_lde = PeriodicLde::build(
+                &this_quotient_eval_domain,
+                periodic_matrix(&air.descriptor().spec().periodic_columns),
+            );
 
             let mut quotient_evals = EF::zero_vec(this_quotient_eval_domain.size());
             let aux_values_i = &all_aux_values[i];
@@ -512,10 +532,10 @@ where
                     &aux_on_gj,
                     &this_quotient_eval_domain,
                     alpha,
-                    &randomness[..air.num_randomness()],
+                    &randomness[..air.descriptor().spec().num_challenges],
                     &air_inputs[trace_order.instance_indices()[i] as usize],
                     &periodic_lde,
-                    &layouts[i],
+                    air.descriptor().analysis().layout(),
                     aux_values_i,
                     &inv_z_h,
                 );
@@ -596,9 +616,14 @@ where
 #[derive(Debug, Error)]
 pub enum ProverError {
     #[error(transparent)]
-    Instance(#[from] InstanceError),
+    Plan(#[from] PlanError),
     #[error(transparent)]
-    Domain(#[from] DomainError),
+    Preprocessed(#[from] PreprocessedValidationError),
+    #[error("AIR {air}: auxiliary witness construction failed: {source}")]
+    Auxiliary {
+        air: usize,
+        source: Box<dyn core::error::Error + Send + Sync>,
+    },
     #[error("external assertion evaluation failed: {0}")]
     Reduction(ReductionError),
     #[error("external assertion {assertion} is non-zero")]

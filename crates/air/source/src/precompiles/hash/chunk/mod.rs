@@ -174,6 +174,17 @@ impl air::LiftedAir for ChunkAir {
     }
 }
 
+impl air::ProverAir<QuadFelt> for ChunkAir {
+    type Error = lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
+    }
+}
+
 // LOOKUP AIR
 // ================================================================================================
 

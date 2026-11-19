@@ -115,6 +115,17 @@ impl air::LiftedAir for Sha512IoAir {
     }
 }
 
+impl air::ProverAir<QuadFelt> for Sha512IoAir {
+    type Error = lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
+    }
+}
+
 /// Evaluate the local constraints in an independent main/periodic column band.
 /// Active rows form whole sixty-four-row blocks. Invocation boundaries reset the message counters;
 /// all other block boundaries continue them. The composite AIR enforces these same boundaries

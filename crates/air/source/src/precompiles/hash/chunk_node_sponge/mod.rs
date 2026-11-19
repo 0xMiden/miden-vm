@@ -77,6 +77,17 @@ impl air::LiftedAir for ChunkNodeSpongeAir {
     }
 }
 
+impl air::ProverAir<QuadFelt> for ChunkNodeSpongeAir {
+    type Error = lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
+    }
+}
+
 impl<LB> lookup::LookupAir<LB> for ChunkNodeSpongeAir
 where
     LB: lookup::LookupBuilder<F = Felt>,

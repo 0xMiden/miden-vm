@@ -362,11 +362,44 @@ fn uint_store_mul_registers_match_standalone_with_nonzero_cycle_sums() {
             STORE_MUL_NUM_MAIN_COLS,
         );
         let challenges = [rand_qf(&mut rng), rand_qf(&mut rng)];
-        let (merged, _) = UintStoreMulAir.build_aux_trace(&main, &[], &[], &challenges);
+        let merged = miden_stark::air::ProverAir::build_aux_trace(
+            &UintStoreMulAir,
+            miden_stark::air::AuxTraceInputs {
+                main: &main,
+                preprocessed: None,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        )
+        .expect("native integer witness inputs are valid")
+        .columns;
         let store_main = extract_band(&main, 0..NUM_MAIN_COLS);
         let mul_main = extract_band(&main, NUM_MAIN_COLS..STORE_MUL_NUM_MAIN_COLS);
-        let (store, _) = UintStoreAir.build_aux_trace(&store_main, &[], &[], &challenges);
-        let (mul, _) = UintMulAir.build_aux_trace(&mul_main, &[], &[], &challenges);
+        let store = miden_stark::air::ProverAir::build_aux_trace(
+            &UintStoreAir,
+            miden_stark::air::AuxTraceInputs {
+                main: &store_main,
+                preprocessed: None,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        )
+        .expect("native integer witness inputs are valid")
+        .columns;
+        let mul = miden_stark::air::ProverAir::build_aux_trace(
+            &UintMulAir,
+            miden_stark::air::AuxTraceInputs {
+                main: &mul_main,
+                preprocessed: None,
+                public_values: &[],
+                statement: &[],
+                challenges: &challenges,
+            },
+        )
+        .expect("native integer witness inputs are valid")
+        .columns;
         assert_eq!(
             store.values[512 * store.width() + store.width() - 1] != QuadFelt::ZERO,
             nonzero_columns.contains(&0),

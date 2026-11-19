@@ -2,17 +2,15 @@
 //! transcript are tied to public `aux_inputs` by extension-field assertion
 //! expressions checked outside the per-row AIR constraints.
 
-use alloc::{vec, vec::Vec};
+use alloc::{borrow::Cow, vec, vec::Vec};
+use core::convert::Infallible;
 
-use p3_field::{Algebra, PrimeCharacteristicRing};
+use p3_field::{Dup, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    ProverInstance, VerifierInstance,
-    air::{
-        AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder, MultiAir,
-        ProverStatement, ReductionError, Statement, WindowAccess,
-    },
+    ProverInstance, VerifierInstance, air,
+    air::{LiftedAirBuilder as _, MultiAir, ProverStatement, ReductionError, Statement},
     testing::configs::goldilocks_poseidon2::{
         Felt, QuadFelt, generate_pow4_trace, test_challenger, test_config,
     },
@@ -30,68 +28,59 @@ struct ExternalAir {
     input: Felt,
 }
 
-impl BaseAir<Felt> for ExternalAir {
-    fn width(&self) -> usize {
-        1
+impl air::LiftedAir for ExternalAir {
+    type F = Felt;
+
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
+            main_width: 1,
+            aux_width: 1,
+            num_public_values: 1,
+            num_challenges: 1,
+            num_exports: 1,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(&[]),
+        }
     }
 
-    fn num_public_values(&self) -> usize {
-        1 // [start]
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        let local = frame.main.current;
+        let next = frame.main.next;
+
+        // Main trace: power-of-4 chain anchored at the public start value.
+        builder.when(frame.first_row()).assert_eq(local[0].dup(), inputs.public(0));
+        let main_pow4 = local[0].dup().exp_power_of_2(2);
+        builder.when(frame.transition()).assert_eq(next[0].dup(), main_pow4);
+
+        // The last-row export is the value used by the unchanged external reduction.
+        builder
+            .when(frame.transition())
+            .assert_eq_ext(frame.aux.next[0].dup(), frame.aux.current[0].dup());
+        builder
+            .when(frame.last_row())
+            .assert_eq_ext(frame.aux.current[0].dup(), inputs.export(0));
     }
 }
 
-impl LiftedAir<Felt, QuadFelt> for ExternalAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        1
-    }
-
-    fn aux_width(&self) -> usize {
-        1
-    }
-
-    fn num_aux_values(&self) -> usize {
-        1
-    }
+impl air::ProverAir<QuadFelt> for ExternalAir {
+    type Error = Infallible;
 
     fn build_aux_trace(
         &self,
-        main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
         // One constant column: challenge + input.
-        let value = QuadFelt::from(self.input) + challenges[0];
-        let values = vec![value; main.height()];
-        (RowMajorMatrix::new(values, 1), vec![value])
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        let start = builder.public_values()[0];
-
-        let main = builder.main();
-        let (local, next) = (main.current_slice(), main.next_slice());
-
-        // Main trace: power-of-4 chain anchored at the public start value.
-        builder.when_first_row().assert_eq(local[0], start);
-        let main_pow4: AB::Expr = local[0].into().exp_power_of_2(2);
-        builder.when_transition().assert_eq(next[0], main_pow4);
-
-        // Aux column is constant and exposes its value as the committed aux value
-        // on the last row — the value `eval_external` reasons about.
-        let aux = builder.permutation();
-        let aux_local = aux.current_slice();
-        let aux_next = aux.next_slice();
-        let aux_value: AB::PermutationVar = builder.permutation_values()[0].clone();
-
-        builder
-            .when_transition()
-            .assert_eq_ext::<AB::ExprEF, AB::ExprEF>(aux_next[0].into(), aux_local[0].into());
-        builder
-            .when_last_row()
-            .assert_eq_ext::<AB::ExprEF, AB::ExprEF>(aux_local[0].into(), aux_value.into());
+        let value = QuadFelt::from(self.input) + inputs.challenges[0];
+        let values = vec![value; inputs.main.height()];
+        Ok(air::AuxTrace {
+            columns: RowMajorMatrix::new(values, 1),
+            exports: vec![value],
+        })
     }
 }
 
@@ -100,11 +89,11 @@ impl LiftedAir<Felt, QuadFelt> for ExternalAir {
 // ---------------------------------------------------------------------------
 
 struct ExternalMultiAir {
-    airs: Vec<ExternalAir>,
+    airs: Vec<air::DirectKernel<ExternalAir>>,
 }
 
 impl MultiAir<Felt, QuadFelt> for ExternalMultiAir {
-    type Air = ExternalAir;
+    type Air = air::DirectKernel<ExternalAir>;
 
     fn airs(&self) -> &[Self::Air] {
         &self.airs
@@ -137,7 +126,9 @@ fn external_prover_statement(
     aux_inputs: Vec<Felt>,
 ) -> ProverStatement<Felt, QuadFelt, ExternalMultiAir> {
     let statement = Statement::new(
-        ExternalMultiAir { airs: vec![ExternalAir { input }] },
+        ExternalMultiAir {
+            airs: vec![air::DirectKernel::new(ExternalAir { input }).unwrap()],
+        },
         vec![(0, air_inputs)],
         aux_inputs,
     )
@@ -196,4 +187,41 @@ fn missing_external_input_fails_proving() {
         matches!(err, crate::ProverError::Reduction(_)),
         "expected Reduction, got {err:?}"
     );
+}
+
+#[test]
+fn native_external_source_preserves_export_and_direct_symbolic_order() {
+    use crate::air::AirKernel;
+
+    let source = ExternalAir { input: Felt::from_u64(42) };
+    let expected = air::capture_with::<_, QuadFelt>(&source).unwrap();
+    assert_eq!(expected.descriptor.analysis().layout().base_indices(), &[0, 1]);
+    assert_eq!(expected.descriptor.analysis().layout().ext_indices(), &[2, 3]);
+
+    let kernel = air::DirectKernel::new(source).unwrap();
+    let main = generate_pow4_trace(Felt::from_u64(2), 4);
+    let public = [Felt::from_u64(2)];
+    let challenges = [QuadFelt::from_u64(7)];
+    let aux = air::ProverAir::build_aux_trace(
+        &kernel,
+        air::AuxTraceInputs {
+            main: &main,
+            preprocessed: None,
+            public_values: &public,
+            statement: &[],
+            challenges: &challenges,
+        },
+    )
+    .unwrap();
+    // This export is the constant itself, without trace-height normalization.
+    assert_eq!(aux.columns.values, vec![QuadFelt::from_u64(49); 4]);
+    assert_eq!(aux.exports, vec![QuadFelt::from_u64(49)]);
+
+    let observed = air::capture_from_spec::<Felt, QuadFelt>(
+        kernel.descriptor().spec().as_borrowed(),
+        |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
+    )
+    .unwrap();
+    assert_eq!(observed.descriptor.fingerprint(), expected.descriptor.fingerprint());
+    assert_eq!(observed.descriptor.analysis(), expected.descriptor.analysis());
 }
