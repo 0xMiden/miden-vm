@@ -189,7 +189,7 @@ impl PackageDebugInfo {
     /// its memory and processing costs. This method still checks the wire format and honors the
     /// reader's remaining input and allocation budget. Use [`Self::read_from`] for potentially
     /// adversarial input with the standard fixed limits.
-    pub fn read_from_unmetered<R: ByteReader>(
+    pub(crate) fn read_from_unmetered<R: ByteReader>(
         source: &mut R,
     ) -> Result<Self, DeserializationError> {
         Self::read_from_with_limits(source, PackageDebugInfoDecodeLimits::UNMETERED)
@@ -199,7 +199,7 @@ impl PackageDebugInfo {
     /// [`Self::read_from_bytes`].
     ///
     /// Use this only when the caller accepts the memory and processing costs of the encoded data.
-    /// The wire-format checks described by [`Self::read_from_unmetered`] still apply. Use
+    /// The same wire-format checks still apply. Use
     /// [`Self::read_from_bytes`] for potentially adversarial input with the standard fixed limits.
     pub fn read_from_bytes_unmetered(bytes: &[u8]) -> Result<Self, DeserializationError> {
         Self::read_from_unmetered(&mut miden_core::serde::SliceReader::new(bytes))
@@ -318,8 +318,9 @@ impl Deserializable for PackageDebugInfo {
     /// input.
     ///
     /// The limits cap the encoded payload, string table, individual strings, and type table. This
-    /// method also performs the normal wire-format checks. Use [`Self::read_from_unmetered`] only
-    /// when the data may exceed those limits and the caller accepts its resource costs.
+    /// method also performs the normal wire-format checks. Use
+    /// [`Self::read_from_bytes_unmetered`] only when the data may exceed those limits and the
+    /// caller accepts its resource costs.
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Self::read_from_with_limits(source, PackageDebugInfoDecodeLimits::BOUNDED)
     }

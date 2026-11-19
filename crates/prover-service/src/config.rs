@@ -132,7 +132,7 @@ impl ServerConfig {
     }
 
     /// Returns the serialized witness byte limit, excluding its protobuf envelope.
-    pub const fn max_witness_bytes(&self) -> usize {
+    pub(crate) const fn max_witness_bytes(&self) -> usize {
         self.max_witness_bytes
     }
 
@@ -162,7 +162,7 @@ impl ServerConfig {
     }
 
     /// Returns the precompile prover-memory budget in bytes.
-    pub const fn precompile_memory_bytes(&self) -> u64 {
+    pub(crate) const fn precompile_memory_bytes(&self) -> u64 {
         self.precompile_memory_bytes
     }
 

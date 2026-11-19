@@ -148,7 +148,7 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// Validates and interns raw identifier text at the given span.
-    pub(super) fn lower_ident_text(
+    fn lower_ident_text(
         &mut self,
         span: SourceSpan,
         text: &str,

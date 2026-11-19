@@ -101,7 +101,6 @@ impl MidenProject {
 }
 
 /// An internal error type used when parsing a `miden-project.toml` file.
-#[allow(dead_code)] // Different feature combinations may produce dead variants
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub(crate) enum ProjectFileError {
     #[error("unable to parse project manifest: {message}")]
@@ -127,6 +126,7 @@ pub(crate) enum ProjectFileError {
         #[label(primary)]
         label: Label,
     },
+    #[cfg(all(feature = "std", feature = "serde"))]
     #[error("invalid dependency specification: {}", label.label().unwrap_or(""))]
     InvalidPackageDependency {
         #[source_code]
@@ -148,6 +148,7 @@ pub(crate) enum ProjectFileError {
         #[label(primary)]
         span: SourceSpan,
     },
+    #[cfg(all(feature = "std", feature = "serde"))]
     #[error("failed to load workspace member: {}", span.label().unwrap_or("unknown"))]
     LoadWorkspaceMemberFailed {
         #[source_code]
@@ -155,6 +156,7 @@ pub(crate) enum ProjectFileError {
         #[label(primary)]
         span: Label,
     },
+    #[cfg(all(feature = "std", feature = "serde"))]
     #[error("duplicate workspace member package name '{name}'")]
     DuplicateWorkspaceMember {
         name: String,
@@ -173,6 +175,7 @@ pub(crate) enum ProjectFileError {
         #[label(primary)]
         span: SourceSpan,
     },
+    #[cfg(all(feature = "std", feature = "serde"))]
     #[error("cannot redefine profile '{name}'")]
     DuplicateProfile {
         name: Arc<str>,
@@ -183,6 +186,7 @@ pub(crate) enum ProjectFileError {
         #[label]
         prev: SourceSpan,
     },
+    #[cfg(all(feature = "std", feature = "serde"))]
     #[error("missing required field 'version'")]
     MissingVersion {
         #[source_code]
@@ -190,6 +194,7 @@ pub(crate) enum ProjectFileError {
         #[label(primary)]
         span: SourceSpan,
     },
+    #[cfg(all(feature = "std", feature = "serde"))]
     #[error("workspace does not define 'version'")]
     MissingWorkspaceVersion {
         #[source_code]

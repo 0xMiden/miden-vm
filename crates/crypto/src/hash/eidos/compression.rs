@@ -262,7 +262,7 @@ mod tests {
         let packed_block: PackedBlock = array::from_fn(|element| {
             array::from_fn(|lane| Felt::new_unchecked((element * 97 + lane * 13 + 5) as u64))
         });
-        let packed = super::super::Eidos::compress_packed(packed_cv, packed_block);
+        let packed = super::super::Eidos::compress_packed(&packed_cv, &packed_block);
 
         for lane in 0..PACKED_LANES {
             let cv = Word::new(array::from_fn(|word| packed_cv[word][lane]));

@@ -349,7 +349,6 @@ impl Page for Home {
                 };
                 Ok(Some(response))
             },
-            InputMode::Insert => Ok(None),
             InputMode::Command => Ok(None),
         }
     }

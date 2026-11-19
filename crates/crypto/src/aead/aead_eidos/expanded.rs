@@ -60,7 +60,7 @@ pub fn derive_mac_key(key: Word, nonce: Word) -> Word {
 ///
 /// The compression block is `[counter, 0, 0, 0, 0, 0, 0, 0]`, and all sixteen XOF lanes form the
 /// keystream block.
-pub fn keystream_block(ctr_key: Word, counter: u32) -> [u32; 16] {
+pub(crate) fn keystream_block(ctr_key: Word, counter: u32) -> [u32; 16] {
     let mut counter_block = [Felt::ZERO; 8];
     counter_block[0] = Felt::from_u32(counter);
 

@@ -19,7 +19,7 @@ use crate::prover::{
         chunk::{
             COL_ABSORPTION_ID, COL_ACT, COL_CHUNK_SEQ_ID, COL_F_BEGIN, COL_F_END, COL_IS_HEAD,
             ChunkAir, ChunkChainMsg, NUM_AUX_COLS, NUM_MAIN_COLS,
-            trace::{ChunkRequires, Invocation, generate_trace},
+            trace::{ChunkRequires, Invocation, generate_trace_padded_to},
         },
         memory64::Memory64Msg,
     },
@@ -39,7 +39,7 @@ fn build_chunk_requires(invocations: &[Invocation]) -> (ChunkRequires, EidosRequ
 
 fn check_with_seed(_seed: u64, invocations: &[Invocation]) {
     let (chunk_req, _p2) = build_chunk_requires(invocations);
-    let main = generate_trace(chunk_req);
+    let main = generate_trace_padded_to(chunk_req, 0);
     crate::prover::tests::check_local(ChunkAir, &main);
 }
 
@@ -189,7 +189,7 @@ fn constraints_hold_with_absorption_id_jump_at_head() {
     // head (is_head_next = 1), so the chain gate vanishes and the
     // constraints still hold.
     let (chunk_req, _p2) = build_chunk_requires(&[inv(33, 0xa1), inv(40, 0xb2)]);
-    let mut main = generate_trace(chunk_req);
+    let mut main = generate_trace_padded_to(chunk_req, 0);
     // inv0 = 2 chunks (rows 0,1), inv1 = 2 chunks (rows 2,3). Row 2 is
     // a head (is_head = 1). Bump absorption_id on rows 2,3 by a gap.
     let gap = Felt::from(7u8);
@@ -209,7 +209,7 @@ fn corrupt_and_check(
     corruption: impl FnOnce(&mut miden_core::utils::RowMajorMatrix<Felt>),
 ) {
     let (chunk_req, _p2) = build_chunk_requires(invocations);
-    let mut main = generate_trace(chunk_req);
+    let mut main = generate_trace_padded_to(chunk_req, 0);
     corruption(&mut main);
     crate::prover::tests::check_local(ChunkAir, &main);
 }

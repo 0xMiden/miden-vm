@@ -26,7 +26,7 @@ use crate::setup::preprocessed::cached_preprocessed_setup;
 /// Failure while producing a VM STARK proof.
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
-pub struct ProvingError(pub alloc::string::String);
+pub struct ProvingError(pub(crate) alloc::string::String);
 
 /// Proves a completed VM trace using the selected commitment hash.
 ///

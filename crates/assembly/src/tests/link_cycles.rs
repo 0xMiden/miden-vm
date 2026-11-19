@@ -62,7 +62,7 @@ fn cyclic_link_retry_is_structured_error_without_panicking() {
 
     let context = TestContext::new();
     let module = context
-        .parse_program(source_file!(
+        .parse_module(source_file!(
             &context,
             r#"
                 begin

@@ -72,7 +72,7 @@ pub struct HidingLmcsConfig<
     const SALT: usize,
 > {
     /// Inner non-hiding config with sponge and compression.
-    pub inner: LmcsConfig<PF, PD, H, C, WIDTH, DIGEST, SALT>,
+    pub(crate) inner: LmcsConfig<PF, PD, H, C, WIDTH, DIGEST, SALT>,
     /// RNG for salt generation. Uses `RefCell` for interior mutability.
     rng: RefCell<R>,
 }

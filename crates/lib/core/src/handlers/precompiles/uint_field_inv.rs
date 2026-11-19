@@ -16,7 +16,7 @@ pub const UINT_FIELD_INV_EVENT_NAME: EventName =
 
 /// Resolves the input uint value digest from deferred state, computes its inverse in the encoded
 /// prime-field domain, and pushes the inverse limbs onto the advice stack for MASM validation.
-pub fn handle_uint_field_inv(
+pub(crate) fn handle_uint_field_inv(
     process: &ProcessorState<'_>,
 ) -> Result<Vec<AdviceMutation>, EventError> {
     let input_digest = process.get_stack_word(1);

@@ -36,7 +36,7 @@ use crate::{
 ///
 /// It is necessary to explicitly hold onto the returned directory until the end of the scope in
 /// order to ensure correct cleanup behavior.
-pub fn default_backend() -> Result<(TempDir, PersistentBackend)> {
+pub(crate) fn default_backend() -> Result<(TempDir, PersistentBackend)> {
     let temp_path = tempdir()?;
     let config = Config::new(temp_path.path())?;
     let backend = PersistentBackend::load(config)?;

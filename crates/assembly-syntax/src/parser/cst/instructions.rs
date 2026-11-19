@@ -1961,7 +1961,7 @@ fn lower_decimal_u64_literal(token: &SyntaxToken) -> Option<u64> {
 }
 
 /// Wraps an instruction in an AST op at `span`.
-pub(super) fn inst_op(span: SourceSpan, instruction: Instruction) -> ast::Op {
+fn inst_op(span: SourceSpan, instruction: Instruction) -> ast::Op {
     ast::Op::Inst(Span::new(span, instruction))
 }
 

@@ -20,7 +20,7 @@ pub fn seeded_rng(seed: [u8; 32]) -> ChaCha20Rng {
     ChaCha20Rng::from_seed(seed)
 }
 
-/// Array-shaped variant of [`seeded_felts`] for sites that need a
+/// Draws `N` values from the same fixed-seed stream for sites that need a
 /// fixed-length `[Felt; N]` (e.g. fixed-width state roundtrips).
 pub fn seeded_felts_array<const N: usize>(seed: u8) -> [Felt; N] {
     let mut rng = seeded_rng([seed; 32]);
@@ -35,7 +35,8 @@ pub fn seeded_felts_array<const N: usize>(seed: u8) -> [Felt; N] {
 /// the values. The elements use the full internal u64 range (possibly
 /// non-canonical representations — fine for these hash oracles, unlike the
 /// field crate's canonical-only `Standard` distribution).
-pub fn seeded_felts(seed: u8, n: usize) -> alloc::vec::Vec<Felt> {
+#[cfg(all(test, feature = "std"))]
+pub(crate) fn seeded_felts(seed: u8, n: usize) -> alloc::vec::Vec<Felt> {
     use rand::Rng;
     let mut rng = seeded_rng([seed; 32]);
     (0..n)

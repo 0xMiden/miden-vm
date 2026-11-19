@@ -117,7 +117,7 @@ impl InteractionLog {
     /// For every `(row, mult, denom)` in `expected`, there must be at least as many matching
     /// pushes at that row. Unclaimed actual pushes are ignored, so partial tests can focus on one
     /// bus or one instruction without enumerating every other interaction that happens to fire.
-    pub fn assert_contains(&self, expected: &Expectations) {
+    pub(crate) fn assert_contains(&self, expected: &Expectations) {
         for &entry in &expected.entries {
             let (row, mult, denom) = entry;
             let want = expected.entries.iter().filter(|&&e| e == entry).count();
@@ -132,7 +132,7 @@ impl InteractionLog {
     }
 
     /// Return the net multiplicity emitted for `message` across the complete trace.
-    pub fn net_multiplicity<M>(&self, message: &M) -> Felt
+    pub(crate) fn net_multiplicity<M>(&self, message: &M) -> Felt
     where
         M: LookupMessage<Felt, QuadFelt>,
     {
@@ -197,12 +197,12 @@ impl<'a> Expectations<'a> {
     }
 
     /// Number of expected entries registered via `add` (multiplicity = +1).
-    pub fn count_adds(&self) -> usize {
+    pub(crate) fn count_adds(&self) -> usize {
         self.entries.iter().filter(|(_, m, _)| *m == Felt::ONE).count()
     }
 
     /// Number of expected entries registered via `remove` (multiplicity = -1).
-    pub fn count_removes(&self) -> usize {
+    pub(crate) fn count_removes(&self) -> usize {
         self.entries.iter().filter(|(_, m, _)| *m == -Felt::ONE).count()
     }
 }

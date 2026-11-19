@@ -70,10 +70,10 @@ pub trait StarkConfig<F: TwoAdicField, EF: ExtensionField<F>>: Clone {
 /// (cloned for each proof/verification). Use this for tests and examples;
 /// production code can implement `StarkConfig` on a custom struct.
 pub struct GenericStarkConfig<F, EF, L, Dft, Ch> {
-    pub pcs: PcsParams,
-    pub lmcs: L,
-    pub dft: Dft,
-    pub challenger: Ch,
+    pub(crate) pcs: PcsParams,
+    pub(crate) lmcs: L,
+    pub(crate) dft: Dft,
+    pub(crate) challenger: Ch,
     /// Whether to hash completed blocks during the final trace LDE. Defaults to `false`.
     pub hash_lde_blocks: bool,
     _phantom: PhantomData<fn() -> (F, EF)>,
@@ -151,7 +151,7 @@ pub type EidosLmcs = LmcsConfig<
 >;
 
 /// Creates the Eidos LMCS configuration used by Miden STARK proofs.
-pub const fn lmcs_config() -> EidosLmcs {
+pub(crate) const fn lmcs_config() -> EidosLmcs {
     LmcsConfig::new(EidosLmcsHasher, EidosLmcsCompressor)
 }
 

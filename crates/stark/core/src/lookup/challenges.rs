@@ -35,7 +35,6 @@ use miden_crypto::field::PrimeCharacteristicRing;
 ///
 /// [`LookupAir`]: crate::lookup::LookupAir
 pub struct Challenges<EF: PrimeCharacteristicRing> {
-    pub alpha: EF,
     pub beta_powers: Box<[EF]>,
     /// Per-bus domain separation: `bus_prefix[i] = alpha + (i+1) * gamma`
     /// where `gamma = beta^max_message_width`.
@@ -69,7 +68,7 @@ impl<EF: PrimeCharacteristicRing> Challenges<EF> {
             .map(|i| alpha.clone() + gamma.clone() * EF::from_u32((i as u32) + 1))
             .collect();
 
-        Self { alpha, beta_powers, bus_prefix }
+        Self { beta_powers, bus_prefix }
     }
 
     /// Encodes as **bus_prefix\[bus\] + sum(beta_powers\[i\] * elem\[i\])** with K consecutive

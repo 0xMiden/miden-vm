@@ -60,7 +60,7 @@ fn test_poseidon2_permutation_consistency() {
     perm.permute_mut(&mut state1);
 
     // Apply permutation directly
-    Poseidon2Permutation256::apply_permutation(&mut state2);
+    Poseidon2::apply_permutation(&mut state2);
 
     // Both should produce the same result
     assert_eq!(state1, state2);

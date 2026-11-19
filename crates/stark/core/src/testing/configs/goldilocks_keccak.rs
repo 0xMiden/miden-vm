@@ -37,7 +37,7 @@ pub type Commitment = Hash<Felt, u64, DIGEST>;
 pub type Challenger = SerializingChallenger64<Felt, HashChallenger<u8, Keccak256Hash, 32>>;
 
 /// Create standard test components for Merkle tree construction.
-pub fn test_components() -> (Sponge, Compress) {
+pub(crate) fn test_components() -> (Sponge, Compress) {
     let sponge = Sponge::new(InnerSponge::new(KeccakF));
     let compress = Compress::new(KeccakMmcsSponge::new(KeccakF));
     (sponge, compress)

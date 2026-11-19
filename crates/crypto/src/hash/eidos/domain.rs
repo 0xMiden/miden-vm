@@ -78,7 +78,7 @@ pub struct NamespaceDescriptor {
     /// Numeric namespace prefix.
     pub namespace: DomainNamespace,
     /// Repository responsible for the namespace's local registry.
-    pub maintainer: &'static str,
+    pub(crate) maintainer: &'static str,
 }
 
 /// The central Eidos namespace registry.
@@ -144,7 +144,7 @@ impl DomainVersion {
     }
 
     /// Returns true when the authenticated payload carries the object version.
-    pub const fn is_delegated(self) -> bool {
+    pub(crate) const fn is_delegated(self) -> bool {
         self.0 == 0
     }
 

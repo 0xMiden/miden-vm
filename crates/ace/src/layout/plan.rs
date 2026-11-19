@@ -122,14 +122,15 @@ pub struct InputLayout {
 }
 
 impl InputLayout {
-    pub(crate) fn mapper(&self) -> super::InputKeyMapper<'_> {
+    fn mapper(&self) -> super::InputKeyMapper<'_> {
         super::InputKeyMapper { layout: self }
     }
 
     /// Number of quotient coordinate READ slots, including committed row padding.
     ///
     /// The logical quotient chunk count remains `counts.num_quotient_chunks`.
-    pub fn quotient_width(&self) -> usize {
+    #[cfg(feature = "compiler")]
+    pub(crate) fn quotient_width(&self) -> usize {
         self.regions.quotient_curr.width
     }
 

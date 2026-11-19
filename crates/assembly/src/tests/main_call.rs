@@ -103,7 +103,7 @@ end
 
     let account_code1 = context.parse_module(account_code1_src)?;
     let account_code2 = context.parse_module(account_code2_src)?;
-    let main = context.parse_program(main_src)?;
+    let main = context.parse_module(main_src)?;
 
     let mut assembler = Assembler::new(context.source_manager());
     assembler.compile_and_statically_link_all([account_code1, account_code2])?;

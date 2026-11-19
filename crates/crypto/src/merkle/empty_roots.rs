@@ -11,7 +11,7 @@ pub struct EmptySubtreeRoots;
 impl EmptySubtreeRoots {
     /// Returns a static slice with roots of empty subtrees of a Merkle tree starting at the
     /// specified depth.
-    pub const fn empty_hashes(tree_depth: u8) -> &'static [Word] {
+    pub(crate) const fn empty_hashes(tree_depth: u8) -> &'static [Word] {
         let ptr = &EMPTY_SUBTREES[255 - tree_depth as usize] as *const Word;
         // SAFETY:
         // 1. Lifetime: EMPTY_SUBTREES is a static array with 256 elements, so it outlives any

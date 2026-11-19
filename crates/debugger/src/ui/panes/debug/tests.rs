@@ -54,14 +54,12 @@ fn log_popup_renders_severities_navigates_and_intercepts_keys() {
             matches!(pane.handle_key_events(KeyEvent::new(code, KeyModifiers::NONE), &mut state).unwrap(), Some(EventResponse::Stop(action)) if action == expected)
         );
     }
-    for mode in [InputMode::Insert, InputMode::Command] {
-        state.input_mode = mode;
-        assert!(matches!(
-            pane.handle_key_events(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), &mut state)
-                .unwrap(),
-            Some(EventResponse::Stop(Action::Noop))
-        ));
-    }
+    state.input_mode = InputMode::Command;
+    assert!(matches!(
+        pane.handle_key_events(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), &mut state)
+            .unwrap(),
+        Some(EventResponse::Stop(Action::Noop))
+    ));
     let mut terminal = Terminal::new(TestBackend::new(80, 12)).unwrap();
     terminal.draw(|frame| pane.draw(frame, frame.area(), &state).unwrap()).unwrap();
     let text = terminal

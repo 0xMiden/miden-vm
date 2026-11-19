@@ -343,7 +343,7 @@ impl History {
 impl History {
     /// Returns `true` if `root` is in the history and `false` otherwise.
     #[must_use]
-    pub fn is_known_root(&self, root: RootValue) -> bool {
+    pub(crate) fn is_known_root(&self, root: RootValue) -> bool {
         self.deltas.iter().any(|r| r.root == root)
     }
 }
