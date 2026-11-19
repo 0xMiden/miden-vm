@@ -1004,6 +1004,8 @@ fn stack_outputs_as_int_vec(outputs: &StackOutputs) -> Vec<u64> {
     outputs.iter().map(Felt::as_canonical_u64).collect()
 }
 
+/// Pads `values` with zeros up to the minimum stack depth.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn resize_to_min_stack_depth(values: &[u64]) -> Vec<u64> {
     let mut result: Vec<u64> = values.to_vec();
     result.resize(MIN_STACK_DEPTH, 0);
