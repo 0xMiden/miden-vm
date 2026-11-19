@@ -375,25 +375,6 @@ impl EcStoreRequires {
     }
 }
 
-/// Build the standalone group and point-store traces for component tests.
-/// Callers must record all cross-chiplet requirements before consuming the
-/// accumulator here.
-#[cfg(test)]
-pub(crate) fn generate_traces(
-    requires: EcStoreRequires,
-) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
-    (groups_trace(&requires), points_trace(&requires))
-}
-
-/// The group table — one row per group in fixed/dense allocation order,
-/// padded to a power-of-two height (min 2). The ungated chain forces
-/// `ptr = row + 1` on every row, so pads carry their ptr too — they are
-/// simply rows whose `mult` (and params) stay zero, touching no bus.
-#[cfg(test)]
-fn groups_trace(requires: &EcStoreRequires) -> RowMajorMatrix<Felt> {
-    groups_trace_padded_to(requires, 0)
-}
-
 /// Builds the group table at a height of at least `min_height`. Padding rows
 /// continue `ptr = row + 1`, with zero multiplicity and parameters. `min_height`
 /// must be 0 or a power of two so the padded height remains a power of two.
