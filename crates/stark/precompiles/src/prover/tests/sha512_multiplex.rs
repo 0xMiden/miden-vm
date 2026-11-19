@@ -8,10 +8,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_stark::{
-    air::{BaseAir, ConstraintDegrees, LiftedAir},
-    lookup::Challenges,
-};
+use miden_stark::{air::LiftedAir, lookup::Challenges};
 
 use crate::prover::{
     hash::sha512::{
@@ -48,9 +45,9 @@ fn io_index(block: usize, lane: usize, column: usize) -> usize {
 
 #[test]
 fn sha512_opcode_lookup_packing_preserves_degree() {
-    assert_eq!(Sha512Air.width(), 54);
-    assert_eq!(Sha512Air.aux_width(), 7);
-    assert_eq!(ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&Sha512Air).max(), 5);
+    assert_eq!(Sha512Air.spec().main_width, 54);
+    assert_eq!(Sha512Air.spec().aux_width, 7);
+    assert_eq!(crate::prover::tests::raw_degrees(&Sha512Air).max(), 5);
     assert_eq!(crate::prover::tests::log_quotient_degree(&Sha512Air), 2);
 }
 

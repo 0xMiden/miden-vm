@@ -11,7 +11,7 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_stark::air::{BaseAir, LiftedAir};
+use miden_stark::air::LiftedAir;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::prover::{
@@ -109,21 +109,21 @@ fn main_column_layout_partitions_12_indices() {
     assert_eq!(COL_F_BEGIN, 4);
     assert_eq!(COL_F_END, NUM_MAIN_COLS);
     assert_eq!(NUM_MAIN_COLS, 12);
-    assert_eq!(<ChunkAir as BaseAir<Felt>>::width(&ChunkAir), NUM_MAIN_COLS);
+    assert_eq!(ChunkAir.spec().main_width, NUM_MAIN_COLS);
 }
 
 #[test]
 fn lifted_air_validates_and_layout_matches_spec() {
     let air = ChunkAir;
-    let layout = <ChunkAir as LiftedAir<Felt, QuadFelt>>::air_layout(&air);
-    assert_eq!(layout.preprocessed_width, 0);
+    let layout = air.spec();
+    assert_eq!(layout.preprocessed_width(), 0);
     assert_eq!(layout.main_width, NUM_MAIN_COLS);
     assert_eq!(layout.num_public_values, 0);
-    assert_eq!(layout.permutation_width, NUM_AUX_COLS);
-    assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
-    assert_eq!(layout.num_permutation_values, NUM_LOGUP_VALUES);
+    assert_eq!(layout.aux_width, NUM_AUX_COLS);
+    assert_eq!(layout.num_challenges, NUM_RANDOMNESS);
+    assert_eq!(layout.num_exports, NUM_LOGUP_VALUES);
     // Period 1 — no periodic columns.
-    assert_eq!(layout.num_periodic_columns, 0);
+    assert_eq!(layout.periodic_columns.len(), 0);
 }
 
 #[test]

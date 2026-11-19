@@ -12,12 +12,12 @@ use miden_core::{
 use miden_crypto::hash::eidos::Eidos;
 use miden_precompiles::{CurvePrecompile, Keccak256Precompile};
 use miden_stark::{
-    air::{BaseAir, ConstraintDegrees, LiftedAir},
-    lookup::debug::{ValidateLayout, ValidateLookupAir},
+    air::{ConstraintDegrees, LiftedAir},
+    lookup::build_lookup_fractions,
 };
 
 use crate::prover::{
-    logup::{Challenges, LookupMessage, NUM_RANDOMNESS, build_lookup_fractions},
+    logup::{Challenges, LookupMessage, NUM_RANDOMNESS},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::Session,
     transcript::eidos::{
@@ -159,15 +159,25 @@ fn lookup_challenges() -> Challenges<QuadFelt> {
 
 fn eidos_balance(trace: &RowMajorMatrix<Felt>) -> HashMap<QuadFelt, Felt> {
     let air = EidosCompressionAir;
-    let fractions =
-        build_lookup_fractions(&air, trace, None, &air.periodic_columns(), &lookup_challenges());
+    let fractions = build_lookup_fractions(
+        &air,
+        trace,
+        None,
+        &miden_stark::air::LiftedAir::spec(&air).periodic_columns,
+        &lookup_challenges(),
+    );
     lookup_balance(fractions.fractions())
 }
 
 fn continuation_balance(trace: &RowMajorMatrix<Felt>) -> HashMap<QuadFelt, Felt> {
     let air = EidosCompressionAir;
-    let fractions =
-        build_lookup_fractions(&air, trace, None, &air.periodic_columns(), &lookup_challenges());
+    let fractions = build_lookup_fractions(
+        &air,
+        trace,
+        None,
+        &miden_stark::air::LiftedAir::spec(&air).periodic_columns,
+        &lookup_challenges(),
+    );
     let mut offset = 0;
     let mut links = Vec::new();
     for (slot, &count) in fractions.counts().iter().enumerate() {
@@ -308,17 +318,18 @@ fn air_layout_matches_32_row_eidos_compression_spec() {
     assert_eq!(NUM_MAIN_COLS, 104);
     assert_eq!(NUM_AUX_COLS, 20);
 
-    let layout =
-        <EidosCompressionAir as LiftedAir<Felt, QuadFelt>>::air_layout(&EidosCompressionAir);
-    assert_eq!(layout.preprocessed_width, 0);
+    let layout = EidosCompressionAir.spec();
+    assert_eq!(layout.preprocessed_width(), 0);
     assert_eq!(layout.main_width, NUM_MAIN_COLS);
     assert_eq!(layout.num_public_values, 0);
-    assert_eq!(layout.permutation_width, NUM_AUX_COLS);
-    assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
-    assert_eq!(layout.num_permutation_values, 1);
-    assert_eq!(layout.num_periodic_columns, 10);
+    assert_eq!(layout.aux_width, NUM_AUX_COLS);
+    assert_eq!(layout.num_challenges, NUM_RANDOMNESS);
+    assert_eq!(layout.num_exports, 1);
+    assert_eq!(layout.periodic_columns.len(), 10);
     assert_eq!(
-        <EidosCompressionAir as BaseAir<Felt>>::periodic_columns(&EidosCompressionAir)
+        EidosCompressionAir
+            .spec()
+            .periodic_columns
             .iter()
             .map(Vec::len)
             .collect::<Vec<_>>(),
@@ -328,24 +339,18 @@ fn air_layout_matches_32_row_eidos_compression_spec() {
 
 #[test]
 fn constraint_degree_remains_three() {
-    let degree = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&EidosCompressionAir);
+    let degree = crate::prover::tests::raw_degrees(&EidosCompressionAir);
     assert_eq!(degree, ConstraintDegrees { base: 3, ext: 3 });
     assert_eq!(crate::prover::tests::log_quotient_degree(&EidosCompressionAir), 1);
 }
 
 #[test]
 fn lookup_degree_annotations_match_the_unified_layout() {
-    EidosCompressionAir
-        .validate(ValidateLayout {
-            preprocessed_width: 0,
-            trace_width: NUM_MAIN_COLS,
-            num_public_values: 0,
-            num_periodic_columns: 10,
-            permutation_width: NUM_LOOKUP_COLS,
-            num_permutation_challenges: NUM_RANDOMNESS,
-            num_permutation_values: 1,
-        })
-        .unwrap_or_else(|error| panic!("PVM Eidos compression lookup validation failed: {error}"));
+    miden_stark::lookup::validate_native(
+        &EidosCompressionAir,
+        &miden_stark::air::LiftedAir::spec(&EidosCompressionAir),
+    )
+    .unwrap_or_else(|error| panic!("PVM Eidos compression lookup validation failed: {error}"));
 }
 
 #[test]
@@ -359,7 +364,7 @@ fn lookup_interaction_liveness_matches_the_nineteen_lookup_columns() {
         &EidosCompressionAir,
         &compression,
         None,
-        &EidosCompressionAir.periodic_columns(),
+        &miden_stark::air::LiftedAir::spec(&EidosCompressionAir).periodic_columns,
         &lookup_challenges(),
     );
     let mut expected_shape = [2; NUM_LOOKUP_COLS];
@@ -1038,7 +1043,7 @@ fn block_init_and_output_relations_fire_at_the_expected_chain_boundaries() {
         &EidosCompressionAir,
         &compression,
         None,
-        &EidosCompressionAir.periodic_columns(),
+        &miden_stark::air::LiftedAir::spec(&EidosCompressionAir).periodic_columns,
         &lookup_challenges(),
     );
 

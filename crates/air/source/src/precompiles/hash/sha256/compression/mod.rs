@@ -8,16 +8,14 @@ use core::array;
 use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
-    utils::RowMajorMatrix,
 };
 use miden_stark::{
-    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
-    lookup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, LookupMessage, build_logup_aux_trace,
-    },
+    air,
+    air::LiftedAirBuilder as _,
+    lookup::{self, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage},
 };
 use miden_utils_sync::LazyLock;
+use p3_field::Dup;
 pub use program::{
     COMPRESSION_PERIOD, INPUT_ADDR_BASE, MAX_PERIODIC_LENGTH, NUM_PERIODIC_COLS, OUTPUT_SLOTS, Op,
     Slot, compression_program, real_slot_count, slots,
@@ -27,7 +25,7 @@ use crate::precompiles::{
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     primitives::byte_pair_lut::{BytePairLutMsg, Range16Msg},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    utils::{current_main, next_main, pack_le},
+    utils::pack_le,
 };
 
 pub const NUM_MAIN_COLS: usize = 39;
@@ -117,212 +115,205 @@ pub struct Sha256CompressionAir;
 static PERIODIC_COLUMNS: LazyLock<[Vec<Felt>; NUM_PERIODIC_COLS]> =
     LazyLock::new(compression_program);
 
-impl BaseAir<Felt> for Sha256CompressionAir {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
-    }
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Borrowed(PERIODIC_COLUMNS.as_slice())
-    }
-}
+impl air::LiftedAir for Sha256CompressionAir {
+    type F = Felt;
 
-impl LiftedAir<Felt, QuadFelt> for Sha256CompressionAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn max_periodic_length(&self) -> usize {
-        MAX_PERIODIC_LENGTH
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
+            main_width: NUM_MAIN_COLS,
+            aux_width: NUM_AUX_COLS,
+            num_public_values: 0,
+            num_challenges: NUM_RANDOMNESS,
+            num_exports: NUM_LOGUP_VALUES,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(PERIODIC_COLUMNS.as_slice()),
+        }
     }
 
-    fn num_randomness(&self) -> usize {
-        NUM_RANDOMNESS
-    }
-    fn aux_width(&self) -> usize {
-        NUM_AUX_COLS
-    }
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
-    fn build_aux_trace(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        main: &RowMajorMatrix<Felt>,
-        _: &[Felt],
-        _: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        build_logup_aux_trace(self, main, challenges)
-    }
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        eval_main(builder, 0, 0);
-        let mut lb = ConstraintLookupBuilder::new(builder, self);
-        eval_lookups(&mut lb, 0, 0);
-        lb.finish();
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        eval_main(frame, builder, 0, 0);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-pub fn eval_main<AB: LiftedAirBuilder<F = Felt>>(
+pub fn eval_main<AB: air::LiftedAirBuilder<F = Felt>>(
+    frame: &air::Frame<'_, AB>,
     builder: &mut AB,
     main_col_offset: usize,
     periodic_col_offset: usize,
 ) {
-    eval_main_with_io(builder, main_col_offset, periodic_col_offset, AB::Expr::ZERO);
+    eval_main_with_io(frame, builder, main_col_offset, periodic_col_offset, AB::Expr::ZERO);
 }
 
 /// Keep the block controller live while the final 32 NOP rows hold IO witnesses.
-pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
+pub(super) fn eval_main_with_io<AB: air::LiftedAirBuilder<F = Felt>>(
+    frame: &air::Frame<'_, AB>,
     builder: &mut AB,
     main_col_offset: usize,
     periodic_col_offset: usize,
     io_act: AB::Expr,
 ) {
-    let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
-    let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), main_col_offset);
-    let periodic: [AB::Expr; NUM_PERIODIC_COLS] =
-        array::from_fn(|i| builder.periodic_values()[periodic_col_offset + i].into());
+    let local: &[AB::Expr; NUM_MAIN_COLS] = frame.main.current
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("SHA-256 current row band");
+    let next: &[AB::Expr; NUM_MAIN_COLS] = frame.main.next
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("SHA-256 next row band");
+    let periodic: &[AB::Expr; NUM_PERIODIC_COLS] = frame.periodic
+        [periodic_col_offset..periodic_col_offset + NUM_PERIODIC_COLS]
+        .try_into()
+        .expect("SHA-256 compression periodic band");
     // The phase machine runs on inactive rows too, permitting a 128-row empty
     // trace while anchoring every active compression to exactly 4096 rows.
-    let block_id: AB::Expr = local[COL_BLOCK_ID].into();
-    let act: AB::Expr = local[COL_ACT].into();
-    let act_next: AB::Expr = next[COL_ACT].into();
-    let cycle: AB::Expr = local[COL_CYCLE].into();
-    let phase_end: AB::Expr = local[COL_PHASE_END].into();
+    let block_id: AB::Expr = local[COL_BLOCK_ID].dup();
+    let act: AB::Expr = local[COL_ACT].dup();
+    let act_next: AB::Expr = next[COL_ACT].dup();
+    let cycle: AB::Expr = local[COL_CYCLE].dup();
+    let phase_end: AB::Expr = local[COL_PHASE_END].dup();
     let phases: [AB::Expr; program::NUM_PHASES] =
-        array::from_fn(|i| local[COL_PHASE_BEGIN + i].into());
-    let last = periodic[program::COL_P32_LAST].clone();
-    let block_last = last.clone() * phase_end.clone() * phases[program::PHASE_PADDING].clone();
-    builder.assert_bool(local[COL_ACT]);
-    builder.assert_bool(local[COL_PHASE_END]);
+        array::from_fn(|i| local[COL_PHASE_BEGIN + i].dup());
+    let last = periodic[program::COL_P32_LAST].dup();
+    let block_last = last.dup() * phase_end.dup() * phases[program::PHASE_PADDING].dup();
+    builder.assert_bool(local[COL_ACT].dup());
+    builder.assert_bool(local[COL_PHASE_END].dup());
     for i in 0..program::NUM_PHASES {
-        builder.assert_bool(local[COL_PHASE_BEGIN + i]);
+        builder.assert_bool(local[COL_PHASE_BEGIN + i].dup());
     }
-    builder.assert_zero(phases.iter().cloned().sum::<AB::Expr>() - AB::Expr::ONE);
-    builder.when_first_row().assert_zero(block_id.clone());
+    builder.assert_zero(phases.iter().map(Dup::dup).sum::<AB::Expr>() - AB::Expr::ONE);
+    builder.when(frame.first_row()).assert_zero(block_id.dup());
     builder
-        .when_first_row()
-        .assert_zero(phases[program::PHASE_MASK].clone() - AB::Expr::ONE);
-    builder.when_first_row().assert_zero(cycle.clone());
+        .when(frame.first_row())
+        .assert_zero(phases[program::PHASE_MASK].dup() - AB::Expr::ONE);
+    builder.when(frame.first_row()).assert_zero(cycle.dup());
     let phase_length: AB::Expr = phases
         .iter()
         .zip(program::PHASE_CYCLES)
-        .map(|(phase, length)| phase.clone() * Felt::from(length))
+        .map(|(phase, length)| phase.dup() * Felt::from(length))
         .sum();
-    let remaining = cycle.clone() + AB::Expr::ONE - phase_length;
-    builder.assert_zero(remaining.clone() * phase_end.clone());
+    let remaining = cycle.dup() + AB::Expr::ONE - phase_length;
+    builder.assert_zero(remaining.dup() * phase_end.dup());
+    builder.assert_zero(remaining * local[COL_PHASE_INV].dup() - (AB::Expr::ONE - phase_end.dup()));
     builder
-        .assert_zero(remaining * local[COL_PHASE_INV].into() - (AB::Expr::ONE - phase_end.clone()));
+        .when(frame.transition())
+        .assert_zero((AB::Expr::ONE - act.dup()) * act_next.dup());
     builder
-        .when_transition()
-        .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
+        .when(frame.transition())
+        .assert_zero((AB::Expr::ONE - block_last.dup()) * (act_next - act.dup()));
     builder
-        .when_transition()
-        .assert_zero((AB::Expr::ONE - block_last.clone()) * (act_next - act.clone()));
-    builder
-        .when_transition()
-        .assert_zero(next[COL_BLOCK_ID].into() - block_id - block_last.clone());
-    builder.when_transition().assert_zero(
-        next[COL_CYCLE].into() - cycle.clone() - last.clone()
-            + last.clone() * phase_end.clone() * (cycle.clone() + AB::Expr::ONE),
+        .when(frame.transition())
+        .assert_zero(next[COL_BLOCK_ID].dup() - block_id - block_last.dup());
+    builder.when(frame.transition()).assert_zero(
+        next[COL_CYCLE].dup() - cycle.dup() - last.dup()
+            + last.dup() * phase_end.dup() * (cycle.dup() + AB::Expr::ONE),
     );
     for i in 0..program::NUM_PHASES {
         let previous = (i + program::NUM_PHASES - 1) % program::NUM_PHASES;
-        builder.when_transition().assert_zero(
-            next[COL_PHASE_BEGIN + i].into()
-                - phases[i].clone()
-                - last.clone() * phase_end.clone() * (phases[previous].clone() - phases[i].clone()),
+        builder.when(frame.transition()).assert_zero(
+            next[COL_PHASE_BEGIN + i].dup()
+                - phases[i].dup()
+                - last.dup() * phase_end.dup() * (phases[previous].dup() - phases[i].dup()),
         );
     }
     // Transition constraints alone would accept a truncated active block.
-    builder.when_last_row().assert_zero(act.clone() * (AB::Expr::ONE - block_last));
-    let act = act - io_act.clone();
+    builder
+        .when(frame.last_row())
+        .assert_zero(act.dup() * (AB::Expr::ONE - block_last));
+    let act = act - io_act.dup();
     let program_gate = AB::Expr::ONE - io_act;
 
-    let word_phase = phases[program::PHASE_WORDS].clone();
-    let hash_phase = phases[program::PHASE_HASH].clone();
-    let round: AB::Expr = local[COL_META_T].into();
-    let input_word: AB::Expr = local[COL_META_INPUT_WORD].into();
+    let word_phase = phases[program::PHASE_WORDS].dup();
+    let hash_phase = phases[program::PHASE_HASH].dup();
+    let round: AB::Expr = local[COL_META_T].dup();
+    let input_word: AB::Expr = local[COL_META_INPUT_WORD].dup();
     // Opcode lookup selectors must be Boolean before the metadata lookup is interpreted.
     // IO uses this cell only in the padding phase, where word_phase is zero.
+    builder.assert_zero(word_phase.dup() * input_word.dup() * (input_word.dup() - AB::Expr::ONE));
     builder.assert_zero(
-        word_phase.clone() * input_word.clone() * (input_word.clone() - AB::Expr::ONE),
+        word_phase.dup()
+            * (round.dup()
+                - cycle.dup() * Felt::from(2u8)
+                - periodic[program::COL_LANE_HALF].dup()),
     );
-    builder.assert_zero(
-        word_phase.clone()
-            * (round.clone()
-                - cycle.clone() * Felt::from(2u8)
-                - periodic[program::COL_LANE_HALF].clone()),
-    );
-    builder.assert_zero(hash_phase.clone() * (round.clone() - cycle.clone()));
-    let hold_metadata = word_phase * (AB::Expr::ONE - periodic[program::COL_WORD_LAST].clone())
-        + hash_phase.clone() * (AB::Expr::ONE - last);
+    builder.assert_zero(hash_phase.dup() * (round.dup() - cycle.dup()));
+    let hold_metadata = word_phase * (AB::Expr::ONE - periodic[program::COL_WORD_LAST].dup())
+        + hash_phase.dup() * (AB::Expr::ONE - last);
     for column in COL_META_T..=COL_META_K {
         builder
-            .when_transition()
-            .assert_zero(hold_metadata.clone() * (next[column].into() - local[column].into()));
+            .when(frame.transition())
+            .assert_zero(hold_metadata.dup() * (next[column].dup() - local[column].dup()));
     }
 
     // Materialize the opcode, sources, and rotation parameter. Destination fanout
     // can be used directly by its lookup without increasing the maximum degree.
-    let word_last = periodic[program::COL_WORD_LAST].clone();
-    let is_add: AB::Expr = local[COL_PROG_BEGIN + program::T_IS_ADD].into();
+    let word_last = periodic[program::COL_WORD_LAST].dup();
+    let is_add: AB::Expr = local[COL_PROG_BEGIN + program::T_IS_ADD].dup();
     for field in 0..10 {
         let mut expected = AB::Expr::ZERO;
         for (phase, phase_selector) in phases.iter().enumerate() {
             let template = &periodic[program::TEMPLATE_BEGIN + phase * program::TEMPLATE_COLS..];
             let template_cycle = if phase == program::PHASE_WORDS {
-                cycle.clone() - AB::Expr::from(Felt::from(8u8))
+                cycle.dup() - AB::Expr::from(Felt::from(8u8))
             } else {
-                cycle.clone()
+                cycle.dup()
             };
             let value = match field {
-                0..=6 => template[field].clone(),
+                0..=6 => template[field].dup(),
                 7 => {
-                    template[program::T_SRC_A_BASE].clone()
-                        + template_cycle * template[program::T_SRC_A_CYCLE_COEFF].clone()
+                    template[program::T_SRC_A_BASE].dup()
+                        + template_cycle * template[program::T_SRC_A_CYCLE_COEFF].dup()
                 },
                 8 => {
-                    template[program::T_SRC_B_BASE].clone()
-                        + template_cycle * template[program::T_SRC_B_CYCLE_COEFF].clone()
+                    template[program::T_SRC_B_BASE].dup()
+                        + template_cycle * template[program::T_SRC_B_CYCLE_COEFF].dup()
                 },
-                9 => template[program::T_ROL_K].clone(),
+                9 => template[program::T_ROL_K].dup(),
                 _ => unreachable!(),
             };
             // The first 16 words use only the last lane, reading an external
             // input. Later words execute the fifteen-instruction schedule.
             let value = if phase == program::PHASE_WORDS {
                 let input_value = match field {
-                    0 => word_last.clone(),
-                    7 => word_last.clone() * round.clone(),
+                    0 => word_last.dup(),
+                    7 => word_last.dup() * round.dup(),
                     _ => AB::Expr::ZERO,
                 };
-                value.clone() + input_word.clone() * (input_value - value)
+                value.dup() + input_word.dup() * (input_value - value)
             } else {
                 value
             };
-            expected += phase_selector.clone() * value;
+            expected += phase_selector.dup() * value;
         }
-        let residual = local[COL_PROG_BEGIN + field].into() - expected;
+        let residual = local[COL_PROG_BEGIN + field].dup() - expected;
         if field == 9 {
             // ADD uses this otherwise idle rotation cell for its carry.
-            builder.assert_zero(program_gate.clone() * (AB::Expr::ONE - is_add.clone()) * residual);
+            builder.assert_zero(program_gate.dup() * (AB::Expr::ONE - is_add.dup()) * residual);
         } else {
-            builder.assert_zero(program_gate.clone() * residual);
+            builder.assert_zero(program_gate.dup() * residual);
         }
     }
-    let is_const: AB::Expr = local[COL_PROG_BEGIN + program::T_IS_CONST].into();
-    let is_rol: AB::Expr = local[COL_PROG_BEGIN + program::T_IS_ROL].into();
-    let k: AB::Expr = local[COL_ROL_K].into();
+    let is_const: AB::Expr = local[COL_PROG_BEGIN + program::T_IS_CONST].dup();
+    let is_rol: AB::Expr = local[COL_PROG_BEGIN + program::T_IS_ROL].dup();
+    let k: AB::Expr = local[COL_ROL_K].dup();
     let mask_template = program::TEMPLATE_BEGIN + program::PHASE_MASK * program::TEMPLATE_COLS;
-    let constant = phases[program::PHASE_MASK].clone()
-        * periodic[mask_template + program::T_CONST].clone()
-        + hash_phase * local[COL_META_K].into();
+    let constant = phases[program::PHASE_MASK].dup()
+        * periodic[mask_template + program::T_CONST].dup()
+        + hash_phase * local[COL_META_K].dup();
 
     let a: AB::Expr = pack_le(&local[COL_A_BEGIN..COL_A_BEGIN + 4], 256);
     let b: AB::Expr = pack_le(&local[COL_B_BEGIN..COL_B_BEGIN + 4], 256);
     let r: AB::Expr = pack_le(&local[COL_R_BEGIN..COL_R_BEGIN + 2], 1 << 16);
     let two32 = AB::Expr::from(Felt::new(1u64 << 32).unwrap());
-    builder.when(program_gate * is_add.clone()).assert_bool(local[COL_CARRY]);
-    let carry: AB::Expr = local[COL_CARRY].into();
-    builder.assert_zero(act.clone() * is_add * (a.clone() + b - r.clone() - two32.clone() * carry));
-    builder.assert_zero(act.clone() * is_const * (r - constant));
+    builder.when(program_gate * is_add.dup()).assert_bool(local[COL_CARRY].dup());
+    let carry: AB::Expr = local[COL_CARRY].dup();
+    builder.assert_zero(act.dup() * is_add * (a.dup() + b - r.dup() - two32.dup() * carry));
+    builder.assert_zero(act.dup() * is_const * (r - constant));
     // The source bus authenticates a u32: sources precede destinations, and every operation
     // preserves that range. With `k = 2^s` for `s` in 1..=30, `(a + 2^32) * k` lies in
     // `[2^33, 2^63)`, so its four range-checked u16 limbs cannot encode a field-modulus alias.
@@ -332,10 +323,10 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
 
 /// The 32-bit left rotation encoded by a ROL row's limbs of `(x + 2^32) * k`: the low word
 /// `x << s` plus the high word `(x >> (32 - s)) + k`, less the offset's contribution `k`.
-fn rotated_word<E: Algebra<Felt>, V: Copy + Into<E>>(limbs: &[V; 4], k: E) -> E {
-    let x: [E; 4] = array::from_fn(|i| limbs[i].into());
+fn rotated_word<E: Algebra<Felt>>(limbs: &[E; 4], k: E) -> E {
+    let x: [E; 4] = array::from_fn(|i| limbs[i].dup());
     let two16 = E::from(Felt::from(1u32 << 16));
-    x[0].clone() + x[2].clone() + two16 * (x[1].clone() + x[3].clone()) - k
+    x[0].dup() + x[2].dup() + two16 * (x[1].dup() + x[3].dup()) - k
 }
 
 #[derive(Copy, Clone)]
@@ -361,29 +352,25 @@ pub(super) const fn lookup_column_degree(index: usize) -> Deg {
 
 /// Select metadata on a NOP word-round row. The hold equations bind the same metadata
 /// across all sixteen word-round rows, so authentication on lane fourteen covers the whole round.
-fn metadata_gate<E: Algebra<Felt>, V: Copy + Into<E>>(
-    local: &[V; NUM_MAIN_COLS],
-    p: &[E; NUM_PERIODIC_COLS],
-) -> E {
+fn metadata_gate<E: Algebra<Felt>>(local: &[E; NUM_MAIN_COLS], p: &[E; NUM_PERIODIC_COLS]) -> E {
     let word_template = program::TEMPLATE_BEGIN + program::PHASE_WORDS * program::TEMPLATE_COLS;
-    let word_nop = E::ONE - (0..7).map(|i| p[word_template + i].clone()).sum::<E>();
-    let word: E = local[COL_PHASE_BEGIN + program::PHASE_WORDS].into();
-    let hash: E = local[COL_PHASE_BEGIN + program::PHASE_HASH].into();
-    word * word_nop + hash * p[program::COL_HASH_FIRST].clone()
+    let word_nop = E::ONE - (0..7).map(|i| p[word_template + i].dup()).sum::<E>();
+    let word: E = local[COL_PHASE_BEGIN + program::PHASE_WORDS].dup();
+    let hash: E = local[COL_PHASE_BEGIN + program::PHASE_HASH].dup();
+    word * word_nop + hash * p[program::COL_HASH_FIRST].dup()
 }
 
-pub(super) fn eval_lookup_group<G, V>(
+pub(super) fn eval_lookup_group<G>(
     group: &mut G,
     index: usize,
-    local: &[V; NUM_MAIN_COLS],
+    local: &[G::Expr; NUM_MAIN_COLS],
     periodic: &[G::Expr; NUM_PERIODIC_COLS],
     act: G::Expr,
 ) where
     G: LookupGroup,
     G::Expr: Algebra<Felt>,
-    V: Copy + Into<G::Expr>,
 {
-    let opcode = |i: usize| -> G::Expr { local[COL_PROG_BEGIN + i].into() };
+    let opcode = |i: usize| -> G::Expr { local[COL_PROG_BEGIN + i].dup() };
     let emit = |group: &mut G, flag: G::Expr, kinds: &[LookupKind], degree| {
         group.batch(
             "compression",
@@ -409,10 +396,10 @@ pub(super) fn eval_lookup_group<G, V>(
                 + opcode(program::T_IS_ANDNOT)
                 + opcode(program::T_IS_ADD)
                 + opcode(program::T_IS_ROL);
-            emit(group, act.clone() * reads, &[LookupKind::Sources], Deg { v: 4, u: 4 });
+            emit(group, act.dup() * reads, &[LookupKind::Sources], Deg { v: 4, u: 4 });
             emit(
                 group,
-                act.clone() * opcode(program::T_IS_INPUT),
+                act.dup() * opcode(program::T_IS_INPUT),
                 &[LookupKind::Input],
                 Deg { v: 2, u: 3 },
             );
@@ -430,14 +417,14 @@ pub(super) fn eval_lookup_group<G, V>(
                 + opcode(program::T_IS_ANDNOT);
             emit(
                 group,
-                act.clone() * logic,
+                act.dup() * logic,
                 &[LookupKind::LogicPair(pair)],
                 lookup_column_degree(index),
             );
             if pair == 0 {
                 emit(
                     group,
-                    act.clone() * (opcode(program::T_IS_ADD) + opcode(program::T_IS_INPUT)),
+                    act.dup() * (opcode(program::T_IS_ADD) + opcode(program::T_IS_INPUT)),
                     &[LookupKind::ValuePair],
                     lookup_column_degree(index),
                 );
@@ -454,18 +441,17 @@ pub(super) fn eval_lookup_group<G, V>(
 }
 
 /// Emit one compression lookup batch into an already-opened lookup batch.
-pub(super) fn eval_lookup_batch<B, V>(
+pub(super) fn eval_lookup_batch<B>(
     batch: &mut B,
     kind: LookupKind,
-    local: &[V; NUM_MAIN_COLS],
+    local: &[B::Expr; NUM_MAIN_COLS],
     periodic: &[B::Expr; NUM_PERIODIC_COLS],
 ) where
     B: LookupBatch,
     B::Expr: Algebra<Felt>,
-    V: Copy + Into<B::Expr>,
 {
-    let v = |index: usize| -> B::Expr { local[index].into() };
-    let p = |index: usize| -> B::Expr { periodic[index].clone() };
+    let v = |index: usize| -> B::Expr { local[index].dup() };
+    let p = |index: usize| -> B::Expr { periodic[index].dup() };
     let act = B::Expr::ONE;
     let entry_degree = match kind {
         LookupKind::Destination => Deg { v: 3, u: 2 },
@@ -488,7 +474,7 @@ pub(super) fn eval_lookup_batch<B, V>(
                     } else {
                         p(template + program::T_DST_CONST)
                     };
-                    selector.clone()
+                    selector.dup()
                         * (constant
                             + p(template + program::T_DST_W) * v(COL_META_W_MULT)
                             + p(template + program::T_DST_A) * v(COL_META_A_MULT)
@@ -498,25 +484,27 @@ pub(super) fn eval_lookup_batch<B, V>(
             let slot = phases
                 .iter()
                 .zip(program::PHASE_BASES)
-                .map(|(phase, base)| phase.clone() * Felt::from(base))
+                .map(|(phase, base)| phase.dup() * Felt::from(base))
                 .sum::<B::Expr>()
                 + v(COL_CYCLE) * Felt::from(32u8)
                 + p(program::COL_LANE);
             let r: B::Expr = pack_le(&local[COL_R_BEGIN..COL_R_BEGIN + 2], 1 << 16);
-            let limbs: [V; 4] = array::from_fn(|i| local[COL_ROT_BEGIN + i]);
-            let rotated = rotated_word(&limbs, v(COL_ROL_K));
+            let limbs: &[B::Expr; 4] = local[COL_ROT_BEGIN..COL_ROT_BEGIN + 4]
+                .try_into()
+                .expect("SHA-256 rotation limb band");
+            let rotated = rotated_word(limbs, v(COL_ROL_K));
             let is_rol = v(COL_PROG_BEGIN + program::T_IS_ROL);
             let x: B::Expr = pack_le(&local[COL_R_BEGIN..COL_R_BEGIN + 4], 256);
             let a: B::Expr = pack_le(&local[COL_A_BEGIN..COL_A_BEGIN + 4], 256);
             let b: B::Expr = pack_le(&local[COL_B_BEGIN..COL_B_BEGIN + 4], 256);
             let is_and = v(COL_PROG_BEGIN + program::T_IS_AND);
             let is_andnot = v(COL_PROG_BEGIN + program::T_IS_ANDNOT);
-            let logic = v(COL_PROG_BEGIN + program::T_IS_XOR) + is_and.clone() + is_andnot.clone();
+            let logic = v(COL_PROG_BEGIN + program::T_IS_XOR) + is_and.dup() + is_andnot.dup();
             let half = B::Expr::from(Felt::new_unchecked(0x7fff_ffff_8000_0001));
             // With X = A xor B, the semantic words are AND=(A+B-X)/2 and ANDNOT=(X-A+B)/2.
-            let out = r.clone()
-                + logic * (x.clone() - r.clone())
-                + is_and * (a.clone() + b.clone() - x.clone() * Felt::from_u8(3)) * half.clone()
+            let out = r.dup()
+                + logic * (x.dup() - r.dup())
+                + is_and * (a.dup() + b.dup() - x.dup() * Felt::from_u8(3)) * half.dup()
                 + is_andnot * (b - a - x) * half
                 + is_rol * (rotated - r);
             batch.insert(
@@ -537,9 +525,9 @@ pub(super) fn eval_lookup_batch<B, V>(
             let reads_b = is_xor + is_and + is_andnot + is_add;
             batch.insert(
                 "src_a",
-                act.clone(),
+                act.dup(),
                 Sha256WordMsg {
-                    block_id: bid.clone(),
+                    block_id: bid.dup(),
                     addr: v(COL_SRC_A),
                     value: a,
                 },
@@ -596,7 +584,7 @@ pub(super) fn eval_lookup_batch<B, V>(
             let phases: [B::Expr; program::NUM_PHASES] = array::from_fn(|i| v(COL_PHASE_BEGIN + i));
             let provider = -B::Expr::from(Felt::from(2u8))
                 * act
-                * phases[program::PHASE_BOOTSTRAP].clone()
+                * phases[program::PHASE_BOOTSTRAP].dup()
                 * p(program::COL_META_VALID);
             batch.insert(
                 "provider",
@@ -633,14 +621,21 @@ pub(super) fn eval_lookup_batch<B, V>(
     }
 }
 
-pub fn eval_lookups<LB: LookupBuilder<F = Felt>>(
+pub fn eval_lookups<LB: lookup::LookupBuilder<F = Felt>>(
+    frame: &lookup::LookupFrame<'_, LB::Expr>,
     builder: &mut LB,
     main_col_offset: usize,
     periodic_col_offset: usize,
 ) {
-    let local = current_main(builder.main(), main_col_offset);
-    let periodic = array::from_fn(|i| builder.periodic_values()[periodic_col_offset + i].into());
-    let act: LB::Expr = local[COL_ACT].into();
+    let local: &[LB::Expr; NUM_MAIN_COLS] = frame.main.current
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("SHA-256 compression lookup row band");
+    let periodic: &[LB::Expr; NUM_PERIODIC_COLS] = frame.periodic
+        [periodic_col_offset..periodic_col_offset + NUM_PERIODIC_COLS]
+        .try_into()
+        .expect("SHA-256 compression lookup periodic band");
+    let act = local[COL_ACT].dup();
     for index in 0..NUM_AUX_COLS {
         let degree = lookup_column_degree(index);
         builder.next_column(
@@ -648,7 +643,7 @@ pub fn eval_lookups<LB: LookupBuilder<F = Felt>>(
                 column.group(
                     "sha256",
                     |group| {
-                        eval_lookup_group(group, index, &local, &periodic, act.clone());
+                        eval_lookup_group(group, index, local, periodic, act.dup());
                     },
                     degree,
                 );
@@ -658,7 +653,7 @@ pub fn eval_lookups<LB: LookupBuilder<F = Felt>>(
     }
 }
 
-impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha256CompressionAir {
+impl<LB: lookup::LookupBuilder<F = Felt>> lookup::LookupAir<LB> for Sha256CompressionAir {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
@@ -668,7 +663,7 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha256CompressionAir {
     fn num_bus_ids(&self) -> usize {
         NUM_BUS_IDS
     }
-    fn eval(&self, builder: &mut LB) {
-        eval_lookups(builder, 0, 0);
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        eval_lookups(frame, builder, 0, 0);
     }
 }

@@ -5,10 +5,12 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
+use miden_stark::air;
 
 use super::{
-    constraints::{enforce_footer_rows, enforce_fused_rows},
+    constraints::{
+        enforce_footer_rows as native_footer_rows, enforce_fused_rows as native_fused_rows,
+    },
     layout::{BLOCK_PERIOD, FUSED_G_ROWS, G_COMPRESSION_CYCLE_ID_COL, NUM_COLS},
     testing::generate_felt_trace_block_with_cycle_id,
     trace::EidosCompressionFeltRow,
@@ -18,6 +20,66 @@ use crate::{
     vm::eidos_compression::testing as mvm,
 };
 
+impl ConstraintEvalBuilder {
+    fn periodic_values(&self) -> &[Felt] {
+        &self.periodic_values
+    }
+
+    fn eval_with(
+        &mut self,
+        evaluate: impl FnOnce(
+            &air::AirFrame<'_, Felt, QuadFelt>,
+            air::UniformInputs<'_, Felt, QuadFelt>,
+            &mut NumericSink<'_>,
+        ),
+    ) {
+        let width = self.main.width;
+        let aux_width = self.aux.width;
+        let frame = air::AirFrame {
+            main: air::Rows {
+                current: &self.main.values[..width],
+                next: &self.main.values[width..2 * width],
+            },
+            preprocessed: air::Rows { current: &[], next: &[] },
+            aux: air::Rows {
+                current: &self.aux.values[..aux_width],
+                next: &self.aux.values[aux_width..2 * aux_width],
+            },
+            periodic: &self.periodic_values,
+            selectors: air::Selectors {
+                first: self.is_first_row,
+                last: self.is_last_row,
+                transition: Felt::ONE - self.is_last_row,
+            },
+        };
+        let inputs = air::UniformInputs {
+            public_values: &[],
+            challenges: &self.randomness,
+            exports: &self.permutation_values,
+        };
+        let mut sink = NumericSink { base: &mut self.evaluations };
+        evaluate(&frame, inputs, &mut sink);
+    }
+}
+
+/// Numerical outputs are separate from the borrowed rows and uniform inputs.
+struct NumericSink<'a> {
+    base: &'a mut Vec<Felt>,
+}
+
+impl air::LiftedAirBuilder for NumericSink<'_> {
+    type F = Felt;
+    type Expr = Felt;
+    type ExtExpr = QuadFelt;
+    fn emit_base(&mut self, value: Felt, _: air::ConstraintMeta<'_>) {
+        self.base.push(value);
+    }
+    fn emit_ext(&mut self, value: QuadFelt, _: air::ConstraintMeta<'_>) {
+        let _ = value;
+        panic!("EidosCompression base-constraint tests must not emit extension-field constraints");
+    }
+}
+
 struct ConstraintEvalBuilder {
     main: RowMajorMatrix<Felt>,
     aux: RowMajorMatrix<QuadFelt>,
@@ -25,9 +87,27 @@ struct ConstraintEvalBuilder {
     permutation_values: Vec<QuadFelt>,
     periodic_values: Vec<Felt>,
     evaluations: Vec<Felt>,
-    preprocessed_window: RowWindow<'static, Felt>,
+
     is_first_row: Felt,
     is_last_row: Felt,
+}
+
+// Preserve the test's independent scalar evaluator while supplying native row selectors.
+fn enforce_fused_rows(
+    builder: &mut ConstraintEvalBuilder,
+    local: &[Felt],
+    next: &[Felt],
+    selectors: &EidosCompressionSelectors<Felt>,
+) {
+    builder.eval_with(|frame, _, sink| native_fused_rows(frame, sink, local, next, selectors));
+}
+fn enforce_footer_rows(
+    builder: &mut ConstraintEvalBuilder,
+    local: &[Felt],
+    next: &[Felt],
+    selectors: &EidosCompressionSelectors<Felt>,
+) {
+    builder.eval_with(|frame, _, sink| native_footer_rows(frame, sink, local, next, selectors));
 }
 
 impl ConstraintEvalBuilder {
@@ -49,88 +129,10 @@ impl ConstraintEvalBuilder {
             permutation_values: vec![QuadFelt::ZERO],
             periodic_values,
             evaluations: Vec::new(),
-            preprocessed_window: RowWindow::from_two_rows(&[], &[]),
+
             is_first_row: Felt::from_bool(row_idx == 0),
             is_last_row: Felt::from_bool(row_idx + 1 == trace_len),
         }
-    }
-}
-
-impl AirBuilder for ConstraintEvalBuilder {
-    type F = Felt;
-    type Expr = Felt;
-    type Var = Felt;
-    type PreprocessedWindow = RowWindow<'static, Felt>;
-    type MainWindow = RowMajorMatrix<Felt>;
-    type PublicVar = Felt;
-    type PeriodicVar = Felt;
-
-    fn main(&self) -> Self::MainWindow {
-        self.main.clone()
-    }
-
-    fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        &self.preprocessed_window
-    }
-
-    fn is_first_row(&self) -> Self::Expr {
-        self.is_first_row
-    }
-
-    fn is_last_row(&self) -> Self::Expr {
-        self.is_last_row
-    }
-
-    fn is_transition(&self) -> Self::Expr {
-        Felt::ONE - self.is_last_row
-    }
-
-    fn is_transition_window(&self, size: usize) -> Self::Expr {
-        assert_eq!(size, 2, "EidosCompression 32-row tests use two-row transition windows");
-        self.is_transition()
-    }
-
-    fn assert_zero<I: Into<Self::Expr>>(&mut self, value: I) {
-        self.evaluations.push(value.into());
-    }
-
-    fn public_values(&self) -> &[Self::PublicVar] {
-        &[]
-    }
-
-    fn periodic_values(&self) -> &[Self::PeriodicVar] {
-        &self.periodic_values
-    }
-}
-
-impl ExtensionBuilder for ConstraintEvalBuilder {
-    type EF = QuadFelt;
-    type ExprEF = QuadFelt;
-    type VarEF = QuadFelt;
-
-    fn assert_zero_ext<I>(&mut self, _value: I)
-    where
-        I: Into<Self::ExprEF>,
-    {
-        panic!("EidosCompression base-constraint tests must not emit extension-field constraints");
-    }
-}
-
-impl PermutationAirBuilder for ConstraintEvalBuilder {
-    type MP = RowMajorMatrix<QuadFelt>;
-    type RandomVar = QuadFelt;
-    type PermutationVar = QuadFelt;
-
-    fn permutation(&self) -> Self::MP {
-        self.aux.clone()
-    }
-
-    fn permutation_randomness(&self) -> &[Self::RandomVar] {
-        &self.randomness
-    }
-
-    fn permutation_values(&self) -> &[Self::PermutationVar] {
-        &self.permutation_values
     }
 }
 
@@ -193,8 +195,12 @@ fn pvm_wrapper_matches_mvm_mode_zero_constraints() {
                 ConstraintEvalBuilder::new(&local, &next, periodic_values, row_idx, BLOCK_PERIOD);
             let shared_selectors =
                 EidosCompressionSelectors::<Felt>::new(shared_builder.periodic_values(), 0);
-            mvm::enforce_fused_rows(&mut shared_builder, &local, &next, &shared_selectors);
-            mvm::enforce_common_footer_rows(&mut shared_builder, &local, &next, &shared_selectors);
+            shared_builder.eval_with(|frame, _, sink| {
+                mvm::enforce_fused_rows(frame, sink, &local, &next, &shared_selectors)
+            });
+            shared_builder.eval_with(|frame, _, sink| {
+                mvm::enforce_common_footer_rows(frame, sink, &local, &next, &shared_selectors)
+            });
 
             assert!(!pvm_builder.evaluations.is_empty(), "PVM wrapper emitted no constraints");
             assert_eq!(

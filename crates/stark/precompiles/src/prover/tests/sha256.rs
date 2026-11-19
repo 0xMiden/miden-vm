@@ -13,8 +13,8 @@ use miden_core::{
 };
 use miden_crypto::hash::sha2::Sha256;
 use miden_stark::{
-    air::{BaseAir, LiftedAir},
-    lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions},
+    air::LiftedAir,
+    lookup::{Challenges, ProverLookupBuilder, build_lookup_fractions},
 };
 
 use crate::prover::{
@@ -94,10 +94,13 @@ fn sha256_program_has_the_frozen_shape() {
     assert_eq!(program::PHASE_BASES, [0, 32, 1056, 1184, 3232, 3264]);
     assert_eq!(program::PHASE_CYCLES, [1, 32, 4, 64, 1, 26]);
     assert!(slots.iter().enumerate().all(|(i, slot)| slot.sources_before_destination(i)));
-    assert_eq!(<Sha256CompressionAir as BaseAir<Felt>>::width(&Sha256CompressionAir), 39);
-    assert_eq!(Sha256CompressionAir.periodic_columns().len(), program::NUM_PERIODIC_COLS);
-    assert_eq!(Sha256CompressionAir.periodic_columns()[0].len(), program::MAX_PERIODIC_LENGTH);
-    assert_eq!(Sha256CompressionAir.aux_width(), 4);
+    assert_eq!(Sha256CompressionAir.spec().main_width, 39);
+    assert_eq!(Sha256CompressionAir.spec().periodic_columns.len(), program::NUM_PERIODIC_COLS);
+    assert_eq!(
+        Sha256CompressionAir.spec().periodic_columns[0].len(),
+        program::MAX_PERIODIC_LENGTH
+    );
+    assert_eq!(Sha256CompressionAir.spec().aux_width, 4);
 }
 
 #[test]
@@ -451,13 +454,14 @@ fn fold_lookup_balance<A>(
     challenges: &Challenges<QuadFelt>,
     net: &mut HashMap<QuadFelt, Felt>,
 ) where
-    A: LiftedAir<Felt, QuadFelt> + Sync,
-    for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
+    A: miden_stark::air::LiftedAir<F = Felt>,
+    for<'a> A: miden_stark::lookup::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
-    let periodic = air.periodic_columns();
-    let preprocessed = air.preprocessed_trace();
+    let spec = miden_stark::air::LiftedAir::spec(air);
+    let periodic = spec.periodic_columns.as_ref();
+    let preprocessed = miden_stark::air::LiftedAir::build_preprocessed_trace(air);
     for &(multiplicity, denominator) in
-        build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, challenges).fractions()
+        build_lookup_fractions(air, main, preprocessed.as_ref(), periodic, challenges).fractions()
     {
         *net.entry(denominator).or_insert(Felt::ZERO) += multiplicity;
     }
@@ -507,7 +511,7 @@ fn sha256_and_bpl_buses_balance_with_input_and_output_boundaries() {
         net.values().all(|multiplicity| *multiplicity == Felt::ZERO),
         "SHA-256 and BPL lookup buses must balance at every message"
     );
-    assert_eq!(Sha256CompressionAir.num_public_values(), 0);
+    assert_eq!(Sha256CompressionAir.spec().num_public_values, 0);
 }
 
 fn two_block_bus_residual(mutator: impl FnOnce(&mut RowMajorMatrix<Felt>)) -> usize {
@@ -955,7 +959,13 @@ fn sha256_empty_trace_needs_only_the_metadata_period() {
     let main = generate_trace(Sha256CompressionRequires::new(), &mut BytePairLutRequires::new());
     assert_eq!(main.height(), 128);
     crate::prover::tests::check_local(Sha256CompressionAir, &main);
-    assert!(Sha256CompressionAir.periodic_columns().iter().all(|column| column.len() <= 128));
+    assert!(
+        Sha256CompressionAir
+            .spec()
+            .periodic_columns
+            .iter()
+            .all(|column| column.len() <= 128)
+    );
     assert_eq!(crate::prover::tests::log_quotient_degree(&Sha256CompressionAir), 2);
 }
 

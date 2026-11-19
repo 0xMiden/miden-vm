@@ -6,17 +6,14 @@
 //! across the canonical edge cases (empty input, single-byte, full
 //! block, multi-block, padding-only trailing block).
 
-use std::{borrow::Cow, vec, vec::Vec};
+use std::{vec, vec::Vec};
 
 use miden_core::{
     Felt,
-    field::{Algebra, PrimeCharacteristicRing, QuadFelt},
+    field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_crypto::hash::keccak::Keccak256;
-use miden_stark::{
-    air::{BaseAir, ConstraintDegrees, LiftedAir},
-    lookup::debug::{ValidateLayout, ValidateLookupAir},
-};
+use miden_stark::air::{ConstraintDegrees, LiftedAir};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::prover::{
@@ -138,53 +135,39 @@ fn main_column_layout_matches_sponge_band() {
     assert_eq!(STATE_NEW_BYTES_RANGE, 32..40);
     // Total matches the spec.
     assert_eq!(NUM_MAIN_COLS, 40);
-    // `BaseAir::width()` agrees.
-    assert_eq!(<KeccakSpongeAir as BaseAir<Felt>>::width(&KeccakSpongeAir), NUM_MAIN_COLS);
+    // the native source main width agrees.
+    assert_eq!(KeccakSpongeAir.spec().main_width, NUM_MAIN_COLS);
 }
 
 #[test]
 fn lifted_air_validates_and_layout_matches_spec() {
     let air = KeccakSpongeAir;
-    // `air_layout` is the single source of truth that downstream
+    // The source schema is the single source of truth that downstream
     // builders consume. Pin every dimension to a documented constant
     // so any column-count drift fails fast.
-    let layout = <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::air_layout(&air);
-    assert_eq!(layout.preprocessed_width, 0);
+    let layout = air.spec();
+    assert_eq!(layout.preprocessed_width(), 0);
     assert_eq!(layout.main_width, NUM_MAIN_COLS);
     assert_eq!(layout.num_public_values, 0);
-    assert_eq!(layout.permutation_width, NUM_AUX_COLS);
-    assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
-    assert_eq!(layout.num_permutation_values, NUM_LOGUP_VALUES);
-    assert_eq!(layout.num_periodic_columns, NUM_PERIODIC_COLS);
+    assert_eq!(layout.aux_width, NUM_AUX_COLS);
+    assert_eq!(layout.num_challenges, NUM_RANDOMNESS);
+    assert_eq!(layout.num_exports, NUM_LOGUP_VALUES);
+    assert_eq!(layout.periodic_columns.len(), NUM_PERIODIC_COLS);
     assert_eq!(NUM_AUX_COLS, 5);
     assert_eq!(crate::prover::tests::lookup_column_shape(&air), &[3, 3, 4, 4, 2]);
 
-    assert_eq!(
-        ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
-        ConstraintDegrees { base: 5, ext: 5 },
-    );
-    ValidateLookupAir::validate(
-        &air,
-        ValidateLayout {
-            preprocessed_width: air.preprocessed_width(),
-            trace_width: air.width(),
-            num_public_values: 0,
-            num_periodic_columns: air.periodic_columns().len(),
-            permutation_width: NUM_AUX_COLS,
-            num_permutation_challenges: NUM_RANDOMNESS,
-            num_permutation_values: NUM_LOGUP_VALUES,
-        },
-    )
-    .unwrap_or_else(|err| panic!("KeccakSpongeAir lookup validation failed: {err}"));
+    assert_eq!(crate::prover::tests::raw_degrees(&air), ConstraintDegrees { base: 5, ext: 5 },);
+    miden_stark::lookup::validate_native(&air, &miden_stark::air::LiftedAir::spec(&air))
+        .unwrap_or_else(|err| panic!("KeccakSpongeAir lookup validation failed: {err}"));
 }
 
 #[test]
 fn periodic_columns_match_program() {
-    // `BaseAir::periodic_columns()` is plumbed through to the
+    // the native source periodic data is plumbed through to the
     // verifier; ensure it returns exactly what `sponge_program()`
     // produced (same shape, same values).
     let air = KeccakSpongeAir;
-    let cols = <KeccakSpongeAir as BaseAir<Felt>>::periodic_columns(&air);
+    let cols = air.spec().periodic_columns;
     assert_eq!(cols.len(), NUM_PERIODIC_COLS);
     for c in cols.iter() {
         assert_eq!(c.len(), SPONGE_PERIOD);
