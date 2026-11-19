@@ -13,38 +13,46 @@ use miden_air_definitions::precompiles::{
     transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
-use miden_constraint_compiler::ir::{GraphBuilder, auxiliary, capture_into, capture_into_with};
+use miden_constraint_compiler::ir::{
+    GraphBuilder, auxiliary, capture_native_into, capture_native_into_with,
+};
 use miden_core::{Felt, field::QuadFelt};
 use miden_stark::{
-    air::{LiftedAir, symbolic::SymbolicAirBuilder},
-    lookup::{ConstraintLookupBuilder, LookupAir},
+    air::{self, LiftedAir},
+    lookup,
 };
 
-type Symbolic = SymbolicAirBuilder<Felt, QuadFelt>;
+type Symbolic = air::SymbolicSink<Felt, QuadFelt>;
+
+#[test]
+fn native_source_geometry_keeps_the_precompile_security_shape() {
+    let native = derive_air_shape().unwrap();
+    assert_eq!(native, miden_air::precompiles::protocol::PROTOCOL.air_shape);
+}
 
 fn degree<A>(air: &A) -> Result<usize, &'static str>
 where
-    A: LiftedAir<Felt, QuadFelt> + for<'a> LookupAir<ConstraintLookupBuilder<'a, Symbolic>>,
+    A: LiftedAir<F = Felt>
+        + for<'r, 's> lookup::LookupAir<lookup::ConstraintLookupBuilder<'r, 's, Symbolic>>,
 {
     let mut builder = GraphBuilder::new();
-    let full = capture_into(air, &mut builder);
-    let lookup = capture_into_with(air, &mut builder, |b| {
-        let mut lb = ConstraintLookupBuilder::new(b, air);
-        LookupAir::eval(air, &mut lb);
-        lb.finish();
-    });
+    let (full, _) = capture_native_into(air, &mut builder).map_err(|_| "native source capture")?;
+    let (lookup, _) = capture_native_into_with(air, &mut builder, |frame, inputs, sink| {
+        lookup::eval_lookup(air, frame, inputs, sink);
+    })
+    .map_err(|_| "native lookup capture")?;
     auxiliary::beta_degree_bound(
         &builder.freeze(),
         &full.ext_roots,
         &lookup.ext_roots,
-        air.aux_width(),
-        &air.periodic_columns(),
+        air.spec().aux_width,
+        &air.spec().periodic_columns,
     )
 }
 
 #[test]
 fn auxiliary_identities_fit_the_lookup_budget() {
-    let shape = derive_air_shape();
+    let shape = derive_air_shape().unwrap();
     assert_eq!(shape, miden_air::precompiles::protocol::PROTOCOL.air_shape);
     let lookup = shape.lookup.unwrap();
     let lookup_coefficient =

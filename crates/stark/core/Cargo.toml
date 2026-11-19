@@ -19,7 +19,6 @@ miden-core.workspace             = true
 miden-utils-sync.workspace       = true
 
 # Plonky3 (always needed)
-p3-air.workspace = true
 p3-challenger.workspace  = true
 p3-dft.workspace         = true
 p3-field.workspace       = true
@@ -27,17 +26,14 @@ p3-goldilocks.workspace  = true
 p3-matrix.workspace      = true
 p3-maybe-rayon.workspace = true
 p3-symmetric.workspace   = true
-p3-security.workspace    = true
 p3-util.workspace        = true
 
 # Optional (for testing/examples features)
 p3-blake3        = { optional = true, workspace = true }
-p3-blake3-air    = { optional = true, workspace = true }
 p3-keccak        = { optional = true, workspace = true }
-p3-keccak-air    = { optional = true, workspace = true }
-p3-poseidon2-air = { optional = true, workspace = true }
 
 # Third-party
+libm.workspace      = true
 rand.workspace      = true
 serde.workspace     = true
 thiserror.workspace = true
@@ -52,7 +48,6 @@ p3-goldilocks.workspace  = true
 p3-keccak.workspace      = true
 p3-merkle-tree.workspace = true
 p3-symmetric.workspace   = true
-p3-security.workspace    = true
 
 # Third-party
 criterion.workspace = true
@@ -62,7 +57,7 @@ proptest.workspace  = true
 concurrent = ["std", "miden-crypto/concurrent", "p3-maybe-rayon/parallel"]
 std = ["miden-crypto/std", "miden-core/std"]
 default    = ["concurrent"]
-testing    = ["dep:p3-blake3", "dep:p3-blake3-air", "dep:p3-keccak", "dep:p3-keccak-air", "dep:p3-poseidon2-air"]
+testing    = ["dep:p3-blake3", "dep:p3-keccak"]
 
 [[bench]]
 harness           = false

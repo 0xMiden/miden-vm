@@ -2,31 +2,29 @@
 
 use miden_air::vm::{config, security as metadata};
 use miden_core::program::KernelDescriptor;
-use miden_vm_stark::security::{self, ProofSecurityParameters};
-use p3_security::{
-    budget::{
-        AirShape, LookupShape, ProtocolParams, SecurityReport,
-        report::{
-            COLLISION_LABEL, COMPOSITION_LABEL, DEEP_COMPOSITION_LABEL, FOLDING_LABEL,
-            LOOKUP_LABEL, OUT_OF_DOMAIN_LABEL, QUERY_LABEL,
-        },
+use miden_stark::security::{
+    AirShape, LookupShape, SecurityReport, fixed,
+    labels::{
+        COLLISION_LABEL, COMPOSITION_LABEL, DEEP_COMPOSITION_LABEL, FOLDING_LABEL, LOOKUP_LABEL,
+        OUT_OF_DOMAIN_LABEL, QUERY_LABEL,
     },
-    fixed,
+    testing::{ProtocolParams, SecurityCase, protocol_params},
 };
+use miden_vm_stark::security;
 
 fn security_parameters(
     protocol_params: ProtocolParams,
     log_max_height: u32,
     air_shape: AirShape,
     num_lookup_boundary_terms: u32,
-) -> ProofSecurityParameters {
-    let mut parameters = security::proof_security_parameters(
+) -> SecurityCase {
+    let mut parameters = SecurityCase::from(security::proof_security_parameters(
         &config::pcs_params(),
         log_max_height,
         0,
         metadata::COMMITMENT_ALIGNMENT,
         miden_core::proof::HashFunction::Eidos,
-    );
+    ));
     parameters.protocol_params = protocol_params;
     parameters.instance_shape.log_max_height = log_max_height;
     parameters.air_shape = air_shape;
@@ -141,7 +139,7 @@ fn lookup_slack_bound_is_conservative_at_every_transition() {
 /// out-of-domain, lookup, and FRI folding terms all depend on height.
 #[test]
 fn omitted_rounds_are_dominated_at_envelope_extremes() {
-    let base = miden_stark::security::protocol_params(&config::pcs_params());
+    let base = protocol_params(&config::pcs_params());
     let air_shape = AirShape {
         num_composed_constraints: 8192,
         max_constraint_degree: 9,
@@ -233,7 +231,7 @@ fn deep_and_fri_grinding_only_raise_their_rounds() {
     let term_bits = |report: &SecurityReport, label| {
         report.terms().iter().find(|term| term.label == label).unwrap().bits
     };
-    let base = miden_stark::security::protocol_params(&config::pcs_params());
+    let base = protocol_params(&config::pcs_params());
     let zero = security::testing::security_report(
         &ProtocolParams {
             deep_pow_bits: 0,

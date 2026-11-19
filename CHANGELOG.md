@@ -6,6 +6,7 @@
 
 #### Changes
 
+- [BREAKING] Own Miden security estimation in `miden-stark` and remove the vendored `p3-security` dependency. `ProofSecurityParameters` stores validated `pcs_params` in place of `protocol_params` and `log_final_degree`; report and security-level methods remain available. Synthetic estimator inputs move to `miden_stark::security::testing`.
 - [BREAKING] Separate authored native AIR equations, fallible auxiliary witnesses and prepared execution under `miden_stark::air`. `MultiAir` now groups `AirKernel` values. Fixed setup construction returns `Result<Option<_>>`, and verifiers own an optional trusted `SetupIdentity`. Fixed heights are declared in `AirSpec`; the combined builder/preparation interfaces and legacy generated ABI are retired.
 
 - Applied the routine-logging changes from [#4238](https://github.com/0xMiden/miden-vm/pull/4238) to the current VM and STARK crates. Successful proving is silent at `INFO`; profiling remains available at `TRACE`.
