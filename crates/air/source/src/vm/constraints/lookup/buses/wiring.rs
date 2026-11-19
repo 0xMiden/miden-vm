@@ -52,15 +52,15 @@
 //! [`super::super::operations::aead_stream`]. Merkle compression interactions are defined in
 //! [`super::super::operations::merkle`].
 
-use core::{array, borrow::Borrow};
+use core::array;
 
 use miden_stark::lookup::{Deg, LookupBatch, LookupColumn, LookupGroup};
+use p3_field::Dup;
 
 use super::super::operations::{aead_stream, merkle};
 use crate::vm::constraints::{
-    chiplets::columns::PeriodicCols,
     lookup::{
-        chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
+        chiplet_air::{ChipletBusContext, NativeChipletLookupBuilder},
         messages::{AceWireMsg, HasherCompressionLinkMsg},
     },
     utils::BoolNot,
@@ -81,13 +81,12 @@ pub(in crate::vm::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 3
 /// Emit the `v_wiring` shared column.
 pub(in crate::vm::constraints::lookup) fn emit_v_wiring<LB>(
     builder: &mut LB,
-    ctx: &ChipletBusContext<LB>,
+    ctx: &ChipletBusContext<'_, LB::Expr>,
 ) where
-    LB: ChipletLookupBuilder,
+    LB: NativeChipletLookupBuilder,
 {
     let local = ctx.local;
-    let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
-    let aead_phase: [LB::Expr; 8] = periodic.aead_stream.phases.map(Into::into);
+    let aead_phase = ctx.periodic.aead_stream.phases.clone();
 
     // ---- ACE wiring captures (Group 1) ----
     let ace_flag = ctx.chiplet_active.ace.clone();
@@ -101,29 +100,29 @@ pub(in crate::vm::constraints::lookup) fn emit_v_wiring<LB>(
 
     // Prefixed with `ace_` where the shorter name would clash with the outer function
     // parameter `ctx`.
-    let ace_clk = ace.clk;
-    let ace_ctx = ace.ctx;
-    let id_0 = ace.id_0;
-    let id_1 = ace.id_1;
-    let id_2 = ace_eval.id_2;
-    let v_0 = ace.v_0;
-    let v_1 = ace.v_1;
-    let v_2 = ace_eval.v_2;
-    let m_0 = ace_read.m_0;
-    let m_1 = ace_read.m_1;
+    let ace_clk = ace.clk.dup();
+    let ace_ctx = ace.ctx.dup();
+    let id_0 = ace.id_0.dup();
+    let id_1 = ace.id_1.dup();
+    let id_2 = ace_eval.id_2.dup();
+    let v_0 = ace.v_0.clone();
+    let v_1 = ace.v_1.clone();
+    let v_2 = ace_eval.v_2.clone();
+    let m_0 = ace_read.m_0.dup();
+    let m_1 = ace_read.m_1.dup();
 
     // `sblock` mixes into the wire_1 / wire_2 multiplicities; keep it as an `LB::Expr`
     // since the `wire_1_mult` expression needs arithmetic against the already-converted
     // `m_1`.
-    let sblock: LB::Expr = ace.s_block.into();
+    let sblock: LB::Expr = ace.s_block.dup();
 
     // Controller rows emit one compression-link tuple except padding rows.
     let ctrl = local.controller_cols();
-    let merkle_or_padding: LB::Expr = ctrl.merkle_or_padding.into();
+    let merkle_or_padding: LB::Expr = ctrl.merkle_or_padding.dup();
     let f_hash_compression = ctx.chiplet_active.controller.clone() * merkle_or_padding.not();
 
-    let ctrl_state: [LB::Var; 12] = array::from_fn(|i| ctrl.state[i]);
-    let ctrl_row_data: [LB::Var; 4] = ctrl.hash_cv();
+    let ctrl_state: [LB::Expr; 12] = array::from_fn(|i| ctrl.state[i].dup());
+    let ctrl_row_data: [LB::Expr; 4] = ctrl.hash_cv();
 
     builder.next_column(
         |col| {
@@ -141,36 +140,36 @@ pub(in crate::vm::constraints::lookup) fn emit_v_wiring<LB>(
                     g.batch(
                         "ace_wiring",
                         ace_flag,
-                        move |b| {
-                            let m_0: LB::Expr = m_0.into();
-                            let m_1: LB::Expr = m_1.into();
+                        |b| {
+                            let m_0: LB::Expr = m_0.dup();
+                            let m_1: LB::Expr = m_1.dup();
                             let wire_1_mult = sblock.not() * m_1 - sblock.clone();
                             let wire_2_mult = -sblock;
 
                             let wire_0 = AceWireMsg {
-                                clk: ace_clk.into(),
-                                ctx: ace_ctx.into(),
-                                id: id_0.into(),
-                                v0: v_0.0.into(),
-                                v1: v_0.1.into(),
+                                clk: ace_clk.dup(),
+                                ctx: ace_ctx.dup(),
+                                id: id_0.dup(),
+                                v0: v_0.0.dup(),
+                                v1: v_0.1.dup(),
                             };
                             b.insert("wire_0", m_0, wire_0, Deg { v: 5, u: 5 });
 
                             let wire_1 = AceWireMsg {
-                                clk: ace_clk.into(),
-                                ctx: ace_ctx.into(),
-                                id: id_1.into(),
-                                v0: v_1.0.into(),
-                                v1: v_1.1.into(),
+                                clk: ace_clk.dup(),
+                                ctx: ace_ctx.dup(),
+                                id: id_1.dup(),
+                                v0: v_1.0.dup(),
+                                v1: v_1.1.dup(),
                             };
                             b.insert("wire_1", wire_1_mult, wire_1, Deg { v: 6, u: 5 });
 
                             let wire_2 = AceWireMsg {
-                                clk: ace_clk.into(),
-                                ctx: ace_ctx.into(),
-                                id: id_2.into(),
-                                v0: v_2.0.into(),
-                                v1: v_2.1.into(),
+                                clk: ace_clk.dup(),
+                                ctx: ace_ctx.dup(),
+                                id: id_2.dup(),
+                                v0: v_2.0.dup(),
+                                v1: v_2.1.dup(),
                             };
                             b.insert("wire_2", wire_2_mult, wire_2, Deg { v: 5, u: 5 });
                         },
@@ -183,10 +182,10 @@ pub(in crate::vm::constraints::lookup) fn emit_v_wiring<LB>(
                     g.add(
                         "hash_compression",
                         f_hash_compression,
-                        move || {
-                            let block = array::from_fn(|i| ctrl_state[i].into());
-                            let cv_in = array::from_fn(|i| ctrl_state[8 + i].into());
-                            let cv_out = array::from_fn(|i| ctrl_row_data[i].into());
+                        || {
+                            let block = array::from_fn(|i| ctrl_state[i].dup());
+                            let cv_in = array::from_fn(|i| ctrl_state[8 + i].dup());
+                            let cv_out = array::from_fn(|i| ctrl_row_data[i].dup());
                             HasherCompressionLinkMsg { block, cv_in, cv_out }
                         },
                         Deg { v: 5, u: 6 },

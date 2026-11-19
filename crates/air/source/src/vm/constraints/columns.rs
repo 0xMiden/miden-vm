@@ -162,10 +162,6 @@ pub const fn indices_arr<const N: usize>() -> [usize; N] {
 
 // COLUMN COUNTS
 // ================================================================================================
-//
-// The auxiliary trace is the LogUp lookup-argument segment built per-AIR by `CoreAir`'s
-// and `ChipletsAir`'s `AuxBuilder` impls (see `crates/air/source/src/vm/constraints/lookup/`): 4
-// Core columns + 4 Chiplets columns.
 
 pub const NUM_SYSTEM_COLS: usize = size_of::<SystemCols<u8>>();
 pub const NUM_DECODER_COLS: usize = size_of::<DecoderCols<u8>>();

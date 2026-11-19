@@ -1,15 +1,14 @@
 //! Authored Eidos compression AIR constraints and lookup bindings.
 
-use alloc::vec::Vec;
+use alloc::borrow::Cow;
 use core::borrow::Borrow;
 
 use miden_core::{Felt, field::ExtensionField};
 use miden_stark::{
-    air::{ReductionError, WindowAccess},
-    lookup::{BoundaryBuilder, Challenges, ConstraintLookupBuilder},
+    air::{self, ReductionError},
+    lookup::{self, Challenges},
 };
 
-use super::{MidenAir, MidenAirBuilder};
 use crate::vm::{
     constraints::eidos_compression::{
         EidosCompressionCols, NUM_COLS as NUM_EIDOS_COMPRESSION_COLS,
@@ -18,10 +17,7 @@ use crate::vm::{
             enforce_inactive_footer_output_aux,
         },
         layout::{AUX_COLS, AUX_REGISTER_COL},
-        lookup::{
-            EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, EidosCompressionLookupBuilder,
-            emit_lookup_columns,
-        },
+        lookup::{EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, emit_lookup_columns},
         periodic::get_periodic_column_values,
         selectors::EidosCompressionSelectors,
     },
@@ -36,18 +32,6 @@ use crate::vm::{
 pub struct EidosCompressionAir;
 
 impl EidosCompressionAir {
-    pub(super) fn width(self) -> usize {
-        NUM_EIDOS_COMPRESSION_COLS
-    }
-
-    pub(in crate::vm) fn periodic_columns(self) -> Vec<Vec<Felt>> {
-        get_periodic_column_values()
-    }
-
-    pub(super) fn aux_width(self) -> usize {
-        AUX_COLS
-    }
-
     pub(super) fn boundary_correction<EF: ExtensionField<Felt>>(
         self,
         _challenges: &Challenges<EF>,
@@ -63,48 +47,63 @@ impl EidosCompressionAir {
         Ok(EF::ZERO)
     }
 
-    pub(super) fn eval<AB: MidenAirBuilder>(self, builder: &mut AB) {
-        {
-            let main = builder.main();
-            let local = main.current_slice();
-            let next = main.next_slice();
-            let periodic_values: Vec<AB::Expr> =
-                builder.periodic_values().iter().map(|value| (*value).into()).collect();
-            let selectors = EidosCompressionSelectors::new(&periodic_values, 0);
-
-            enforce_fused_rows(builder, local, next, &selectors);
-            enforce_footer_rows(builder, local, next, &selectors);
-            enforce_inactive_footer_input_aux(builder, &selectors);
-            enforce_inactive_footer_output_aux(builder, local, &selectors);
-            crate::shared::eidos::enforce_register_constraints(builder, AUX_REGISTER_COL);
-        }
-        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::EidosCompression);
-        self.lookup_eval(&mut lb);
-        lb.finish();
-    }
-
     pub(super) fn lookup_column_shape(self) -> &'static [usize] {
         &EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE
     }
+}
 
-    pub(super) fn lookup_max_message_width(self) -> usize {
+impl air::LiftedAir for EidosCompressionAir {
+    type F = Felt;
+
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
+            main_width: NUM_EIDOS_COMPRESSION_COLS,
+            aux_width: AUX_COLS,
+            num_public_values: 0,
+            num_challenges: crate::vm::trace::AUX_TRACE_RAND_CHALLENGES,
+            num_exports: 1,
+            preprocessed: None,
+            periodic_columns: Cow::Owned(get_periodic_column_values()),
+        }
+    }
+
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        let local = frame.main.current;
+        let next = frame.main.next;
+        let selectors = EidosCompressionSelectors::new(frame.periodic, 0);
+        enforce_fused_rows(frame, builder, local, next, &selectors);
+        enforce_footer_rows(frame, builder, local, next, &selectors);
+        enforce_inactive_footer_input_aux(frame, builder, &selectors);
+        enforce_inactive_footer_output_aux(frame, builder, local, &selectors);
+        crate::shared::eidos::enforce_register_constraints(
+            frame,
+            inputs,
+            builder,
+            AUX_REGISTER_COL,
+        );
+        lookup::eval_lookup(self, frame, inputs, builder);
+    }
+}
+
+impl<LB: lookup::LookupBuilder<F = Felt>> lookup::LookupAir<LB> for EidosCompressionAir {
+    fn column_shape(&self) -> &[usize] {
+        &EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE
+    }
+    fn max_message_width(&self) -> usize {
         MIDEN_MAX_MESSAGE_WIDTH
     }
-
-    pub(super) fn lookup_num_bus_ids(self) -> usize {
+    fn num_bus_ids(&self) -> usize {
         BusId::COUNT
     }
-
-    pub(super) fn lookup_eval<LB: EidosCompressionLookupBuilder>(self, builder: &mut LB) {
-        let main = builder.main();
-        let local: &EidosCompressionCols<_> = main.current_slice().borrow();
-        let next: &EidosCompressionCols<_> = main.next_slice().borrow();
-        let periodic_values: Vec<LB::Expr> =
-            builder.periodic_values().iter().map(|value| (*value).into()).collect();
-        let selectors = EidosCompressionSelectors::new(&periodic_values, 0);
-
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        let local: &EidosCompressionCols<_> = frame.main.current.borrow();
+        let next: &EidosCompressionCols<_> = frame.main.next.borrow();
+        let selectors = EidosCompressionSelectors::new(frame.periodic, 0);
         emit_lookup_columns(builder, local, next, &selectors);
     }
-
-    pub(super) fn lookup_eval_boundary<B: BoundaryBuilder>(self, _boundary: &mut B) {}
 }

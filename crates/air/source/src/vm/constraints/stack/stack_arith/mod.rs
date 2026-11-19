@@ -8,10 +8,10 @@
 mod tests;
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_stark::air::AirBuilder;
+use miden_stark::air::LiftedAirBuilder;
 
 use crate::vm::{
-    CoreCols, MidenAirBuilder,
+    CoreCols, NativeMidenAirBuilder,
     constraints::{constants::*, op_flags::OpFlags},
 };
 
@@ -21,21 +21,21 @@ use crate::vm::{
 /// Enforces stack arith/u32 constraints.
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &CoreCols<AB::Var>,
-    next: &CoreCols<AB::Var>,
+    local: &CoreCols<AB::Expr>,
+    next: &CoreCols<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
-    let s0: AB::Expr = local.stack.get(0).into();
-    let s1: AB::Expr = local.stack.get(1).into();
-    let s2: AB::Expr = local.stack.get(2).into();
-    let s3: AB::Expr = local.stack.get(3).into();
+    let s0: AB::Expr = local.stack.get(0);
+    let s1: AB::Expr = local.stack.get(1);
+    let s2: AB::Expr = local.stack.get(2);
+    let s3: AB::Expr = local.stack.get(3);
 
-    let s0_next: AB::Expr = next.stack.get(0).into();
-    let s1_next: AB::Expr = next.stack.get(1).into();
-    let s2_next: AB::Expr = next.stack.get(2).into();
-    let s3_next: AB::Expr = next.stack.get(3).into();
+    let s0_next: AB::Expr = next.stack.get(0);
+    let s1_next: AB::Expr = next.stack.get(1);
+    let s2_next: AB::Expr = next.stack.get(2);
+    let s3_next: AB::Expr = next.stack.get(3);
 
     // Decoder helper columns: hasher_state[2..8] are user-op helpers.
     // - h0 is used as an inverse witness (EQ/EQZ) or exp_val (EXPACC).
@@ -44,12 +44,6 @@ pub fn enforce_main<AB>(
     //   remainder - 1 for U32DIV.
     // - h5 is the high limb of divisor - remainder - 1 for U32DIV and is otherwise unused here.
     let [uop_h0, uop_h1, uop_h2, uop_h3, uop_h4, uop_h5] = local.decoder.user_op_helpers();
-    let uop_h0: AB::Expr = uop_h0.into();
-    let uop_h1: AB::Expr = uop_h1.into();
-    let uop_h2: AB::Expr = uop_h2.into();
-    let uop_h3: AB::Expr = uop_h3.into();
-    let uop_h4: AB::Expr = uop_h4.into();
-    let uop_h5: AB::Expr = uop_h5.into();
 
     // Field ops.
     let is_add = op_flags.add();

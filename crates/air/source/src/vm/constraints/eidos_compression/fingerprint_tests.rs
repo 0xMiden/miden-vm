@@ -5,7 +5,10 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_stark::air::LiftedAir;
+use miden_stark::{
+    air::{self, LiftedAir},
+    lookup::{self, Challenges, accumulate_slow},
+};
 
 use super::{
     algebra::{footer_cv_word, footer_message_word},

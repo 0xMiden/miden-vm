@@ -26,6 +26,7 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing},
     operations::opcodes,
 };
+use p3_field::Dup;
 
 use crate::vm::constraints::{
     decoder::columns::DecoderCols, op_flags::get_op_index, stack::columns::StackCols,
@@ -110,13 +111,13 @@ where
         decoder_next: &DecoderCols<V>,
     ) -> Self
     where
-        V: Copy,
+        V: Dup,
         E: Algebra<V>,
     {
         // -- Bit selectors: bits[k][0] = 1 - b_k, bits[k][1] = b_k --------------------------
         let bits: [[E; 2]; 7] = array::from_fn(|k| {
-            let val = decoder.op_bits[k];
-            [E::ONE - val, val.into()]
+            let val = decoder.op_bits[k].dup();
+            [E::ONE - val.dup(), val.into()]
         });
 
         // -- Shared prefix product tables (same shape as OpFlags::new) ----------------------
@@ -144,7 +145,7 @@ where
         let mstorew = deg7(&b654_2, opcodes::MSTOREW);
 
         // -- Degree-5 subset --------------------------------------------------------------
-        let deg5_extra: E = decoder.extra[0].into();
+        let deg5_extra: E = decoder.extra[0].dup().into();
         let deg5 = |op: u8| -> E { deg5_extra.clone() * b3210[get_op_index(op)].clone() };
         let compress = deg5(opcodes::COMPRESS);
         let mpverify = deg5(opcodes::MPVERIFY);
@@ -163,7 +164,7 @@ where
         let hornerext = deg5(opcodes::HORNEREXT);
 
         // -- Degree-4 subset --------------------------------------------------------------
-        let deg4_extra: E = decoder.extra[1].into();
+        let deg4_extra: E = decoder.extra[1].dup().into();
         let deg4 = |op: u8| -> E { b432[get_op_index(op)].clone() * deg4_extra.clone() };
         let end = deg4(opcodes::END);
         let repeat = deg4(opcodes::REPEAT);
@@ -177,10 +178,10 @@ where
         // prefix = extra[1]' * b4' = b6'*b5'*b4'. Distinguishes among the four deg-4 ops
         // under the `0b0111_xxxx` family via (b3', b2').
         let (end_next, repeat_next, respan_next, halt_next) = {
-            let prefix: E = decoder_next.extra[1].into();
-            let prefix = prefix * decoder_next.op_bits[4];
-            let b3n: E = decoder_next.op_bits[3].into();
-            let b2n: E = decoder_next.op_bits[2].into();
+            let prefix: E = decoder_next.extra[1].dup().into();
+            let prefix = prefix * decoder_next.op_bits[4].dup();
+            let b3n: E = decoder_next.op_bits[3].dup().into();
+            let b2n: E = decoder_next.op_bits[2].dup().into();
             let nb3n = E::ONE - b3n.clone();
             let nb2n = E::ONE - b2n.clone();
             (
@@ -216,8 +217,8 @@ where
             prefix_010 + u32_add3_madd_group + split.clone() + repeat + end_loop + dyn_op.clone();
 
         // overflow = (b0 - 16) * h0, degree 2 (uses stack columns, not decoder).
-        let b0: E = stack.b0.into();
-        let overflow = (b0 - E::from_u64(16)) * stack.h0;
+        let b0: E = stack.b0.dup().into();
+        let overflow = (b0 - E::from_u64(16)) * stack.h0.dup();
 
         Self {
             end,

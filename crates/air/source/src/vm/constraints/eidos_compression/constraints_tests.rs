@@ -1,16 +1,14 @@
 use alloc::vec::Vec;
 
 use miden_core::field::{Field, PrimeCharacteristicRing, QuadFelt};
-use miden_stark::{
-    air::{AirBuilder, ConstraintDegrees, ExtensionBuilder, PermutationAirBuilder, RowWindow},
-    lookup::{ConstraintLookupBuilder, LookupAir},
-};
+use miden_stark::{air, air::ConstraintDegrees, lookup};
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::{
     constraints::{
-        enforce_footer_rows, enforce_fused_rows, enforce_inactive_footer_input_aux,
-        enforce_inactive_footer_output_aux,
+        enforce_footer_rows as native_footer_rows, enforce_fused_rows as native_fused_rows,
+        enforce_inactive_footer_input_aux as native_inactive_input,
+        enforce_inactive_footer_output_aux as native_inactive_output,
     },
     layout::*,
     lookup::{FOOTER_INPUT_COLUMN, FOOTER_OUTPUT_COLUMN},
@@ -28,6 +26,69 @@ use super::{
 };
 use crate::vm::{Felt, MidenAir, constraints::and8_lookup::eidos::normalize};
 
+impl ConstraintEvalBuilder {
+    fn periodic_values(&self) -> &[Felt] {
+        &self.periodic_values
+    }
+
+    fn eval_with(
+        &mut self,
+        evaluate: impl FnOnce(
+            &air::AirFrame<'_, Felt, QuadFelt>,
+            air::UniformInputs<'_, Felt, QuadFelt>,
+            &mut NumericSink<'_>,
+        ),
+    ) {
+        let width = self.main.width;
+        let aux_width = self.aux.width;
+        let frame = air::AirFrame {
+            main: air::Rows {
+                current: &self.main.values[..width],
+                next: &self.main.values[width..2 * width],
+            },
+            preprocessed: air::Rows { current: &[], next: &[] },
+            aux: air::Rows {
+                current: &self.aux.values[..aux_width],
+                next: &self.aux.values[aux_width..2 * aux_width],
+            },
+            periodic: &self.periodic_values,
+            selectors: air::Selectors {
+                first: self.is_first_row,
+                last: self.is_last_row,
+                transition: Felt::ONE - self.is_last_row,
+            },
+        };
+        let inputs = air::UniformInputs {
+            public_values: &[],
+            challenges: &self.randomness,
+            exports: &self.permutation_values,
+        };
+        let mut sink = NumericSink {
+            base: &mut self.evaluations,
+            extension: &mut self.extension_evaluations,
+        };
+        evaluate(&frame, inputs, &mut sink);
+    }
+}
+
+/// Numerical outputs are separate from the borrowed rows and uniform inputs.
+struct NumericSink<'a> {
+    base: &'a mut Vec<Felt>,
+    extension: &'a mut Vec<QuadFelt>,
+}
+
+impl air::LiftedAirBuilder for NumericSink<'_> {
+    type F = Felt;
+    type Expr = Felt;
+    type ExtExpr = QuadFelt;
+    fn emit_base(&mut self, value: Felt, _: air::ConstraintMeta<'_>) {
+        self.base.push(value);
+    }
+    fn emit_ext(&mut self, value: QuadFelt, _: air::ConstraintMeta<'_>) {
+        self.extension.push(value);
+    }
+}
+
 struct ConstraintEvalBuilder {
     main: RowMajorMatrix<Felt>,
     aux: RowMajorMatrix<QuadFelt>,
@@ -36,15 +97,46 @@ struct ConstraintEvalBuilder {
     periodic_values: Vec<Felt>,
     evaluations: Vec<Felt>,
     extension_evaluations: Vec<QuadFelt>,
-    preprocessed_window: RowWindow<'static, Felt>,
+
     is_first_row: Felt,
     is_last_row: Felt,
+}
+
+// Keep the independent scalar test builder while passing its row context to the native bodies.
+fn enforce_fused_rows(
+    builder: &mut ConstraintEvalBuilder,
+    local: &[Felt],
+    next: &[Felt],
+    selectors: &EidosCompressionSelectors<Felt>,
+) {
+    builder.eval_with(|frame, _, sink| native_fused_rows(frame, sink, local, next, selectors));
+}
+fn enforce_footer_rows(
+    builder: &mut ConstraintEvalBuilder,
+    local: &[Felt],
+    next: &[Felt],
+    selectors: &EidosCompressionSelectors<Felt>,
+) {
+    builder.eval_with(|frame, _, sink| native_footer_rows(frame, sink, local, next, selectors));
+}
+fn enforce_inactive_footer_input_aux(
+    builder: &mut ConstraintEvalBuilder,
+    selectors: &EidosCompressionSelectors<Felt>,
+) {
+    builder.eval_with(|frame, _, sink| native_inactive_input(frame, sink, selectors));
+}
+fn enforce_inactive_footer_output_aux(
+    builder: &mut ConstraintEvalBuilder,
+    local: &[Felt],
+    selectors: &EidosCompressionSelectors<Felt>,
+) {
+    builder.eval_with(|frame, _, sink| native_inactive_output(frame, sink, local, selectors));
 }
 
 #[test]
 fn handwritten_constraint_degree_remains_three() {
     let air = MidenAir::EidosCompression;
-    let degree = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air);
+    let degree = air::capture(&air).unwrap().descriptor.analysis().raw_degrees();
     assert_eq!(degree, ConstraintDegrees { base: 3, ext: 3 });
 }
 
@@ -183,9 +275,7 @@ fn inactive_footer_aux_pins_close_zero_denominator_rows() {
     builder.aux.values[FOOTER_OUTPUT_COLUMN] = QuadFelt::ONE;
 
     let air = MidenAir::EidosCompression;
-    let mut lookup_builder = ConstraintLookupBuilder::new(&mut builder, &air);
-    LookupAir::eval(&air, &mut lookup_builder);
-    lookup_builder.finish();
+    builder.eval_with(|frame, inputs, sink| lookup::eval_lookup(&air, frame, inputs, sink));
 
     // Column zero emits its anchor and recurrence; every later column emits one constraint.
     assert_eq!(builder.extension_evaluations.len(), NUM_LOGUP_COLS + 1);
@@ -222,7 +312,7 @@ impl ConstraintEvalBuilder {
             periodic_values,
             evaluations: Vec::new(),
             extension_evaluations: Vec::new(),
-            preprocessed_window: RowWindow::from_two_rows(&[], &[]),
+
             is_first_row: Felt::from_bool(row_idx == 0),
             is_last_row: Felt::from_bool(row_idx + 1 == trace_len),
         }
@@ -234,84 +324,6 @@ impl ConstraintEvalBuilder {
             "EidosCompression base-constraint tests must not emit extension-field constraints",
         );
         self.evaluations
-    }
-}
-
-impl AirBuilder for ConstraintEvalBuilder {
-    type F = Felt;
-    type Expr = Felt;
-    type Var = Felt;
-    type PreprocessedWindow = RowWindow<'static, Felt>;
-    type MainWindow = RowMajorMatrix<Felt>;
-    type PublicVar = Felt;
-    type PeriodicVar = Felt;
-
-    fn main(&self) -> Self::MainWindow {
-        self.main.clone()
-    }
-
-    fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        &self.preprocessed_window
-    }
-
-    fn is_first_row(&self) -> Self::Expr {
-        self.is_first_row
-    }
-
-    fn is_last_row(&self) -> Self::Expr {
-        self.is_last_row
-    }
-
-    fn is_transition(&self) -> Self::Expr {
-        Felt::ONE - self.is_last_row
-    }
-
-    fn is_transition_window(&self, size: usize) -> Self::Expr {
-        assert_eq!(size, 2, "EidosCompression 32-row tests use two-row transition windows");
-        self.is_transition()
-    }
-
-    fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
-        self.evaluations.push(x.into());
-    }
-
-    fn public_values(&self) -> &[Self::PublicVar] {
-        &[]
-    }
-
-    fn periodic_values(&self) -> &[Self::PeriodicVar] {
-        &self.periodic_values
-    }
-}
-
-impl ExtensionBuilder for ConstraintEvalBuilder {
-    type EF = QuadFelt;
-    type ExprEF = QuadFelt;
-    type VarEF = QuadFelt;
-
-    fn assert_zero_ext<I>(&mut self, x: I)
-    where
-        I: Into<Self::ExprEF>,
-    {
-        self.extension_evaluations.push(x.into());
-    }
-}
-
-impl PermutationAirBuilder for ConstraintEvalBuilder {
-    type MP = RowMajorMatrix<QuadFelt>;
-    type RandomVar = QuadFelt;
-    type PermutationVar = QuadFelt;
-
-    fn permutation(&self) -> Self::MP {
-        self.aux.clone()
-    }
-
-    fn permutation_randomness(&self) -> &[Self::RandomVar] {
-        &self.randomness
-    }
-
-    fn permutation_values(&self) -> &[Self::PermutationVar] {
-        &self.permutation_values
     }
 }
 
@@ -1210,7 +1222,14 @@ pub(super) fn fingerprint_evaluations(
             builder.aux.values[AUX_COLS..]
                 .copy_from_slice(&aux.values[next * AUX_COLS..(next + 1) * AUX_COLS]);
             builder.randomness[1] = rho;
-            super::fingerprint::enforce_register_constraints(&mut builder, AUX_REGISTER_COL);
+            builder.eval_with(|frame, inputs, sink| {
+                super::fingerprint::enforce_register_constraints(
+                    frame,
+                    inputs,
+                    sink,
+                    AUX_REGISTER_COL,
+                )
+            });
             builder.extension_evaluations.try_into().unwrap()
         })
         .collect()

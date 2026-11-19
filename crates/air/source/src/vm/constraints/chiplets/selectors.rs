@@ -32,9 +32,10 @@
 //! activity is raw membership and can be nonzero on the cyclic last-to-first opening.
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
-use miden_stark::air::AirBuilder;
+use miden_stark::air::{Frame, LiftedAirBuilder};
+use p3_field::Dup;
 
-use crate::vm::{ChipletCols, Felt, MidenAirBuilder, constraints::utils::BoolNot};
+use crate::vm::{ChipletCols, Felt, NativeMidenAirBuilder, constraints::utils::BoolNot};
 
 // CHIPLET FLAGS
 // ================================================================================================
@@ -107,14 +108,14 @@ where
     /// Builds the polynomial chiplet membership expressions from a typed shared row.
     pub fn from_chiplet_cols<V>(local: &ChipletCols<V>) -> Self
     where
-        V: Copy,
+        V: Dup,
         E: Algebra<V>,
     {
-        let s0: E = local.chiplets[0].into();
-        let s1: E = local.chiplets[1].into();
-        let s2: E = local.chiplets[2].into();
-        let s3: E = local.chiplets[3].into();
-        let s4: E = local.chiplets[4].into();
+        let s0: E = local.chiplets[0].dup().into();
+        let s1: E = local.chiplets[1].dup().into();
+        let s2: E = local.chiplets[2].dup().into();
+        let s3: E = local.chiplets[3].dup().into();
+        let s4: E = local.chiplets[4].dup().into();
 
         let s01 = s0.clone() * s1;
         let s012 = s01.clone() * s2.clone();
@@ -166,24 +167,25 @@ impl ChipletActiveFlags<bool> {
 
 /// Enforces the selector prefixes and section order and builds the chiplet gates.
 pub fn build_chiplet_selectors<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    local: &ChipletCols<AB::Var>,
-    next: &ChipletCols<AB::Var>,
+    local: &ChipletCols<AB::Expr>,
+    next: &ChipletCols<AB::Expr>,
 ) -> ChipletSelectors<AB::Expr>
 where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
-    let s0: AB::Expr = local.chiplets[0].into();
-    let s1: AB::Expr = local.chiplets[1].into();
-    let s2: AB::Expr = local.chiplets[2].into();
-    let s3: AB::Expr = local.chiplets[3].into();
-    let s4: AB::Expr = local.chiplets[4].into();
+    let s0: AB::Expr = local.chiplets[0].dup();
+    let s1: AB::Expr = local.chiplets[1].dup();
+    let s2: AB::Expr = local.chiplets[2].dup();
+    let s3: AB::Expr = local.chiplets[3].dup();
+    let s4: AB::Expr = local.chiplets[4].dup();
 
-    let s0_next: AB::Expr = next.chiplets[0].into();
-    let s1_next: AB::Expr = next.chiplets[1].into();
-    let s2_next: AB::Expr = next.chiplets[2].into();
-    let s3_next: AB::Expr = next.chiplets[3].into();
-    let s4_next: AB::Expr = next.chiplets[4].into();
+    let s0_next: AB::Expr = next.chiplets[0].dup();
+    let s1_next: AB::Expr = next.chiplets[1].dup();
+    let s2_next: AB::Expr = next.chiplets[2].dup();
+    let s3_next: AB::Expr = next.chiplets[3].dup();
+    let s4_next: AB::Expr = next.chiplets[4].dup();
 
     let s01 = s0.clone() * s1.clone();
     let s012 = s01.clone() * s2.clone();
@@ -192,14 +194,18 @@ where
 
     // A column is binary whenever it is part of the row's selector prefix.
     builder.assert_bool(s0.clone());
-    builder.when(s0.clone()).assert_bools([s1.clone(), s2.clone()]);
+    {
+        let builder = &mut builder.when(s0.clone());
+        builder.assert_bool(s1.clone());
+        builder.assert_bool(s2.clone());
+    }
     builder.when(s012.clone()).assert_bool(s3.clone());
     builder.when(s0123.clone()).assert_bool(s4.clone());
 
     // Once the trace reaches an all-ones prefix, subsequent rows retain it. This leaves s2
     // free to distinguish AEAD and bitwise under `10`.
     {
-        let builder = &mut builder.when_transition();
+        let builder = &mut builder.when(frame.transition());
         builder.when(s0.clone()).assert_one(s0_next.clone());
         builder.when(s01.clone()).assert_one(s1_next.clone());
         builder.when(s012.clone()).assert_one(s2_next.clone());
@@ -209,7 +215,7 @@ where
 
     // Padding on the last row makes all current-row chiplet activity vanish.
     {
-        let builder = &mut builder.when_last_row();
+        let builder = &mut builder.when(frame.last_row());
         builder.assert_one(s0.clone());
         builder.assert_one(s1);
         builder.assert_one(s2);
@@ -220,8 +226,8 @@ where
     let not_s2_next = s2_next.not();
     let not_s3_next = s3_next.not();
 
-    let is_transition_flag: AB::Expr = builder.is_transition();
-    let active = ChipletActiveFlags::<AB::Expr>::from_chiplet_cols(local);
+    let is_transition_flag: AB::Expr = frame.transition();
+    let active = ChipletActiveFlags::<AB::Expr>::from_chiplet_cols::<AB::Expr>(local);
     let controller_next_active = s0_next.not();
     let controller_transition =
         is_transition_flag.clone() * active.controller.clone() * controller_next_active.clone();

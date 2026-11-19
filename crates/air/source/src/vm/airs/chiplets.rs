@@ -1,17 +1,17 @@
 //! Authored Chiplets AIR constraints and lookup bindings.
 
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 use core::borrow::Borrow;
 
 use miden_core::{Felt, WORD_SIZE, field::ExtensionField};
 use miden_stark::{
-    air::{ReductionError, WindowAccess},
-    lookup::{BoundaryBuilder, Challenges, ConstraintLookupBuilder},
+    air::{self, ReductionError},
+    lookup::{self, BoundaryBuilder, Challenges},
 };
 
-use super::{MidenAir, MidenAirBuilder, boundary::ReduceBoundaryBuilder};
+use super::boundary::ReduceBoundaryBuilder;
 use crate::vm::{
-    constraints::{self, columns::ChipletCols, lookup::chiplet_air::ChipletLookupBuilder},
+    constraints::{self, columns::ChipletCols, lookup::chiplet_air::NativeChipletLookupBuilder},
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
 };
 
@@ -26,16 +26,8 @@ use crate::vm::{
 pub struct ChipletsAir;
 
 impl ChipletsAir {
-    pub(super) fn width(self) -> usize {
-        constraints::columns::NUM_CHIPLETS_COLS
-    }
-
     pub(in crate::vm) fn periodic_columns(self) -> Vec<Vec<Felt>> {
         constraints::chiplets::columns::PeriodicCols::periodic_columns()
-    }
-
-    pub(super) fn aux_width(self) -> usize {
-        constraints::lookup::chiplet_air::CHIPLET_COLUMN_SHAPE.len()
     }
 
     /// LogUp boundary correction for the chiplets trace.
@@ -73,42 +65,100 @@ impl ChipletsAir {
         reducer.finalize()
     }
 
-    pub(super) fn eval<AB: MidenAirBuilder>(self, builder: &mut AB) {
-        let main = builder.main();
-        let local: &ChipletCols<AB::Var> = (*main.current_slice()).borrow();
-        let next: &ChipletCols<AB::Var> = (*main.next_slice()).borrow();
-
-        let selectors =
-            constraints::chiplets::selectors::build_chiplet_selectors(builder, local, next);
-
-        constraints::enforce_chiplets(builder, local, next, &selectors);
-
-        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::Chiplets);
-        self.lookup_eval(&mut lb);
-        lb.finish();
-    }
-
     pub(super) fn lookup_column_shape(self) -> &'static [usize] {
         &constraints::lookup::chiplet_air::CHIPLET_COLUMN_SHAPE
     }
+}
 
-    pub(super) fn lookup_max_message_width(self) -> usize {
+impl air::LiftedAir for ChipletsAir {
+    type F = Felt;
+
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
+            main_width: constraints::columns::NUM_CHIPLETS_COLS,
+            aux_width: constraints::lookup::chiplet_air::CHIPLET_COLUMN_SHAPE.len(),
+            num_public_values: 0,
+            num_challenges: crate::vm::trace::AUX_TRACE_RAND_CHALLENGES,
+            num_exports: 1,
+            preprocessed: None,
+            periodic_columns: Cow::Owned(self.periodic_columns()),
+        }
+    }
+
+    fn eval<B: air::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &air::Frame<'_, B>,
+        inputs: air::Inputs<'_, B>,
+        sink: &mut B,
+    ) {
+        let local: &ChipletCols<B::Expr> = frame.main.current.borrow();
+        let next: &ChipletCols<B::Expr> = frame.main.next.borrow();
+        let selectors =
+            constraints::chiplets::selectors::build_chiplet_selectors(frame, sink, local, next);
+        constraints::enforce_chiplets(frame, sink, local, next, &selectors);
+        lookup::eval_lookup(self, frame, inputs, sink);
+    }
+}
+
+impl<LB: NativeChipletLookupBuilder> lookup::LookupAir<LB> for ChipletsAir {
+    fn column_shape(&self) -> &[usize] {
+        &constraints::lookup::chiplet_air::CHIPLET_COLUMN_SHAPE
+    }
+    fn max_message_width(&self) -> usize {
         MIDEN_MAX_MESSAGE_WIDTH
     }
-
-    pub(super) fn lookup_num_bus_ids(self) -> usize {
+    fn num_bus_ids(&self) -> usize {
         BusId::COUNT
     }
-
-    pub(super) fn lookup_eval<LB: ChipletLookupBuilder>(self, builder: &mut LB) {
-        let main = builder.main();
-        let local: &ChipletCols<_> = main.current_slice().borrow();
-        let next: &ChipletCols<_> = main.next_slice().borrow();
-
-        constraints::lookup::chiplet_air::emit_chiplet_lookup_columns(builder, local, next);
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        constraints::lookup::chiplet_air::emit_chiplet_lookup_columns(frame, builder);
     }
-
-    pub(super) fn lookup_eval_boundary<B: BoundaryBuilder>(self, boundary: &mut B) {
+    fn eval_boundary<B: BoundaryBuilder<F = Felt>>(&self, boundary: &mut B) {
         constraints::lookup::miden_air::emit_chiplets_boundary(boundary);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_core::{
+        Felt,
+        field::{PrimeCharacteristicRing, QuadFelt},
+        utils::RowMajorMatrix,
+    };
+    use miden_stark::{
+        air,
+        lookup::{self, Challenges, accumulate_slow},
+    };
+
+    use super::ChipletsAir;
+    use crate::vm::constraints::columns::NUM_CHIPLETS_COLS;
+
+    #[test]
+    fn complete_native_chiplets_capture_preserves_ordinary_then_lookup_order() {
+        let captured = air::capture_with::<_, QuadFelt>(&ChipletsAir).unwrap();
+        let spec = captured.descriptor.spec();
+        assert_eq!(spec.main_width, NUM_CHIPLETS_COLS);
+        assert_eq!(spec.aux_width, 4);
+        assert_eq!(spec.num_public_values, 0);
+        assert_eq!(spec.num_challenges, 2);
+        assert_eq!(spec.num_exports, 1);
+        assert!(spec.preprocessed.is_none());
+        assert_eq!(spec.periodic_columns.len(), 8);
+        assert!(spec.periodic_columns.iter().all(|column| column.len() == 8));
+        let counts = captured.descriptor.analysis().counts();
+        assert_eq!(counts.base, 172);
+        assert_eq!(counts.ext, 5);
+        assert!(
+            captured.assertions[..counts.base]
+                .iter()
+                .all(|value| matches!(value, air::Assertion::Base(_)))
+        );
+        assert!(
+            captured.assertions[counts.base..]
+                .iter()
+                .all(|value| matches!(value, air::Assertion::Extension(_)))
+        );
+        #[cfg(feature = "std")]
+        miden_stark::lookup::validate_native(&ChipletsAir, spec).unwrap();
     }
 }

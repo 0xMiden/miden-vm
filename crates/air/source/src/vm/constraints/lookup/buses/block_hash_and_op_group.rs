@@ -15,11 +15,12 @@ use core::array;
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_stark::lookup::{Deg, LookupBatch, LookupColumn, LookupGroup};
+use p3_field::Dup;
 
 use crate::vm::constraints::{
     decoder::batch::OpBatchSelectors,
     lookup::{
-        main_air::{MainBusContext, MainLookupBuilder},
+        main_air::{MainBusContext, NativeMainLookupBuilder},
         messages::{BlockHashMsg, OpGroupMsg},
     },
     utils::{BoolNot, horner_eval_bits},
@@ -36,9 +37,9 @@ pub(in crate::vm::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 7
 /// Emit the shared block-hash table and op-group table column.
 pub(in crate::vm::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     builder: &mut LB,
-    ctx: &MainBusContext<LB>,
+    ctx: &MainBusContext<'_, LB::Expr>,
 ) where
-    LB: MainLookupBuilder,
+    LB: NativeMainLookupBuilder,
 {
     let local = ctx.local;
     let next = ctx.next;
@@ -49,12 +50,12 @@ pub(in crate::vm::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     let stk = &local.stack;
     let stk_next = &next.stack;
 
-    let addr = dec.addr;
-    let addr_next = dec_next.addr;
+    let addr = dec.addr.dup();
+    let addr_next = dec_next.addr.dup();
     // `dec.hasher_state` is the Eidos input block, split into two words:
     // `h_0 = h[0..4]` (first child) and `h_1 = h[4..8]` (second child).
-    let h_0: [LB::Var; 4] = array::from_fn(|i| dec.hasher_state[i]);
-    let h_1: [LB::Var; 4] = array::from_fn(|i| dec.hasher_state[4 + i]);
+    let h_0: [LB::Expr; 4] = array::from_fn(|i| dec.hasher_state[i].dup());
+    let h_1: [LB::Expr; 4] = array::from_fn(|i| dec.hasher_state[4 + i].dup());
     let s0 = stk.get(0);
 
     let f_join = op_flags.join();
@@ -64,13 +65,13 @@ pub(in crate::vm::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     let f_push = op_flags.push();
 
     // Op-group batch-size selectors.
-    let batch_selectors = OpBatchSelectors::new(dec.full_batch.into(), dec.batch_size_code.into());
+    let batch_selectors = OpBatchSelectors::new(dec.full_batch.dup(), dec.batch_size_code.dup());
 
-    let gc: LB::Expr = dec.group_count.into();
+    let gc: LB::Expr = dec.group_count.dup();
 
     // Op-group removal flag: `in_span * (gc - gc_next)`.
-    let in_span: LB::Expr = dec.in_span.into();
-    let gc_next: LB::Expr = dec_next.group_count.into();
+    let in_span: LB::Expr = dec.in_span.dup();
+    let gc_next: LB::Expr = dec_next.group_count.dup();
     let f_rem = in_span * (gc.clone() - gc_next);
 
     builder.next_column(
@@ -85,9 +86,9 @@ pub(in crate::vm::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                         "join",
                         f_join,
                         |b| {
-                            let parent: LB::Expr = addr_next.into();
-                            let first_hash = h_0.map(LB::Expr::from);
-                            let second_hash = h_1.map(LB::Expr::from);
+                            let parent: LB::Expr = addr_next.dup();
+                            let first_hash = h_0.clone();
+                            let second_hash = h_1.clone();
                             b.add(
                                 "join_first_child",
                                 BlockHashMsg::FirstChild {
@@ -110,11 +111,11 @@ pub(in crate::vm::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                         "split",
                         f_split,
                         || {
-                            let parent = addr_next.into();
-                            let s0: LB::Expr = s0.into();
+                            let parent = addr_next.dup();
+                            let s0: LB::Expr = s0.dup();
                             let one_minus_s0 = s0.not();
                             let child_hash = array::from_fn(|i| {
-                                s0.clone() * h_0[i].into() + one_minus_s0.clone() * h_1[i].into()
+                                s0.clone() * h_0[i].dup() + one_minus_s0.clone() * h_1[i].dup()
                             });
                             BlockHashMsg::Child { parent, child_hash }
                         },
@@ -138,8 +139,8 @@ pub(in crate::vm::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                         op_flags.loop_op(),
                         gc.clone(),
                         || {
-                            let parent = addr_next.into();
-                            let child_hash = h_0.map(LB::Expr::from);
+                            let parent = addr_next.dup();
+                            let child_hash = h_0.clone();
                             BlockHashMsg::LoopBody { parent, child_hash }
                         },
                         Deg { v: 6, u: 6 },
@@ -150,8 +151,8 @@ pub(in crate::vm::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                         "dyn_dyncall_call_syscall",
                         f_child,
                         || {
-                            let parent = addr_next.into();
-                            let child_hash = h_0.map(LB::Expr::from);
+                            let parent = addr_next.dup();
+                            let child_hash = h_0.clone();
                             BlockHashMsg::Child { parent, child_hash }
                         },
                         Deg { v: 5, u: 6 },
@@ -162,8 +163,8 @@ pub(in crate::vm::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                         "end",
                         f_end,
                         || {
-                            let parent = addr_next.into();
-                            let child_hash = h_0.map(LB::Expr::from);
+                            let parent = addr_next.dup();
+                            let child_hash = h_0.clone();
                             // RESPAN can directly follow END (the decoder only blocks the
                             // pair conditionally on `delta_group_count`), so include
                             // `respan_next` here — otherwise an END→RESPAN pair encodes a
@@ -173,7 +174,7 @@ pub(in crate::vm::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                                 - op_flags.repeat_next()
                                 - op_flags.respan_next()
                                 - op_flags.halt_next();
-                            let is_loop_body = dec.end_block_flags().is_loop_body.into();
+                            let is_loop_body = dec.end_block_flags().is_loop_body.dup();
                             BlockHashMsg::End {
                                 parent,
                                 child_hash,
@@ -192,10 +193,10 @@ pub(in crate::vm::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                     g.batch(
                         "g8_batch",
                         batch_selectors.groups_8,
-                        move |b| {
-                            let batch_id: LB::Expr = addr_next.into();
+                        |b| {
+                            let batch_id: LB::Expr = addr_next.dup();
                             for i in 1u16..=3 {
-                                let group_value = h_0[i as usize].into();
+                                let group_value = h_0[i as usize].dup();
                                 b.add(
                                     "g8_group",
                                     OpGroupMsg::new(&batch_id, gc8.clone(), i, group_value),
@@ -203,7 +204,7 @@ pub(in crate::vm::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                                 );
                             }
                             for i in 4u16..=7 {
-                                let group_value = h_1[(i - 4) as usize].into();
+                                let group_value = h_1[(i - 4) as usize].dup();
                                 b.add(
                                     "g8_group",
                                     OpGroupMsg::new(&batch_id, gc8.clone(), i, group_value),
@@ -219,10 +220,10 @@ pub(in crate::vm::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                     g.batch(
                         "g4_batch",
                         batch_selectors.groups_4,
-                        move |b| {
-                            let batch_id: LB::Expr = addr_next.into();
+                        |b| {
+                            let batch_id: LB::Expr = addr_next.dup();
                             for i in 1u16..=3 {
-                                let group_value = h_0[i as usize].into();
+                                let group_value = h_0[i as usize].dup();
                                 b.add(
                                     "g4_group",
                                     OpGroupMsg::new(&batch_id, gc4.clone(), i, group_value),
@@ -238,9 +239,9 @@ pub(in crate::vm::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                     g.add(
                         "g2",
                         batch_selectors.groups_2,
-                        move || {
-                            let batch_id: LB::Expr = addr_next.into();
-                            let group_value = h_0[1].into();
+                        || {
+                            let batch_id: LB::Expr = addr_next.dup();
+                            let group_value = h_0[1].dup();
                             OpGroupMsg::new(&batch_id, gc2, 1, group_value)
                         },
                         Deg { v: 2, u: 3 },
@@ -251,13 +252,13 @@ pub(in crate::vm::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                     g.remove(
                         "op_group_removal",
                         f_rem,
-                        move || {
+                        || {
                             let opcode_next = horner_eval_bits::<7, _, LB::Expr>(&dec_next.op_bits);
-                            let stk_next_0: LB::Expr = stk_next.get(0).into();
-                            let h0_next: LB::Expr = dec_next.hasher_state[0].into();
+                            let stk_next_0: LB::Expr = stk_next.get(0);
+                            let h0_next: LB::Expr = dec_next.hasher_state[0].dup();
                             let group_value = f_push.clone() * stk_next_0
                                 + f_push.not() * (h0_next * LB::Expr::from_u16(128) + opcode_next);
-                            let batch_id = addr.into();
+                            let batch_id = addr.dup();
                             OpGroupMsg { batch_id, group_pos: gc, group_value }
                         },
                         Deg { v: 2, u: 8 },

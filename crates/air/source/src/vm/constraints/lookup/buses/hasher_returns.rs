@@ -6,11 +6,12 @@
 //! single-denominator hasher shape.
 
 use miden_stark::lookup::{Deg, LookupColumn, LookupGroup};
+use p3_field::Dup;
 
 use super::super::operations::merkle;
 use crate::vm::constraints::{
     lookup::{
-        chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
+        chiplet_air::{ChipletBusContext, NativeChipletLookupBuilder},
         messages::HasherMsg,
     },
     utils::BoolNot,
@@ -22,19 +23,19 @@ pub(in crate::vm::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 1
 /// Emit four-Felt hasher responses.
 pub(in crate::vm::constraints::lookup) fn emit_hasher_returns<LB>(
     builder: &mut LB,
-    ctx: &ChipletBusContext<LB>,
+    ctx: &ChipletBusContext<'_, LB::Expr>,
 ) where
-    LB: ChipletLookupBuilder,
+    LB: NativeChipletLookupBuilder,
 {
     let local = ctx.local;
     let ctrl = local.controller_cols();
 
     let controller_flag = ctx.chiplet_active.controller.clone();
-    let merkle_or_padding: LB::Expr = ctrl.merkle_or_padding.into();
-    let op_final: LB::Expr = ctrl.op_final.into();
+    let merkle_or_padding: LB::Expr = ctrl.merkle_or_padding.dup();
+    let op_final: LB::Expr = ctrl.op_final.dup();
     let hash_return = controller_flag * merkle_or_padding.not() * op_final;
 
-    let addr: LB::Expr = ctrl.addr.into();
+    let addr: LB::Expr = ctrl.addr.dup();
     let hash_result = ctrl.hash_cv();
 
     builder.next_column(
@@ -45,7 +46,7 @@ pub(in crate::vm::constraints::lookup) fn emit_hasher_returns<LB>(
                     g.add(
                         "hash_return",
                         hash_return,
-                        || HasherMsg::return_hash(addr.clone(), hash_result.map(LB::Expr::from)),
+                        || HasherMsg::return_hash(addr.clone(), hash_result.clone()),
                         Deg { v: 3, u: 4 },
                     );
                     merkle::emit_return::<LB, _>(g, ctx);

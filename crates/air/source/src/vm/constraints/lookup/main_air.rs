@@ -2,7 +2,7 @@
 //!
 //! Owns the main-trace side of the Miden VM's LogUp argument: four lookup columns, one
 //! per `emit_*` function in [`super::buses`]. This module wires them together via a single
-//! [`MainBusContext`] that carries the two-row window plus a shared [`OpFlags`] instance.
+//! [`MainBusContext`] that carries the two-row window plus a shared [`LookupOpFlags`] instance.
 //!
 //! Columns (in emission order):
 //! - block-stack table + u32 and Merkle-depth range checks + log-deferred capacity + range-table
@@ -11,17 +11,14 @@
 //! - chiplet requests from the decoder + U32DIV remainder-bound range checks.
 //! - stack overflow table.
 //!
-//! The [`MainLookupBuilder`] extension trait exists so the `OpFlags` construction can diverge
+//! The [`NativeMainLookupBuilder`] hook lets flag construction diverge
 //! between the constraint path (polynomial, the default body) and the prover path (boolean fast
 //! path). The constraint and debug adapters use the default body; the prover adapter overrides the
 //! hook in [`super::extension_impls`].
 
 use core::borrow::Borrow;
 
-use miden_stark::{
-    air::WindowAccess,
-    lookup::{LookupAir, LookupBuilder},
-};
+use miden_stark::lookup;
 
 use super::{
     BusId,
@@ -35,31 +32,18 @@ use super::{
 };
 use crate::vm::{CoreCols, Felt, constraints::columns::NUM_CORE_COLS};
 
-// MAIN LOOKUP BUILDER
+// NATIVE MAIN LOOKUP BUILDER
 // ================================================================================================
 
-/// Extension trait the main-trace [`LookupAir`] requires from its [`LookupBuilder`].
+/// Source-specific flag construction over independently borrowed expression rows.
 ///
-/// Carries a single hook, [`build_op_flags`](Self::build_op_flags), for constructing the
-/// shared [`LookupOpFlags`] instance that the four main-trace bus emitters consume. The
-/// default body uses the polynomial path. The prover-path adapter overrides this method to skip
-/// the dead polynomial products that come from decoder bits already being concrete 0/1 values; no
-/// emitter code moves.
-///
-/// There is intentionally **no** blanket `impl<LB: LookupBuilder> MainLookupBuilder for LB`
-/// Rust coherence would then forbid the prover adapter from overriding the default body.
-/// Each adapter implements this trait explicitly with an empty `impl` block that picks up
-/// the default.
-pub(crate) trait MainLookupBuilder: LookupBuilder<F = Felt> {
-    /// Build the shared [`LookupOpFlags`] instance for one `eval` call.
-    ///
-    /// Default body calls [`LookupOpFlags::from_main_cols`], the polynomial path, against
-    /// the multi-AIR `CoreCols` view. Adapters override this when a cheaper construction
-    /// path is available (e.g. the prover path, where decoder bits are concrete 0/1).
+/// Implement adapters explicitly: a blanket implementation would prevent the concrete prover
+/// adapter from selecting its boolean opcode fast path.
+pub(crate) trait NativeMainLookupBuilder: lookup::LookupBuilder<F = Felt> {
     fn build_op_flags(
         &self,
-        local: &CoreCols<Self::Var>,
-        next: &CoreCols<Self::Var>,
+        local: &CoreCols<Self::Expr>,
+        next: &CoreCols<Self::Expr>,
     ) -> LookupOpFlags<Self::Expr> {
         LookupOpFlags::from_main_cols(&local.decoder, &local.stack, &next.decoder)
     }
@@ -68,35 +52,18 @@ pub(crate) trait MainLookupBuilder: LookupBuilder<F = Felt> {
 // MAIN BUS CONTEXT
 // ================================================================================================
 
-/// Shared context for the four main-trace bus emitters.
-///
-/// Holds the two-row window plus a single [`LookupOpFlags`] instance built once per `eval`
-/// through [`MainLookupBuilder::build_op_flags`]. Every emitter reads `ctx.local`,
-/// `ctx.next`, and `ctx.op_flags.<accessor>()` directly; no method indirection beyond the
-/// single clone each accessor performs.
-pub(crate) struct MainBusContext<'a, LB>
-where
-    LB: LookupBuilder<F = Felt>,
-{
-    /// Typed view of the current row (Core half of the trace).
-    pub local: &'a CoreCols<LB::Var>,
-    /// Typed view of the next row (Core half of the trace).
-    pub next: &'a CoreCols<LB::Var>,
-    /// Operation flags computed from `(local.decoder, local.stack, next.decoder)` via the
-    /// builder-provided hook.
-    pub op_flags: LookupOpFlags<LB::Expr>,
+/// Immutable expression rows and one owned flag polynomial for the four main-trace emitters.
+pub(crate) struct MainBusContext<'a, E> {
+    pub local: &'a CoreCols<E>,
+    pub next: &'a CoreCols<E>,
+    pub op_flags: LookupOpFlags<E>,
 }
 
-impl<'a, LB> MainBusContext<'a, LB>
-where
-    LB: MainLookupBuilder,
-{
-    /// Build the shared main-trace context for one `eval` call.
-    ///
-    /// Delegates the `LookupOpFlags` construction to the builder's
-    /// [`MainLookupBuilder::build_op_flags`] hook so the constraint-path and prover-path
-    /// adapters can diverge on construction cost without the emitters noticing.
-    pub fn new(builder: &LB, local: &'a CoreCols<LB::Var>, next: &'a CoreCols<LB::Var>) -> Self {
+impl<'a, E> MainBusContext<'a, E> {
+    fn new<LB>(builder: &LB, local: &'a CoreCols<E>, next: &'a CoreCols<E>) -> Self
+    where
+        LB: NativeMainLookupBuilder<Expr = E>,
+    {
         let op_flags = builder.build_op_flags(local, next);
         Self { local, next, op_flags }
     }
@@ -123,9 +90,9 @@ pub(crate) const MAIN_COLUMN_SHAPE: [usize; 4] = [
     stack_overflow::MAX_INTERACTIONS_PER_ROW,
 ];
 
-impl<LB> LookupAir<LB> for MainLookupAir
+impl<LB> lookup::LookupAir<LB> for MainLookupAir
 where
-    LB: MainLookupBuilder,
+    LB: NativeMainLookupBuilder,
 {
     fn column_shape(&self) -> &[usize] {
         &MAIN_COLUMN_SHAPE
@@ -144,17 +111,10 @@ where
         BusId::COUNT
     }
 
-    fn eval(&self, builder: &mut LB) {
-        // Hold the `MainWindow` as an owned value so its borrow on the underlying builder is
-        // released by the time we grab the `&mut builder` for the per-column emitters.
-        //
-        // Borrow the leading `NUM_CORE_COLS` of the row as a `CoreCols`; the Core half of
-        // the trace.
-        let main = builder.main();
-        let local_slice = main.current_slice();
-        let next_slice = main.next_slice();
-        let local: &CoreCols<_> = local_slice[..NUM_CORE_COLS].borrow();
-        let next: &CoreCols<_> = next_slice[..NUM_CORE_COLS].borrow();
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        // Combined-trace readers may supply wider rows; Core owns its leading columns.
+        let local: &CoreCols<_> = frame.main.current[..NUM_CORE_COLS].borrow();
+        let next: &CoreCols<_> = frame.main.next[..NUM_CORE_COLS].borrow();
 
         let ctx = MainBusContext::new(&*builder, local, next);
 
@@ -162,5 +122,104 @@ where
         emit_block_hash_and_op_group::<LB>(builder, &ctx);
         emit_chiplet_requests::<LB>(builder, &ctx);
         emit_stack_overflow::<LB>(builder, &ctx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::cell::Cell;
+
+    use miden_core::{
+        Felt,
+        field::{PrimeCharacteristicRing, QuadFelt},
+        operations::opcodes,
+    };
+    use miden_stark::{
+        air::Rows,
+        lookup::{self, Challenges, Deg, LookupFractions, ProverLookupBuilder},
+    };
+
+    use super::{MAIN_COLUMN_SHAPE, MainLookupAir, NativeMainLookupBuilder};
+    use crate::vm::{
+        CoreCols,
+        constraints::{
+            lookup::{BusId, buses::LookupOpFlags, messages::MIDEN_MAX_MESSAGE_WIDTH},
+            op_flags::generate_test_row,
+        },
+    };
+
+    /// Test-only custom native hook over the real scalar collector. Its row checks distinguish
+    /// current from next and its counter detects accidental default-polynomial dispatch.
+    struct HookProbe<'a> {
+        inner: ProverLookupBuilder<'a, Felt, QuadFelt>,
+        calls: Cell<usize>,
+    }
+
+    impl<'a> lookup::LookupBuilder for HookProbe<'a> {
+        type F = Felt;
+        type Expr = Felt;
+        type ExprEF = QuadFelt;
+        type Column<'b>
+            = <ProverLookupBuilder<'a, Felt, QuadFelt> as lookup::LookupBuilder>::Column<'b>
+        where
+            Self: 'b;
+
+        fn next_column<'b, R>(
+            &'b mut self,
+            f: impl FnOnce(&mut Self::Column<'b>) -> R,
+            deg: Deg,
+        ) -> R {
+            lookup::LookupBuilder::next_column(&mut self.inner, f, deg)
+        }
+    }
+
+    impl NativeMainLookupBuilder for HookProbe<'_> {
+        fn build_op_flags(
+            &self,
+            local: &CoreCols<Felt>,
+            next: &CoreCols<Felt>,
+        ) -> LookupOpFlags<Felt> {
+            self.calls.set(self.calls.get() + 1);
+            assert_eq!(local.system.clk, Felt::from_u32(19));
+            assert_eq!(next.system.clk, Felt::from_u32(41));
+            let flags =
+                LookupOpFlags::from_boolean_row(&local.decoder, &local.stack, &next.decoder);
+            assert_eq!(flags.push(), Felt::ONE);
+            assert_eq!(flags.end_next(), Felt::ONE);
+            flags
+        }
+    }
+
+    #[test]
+    fn native_hook_runs_once_on_the_original_row_pair() {
+        let mut local = generate_test_row(opcodes::PUSH.into());
+        let mut next = generate_test_row(opcodes::END.into());
+        local.system.clk = Felt::from_u32(19);
+        next.system.clk = Felt::from_u32(41);
+        // MainLookupAir also accepts combined-trace readers. Its Core prefix and hook
+        // must keep working even when the row contains additional unrelated columns.
+        let mut current = local.as_slice().to_vec();
+        let mut following = next.as_slice().to_vec();
+        current.extend([Felt::from_u32(101), Felt::from_u32(103)]);
+        following.extend([Felt::from_u32(107), Felt::from_u32(109)]);
+        let challenges = Challenges::new(
+            QuadFelt::from_u32(7),
+            QuadFelt::from_u32(11),
+            MIDEN_MAX_MESSAGE_WIDTH,
+            BusId::COUNT,
+        );
+        let mut fractions = LookupFractions::from_shape(MAIN_COLUMN_SHAPE.to_vec(), 1);
+        {
+            let frame = lookup::LookupFrame {
+                main: Rows { current: &current, next: &following },
+                preprocessed: Rows { current: &[], next: &[] },
+                periodic: &[],
+            };
+            let inner = ProverLookupBuilder::new(&challenges, &MAIN_COLUMN_SHAPE, &mut fractions);
+            let mut builder = HookProbe { inner, calls: Cell::new(0) };
+            lookup::LookupAir::eval(&MainLookupAir, &frame, &mut builder);
+            assert_eq!(builder.calls.get(), 1);
+        }
+        assert_eq!(fractions.counts().len(), MAIN_COLUMN_SHAPE.len());
     }
 }

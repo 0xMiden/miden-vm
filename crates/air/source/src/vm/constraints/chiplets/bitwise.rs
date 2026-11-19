@@ -5,8 +5,11 @@
 //! each AND witness onto the canonical `(a_byte, b_byte, a_byte xor b_byte)` relation; the chiplet
 //! response bus recomposes the VM-facing `(op, a, b, result)` message.
 
+use miden_stark::air::LiftedAirBuilder;
+use p3_field::Dup;
+
 use crate::vm::{
-    AirBuilder, MidenAirBuilder,
+    NativeMidenAirBuilder,
     constraints::chiplets::{columns::BitwiseOpCols, selectors::ChipletSelectors},
 };
 
@@ -19,14 +22,14 @@ use crate::vm::{
 /// enforced by the shared AND8 lookup.
 pub fn enforce_bitwise_constraints<AB>(
     builder: &mut AB,
-    cols: &BitwiseOpCols<AB::Var>,
+    cols: &BitwiseOpCols<AB::Expr>,
     selectors: &ChipletSelectors<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     // The operation flag is meaningful only on bitwise rows.
     let bitwise_builder = &mut builder.when(selectors.bitwise_active.clone());
 
     // 0 = AND, 1 = XOR.
-    bitwise_builder.assert_bool(cols.op_flag);
+    bitwise_builder.assert_bool(cols.op_flag.dup());
 }

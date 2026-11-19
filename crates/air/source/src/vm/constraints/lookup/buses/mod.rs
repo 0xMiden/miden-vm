@@ -38,8 +38,8 @@
 //!   snapshot consumed by the 4 chiplet-trace emitters.
 //!
 //! Each context is built once per `eval` through an extension-trait hook
-//! ([`super::main_air::MainLookupBuilder::build_op_flags`] /
-//! [`super::chiplet_air::ChipletLookupBuilder::build_chiplet_active`]). Prover-side
+//! ([`super::main_air::NativeMainLookupBuilder::build_op_flags`] /
+//! [`super::chiplet_air::NativeChipletLookupBuilder::build_chiplet_active`]). Prover-side
 //! implementations can override those hooks with boolean fast paths without changing
 //! emitter code. Chiplet membership is decoded centrally by
 //! [`crate::vm::constraints::chiplets::selectors`].
