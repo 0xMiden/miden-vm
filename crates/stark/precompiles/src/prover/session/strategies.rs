@@ -271,17 +271,9 @@ pub(crate) fn wnaf_msm(session: &mut Session, terms: &[(&WnafTable, U256)]) -> E
 /// expression. Panics if `terms` is empty or every scalar is zero.
 ///
 /// When a base recurs across many calls — the generator across a batch of
-/// signatures — build its table once with [`wnaf_table`] and drive the same
-/// interleaved ladder with [`joint_wnaf_with_tables`] instead, so the
-/// recurring base's table is laid once rather than rebuilt per call.
-#[cfg(test)]
-pub(crate) fn joint_wnaf(session: &mut Session, terms: &[(EcNode, U256)], w: usize) -> EcExprPtr {
-    let tables: Vec<WnafTable> = terms.iter().map(|(p, _)| wnaf_table(session, p, w)).collect();
-    let table_terms: Vec<(&WnafTable, U256)> =
-        tables.iter().zip(terms).map(|(table, &(_, k))| (table, k)).collect();
-    joint_wnaf_with_tables(session, &table_terms)
-}
-
+/// signatures — build its table once with [`wnaf_table`] and drive
+/// [`joint_wnaf_with_tables`] over it, so the recurring base's table is laid
+/// once rather than rebuilt per call.
 /// An interleaved wNAF ladder taking already-built
 /// [`WnafTable`]s instead of building one per base — lets a caller reuse a
 /// recurring base's table (built once via [`wnaf_table`]) across many MSM
