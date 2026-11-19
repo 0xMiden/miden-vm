@@ -4,6 +4,8 @@
 
 #### Features
 
+- Added the MASM procedure `seal_and_commit`, which encrypts a message with EcGFp5/Eidos and returns the envelope commitment. Rust callers can compute the same commitment from an envelope with `Envelope::to_commitment`.
+
 #### Changes
 
 - Applied the routine-logging changes from [#4238](https://github.com/0xMiden/miden-vm/pull/4238) to the current VM and STARK crates. Successful proving is silent at `INFO`; profiling remains available at `TRACE`.

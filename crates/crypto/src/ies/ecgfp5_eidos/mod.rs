@@ -29,12 +29,17 @@ use crate::{
     ecdh::ecgfp5::{PublicKey, SecretKey, SharedSecret},
     hash::eidos::{
         Eidos,
-        domains::{ECGFP5_SEAL_CONTEXT, ECGFP5_SEAL_EXTRACT, ECGFP5_SEAL_KEY, ECGFP5_SEAL_NONCE},
+        domains::{
+            ECGFP5_ENVELOPE, ECGFP5_SEAL_CONTEXT, ECGFP5_SEAL_EXTRACT, ECGFP5_SEAL_KEY,
+            ECGFP5_SEAL_NONCE,
+        },
     },
 };
 
 /// Maximum plaintext length with empty associated data. Context shares the AEAD input budget.
 pub const MAX_PLAINTEXT_FELTS: usize = (MAX_AUTHENTICATED_INPUT_FELTS - 6) / 2;
+
+const ENVELOPE_HEADER_LEN: usize = 8;
 
 /// Public output of one encryption, with no shared-secret material.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,36 +65,57 @@ impl Envelope {
         self.tag
     }
 
-    /// Encodes the eight-Felt header followed by the expanded ciphertext.
+    /// Encodes the eight-Felt header followed by the ciphertext limbs.
     pub fn to_elements(&self) -> Vec<Felt> {
-        let mut result = Vec::with_capacity(8 + self.ciphertext.len());
-        result.extend(self.ephemeral_key.to_elements());
-        result.extend(self.tag);
-        result.push(Felt::from_u32((self.ciphertext.len() / 2) as u32));
-        result.extend_from_slice(&self.ciphertext);
-        result
+        let header = self.encode_header();
+        let mut elements = Vec::with_capacity(header.len() + self.ciphertext.len());
+        elements.extend(header);
+        elements.extend_from_slice(&self.ciphertext);
+        elements
+    }
+
+    /// Hashes the envelope encoding from [`Self::to_elements`] under `ECGFP5_ENVELOPE`.
+    ///
+    /// This matches the commitment returned by the VM's `seal_and_commit` procedure.
+    pub fn to_commitment(&self) -> Word {
+        let header = self.encode_header();
+        let len = header.len() + self.ciphertext.len();
+        Eidos::hash_felt_iter_in_domain(
+            header.into_iter().chain(self.ciphertext.iter().copied()),
+            len,
+            ECGFP5_ENVELOPE,
+        )
     }
 
     /// Decodes an exact-length envelope, validating the point, length, and ciphertext limbs.
     /// Authentication is performed by [`open`], not by this structural decoder.
     pub fn from_elements(elements: &[Felt]) -> Result<Self, Error> {
-        let header = elements.get(..8).ok_or(Error::InvalidEnvelope)?;
-        let len =
-            usize::try_from(header[7].as_canonical_u64()).map_err(|_| Error::InvalidEnvelope)?;
-        if len > MAX_PLAINTEXT_FELTS || elements.len() != 8 + 2 * len {
+        let (header, ciphertext) = elements
+            .split_first_chunk::<ENVELOPE_HEADER_LEN>()
+            .ok_or(Error::InvalidEnvelope)?;
+        let [point_encoding @ .., tag0, tag1, plaintext_len] = *header;
+        let plaintext_len = usize::try_from(plaintext_len.as_canonical_u64())
+            .map_err(|_| Error::InvalidEnvelope)?;
+        if plaintext_len > MAX_PLAINTEXT_FELTS || ciphertext.len() != 2 * plaintext_len {
             return Err(Error::InvalidEnvelope);
         }
-        let ephemeral_key = PublicKey::from_elements(header[..5].try_into().unwrap())
-            .map_err(|_| Error::InvalidEnvelope)?;
-        let ciphertext = &elements[8..];
+        let ephemeral_key =
+            PublicKey::from_elements(point_encoding).map_err(|_| Error::InvalidEnvelope)?;
         if ciphertext.iter().any(|x| x.as_canonical_u64() > u64::from(u32::MAX)) {
             return Err(Error::InvalidEnvelope);
         }
         Ok(Self {
             ephemeral_key,
             ciphertext: ciphertext.to_vec(),
-            tag: [header[5], header[6]],
+            tag: [tag0, tag1],
         })
+    }
+
+    fn encode_header(&self) -> [Felt; ENVELOPE_HEADER_LEN] {
+        let [r0, r1, r2, r3, r4] = self.ephemeral_key.to_elements();
+        let [tag0, tag1] = self.tag;
+        let plaintext_len = Felt::from_u32((self.ciphertext.len() / 2) as u32);
+        [r0, r1, r2, r3, r4, tag0, tag1, plaintext_len]
     }
 }
 

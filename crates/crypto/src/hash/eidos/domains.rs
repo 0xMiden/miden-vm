@@ -136,6 +136,13 @@ crate::eidos_domain_registry! {
                 description: "EcGFp5-Eidos byte-message application-context commitment.",
                 schema: "param0 = context length in bytes; param1 = 0; param2 = 0; payload = application context",
             }
+            pub ECGFP5_ENVELOPE: Ecgfp5EnvelopeDomain {
+                local_id: 0x0013,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "EcGFp5-Eidos envelope commitment.",
+                schema: "param0 = 8 + 2 * plaintext length; param1 = 0; param2 = 0; payload = ephemeral point R(5), tag(2), plaintext length, ciphertext u32 limbs(2 * plaintext length)",
+            }
         }
     }
 }

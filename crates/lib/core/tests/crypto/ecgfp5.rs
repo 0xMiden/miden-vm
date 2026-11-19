@@ -829,26 +829,28 @@ fn proves_native_dh() {
 #[derive(Clone, Copy)]
 enum SealMode {
     Direct,
+    DirectWithCommitment,
     Preprocessed,
 }
 
 impl SealMode {
     fn call(self) -> String {
-        match self {
-            Self::Direct => {
-                let key = recipient().public_key().to_commitment().into_elements();
-                format!("push.{key:?} exec.ecgfp5_eidos::seal")
+        let (key, procedure) = match self {
+            Self::Direct => (recipient().public_key().to_commitment(), "seal"),
+            Self::DirectWithCommitment => {
+                (recipient().public_key().to_commitment(), "seal_and_commit")
             },
-            Self::Preprocessed => {
-                let key = prepared().to_commitment().into_elements();
-                format!("push.{key:?} exec.ecgfp5_eidos::seal_preprocessed")
-            },
-        }
+            Self::Preprocessed => (prepared().to_commitment(), "seal_preprocessed"),
+        };
+        let key = key.into_elements();
+        format!("push.{key:?} exec.ecgfp5_eidos::{procedure}")
     }
 
     fn advice(self, secret: &SecretKey) -> AdviceInputs {
         match self {
-            Self::Direct => direct_advice_inputs(&recipient().public_key(), secret),
+            Self::Direct | Self::DirectWithCommitment => {
+                direct_advice_inputs(&recipient().public_key(), secret)
+            },
             Self::Preprocessed => advice_inputs(prepared(), secret),
         }
     }
@@ -973,7 +975,7 @@ fn sealing_reexecutes_with_recorded_advice() {
              end"
         );
         let event = match mode {
-            SealMode::Direct => ECGFP5_EIDOS_SEAL_EVENT_NAME,
+            SealMode::Direct | SealMode::DirectWithCommitment => ECGFP5_EIDOS_SEAL_EVENT_NAME,
             SealMode::Preprocessed => ECGFP5_EIDOS_SEAL_PREPROCESSED_EVENT_NAME,
         };
         let handler = Ecgfp5SealHandler::new(ChaCha20Rng::from_seed([91; 32]))
@@ -1151,17 +1153,14 @@ fn sealing_rejects_bad_memory_before_requesting_advice() {
 }
 
 #[test]
-fn proves_in_vm_encryption() {
-    for mode in [SealMode::Direct, SealMode::Preprocessed] {
-        let source = seal_program(&[Felt::ONE; 9], &[Felt::ONE; 7], mode);
-        let handlers = Ecgfp5SealHandler::new(ChaCha20Rng::from_seed([93; 32]))
-            .with_public_key(recipient().public_key())
-            .with_preprocessed_public_key(Arc::clone(prepared()))
-            .handlers();
-        let test = build_test!(&source, &[]).with_event_handlers(handlers);
-        // This checks proof validity, not ZK; the program embeds public test plaintext.
-        test.prove_and_verify(vec![], false);
-    }
+fn proves_sealing_with_a_preprocessed_key() {
+    let source = seal_program(&[Felt::ONE; 9], &[Felt::ONE; 7], SealMode::Preprocessed);
+    let handlers = Ecgfp5SealHandler::new(ChaCha20Rng::from_seed([93; 32]))
+        .with_preprocessed_public_key(Arc::clone(prepared()))
+        .handlers();
+    build_test!(&source, &[])
+        .with_event_handlers(handlers)
+        .prove_and_verify(vec![], false);
 }
 
 #[test]
@@ -1195,14 +1194,15 @@ fn repeated_sealing_preserves_caller_state_and_allows_overlapping_read_inputs() 
     for (i, value) in plaintext.iter().enumerate() {
         body.push_str(&format!("push.{value} mem_store.{}\n", 1000 + i));
     }
-    for value in 1..=32 {
-        body.push_str(&format!("push.{value}\n"));
-    }
     let mut advice = AdviceInputs::default();
     for (mode, ephemeral) in [
         (SealMode::Direct, sample()),
         (SealMode::Preprocessed, scalar([65537, 0, 0, 0, 0, 0, 0, 0, 0, 0])),
+        (SealMode::DirectWithCommitment, scalar([65539, 0, 0, 0, 0, 0, 0, 0, 0, 0])),
     ] {
+        for value in 1..=32 {
+            body.push_str(&format!("push.{value}\n"));
+        }
         advice.extend(mode.advice(&ephemeral));
         let seal = mode.call();
         // Both read inputs start at 1000; the output starts immediately after the plaintext.
@@ -1214,6 +1214,11 @@ fn repeated_sealing_preserves_caller_state_and_allows_overlapping_read_inputs() 
             &ephemeral,
         )
         .unwrap();
+        if matches!(mode, SealMode::DirectWithCommitment) {
+            for value in sealed.to_commitment().iter() {
+                body.push_str(&format!("push.{value} assert_eq\n"));
+            }
+        }
         for (i, value) in sealed.to_elements().iter().enumerate() {
             body.push_str(&format!("mem_load.{} push.{value} assert_eq\n", 1008 + i));
         }
@@ -1221,12 +1226,6 @@ fn repeated_sealing_preserves_caller_state_and_allows_overlapping_read_inputs() 
         for value in (1..=32).rev() {
             body.push_str(&format!("push.{value} assert_eq\n"));
         }
-        for value in 1..=32 {
-            body.push_str(&format!("push.{value}\n"));
-        }
-    }
-    for value in (1..=32).rev() {
-        body.push_str(&format!("push.{value} assert_eq\n"));
     }
     for (i, value) in plaintext.iter().enumerate() {
         body.push_str(&format!("mem_load.{} push.{value} assert_eq\n", 1000 + i));
@@ -1242,4 +1241,130 @@ fn repeated_sealing_preserves_caller_state_and_allows_overlapping_read_inputs() 
     );
     let test = sealing_with_advice(&source, advice);
     test.expect_stack(&[]);
+}
+
+#[test]
+fn seal_and_commit_respects_envelope_boundary() {
+    use miden_crypto::ies::ecgfp5_eidos;
+
+    let mode = SealMode::DirectWithCommitment;
+    let call = mode.call();
+    let ephemeral = sample();
+    let frame = miden_core::FMP_INIT_VALUE.as_canonical_u64() as u32;
+
+    // These lengths exercise all four possible envelope remainders modulo the hash block size.
+    // Odd lengths leave two sentinel elements between the envelope and the frame.
+    let last_word = frame - 4;
+    for len in 0..4u32 {
+        let sealed = ecgfp5_eidos::seal_with_scalar(
+            &recipient().public_key(),
+            &[Felt::ONE; 4][..len as usize],
+            &[],
+            &ephemeral,
+        )
+        .unwrap();
+        let envelope_len = 8 + 2 * len;
+        let dst = frame - envelope_len.next_multiple_of(4);
+        let end = dst + envelope_len;
+        let source = format!(
+            "use miden::core::crypto::ies::ecgfp5_eidos
+            begin
+                push.1.1.1.1 mem_storew_le.1000 dropw
+                push.999.999.999.999 mem_storew_le.{last_word} dropw
+                push.{dst}.0.2000.{len}.1000 {call}
+                swapw dropw
+            end"
+        );
+        let test = sealing_with_advice(&source, mode.advice(&ephemeral));
+        let commitment: Vec<_> =
+            sealed.to_commitment().iter().map(Felt::as_canonical_u64).collect();
+        let memory: Vec<_> = sealed
+            .to_elements()
+            .iter()
+            .map(Felt::as_canonical_u64)
+            .chain((end..frame).map(|_| 999))
+            .collect();
+        test.expect_stack_and_memory(&commitment, dst, &memory);
+    }
+
+    let source = format!(
+        "use miden::core::crypto::ies::ecgfp5_eidos
+        begin push.{}.0.2000.1.1000 {call} end",
+        frame - 8,
+    );
+    assert_failure(
+        &build_test!(&source, &[]),
+        "EcGFp5-Eidos memory ranges must stay below the local frame",
+    );
+}
+
+#[test]
+fn prove_seal_and_commit_from_advice() {
+    use miden_assembly::{Assembler, Linkage};
+    use miden_core::program::{ExecutionClaim, StackInputs, StackOutputs};
+    use miden_core_lib::CoreLibrary;
+    use miden_crypto::ies::ecgfp5_eidos::{self, Envelope};
+    use miden_processor::{DefaultHost, FastProcessor};
+    use miden_prover::Prover;
+    use miden_verifier::Verifier;
+
+    let plaintext = [-Felt::ONE];
+    let context = [Felt::from_u32(17)];
+    let source = "
+        use miden::core::crypto::ies::ecgfp5_eidos
+        use miden::core::sys
+        begin
+            adv_push mem_store.1000
+            push.17 mem_store.2000
+            push.3000.1.2000.1 swapw
+            push.1000 movdn.4
+            exec.ecgfp5_eidos::seal_and_commit
+            push.3010.3000 movdn.5 movdn.5 adv.insert_mem
+            movup.4 drop movup.4 drop
+            exec.sys::truncate_stack
+        end";
+    let core = CoreLibrary::default();
+    let program = Assembler::default()
+        .with_package(core.package(), Linkage::Dynamic)
+        .unwrap()
+        .assemble_program("seal_and_commit", source)
+        .unwrap()
+        .unwrap_program();
+    let mut host = DefaultHost::default().with_library(&core).unwrap();
+    for (event, handler) in Ecgfp5SealHandler::new(ChaCha20Rng::from_seed([94; 32]))
+        .with_public_key(recipient().public_key())
+        .handlers()
+    {
+        host.register_handler(event, handler).unwrap();
+    }
+
+    let stack_inputs = |key: Word| StackInputs::new(key.as_elements()).unwrap();
+    let claim = |key: Word, envelope: &Envelope| {
+        ExecutionClaim::from_program_info(
+            program.to_info(),
+            stack_inputs(key),
+            StackOutputs::new(envelope.to_commitment().as_elements()).unwrap(),
+        )
+    };
+
+    let key = recipient().public_key().to_commitment();
+    let (witness, advice) = FastProcessor::new(stack_inputs(key))
+        .with_advice(AdviceInputs::default().with_stack(plaintext.to_vec().into()))
+        .unwrap()
+        .execute_for_proving_with_advice_sync(&program, &mut host)
+        .unwrap();
+    let commitment = witness.claim().stack_outputs().get_word(0).unwrap();
+    let envelope = Envelope::from_elements(advice.get_mapped_values(&commitment).unwrap()).unwrap();
+    assert_eq!(ecgfp5_eidos::open(&recipient(), &context, &envelope).unwrap(), plaintext);
+
+    let proof = Prover::new().prove_full(witness).unwrap();
+    let verifier = Verifier::new();
+    assert!(verifier.verify(&claim(key, &envelope), &proof).unwrap().is_complete());
+
+    let mut elements = envelope.to_elements();
+    elements[8] = Felt::from_u32(elements[8].as_canonical_u64() as u32 ^ 1);
+    let changed_envelope = Envelope::from_elements(&elements).unwrap();
+    assert!(verifier.verify(&claim(key, &changed_envelope), &proof).is_err());
+    let other_key = sample().public_key().to_commitment();
+    assert!(verifier.verify(&claim(other_key, &envelope), &proof).is_err());
 }
