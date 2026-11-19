@@ -1,5 +1,3 @@
-#[cfg(test)]
-use std::vec::Vec;
 use std::{
     borrow::Cow,
     boxed::Box,
@@ -111,20 +109,6 @@ impl DebugLogger {
     {
         let guard = self.0.lock().unwrap();
         guard.captured.iter().any(predicate)
-    }
-
-    /// Clones all of the log entries in the buffer which match `predicate`.
-    #[cfg(test)]
-    pub(crate) fn select_matching<F>(&self, mut predicate: F) -> Vec<LogEntry>
-    where
-        F: FnMut(&LogEntry) -> bool,
-    {
-        let guard = self.0.lock().unwrap();
-        guard
-            .captured
-            .iter()
-            .filter_map(move |entry| if predicate(entry) { Some(entry.clone()) } else { None })
-            .collect()
     }
 
     pub fn clone_captured(&self) -> VecDeque<LogEntry> {
