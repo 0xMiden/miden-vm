@@ -701,7 +701,7 @@ fn test_diagnostic_invalid_merkle_tree_node_index() {
 // InvalidStackDepthOnReturn
 // ------------------------------------------------------------------------------------------------
 
-/// Ensures that the proper `ExecutionError::InvalidStackDepthOnReturn` diagnostic is generated when
+/// Ensures that the proper `OperationError::InvalidStackDepthOnReturn` diagnostic is generated when
 /// the stack depth is invalid on return from a call.
 #[test]
 fn test_diagnostic_invalid_stack_depth_on_return_call() {
@@ -729,7 +729,7 @@ fn test_diagnostic_invalid_stack_depth_on_return_call() {
     );
 }
 
-/// Ensures that the proper `ExecutionError::InvalidStackDepthOnReturn` diagnostic is generated when
+/// Ensures that the proper `OperationError::InvalidStackDepthOnReturn` diagnostic is generated when
 /// the stack depth is invalid on return from a dyncall.
 #[test]
 fn test_diagnostic_invalid_stack_depth_on_return_dyncall() {

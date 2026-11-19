@@ -125,7 +125,7 @@ fn pvm_wrapper_rejects_a_non_u32_air_height() {
     heights[0] = u64::from(u32::MAX) + 1;
 
     let test = build_test!(source(), &[], &heights);
-    assert!(test.execute().is_err(), "a non-u32 AIR height must be rejected");
+    assert!(test.execute_for_output().is_err(), "a non-u32 AIR height must be rejected");
 }
 
 #[test]

@@ -5,13 +5,13 @@ use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
     chiplets::{eidos_compression, hasher::compress_state},
     crypto::merkle::MerklePath,
-    deferred::Digest,
+    deferred::{Digest, PrecompileError},
     program::MIN_STACK_DEPTH,
     utils::range,
 };
 
 use crate::{
-    AdviceProvider, ContextId, ExecutionError,
+    AdviceProvider, ContextId, ProcessorError,
     errors::OperationError,
     fast::{FastProcessor, INITIAL_STACK_TOP_IDX, SystemCallState, memory::Memory},
     processor::{HasherInterface, Processor, StackInterface, SystemInterface},
@@ -160,18 +160,15 @@ impl SystemInterface for FastProcessor {
         &mut self,
         statement_digest: Digest,
         expected_new_root: Word,
-    ) -> Result<(), OperationError> {
+    ) -> Result<(), PrecompileError> {
         self.deferred_state
             .log_verified_statement(statement_digest, expected_new_root)
             .map(|_| ())
-            .map_err(OperationError::from)
     }
 
     #[inline(always)]
-    fn clear_deferred(&mut self, expected_previous_root: Word) -> Result<(), OperationError> {
-        self.deferred_state
-            .clear_deferred(expected_previous_root)
-            .map_err(OperationError::from)
+    fn clear_deferred(&mut self, expected_previous_root: Word) -> Result<(), PrecompileError> {
+        self.deferred_state.clear_deferred(expected_previous_root)
     }
 
     #[inline(always)]
@@ -286,7 +283,7 @@ impl StackInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn increment_size(&mut self) -> Result<(), ExecutionError> {
+    fn increment_size(&mut self) -> Result<(), ProcessorError> {
         self.ensure_stack_capacity_for_push()?;
         self.increment_stack_size();
         Ok(())

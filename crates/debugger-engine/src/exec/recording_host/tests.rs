@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_processor::{
-    DefaultHost, ExecutionError, FastProcessor, ProcessorState, StackInputs,
+    DefaultHost, FastProcessor, ProcessorError, ProcessorState, StackInputs,
     event::{EventName, TraceError},
 };
 
@@ -30,11 +30,11 @@ fn trace_handler_errors_preserve_the_registered_name() {
             .execute(&package.unwrap_program(), &mut recording),
     )
     .expect_err("the trace handler must reject execution");
-    let ExecutionError::EventError { event_id, event_name, error, .. } = error else {
+    let ProcessorError::Event { event_id, event_name, source: error } = error.kind() else {
         panic!("unexpected execution error: {error:?}");
     };
-    assert_eq!(event_id, name.to_event_id());
-    assert_eq!(event_name, Some(name));
+    assert_eq!(*event_id, name.to_event_id());
+    assert_eq!(event_name.as_ref(), Some(&name));
     assert_eq!(error.to_string(), "trace rejected");
 }
 

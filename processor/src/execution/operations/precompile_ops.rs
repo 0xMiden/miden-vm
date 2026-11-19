@@ -6,7 +6,7 @@ use miden_core::{
 };
 
 use crate::{
-    Felt, Word, ZERO,
+    Felt, ProcessorError, Word, ZERO,
     errors::OperationError,
     processor::{HasherInterface, Processor, StackInterface, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},
@@ -28,7 +28,7 @@ use crate::{
 pub(super) fn op_log_deferred<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, OperationError> {
+) -> Result<OperationHelperRegisters, ProcessorError> {
     let statement_digest: Word = processor.stack().get_word(0);
     let state_prev = processor.system().deferred_root();
 
@@ -64,10 +64,10 @@ pub(super) fn op_log_deferred<P: Processor, T: Tracer>(
 #[inline(always)]
 pub(super) fn op_clear_deferred<P: Processor>(
     processor: &mut P,
-) -> Result<OperationHelperRegisters, OperationError> {
+) -> Result<OperationHelperRegisters, ProcessorError> {
     let ctx = processor.system().ctx();
     if !ctx.is_root() {
-        return Err(OperationError::ClearDeferredOutsideRootContext { ctx });
+        return Err(OperationError::ClearDeferredOutsideRootContext { ctx }.into());
     }
 
     let previous_root = processor.stack().get_word(0);

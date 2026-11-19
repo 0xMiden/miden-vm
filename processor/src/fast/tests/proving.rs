@@ -89,15 +89,11 @@ async fn proving_with_advice_preserves_explicit_source_errors() {
         .unwrap_err();
 
     for error in [sync_error, async_error] {
+        assert_eq!(error.source_span(), Some(SourceSpan::new(fixture.source_file.id(), 9u32..17)));
+        assert_eq!(error.source_file().map(|file| file.id()), Some(fixture.source_file.id()));
         assert_matches!(
-            error,
-            ExecutionError::OperationError {
-                label,
-                source_file: Some(actual_source_file),
-                err: OperationError::FailedAssertion { err_code, .. },
-            } if label == SourceSpan::new(fixture.source_file.id(), 9u32..17)
-                && actual_source_file.id() == fixture.source_file.id()
-                && err_code == Felt::from_u32(9)
+            error.into_kind(),
+            ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if err_code == Felt::from_u32(9)
         );
     }
 }

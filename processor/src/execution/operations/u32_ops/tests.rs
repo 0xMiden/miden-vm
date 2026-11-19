@@ -13,7 +13,7 @@ use super::{
     op_u32sub, op_u32xor,
 };
 use crate::{
-    DefaultHost, ExecutionError,
+    DefaultHost, ProcessorError,
     execution::operations::execute_op,
     fast::{FastProcessor, NoopTracer},
     operation::{Operation, OperationError},
@@ -218,8 +218,8 @@ fn test_op_u32assert2_assembled_err_msg_lookup() {
         .expect_err("expected u32 assertion failure");
 
     // Unwrap the OperationError from the ExecutionError wrapper.
-    let op_err = match exec_err {
-        ExecutionError::OperationError { err, .. } => err,
+    let op_err = match exec_err.into_kind() {
+        ProcessorError::Operation(err) => err,
         other => panic!("expected OperationError, got {other:?}"),
     };
 
@@ -253,8 +253,8 @@ fn test_u32assert_err_wrapper_assembled() {
         .execute_sync(&program, &mut host)
         .expect_err("expected u32 assertion failure");
 
-    let op_err = match exec_err {
-        ExecutionError::OperationError { err, .. } => err,
+    let op_err = match exec_err.into_kind() {
+        ProcessorError::Operation(err) => err,
         other => panic!("expected OperationError, got {other:?}"),
     };
     match op_err {
@@ -290,8 +290,8 @@ fn test_u32assertw_err_wrapper_assembled() {
         .execute_sync(&program, &mut host)
         .expect_err("expected u32 assertion failure");
 
-    let op_err = match exec_err {
-        ExecutionError::OperationError { err, .. } => err,
+    let op_err = match exec_err.into_kind() {
+        ProcessorError::Operation(err) => err,
         other => panic!("expected OperationError, got {other:?}"),
     };
     match op_err {
@@ -513,7 +513,7 @@ fn test_op_u32xor_min_stack() {
 // U32CLZ VERIFIER REGRESSIONS
 // --------------------------------------------------------------------------------------------
 
-fn run_verify_clz_gadget(n: u32, clz: u32) -> Result<FastProcessor, ExecutionError> {
+fn run_verify_clz_gadget(n: u32, clz: u32) -> Result<FastProcessor, ProcessorError> {
     use Operation::*;
 
     let mut processor = FastProcessor::new(
@@ -521,7 +521,6 @@ fn run_verify_clz_gadget(n: u32, clz: u32) -> Result<FastProcessor, ExecutionErr
             .unwrap(),
     );
     let mut tracer = NoopTracer;
-    let mut host = DefaultHost::default();
 
     let ops = vec![
         // Group 1 from `verify_clz`
@@ -577,8 +576,8 @@ fn run_verify_clz_gadget(n: u32, clz: u32) -> Result<FastProcessor, ExecutionErr
         Assert(ZERO),
     ];
 
-    for (op_idx, op) in ops.iter().enumerate() {
-        let _ = execute_op(&mut processor, op, op_idx, &mut host, &mut tracer, None)?;
+    for op in &ops {
+        let _ = execute_op(&mut processor, op, &mut tracer)?;
     }
 
     Ok(processor)

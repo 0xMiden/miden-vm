@@ -11,6 +11,7 @@ use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, ONE_LIMBS, Sha256Precompile, Sha512Precompile,
     UintDomain, UintPrecompile,
 };
+use miden_processor::ProcessorError;
 
 use super::helpers::{
     masm_store_felts, read_memory_felts, read_stack_felts, run_precompile_program as run_raw,
@@ -498,7 +499,7 @@ fn manual_hashes_reject_forged_digest_advice() {
         },
     };
     use miden_processor::{
-        DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, StackInputs,
+        DefaultHost, ExecutionOptions, FastProcessor, StackInputs,
         advice::{AdviceInputs, AdviceMutation, AdviceStack},
         event::EventHandler,
     };
@@ -535,7 +536,7 @@ fn manual_hashes_reject_forged_digest_advice() {
         .execute_sync(&program, &mut host)
         .unwrap_err();
         assert!(
-            matches!(error,ExecutionError::DeferredError { ref err, .. } if matches!(err.root(),PrecompileError::AssertionFailed)),
+            matches!(error.kind(),ProcessorError::Deferred(err) if matches!(err.root(),PrecompileError::AssertionFailed)),
             "{module}: {error}"
         );
     }

@@ -2,6 +2,7 @@
 #![allow(unused_assignments)]
 
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use core::fmt;
 
 use miden_air_definitions::vm::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
 use miden_core::{deferred::PrecompileError, program::MIN_STACK_DEPTH};
@@ -16,149 +17,169 @@ use crate::{
     BaseHost, ContextId, Felt, Word,
     advice::AdviceError,
     event::{EventError, EventId, EventName},
-    fast::SystemEventError,
-    host::MastForestLoadError,
     utils::to_hex,
 };
 
 // EXECUTION ERROR
 // ================================================================================================
 
-#[non_exhaustive]
-#[derive(Debug, thiserror::Error, Diagnostic)]
-pub enum ExecutionError {
-    #[error("failed to execute arithmetic circuit evaluation operation: {error}")]
-    #[diagnostic()]
-    AceChipError {
-        #[label("this call failed")]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        error: AceError,
-    },
-    #[error("{err}")]
-    #[diagnostic(forward(err))]
-    AdviceError {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        err: AdviceError,
-    },
-    #[error("exceeded the allowed number of max cycles {0}")]
-    CycleLimitExceeded(u32),
-    #[error("error during processing of event {}", match event_name {
-        Some(name) => format!("'{name}' (ID: {event_id})"),
-        None => format!("with ID: {event_id}"),
-    })]
-    #[diagnostic()]
-    EventError {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        event_id: EventId,
-        event_name: Option<EventName>,
-        #[source]
-        error: EventError,
-    },
-    /// Failed to load a MAST forest from the host.
-    #[error("failed to load MAST forest for procedure with root digest {root_digest}: {error}")]
-    #[diagnostic()]
-    MastForestError {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        root_digest: Word,
-        #[source]
-        error: MastForestLoadError,
-    },
-    /// Deferred system event failed while validating or evaluating a committed node.
-    #[error("{err}")]
-    #[diagnostic()]
-    DeferredError {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        err: PrecompileError,
-    },
-    #[error("failed to execute the program for internal reason: {0}")]
-    Internal(&'static str),
-    #[error("operand stack depth {depth} exceeds the maximum of {max}")]
-    StackDepthLimitExceeded { depth: usize, max: usize },
-    /// This means trace generation would go over the configured row limit.
-    ///
-    /// In parallel trace building, this is used for core-row prechecks and chiplet overflow.
-    #[error("trace length exceeded the maximum of {0} rows")]
-    TraceLenExceeded(usize),
-    /// This means the modelled peak prover memory for the trace exceeds the configured budget.
-    #[error(
-        "estimated prover memory of {estimated_bytes} bytes exceeds the budget of {budget_bytes} bytes"
-    )]
-    ProverMemoryExceeded { estimated_bytes: u64, budget_bytes: u64 },
-    /// Memory error with source context for diagnostics.
-    ///
-    /// Use `MemoryResultExt::map_mem_err` to convert `Result<T, MemoryError>` with context.
-    #[error("{err}")]
-    #[diagnostic(forward(err))]
-    MemoryError {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        err: MemoryError,
-    },
-    /// Memory error without source context (for internal operations like FMP initialization).
-    ///
-    /// Use `ExecutionError::MemoryErrorNoCtx` for memory errors that don't have error context
-    /// available (e.g., during call/syscall context initialization).
-    #[error(transparent)]
-    #[diagnostic(transparent)]
-    MemoryErrorNoCtx(MemoryError),
-    #[error("{err}")]
-    #[diagnostic(forward(err))]
-    OperationError {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        err: OperationError,
-    },
-    #[error("stack should have at most {MIN_STACK_DEPTH} elements at the end of program execution, but had {} elements", MIN_STACK_DEPTH + .0)]
-    OutputStackOverflow(usize),
-    #[error("procedure with root digest {root_digest} could not be found")]
-    #[diagnostic()]
-    ProcedureNotFound {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        root_digest: Word,
-    },
-    #[error("failed to generate STARK proof: {0}")]
-    ProvingError(String),
-    #[error(transparent)]
-    HostError(#[from] HostError),
-    #[error(transparent)]
-    PackageDebugInfoError(#[from] PackageDebugInfoError),
+/// A typed execution failure with source diagnostics resolved at its execution boundary.
+///
+/// Low-level operations propagate [`ProcessorError`] or a narrower domain error. The boundary
+/// that owns the failing source occurrence calls [`ProcessorError::with_context`] once. Errors
+/// outside instruction execution, such as initialization and output validation, can be converted
+/// directly without source diagnostics.
+#[derive(Debug, Diagnostic)]
+pub struct ExecutionError {
+    kind: ProcessorError,
+    #[label]
+    source_span: Option<SourceSpan>,
+    #[source_code]
+    source_file: Option<Arc<SourceFile>>,
 }
 
 impl ExecutionError {
-    /// Wraps an advice error without source-location context.
-    pub fn advice_error_no_context(err: AdviceError) -> Self {
-        Self::AdviceError {
-            label: SourceSpan::UNKNOWN,
-            source_file: None,
-            err,
-        }
+    /// Returns the classified failure independently of its source diagnostics.
+    pub fn kind(&self) -> &ProcessorError {
+        &self.kind
+    }
+
+    /// Consumes this error and returns its classified failure.
+    pub fn into_kind(self) -> ProcessorError {
+        self.kind
+    }
+
+    /// Returns the source span of the failing instruction or control-flow node, when known.
+    pub fn source_span(&self) -> Option<SourceSpan> {
+        self.source_span
+    }
+
+    /// Returns the source file supplied by the host, when available.
+    pub fn source_file(&self) -> Option<&Arc<SourceFile>> {
+        self.source_file.as_ref()
+    }
+}
+
+impl fmt::Display for ExecutionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.kind, f)
+    }
+}
+
+impl core::error::Error for ExecutionError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        // This wrapper adds diagnostics, not another causal layer with the same error message.
+        core::error::Error::source(&self.kind)
     }
 }
 
 impl AsRef<dyn Diagnostic> for ExecutionError {
     fn as_ref(&self) -> &(dyn Diagnostic + 'static) {
         self
+    }
+}
+
+/// A context-free failure produced while initializing or running the processor.
+///
+/// `From` conversions preserve typed causes while allowing ordinary `?` propagation. Source spans,
+/// files, and package error messages are resolved only when the failing execution boundary is
+/// known.
+#[non_exhaustive]
+#[derive(Debug, thiserror::Error)]
+pub enum ProcessorError {
+    #[error("failed to execute arithmetic circuit evaluation operation: {0}")]
+    Ace(#[from] AceError),
+    #[error(transparent)]
+    Advice(#[from] AdviceError),
+    #[error("exceeded the allowed number of max cycles {0}")]
+    CycleLimitExceeded(u32),
+    #[error("error during processing of event {}", match event_name {
+        Some(name) => format!("'{name}' (ID: {event_id})"),
+        None => format!("with ID: {event_id}"),
+    })]
+    Event {
+        event_id: EventId,
+        event_name: Option<EventName>,
+        #[source]
+        source: EventError,
+    },
+    /// Failed to load a MAST forest from the host.
+    #[error("failed to load MAST forest for procedure with root digest {root_digest}: {source}")]
+    MastForestLoad {
+        root_digest: Word,
+        #[source]
+        source: crate::MastForestLoadError,
+    },
+    #[error(transparent)]
+    Deferred(#[from] PrecompileError),
+    #[error("failed to execute the program for internal reason: {0}")]
+    Internal(&'static str),
+    #[error("operand stack depth {depth} exceeds the maximum of {max}")]
+    StackDepthLimitExceeded { depth: usize, max: usize },
+    #[error(transparent)]
+    Memory(#[from] MemoryError),
+    #[error(transparent)]
+    Operation(#[from] OperationError),
+    #[error("stack should have at most {MIN_STACK_DEPTH} elements at the end of program execution, but had {} elements", MIN_STACK_DEPTH + .0)]
+    OutputStackOverflow(usize),
+    #[error("procedure with root digest {root_digest} could not be found")]
+    ProcedureNotFound { root_digest: Word },
+    #[error(transparent)]
+    PackageDebugInfo(#[from] Arc<PackageDebugInfoError>),
+}
+
+impl ProcessorError {
+    /// Resolves diagnostic context once, while the failing source occurrence is still available.
+    ///
+    /// The context must belong to the package containing that occurrence. Package assertion
+    /// messages are resolved even if source locations or source files are unavailable. For a
+    /// control-flow node, pass `None` for `op_idx` to use its first assembly operation.
+    pub fn with_context(
+        self,
+        context: Option<PackageSourceDebugContext<'_>>,
+        host: &(dyn BaseHost + '_),
+        op_idx: Option<usize>,
+    ) -> ExecutionError {
+        let source =
+            context.map(|context| context.resolve_source(host, op_idx)).unwrap_or_default();
+        self.with_resolved_context(context.map(|context| context.debug_info), source)
+    }
+
+    /// Attaches selected source diagnostics without repeating source lookup.
+    pub(crate) fn with_resolved_context(
+        self,
+        debug_info: Option<&PackageDebugInfo>,
+        (span, source_file): (SourceSpan, Option<Arc<SourceFile>>),
+    ) -> ExecutionError {
+        let kind = match (self, debug_info) {
+            (Self::Operation(err), Some(debug_info)) => {
+                Self::Operation(err.with_package_debug_info(debug_info))
+            },
+            (kind, _) => kind,
+        };
+        ExecutionError {
+            kind,
+            source_span: (span != SourceSpan::UNKNOWN).then_some(span),
+            source_file,
+        }
+    }
+}
+
+impl From<ProcessorError> for ExecutionError {
+    fn from(kind: ProcessorError) -> Self {
+        kind.with_resolved_context(None, (SourceSpan::UNKNOWN, None))
+    }
+}
+
+impl From<AdviceError> for ExecutionError {
+    fn from(error: AdviceError) -> Self {
+        ProcessorError::Advice(error).into()
+    }
+}
+
+impl From<PrecompileError> for ExecutionError {
+    fn from(error: PrecompileError) -> Self {
+        ProcessorError::Deferred(error).into()
     }
 }
 
@@ -169,27 +190,11 @@ impl AsRef<dyn Diagnostic> for ExecutionError {
 #[error("ace circuit evaluation failed: {0}")]
 pub struct AceError(pub String);
 
-// ACE EVAL ERROR
-// ================================================================================================
-
-/// Context-free error type for ACE circuit evaluation operations.
-///
-/// This enum wraps errors from ACE evaluation and memory subsystems without
-/// carrying source location context. Context is added at the call site via
-/// `AceEvalResultExt::map_ace_eval_err`.
-#[derive(Debug, thiserror::Error)]
-pub enum AceEvalError {
-    #[error(transparent)]
-    Ace(#[from] AceError),
-    #[error(transparent)]
-    Memory(#[from] MemoryError),
-}
-
 // HOST ERROR
 // ================================================================================================
 
 /// Error type for host-related operations.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum HostError {
     #[error("attempted to add event handler for '{event}' (already registered)")]
     DuplicateEventHandler { event: EventName },
@@ -202,47 +207,15 @@ pub enum HostError {
     EmptyEventName,
 }
 
-// IO ERROR
-// ================================================================================================
-
-/// Context-free error type for IO operations.
-///
-/// This enum wraps errors from the advice provider and memory subsystems without
-/// carrying source location context. Context is added at the call site via
-/// `IoResultExt::map_io_err`.
-#[derive(Debug, thiserror::Error, Diagnostic)]
-pub enum IoError {
-    #[error(transparent)]
-    Advice(#[from] AdviceError),
-    #[error(transparent)]
-    Memory(#[from] MemoryError),
-    #[error(transparent)]
-    #[diagnostic(transparent)]
-    Operation(#[from] OperationError),
-    /// Stack operation error (increment/decrement size failures).
-    ///
-    /// These are internal execution errors that don't need additional context
-    /// since they already carry their own error information.
-    #[error(transparent)]
-    #[diagnostic(transparent)]
-    Execution(Box<ExecutionError>),
-}
-
-impl From<ExecutionError> for IoError {
-    fn from(err: ExecutionError) -> Self {
-        IoError::Execution(Box::new(err))
-    }
-}
-
 // MEMORY ERROR
 // ================================================================================================
 
 /// Lightweight error type for memory operations.
 ///
 /// This enum captures error conditions without expensive context information (no source location,
-/// no file references). When a `MemoryError` propagates up to become an `ExecutionError`, the
-/// context is resolved lazily via `MapExecErr::map_exec_err`.
-#[derive(Debug, thiserror::Error, Diagnostic)]
+/// no file references). Execution boundaries add source diagnostics after propagation through
+/// [`ProcessorError`].
+#[derive(Debug, thiserror::Error)]
 pub enum MemoryError {
     #[error("memory address cannot exceed 2^32 but was {addr}")]
     AddressOutOfBounds { addr: u64 },
@@ -260,66 +233,22 @@ pub enum MemoryError {
     UnalignedWordAccess { addr: u32, ctx: ContextId },
     #[error("failed to read from memory: {0}")]
     MemoryReadFailed(String),
+    /// Configured by [`crate::ExecutionOptions::with_max_memory_elements`].
     #[error(
         "writing to memory address {addr} in context {ctx} would exceed the maximum number of memory elements {max}"
     )]
-    #[diagnostic(help(
-        "increase the limit via `ExecutionOptions::with_max_memory_elements`, or reduce the number of distinct memory addresses the program writes to"
-    ))]
     MemoryElementLimitExceeded { ctx: ContextId, addr: u32, max: usize },
-}
-
-// CRYPTO ERROR
-// ================================================================================================
-
-/// Context-free error type for cryptographic operations (Merkle path verification, updates).
-///
-/// This enum wraps errors from the advice provider and operation subsystems without carrying
-/// source location context. Context is added at the call site via
-/// `CryptoResultExt::map_crypto_err`.
-#[derive(Debug, thiserror::Error, Diagnostic)]
-pub enum CryptoError {
-    #[error(transparent)]
-    Advice(#[from] AdviceError),
-    #[error(transparent)]
-    #[diagnostic(transparent)]
-    Operation(#[from] OperationError),
 }
 
 // OPERATION ERROR
 // ================================================================================================
 
-/// Lightweight error type for operations that can fail.
+/// A failure specific to an operation, independent of source diagnostics.
 ///
-/// This enum captures error conditions without expensive context information (no source location,
-/// no file references). When an `OperationError` propagates up to become an `ExecutionError`, the
-/// context is resolved lazily via extension traits like `OperationResultExt::map_exec_err`.
-///
-/// # Adding new errors (for contributors)
-///
-/// **Use `OperationError` when:**
-/// - The error occurs during operation execution (e.g., assertion failures, type mismatches)
-/// - Context can be resolved at the call site via the extension traits
-/// - The error needs both a human-readable message and optional diagnostic help
-///
-/// **Avoid duplicating error context.** Context is added by the extension traits,
-/// so do NOT add `label` or `source_file` fields to the variant.
-///
-/// **Pattern at call sites:**
-/// ```ignore
-/// // Return OperationError and let the caller wrap it:
-/// fn some_op() -> Result<(), OperationError> {
-///     Err(OperationError::DivideByZero)
-/// }
-///
-/// // Caller wraps with context lazily:
-/// some_op().map_exec_err()?;
-/// ```
-///
-/// For wrapper errors (`AdviceError`, `EventError`, `AceError`), use the corresponding extension
-/// traits (`AdviceResultExt`, `AceResultExt`) or helper functions (`advice_error_with_context`,
-/// `event_error_with_context`).
-#[derive(Debug, Clone, thiserror::Error, Diagnostic)]
+/// Propagate it directly from narrow helpers, or through [`ProcessorError`] when an operation
+/// combines multiple failure sources. The execution boundary resolves package messages and source
+/// locations once the failing source occurrence is known.
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum OperationError {
     #[error("external node with mast root {0} resolved to an external node")]
     CircularExternalNode(Word),
@@ -327,8 +256,6 @@ pub enum OperationError {
     ClearDeferredOutsideRootContext { ctx: ContextId },
     #[error("division by zero: divisor must be non-zero for division or modulo operations")]
     DivideByZero,
-    #[error(transparent)]
-    Deferred(#[from] PrecompileError),
     #[error(
         "assertion failed with error {}",
         match err_msg {
@@ -417,34 +344,6 @@ impl BinaryValueErrorContext {
 }
 
 impl OperationError {
-    /// Wraps this error with execution context to produce an `ExecutionError`.
-    ///
-    /// This is useful when working with `ControlFlow` or other non-`Result` return types
-    /// where the `OperationResultExt::map_exec_err` extension trait cannot be used directly.
-    pub fn with_context(self) -> ExecutionError {
-        let (label, source_file) = get_label_and_source_file();
-        ExecutionError::OperationError { label, source_file, err: self }
-    }
-
-    /// Wraps this error with package-owned source-occurrence execution context.
-    ///
-    /// Unlike [`Self::with_context`], this resolves source metadata from package debug sections
-    /// keyed by a source/debug MAST occurrence rather than by the reduced execution MAST node.
-    pub fn with_package_source_context(
-        self,
-        context: PackageSourceDebugContext<'_>,
-        host: &(dyn BaseHost + '_),
-        op_idx: Option<usize>,
-    ) -> ExecutionError {
-        let (label, source_file) =
-            label_and_source_file_from_location(context.assembly_location(op_idx).as_ref(), host);
-        ExecutionError::OperationError {
-            label,
-            source_file,
-            err: self.with_package_debug_info(context.debug_info()),
-        }
-    }
-
     fn with_package_debug_info(self, debug_info: &PackageDebugInfo) -> Self {
         match self {
             Self::FailedAssertion { err_code, err_msg: None } => Self::FailedAssertion {
@@ -479,7 +378,7 @@ pub struct MerklePathVerificationFailedInner {
     pub err_msg: Option<Arc<str>>,
 }
 
-// EXTENSION TRAITS
+// SOURCE CONTEXT
 // ================================================================================================
 
 /// Source-occurrence debug context decoded from package debug sections.
@@ -493,30 +392,12 @@ pub struct PackageSourceDebugContext<'a> {
 }
 
 impl<'a> PackageSourceDebugContext<'a> {
-    /// Creates a source debug context for one package-owned source/debug MAST occurrence.
-    pub fn new(debug_info: &'a PackageDebugInfo, source_node_id: DebugSourceNodeId) -> Self {
-        Self {
-            debug_info,
-            source_node_id: Some(source_node_id),
-        }
-    }
-
     /// Creates a package debug context when source location metadata may be unavailable.
-    pub(crate) fn new_optional(
+    pub fn new(
         debug_info: &'a PackageDebugInfo,
         source_node_id: Option<DebugSourceNodeId>,
     ) -> Self {
         Self { debug_info, source_node_id }
-    }
-
-    /// Returns the source/debug MAST occurrence associated with this context, if known.
-    pub fn source_node_id(&self) -> Option<DebugSourceNodeId> {
-        self.source_node_id
-    }
-
-    /// Returns the package debug info backing this context.
-    pub fn debug_info(&self) -> &'a PackageDebugInfo {
-        self.debug_info
     }
 
     /// Returns source location metadata for `op_idx`, if present.
@@ -536,605 +417,19 @@ impl<'a> PackageSourceDebugContext<'a> {
             .into_option()
             .and_then(|idx| self.debug_info.get_location(idx))
     }
-}
 
-fn label_and_source_file_from_location(
-    location: Option<&Location>,
-    host: &(dyn BaseHost + '_),
-) -> (SourceSpan, Option<Arc<SourceFile>>) {
-    location.map_or_else(
-        || (SourceSpan::UNKNOWN, None),
-        |location| host.get_label_and_source_file(location),
-    )
-}
-
-/// Computes the label and source file for error context.
-///
-/// This function is called by the extension traits to compute source location
-/// only when an error occurs. Since errors are rare, the cost of source metadata lookup is
-/// acceptable.
-fn get_label_and_source_file() -> (SourceSpan, Option<Arc<SourceFile>>) {
-    (SourceSpan::UNKNOWN, None)
-}
-
-/// Wraps an `AdviceError` with execution context to produce an `ExecutionError`.
-///
-/// This is useful when working with `ControlFlow` or other non-`Result` return types
-/// where the extension traits cannot be used directly.
-pub fn advice_error_with_context(err: AdviceError) -> ExecutionError {
-    let (label, source_file) = get_label_and_source_file();
-    ExecutionError::AdviceError { label, source_file, err }
-}
-
-/// Wraps an `AdviceError` with package-owned source-occurrence execution context.
-pub fn advice_error_with_package_source_context(
-    err: AdviceError,
-    context: PackageSourceDebugContext<'_>,
-    host: &(dyn BaseHost + '_),
-    op_idx: Option<usize>,
-) -> ExecutionError {
-    let (label, source_file) =
-        label_and_source_file_from_location(context.assembly_location(op_idx).as_ref(), host);
-    ExecutionError::AdviceError { label, source_file, err }
-}
-
-/// Wraps an `EventError` with execution context to produce an `ExecutionError`.
-///
-/// This is useful when working with `ControlFlow` or other non-`Result` return types
-/// where an extension trait on `Result` cannot be used directly.
-pub fn event_error_with_context(
-    error: EventError,
-    event_id: EventId,
-    event_name: Option<EventName>,
-) -> ExecutionError {
-    let (label, source_file) = get_label_and_source_file();
-    ExecutionError::EventError {
-        label,
-        source_file,
-        event_id,
-        event_name,
-        error,
-    }
-}
-
-/// Wraps an `EventError` with package-owned source-occurrence execution context.
-pub fn event_error_with_package_source_context(
-    error: EventError,
-    context: PackageSourceDebugContext<'_>,
-    host: &(dyn BaseHost + '_),
-    op_idx: Option<usize>,
-    event_id: EventId,
-    event_name: Option<EventName>,
-) -> ExecutionError {
-    let (label, source_file) =
-        label_and_source_file_from_location(context.assembly_location(op_idx).as_ref(), host);
-    ExecutionError::EventError {
-        label,
-        source_file,
-        event_id,
-        event_name,
-        error,
-    }
-}
-
-/// Creates a `MastForestError` with execution context.
-pub fn mast_forest_error_with_context(
-    root_digest: Word,
-    error: MastForestLoadError,
-) -> ExecutionError {
-    let (label, source_file) = get_label_and_source_file();
-    ExecutionError::MastForestError { label, source_file, root_digest, error }
-}
-
-/// Creates a `MastForestError` with package-owned source-occurrence execution context.
-pub fn mast_forest_error_with_package_source_context(
-    root_digest: Word,
-    error: MastForestLoadError,
-    context: PackageSourceDebugContext<'_>,
-    host: &(dyn BaseHost + '_),
-) -> ExecutionError {
-    let (label, source_file) =
-        label_and_source_file_from_location(context.assembly_location(None).as_ref(), host);
-    ExecutionError::MastForestError { label, source_file, root_digest, error }
-}
-
-/// Creates a `ProcedureNotFound` error with execution context.
-pub fn procedure_not_found_with_context(root_digest: Word) -> ExecutionError {
-    let (label, source_file) = get_label_and_source_file();
-    ExecutionError::ProcedureNotFound { label, source_file, root_digest }
-}
-
-/// Creates a `ProcedureNotFound` error with package-owned source-occurrence execution context.
-pub fn procedure_not_found_with_package_source_context(
-    root_digest: Word,
-    context: PackageSourceDebugContext<'_>,
-    host: &(dyn BaseHost + '_),
-) -> ExecutionError {
-    let (label, source_file) =
-        label_and_source_file_from_location(context.assembly_location(None).as_ref(), host);
-    ExecutionError::ProcedureNotFound { label, source_file, root_digest }
-}
-
-/// Creates a `MalformedMastForestInHost` operation error with execution context.
-pub fn malformed_mast_forest_with_context(
-    root_digest: Word,
-    context: Option<PackageSourceDebugContext<'_>>,
-    host: &(dyn BaseHost + '_),
-) -> ExecutionError {
-    let err = OperationError::MalformedMastForestInHost { root_digest };
-    match context {
-        Some(context) => err.with_package_source_context(context, host, None),
-        None => err.with_context(),
-    }
-}
-
-// CONSOLIDATED EXTENSION TRAITS (plafer's approach)
-// ================================================================================================
-//
-// Three traits organized by method signature rather than by error type:
-// 1. MapExecErr - for errors with basic context
-// 2. MapExecErrWithOpIdx - for errors in basic blocks that may need op_idx
-// 3. MapExecErrNoCtx - for errors without any context
-
-/// Extension trait for mapping errors to `ExecutionError`.
-///
-/// Legacy MAST-local debug metadata no longer provides source locations here; callers that have
-/// package-owned source context should use `map_exec_err_with_package_source_op_idx`.
-pub trait MapExecErr<T> {
-    fn map_exec_err(self) -> Result<T, ExecutionError>;
-}
-
-/// Extension trait for mapping errors to `ExecutionError` with op index context.
-///
-/// Implement this for error types that occur within basic blocks where the
-/// operation index is available for more precise source location.
-pub trait MapExecErrWithOpIdx<T> {
-    fn map_exec_err_with_op_idx(self) -> Result<T, ExecutionError>;
-
-    fn map_exec_err_with_package_source_op_idx(
-        self,
-        context: Option<PackageSourceDebugContext<'_>>,
-        _host: &(dyn BaseHost + '_),
-        _op_idx: usize,
-    ) -> Result<T, ExecutionError>
-    where
-        Self: Sized,
-    {
-        if context.is_some() {
-            return Err(ExecutionError::Internal(
-                "package source context is unsupported for this error type",
-            ));
-        }
-
-        self.map_exec_err_with_op_idx()
-    }
-}
-
-/// Extension trait for mapping errors to `ExecutionError` without context.
-///
-/// Implement this for error types that may need to be converted when no
-/// error context is available (e.g., during initialization).
-pub trait MapExecErrNoCtx<T> {
-    fn map_exec_err_no_ctx(self) -> Result<T, ExecutionError>;
-}
-
-// OperationError implementations
-impl<T> MapExecErr<T> for Result<T, OperationError> {
-    #[inline(always)]
-    fn map_exec_err(self) -> Result<T, ExecutionError> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(err) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(ExecutionError::OperationError { label, source_file, err })
-            },
-        }
-    }
-}
-
-impl<T> MapExecErrWithOpIdx<T> for Result<T, OperationError> {
-    #[inline(always)]
-    fn map_exec_err_with_op_idx(self) -> Result<T, ExecutionError> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(err) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(ExecutionError::OperationError { label, source_file, err })
-            },
-        }
-    }
-
-    #[inline(always)]
-    fn map_exec_err_with_package_source_op_idx(
-        self,
-        context: Option<PackageSourceDebugContext<'_>>,
+    /// Resolves the source independently of final error construction so callers can select a
+    /// fallback when the host cannot provide the referenced file.
+    pub(crate) fn resolve_source(
+        &self,
         host: &(dyn BaseHost + '_),
-        op_idx: usize,
-    ) -> Result<T, ExecutionError> {
-        match (self, context) {
-            (Ok(v), _) => Ok(v),
-            (Err(err), Some(context)) => {
-                Err(err.with_package_source_context(context, host, Some(op_idx)))
-            },
-            (Err(err), None) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(ExecutionError::OperationError { label, source_file, err })
-            },
-        }
+        op_idx: Option<usize>,
+    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        self.assembly_location(op_idx)
+            .map(|location| host.get_label_and_source_file(&location))
+            .unwrap_or_default()
     }
 }
-
-impl<T> MapExecErrNoCtx<T> for Result<T, OperationError> {
-    #[inline(always)]
-    fn map_exec_err_no_ctx(self) -> Result<T, ExecutionError> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(err) => Err(ExecutionError::OperationError {
-                label: SourceSpan::UNKNOWN,
-                source_file: None,
-                err,
-            }),
-        }
-    }
-}
-
-// AdviceError implementations
-impl<T> MapExecErr<T> for Result<T, AdviceError> {
-    #[inline(always)]
-    fn map_exec_err(self) -> Result<T, ExecutionError> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(err) => Err(advice_error_with_context(err)),
-        }
-    }
-}
-
-impl<T> MapExecErrNoCtx<T> for Result<T, AdviceError> {
-    #[inline(always)]
-    fn map_exec_err_no_ctx(self) -> Result<T, ExecutionError> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(err) => Err(ExecutionError::AdviceError {
-                label: SourceSpan::UNKNOWN,
-                source_file: None,
-                err,
-            }),
-        }
-    }
-}
-
-// MemoryError implementations
-impl<T> MapExecErr<T> for Result<T, MemoryError> {
-    #[inline(always)]
-    fn map_exec_err(self) -> Result<T, ExecutionError> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(err) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(ExecutionError::MemoryError { label, source_file, err })
-            },
-        }
-    }
-}
-
-impl<T> MapExecErrWithOpIdx<T> for Result<T, MemoryError> {
-    #[inline(always)]
-    fn map_exec_err_with_op_idx(self) -> Result<T, ExecutionError> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(err) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(ExecutionError::MemoryError { label, source_file, err })
-            },
-        }
-    }
-
-    #[inline(always)]
-    fn map_exec_err_with_package_source_op_idx(
-        self,
-        context: Option<PackageSourceDebugContext<'_>>,
-        host: &(dyn BaseHost + '_),
-        op_idx: usize,
-    ) -> Result<T, ExecutionError> {
-        match (self, context) {
-            (Ok(v), _) => Ok(v),
-            (Err(err), Some(context)) => {
-                let (label, source_file) = label_and_source_file_from_location(
-                    context.assembly_location(Some(op_idx)).as_ref(),
-                    host,
-                );
-                Err(ExecutionError::MemoryError { label, source_file, err })
-            },
-            (Err(err), None) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(ExecutionError::MemoryError { label, source_file, err })
-            },
-        }
-    }
-}
-
-// SystemEventError implementations
-impl<T> MapExecErr<T> for Result<T, SystemEventError> {
-    #[inline(always)]
-    fn map_exec_err(self) -> Result<T, ExecutionError> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(err) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(match err {
-                    SystemEventError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err }
-                    },
-                    SystemEventError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
-                    },
-                    SystemEventError::Memory(err) => {
-                        ExecutionError::MemoryError { label, source_file, err }
-                    },
-                    SystemEventError::Deferred(err) => {
-                        ExecutionError::DeferredError { label, source_file, err }
-                    },
-                })
-            },
-        }
-    }
-}
-
-impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
-    #[inline(always)]
-    fn map_exec_err_with_op_idx(self) -> Result<T, ExecutionError> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(err) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(match err {
-                    SystemEventError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err }
-                    },
-                    SystemEventError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
-                    },
-                    SystemEventError::Memory(err) => {
-                        ExecutionError::MemoryError { label, source_file, err }
-                    },
-                    SystemEventError::Deferred(err) => {
-                        ExecutionError::DeferredError { label, source_file, err }
-                    },
-                })
-            },
-        }
-    }
-
-    #[inline(always)]
-    fn map_exec_err_with_package_source_op_idx(
-        self,
-        context: Option<PackageSourceDebugContext<'_>>,
-        host: &(dyn BaseHost + '_),
-        op_idx: usize,
-    ) -> Result<T, ExecutionError> {
-        match (self, context) {
-            (Ok(v), _) => Ok(v),
-            (Err(err), Some(context)) => {
-                let (label, source_file) = label_and_source_file_from_location(
-                    context.assembly_location(Some(op_idx)).as_ref(),
-                    host,
-                );
-                Err(match err {
-                    SystemEventError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err }
-                    },
-                    SystemEventError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
-                    },
-                    SystemEventError::Memory(err) => {
-                        ExecutionError::MemoryError { label, source_file, err }
-                    },
-                    SystemEventError::Deferred(err) => {
-                        ExecutionError::DeferredError { label, source_file, err }
-                    },
-                })
-            },
-            (Err(err), None) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(match err {
-                    SystemEventError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err }
-                    },
-                    SystemEventError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
-                    },
-                    SystemEventError::Memory(err) => {
-                        ExecutionError::MemoryError { label, source_file, err }
-                    },
-                    SystemEventError::Deferred(err) => {
-                        ExecutionError::DeferredError { label, source_file, err }
-                    },
-                })
-            },
-        }
-    }
-}
-
-// IoError implementations
-impl<T> MapExecErrWithOpIdx<T> for Result<T, IoError> {
-    #[inline(always)]
-    fn map_exec_err_with_op_idx(self) -> Result<T, ExecutionError> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(err) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(match err {
-                    IoError::Advice(err) => ExecutionError::AdviceError { label, source_file, err },
-                    IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
-                    IoError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
-                    },
-                    // Execution errors are already fully formed with their own message.
-                    IoError::Execution(boxed_err) => *boxed_err,
-                })
-            },
-        }
-    }
-
-    #[inline(always)]
-    fn map_exec_err_with_package_source_op_idx(
-        self,
-        context: Option<PackageSourceDebugContext<'_>>,
-        host: &(dyn BaseHost + '_),
-        op_idx: usize,
-    ) -> Result<T, ExecutionError> {
-        match (self, context) {
-            (Ok(v), _) => Ok(v),
-            (Err(IoError::Execution(boxed_err)), _) => Err(*boxed_err),
-            (Err(err), Some(context)) => {
-                let (label, source_file) = label_and_source_file_from_location(
-                    context.assembly_location(Some(op_idx)).as_ref(),
-                    host,
-                );
-                Err(match err {
-                    IoError::Advice(err) => ExecutionError::AdviceError { label, source_file, err },
-                    IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
-                    IoError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
-                    },
-                    IoError::Execution(_) => unreachable!("handled above"),
-                })
-            },
-            (Err(err), None) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(match err {
-                    IoError::Advice(err) => ExecutionError::AdviceError { label, source_file, err },
-                    IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
-                    IoError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
-                    },
-                    IoError::Execution(_) => unreachable!("handled above"),
-                })
-            },
-        }
-    }
-}
-
-// CryptoError implementations
-impl<T> MapExecErrWithOpIdx<T> for Result<T, CryptoError> {
-    #[inline(always)]
-    fn map_exec_err_with_op_idx(self) -> Result<T, ExecutionError> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(err) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(match err {
-                    CryptoError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err }
-                    },
-                    CryptoError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
-                    },
-                })
-            },
-        }
-    }
-
-    #[inline(always)]
-    fn map_exec_err_with_package_source_op_idx(
-        self,
-        context: Option<PackageSourceDebugContext<'_>>,
-        host: &(dyn BaseHost + '_),
-        op_idx: usize,
-    ) -> Result<T, ExecutionError> {
-        match (self, context) {
-            (Ok(v), _) => Ok(v),
-            (Err(err), Some(context)) => {
-                let (label, source_file) = label_and_source_file_from_location(
-                    context.assembly_location(Some(op_idx)).as_ref(),
-                    host,
-                );
-                Err(match err {
-                    CryptoError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err }
-                    },
-                    CryptoError::Operation(err) => ExecutionError::OperationError {
-                        label,
-                        source_file,
-                        err: err.with_package_debug_info(context.debug_info()),
-                    },
-                })
-            },
-            (Err(err), None) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(match err {
-                    CryptoError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err }
-                    },
-                    CryptoError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
-                    },
-                })
-            },
-        }
-    }
-}
-
-// AceEvalError implementations
-impl<T> MapExecErrWithOpIdx<T> for Result<T, AceEvalError> {
-    #[inline(always)]
-    fn map_exec_err_with_op_idx(self) -> Result<T, ExecutionError> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(err) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(match err {
-                    AceEvalError::Ace(error) => {
-                        ExecutionError::AceChipError { label, source_file, error }
-                    },
-                    AceEvalError::Memory(err) => {
-                        ExecutionError::MemoryError { label, source_file, err }
-                    },
-                })
-            },
-        }
-    }
-
-    #[inline(always)]
-    fn map_exec_err_with_package_source_op_idx(
-        self,
-        context: Option<PackageSourceDebugContext<'_>>,
-        host: &(dyn BaseHost + '_),
-        op_idx: usize,
-    ) -> Result<T, ExecutionError> {
-        match (self, context) {
-            (Ok(v), _) => Ok(v),
-            (Err(err), Some(context)) => {
-                let (label, source_file) = label_and_source_file_from_location(
-                    context.assembly_location(Some(op_idx)).as_ref(),
-                    host,
-                );
-                Err(match err {
-                    AceEvalError::Ace(error) => {
-                        ExecutionError::AceChipError { label, source_file, error }
-                    },
-                    AceEvalError::Memory(err) => {
-                        ExecutionError::MemoryError { label, source_file, err }
-                    },
-                })
-            },
-            (Err(err), None) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(match err {
-                    AceEvalError::Ace(error) => {
-                        ExecutionError::AceChipError { label, source_file, error }
-                    },
-                    AceEvalError::Memory(err) => {
-                        ExecutionError::MemoryError { label, source_file, err }
-                    },
-                })
-            },
-        }
-    }
-}
-
-// TESTS
-// ================================================================================================
 
 #[cfg(test)]
 mod error_assertions {
@@ -1230,24 +525,24 @@ mod error_assertions {
             expected_location: location_b,
             returned_span: SourceSpan::new(SourceId::new(7), 20u32..24),
         };
-        let context = PackageSourceDebugContext::new(&debug_info, source_b);
+        let context = PackageSourceDebugContext::new(&debug_info, Some(source_b));
 
         assert_eq!(context.assembly_location(None), Some(host.expected_location.clone()));
 
-        let err = OperationError::DivideByZero.with_package_source_context(context, &host, Some(0));
+        let err = ProcessorError::Operation(OperationError::DivideByZero).with_context(
+            Some(context),
+            &host,
+            Some(0),
+        );
 
-        match err {
-            ExecutionError::OperationError { label, source_file, err } => {
-                assert_eq!(label, host.returned_span);
-                assert!(source_file.is_none());
-                assert!(matches!(err, OperationError::DivideByZero));
-            },
-            err => panic!("expected operation error, got {err:?}"),
-        }
+        assert_eq!(err.source_span(), Some(host.returned_span));
+        assert!(err.source_file().is_none());
+        assert!(matches!(err.kind(), ProcessorError::Operation(OperationError::DivideByZero)));
+        assert_eq!(err.labels().unwrap().count(), 1);
     }
 
     #[test]
-    fn package_source_context_without_location_uses_unknown_span() {
+    fn package_source_context_without_location_has_no_label() {
         let mut builder = PackageDebugInfoBuilder::default();
         let asm_op = debug_asm_op(&mut builder, 0, None, "missing_location", "add");
         let source_node_id = builder.add_node(debug_source_node(0, vec![asm_op])).unwrap();
@@ -1260,23 +555,18 @@ mod error_assertions {
             ),
             returned_span: SourceSpan::new(SourceId::new(7), 20u32..24),
         };
-        let context = PackageSourceDebugContext::new(&debug_info, source_node_id);
+        let context = PackageSourceDebugContext::new(&debug_info, Some(source_node_id));
 
-        let err = advice_error_with_package_source_context(
-            AdviceError::StackReadFailed,
-            context,
+        let err = ProcessorError::Advice(AdviceError::StackReadFailed).with_context(
+            Some(context),
             &host,
             Some(0),
         );
 
-        match err {
-            ExecutionError::AdviceError { label, source_file, err } => {
-                assert_eq!(label, SourceSpan::UNKNOWN);
-                assert!(source_file.is_none());
-                assert!(matches!(err, AdviceError::StackReadFailed));
-            },
-            err => panic!("expected advice error, got {err:?}"),
-        }
+        assert!(err.source_span().is_none());
+        assert!(err.source_file().is_none());
+        assert!(matches!(err.kind(), ProcessorError::Advice(AdviceError::StackReadFailed)));
+        assert_eq!(err.labels().unwrap().count(), 0);
     }
 
     #[test]
@@ -1284,12 +574,12 @@ mod error_assertions {
         let mut builder = PackageDebugInfoBuilder::default();
         assert!(builder.add_error_message(7, Arc::from("some error message")));
         let debug_info = *builder.build();
-        let context = PackageSourceDebugContext::new_optional(&debug_info, None);
-        let err = Err::<(), _>(OperationError::FailedAssertion {
+        let context = PackageSourceDebugContext::new(&debug_info, None);
+        let err = ProcessorError::Operation(OperationError::FailedAssertion {
             err_code: Felt::from_u32(7),
             err_msg: None,
         })
-        .map_exec_err_with_package_source_op_idx(
+        .with_context(
             Some(context),
             &RecordingHost {
                 expected_location: Location::new(
@@ -1299,18 +589,13 @@ mod error_assertions {
                 ),
                 returned_span: SourceSpan::new(SourceId::new(7), 20u32..24),
             },
-            0,
-        )
-        .unwrap_err();
+            Some(0),
+        );
 
-        match err {
-            ExecutionError::OperationError {
-                label,
-                source_file,
-                err: OperationError::FailedAssertion { err_msg, .. },
-            } => {
-                assert_eq!(label, SourceSpan::UNKNOWN);
-                assert!(source_file.is_none());
+        assert!(err.source_span().is_none());
+        assert!(err.source_file().is_none());
+        match err.into_kind() {
+            ProcessorError::Operation(OperationError::FailedAssertion { err_msg, .. }) => {
                 assert_eq!(err_msg.as_deref(), Some("some error message"));
             },
             err => panic!("expected failed assertion operation error, got {err:?}"),
@@ -1338,6 +623,44 @@ mod error_assertions {
                 assert_eq!(inner.err_msg.as_deref(), Some("some error message"));
             },
             err => panic!("expected MerklePathVerificationFailed, got {err:?}"),
+        }
+    }
+
+    #[test]
+    fn source_diagnostics_are_shared_by_failure_kinds() {
+        use core::cell::Cell;
+
+        struct CountingHost(Cell<usize>);
+        impl BaseHost for CountingHost {
+            fn get_label_and_source_file(
+                &self,
+                _location: &Location,
+            ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+                self.0.set(self.0.get() + 1);
+                (SourceSpan::new(SourceId::new(3), 4u32..8), None)
+            }
+        }
+        let mut builder = PackageDebugInfoBuilder::default();
+        let location =
+            Location::new(Uri::new("file://pkg/test.masm"), ByteIndex::new(4), ByteIndex::new(8));
+        let asm_op = debug_asm_op(&mut builder, 0, Some(location), "test", "add");
+        let node = builder.add_node(debug_source_node(0, vec![asm_op])).unwrap();
+        let debug_info = *builder.build();
+        let context = PackageSourceDebugContext::new(&debug_info, Some(node));
+        let host = CountingHost(Cell::new(0));
+        for (index, kind) in [
+            ProcessorError::Operation(OperationError::DivideByZero),
+            ProcessorError::Advice(AdviceError::StackReadFailed),
+            ProcessorError::Memory(MemoryError::AddressOutOfBounds { addr: u64::MAX }),
+            ProcessorError::StackDepthLimitExceeded { depth: 20, max: 19 },
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let error = kind.with_context(Some(context), &host, Some(0));
+            assert_eq!(error.source_span(), Some(SourceSpan::new(SourceId::new(3), 4u32..8)));
+            assert_eq!(error.labels().unwrap().count(), 1);
+            assert_eq!(host.0.get(), index + 1);
         }
     }
 }

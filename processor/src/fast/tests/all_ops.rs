@@ -119,14 +119,16 @@ fn test_basic_block(
 
     let mut host = DefaultHost::default();
     let fast_processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-    let fast_stack_outputs =
-        fast_processor.execute_sync(&program, &mut host).map(|output| output.stack);
+    let fast_stack_outputs = fast_processor
+        .execute_sync(&program, &mut host)
+        .map(|output| output.stack)
+        .map_err(ExecutionError::into_kind);
 
     // Make sure that we're not getting an output stack overflow error, as it indicates that
     // the sequence of operations makes the stack end with a non-16 depth, and doesn't tell
     // us if the stack outputs are actually the same.
     if let Some(err) = fast_stack_outputs.as_ref().err()
-        && matches!(err, ExecutionError::OutputStackOverflow(_))
+        && matches!(err, ProcessorError::OutputStackOverflow(_))
     {
         panic!("we don't want to be testing this output stack overflow error");
     }

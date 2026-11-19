@@ -171,7 +171,7 @@ fn hash_elements_in_domain_matches_native() {
 
 #[test]
 fn element_hash_procedures_reject_non_u32_length() {
-    use miden_processor::{ExecutionError, operation::OperationError};
+    use miden_processor::{ProcessorError, operation::OperationError};
 
     const NON_U32_LENGTH: u64 = u32::MAX as u64 + 1;
     const PTR: u64 = 1000;
@@ -188,12 +188,11 @@ fn element_hash_procedures_reject_non_u32_length() {
     for invocation in invocations {
         let source = format!("use miden::core::crypto::hashes::eidos begin {invocation} end");
         let test = build_test!(source.as_str(), &[]);
-        let err = test.execute().expect_err("a non-u32 length must be rejected");
-        match err {
-            ExecutionError::OperationError {
-                err: OperationError::U32AssertionFailed { err_code, .. },
-                ..
-            } => assert_eq!(err_code, expected_error_code),
+        let err = test.execute_for_output().expect_err("a non-u32 length must be rejected");
+        match err.into_kind() {
+            ProcessorError::Operation(OperationError::U32AssertionFailed { err_code, .. }) => {
+                assert_eq!(err_code, expected_error_code)
+            },
             err => panic!("expected a u32 assertion failure, got {err:?}"),
         }
     }
@@ -228,7 +227,7 @@ fn generic_eidos_initializer_matches_native_across_full_u32_inputs() {
 
 #[test]
 fn generic_eidos_initializer_rejects_two_pow_32_in_every_slot() {
-    use miden_processor::{ExecutionError, operation::OperationError};
+    use miden_processor::{ProcessorError, operation::OperationError};
 
     const INVALID: u64 = 1 << 32;
     const ERROR_MSG: &str = "Eidos init values must fit in u32";
@@ -245,13 +244,12 @@ fn generic_eidos_initializer_rejects_two_pow_32_in_every_slot() {
         );
 
         let err = build_test!(source.as_str(), &[])
-            .execute()
+            .execute_for_output()
             .expect_err("a non-u32 initializer value must be rejected");
-        match err {
-            ExecutionError::OperationError {
-                err: OperationError::U32AssertionFailed { err_code, .. },
-                ..
-            } => assert_eq!(err_code, expected_error_code),
+        match err.into_kind() {
+            ProcessorError::Operation(OperationError::U32AssertionFailed { err_code, .. }) => {
+                assert_eq!(err_code, expected_error_code)
+            },
             err => panic!("expected a u32 assertion failure, got {err:?}"),
         }
     }

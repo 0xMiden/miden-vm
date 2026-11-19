@@ -1,6 +1,6 @@
 use miden_core::serde::Serializable;
 use miden_crypto::hash::sha2::Sha256;
-use miden_processor::{ExecutionError, operation::OperationError};
+use miden_processor::{ProcessorError, operation::OperationError};
 use miden_utils_testing::{
     IntoBytes, Test, group_slice_elements, push_inputs,
     rand::{seeded_element, seeded_word},
@@ -170,12 +170,13 @@ fn sha256_hash_bytes_rejects_non_u32_memory_word() {
 }
 
 fn expect_non_u32_execution_error(test: Test) {
-    let err = test.execute().expect_err("expected non-u32 SHA256 input to fail");
-    match err {
-        ExecutionError::OperationError {
-            err: OperationError::U32AssertionFailed { err_code, err_msg, invalid_values },
-            ..
-        } => assert!(
+    let err = test.execute_for_output().expect_err("expected non-u32 SHA256 input to fail");
+    match err.into_kind() {
+        ProcessorError::Operation(OperationError::U32AssertionFailed {
+            err_code,
+            err_msg,
+            invalid_values,
+        }) => assert!(
             err_code == miden_core::mast::error_code_from_msg(INVALID_SHA256_MESSAGE_WORD)
                 && err_msg.is_none()
                 && invalid_values.iter().any(|value| value.as_canonical_u64() == NON_U32_WORD),

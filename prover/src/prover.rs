@@ -1,4 +1,4 @@
-use alloc::{string::ToString, vec::Vec};
+use alloc::vec::Vec;
 
 use miden_core::{
     Word,
@@ -6,13 +6,15 @@ use miden_core::{
     proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus, VmProof},
 };
 use miden_processor::{
-    ExecutionError, ExecutionOptions, ExecutionWitness, FastProcessor, PrecompileWitness, Program,
-    StackInputs, StackOutputs, SyncHost, VmWitness,
+    ExecutionError, ExecutionOptions, ExecutionTraceError, ExecutionWitness, FastProcessor,
+    PrecompileWitness, Program, StackInputs, StackOutputs, SyncHost, TraceGenerationError,
+    VmWitness,
     advice::AdviceInputs,
     trace::{VmTrace, build_trace},
 };
+use miden_utils_diagnostics::{Diagnostic, miette};
 
-use crate::PrecompileProvingError;
+use crate::{PrecompileProvingError, VmProvingError};
 
 /// A synchronous, configurable prover for post-execution Miden VM witnesses.
 ///
@@ -223,9 +225,8 @@ impl Prover {
     /// Buffered and overlapped trace construction share this private implementation so STARK
     /// generation and VM proof packaging cannot diverge.
     fn prove_vm_trace(&self, trace: VmTrace) -> Result<VmProof, ProverError> {
-        miden_vm_stark::prover::prove(trace, self.hash_fn, self.hash_lde_blocks).map_err(|error| {
-            ProverError::VmProofGeneration(ExecutionError::ProvingError(error.to_string()))
-        })
+        miden_vm_stark::prover::prove(trace, self.hash_fn, self.hash_lde_blocks)
+            .map_err(ProverError::VmProofGeneration)
     }
 }
 
@@ -245,11 +246,11 @@ pub fn prove_sync(
     advice_inputs: AdviceInputs,
     host: &mut impl SyncHost,
     execution_options: ExecutionOptions,
-) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+) -> Result<(StackOutputs, ExecutionProof), ProverError> {
     #[cfg(feature = "std")]
     let overlapped_trace_build = execution_options.overlapped_trace_build();
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
-        .map_err(ExecutionError::advice_error_no_context)?;
+        .map_err(ExecutionError::from)?;
 
     #[cfg(feature = "std")]
     if overlapped_trace_build {
@@ -259,15 +260,13 @@ pub fn prove_sync(
             &miden_vm_stark::memory::canonical_budget(prover.max_prover_memory_bytes()),
         )?;
         let stack_outputs = *trace.stack_outputs();
-        let proof = prover
-            .prove_full_trace(trace, precompile)
-            .map_err(ProverError::into_execution_error)?;
+        let proof = prover.prove_full_trace(trace, precompile)?;
         return Ok((stack_outputs, proof));
     }
 
     let witness = processor.execute_for_proving_sync(program, host)?;
     let stack_outputs = *witness.claim().stack_outputs();
-    let proof = prover.prove_full(witness).map_err(ProverError::into_execution_error)?;
+    let proof = prover.prove_full(witness)?;
     Ok((stack_outputs, proof))
 }
 
@@ -277,39 +276,129 @@ impl Default for Prover {
     }
 }
 
-/// Errors produced while proving post-execution witnesses.
-#[derive(Debug, thiserror::Error)]
+/// A failure during execution, trace generation, or proof generation.
+#[derive(Debug, thiserror::Error, Diagnostic)]
 #[non_exhaustive]
 pub enum ProverError {
+    /// The program could not produce a complete execution witness.
+    #[error("failed to execute program: {0}")]
+    #[diagnostic(transparent)]
+    Execution(#[from] ExecutionError),
     /// The VM witness authenticates deferred precompile work that this proving path cannot carry.
     #[error("VM witness contains deferred precompile work")]
     VmWitnessHasPrecompiles,
     /// The processor witness could not be materialized into a valid execution trace.
     #[error("failed to materialize VM execution trace: {0}")]
-    TraceGeneration(#[source] ExecutionError),
+    #[diagnostic(transparent)]
+    TraceGeneration(#[from] TraceGenerationError),
     /// The materialized VM trace could not be proved.
     #[error("failed to prove VM execution trace: {0}")]
-    VmProofGeneration(#[source] ExecutionError),
+    VmProofGeneration(#[source] VmProvingError),
     /// The deferred precompile witness could not be proved.
     #[error("failed to prove precompile witness: {0}")]
     PrecompileProofGeneration(#[source] PrecompileProvingError),
 }
 
-impl ProverError {
-    fn into_execution_error(self) -> ExecutionError {
-        match self {
-            Self::VmWitnessHasPrecompiles => ExecutionError::ProvingError(self.to_string()),
-            Self::TraceGeneration(error) | Self::VmProofGeneration(error) => error,
-            Self::PrecompileProofGeneration(error) => {
-                ExecutionError::ProvingError(error.to_string())
-            },
+impl From<ExecutionTraceError> for ProverError {
+    fn from(error: ExecutionTraceError) -> Self {
+        match error {
+            ExecutionTraceError::Execution(error) => Self::Execution(error),
+            ExecutionTraceError::TraceGeneration(error) => Self::TraceGeneration(error),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use alloc::sync::Arc;
+    use core::error::Error;
+
+    use miden_assembly::{Assembler, DefaultSourceManager};
+    use miden_processor::{DefaultHost, ProcessorError, operation::OperationError};
+
     use super::*;
+
+    #[test]
+    fn proving_error_preserves_execution_source_diagnostics() {
+        let source_manager = Arc::new(DefaultSourceManager::default());
+        let package = Assembler::new(source_manager.clone())
+            .assemble_program("failing", "begin push.0 assert end")
+            .unwrap();
+        let program = package.unwrap_program();
+        let debug_info = package.debug_info().unwrap().unwrap();
+        let mut host = DefaultHost::default().with_source_manager(source_manager);
+        let execution_error = FastProcessor::new(StackInputs::default())
+            .execute_for_proving_with_package_debug_info_sync(&program, &debug_info, &mut host)
+            .expect_err("the assertion must fail with its source location");
+
+        assert!(execution_error.source_file().is_some());
+        let expected_labels: Vec<_> = execution_error
+            .labels()
+            .unwrap()
+            .map(|label| (label.offset(), label.len()))
+            .collect();
+        assert_eq!(expected_labels.len(), 1);
+
+        let report = miette::Report::new(ProverError::from(execution_error));
+        assert!(report.source_code().is_some());
+        let actual_labels: Vec<_> =
+            report.labels().unwrap().map(|label| (label.offset(), label.len())).collect();
+        assert_eq!(actual_labels, expected_labels);
+    }
+
+    #[test]
+    fn prove_sync_preserves_failure_phase_in_both_trace_modes() {
+        let failing_program = Assembler::default()
+            .assemble_program("failing", "begin push.0 assert end")
+            .unwrap()
+            .unwrap_program();
+        let valid_program = Assembler::default()
+            .assemble_program("valid", "begin nop end")
+            .unwrap()
+            .unwrap_program();
+
+        for overlapped in [false, true] {
+            for (program, budget, execution_failure) in [
+                (&failing_program, Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES, true),
+                (&failing_program, 1, true),
+                (&valid_program, 1, false),
+            ] {
+                let error = prove_sync(
+                    &Prover::new().with_max_prover_memory_bytes(budget),
+                    program,
+                    StackInputs::default(),
+                    AdviceInputs::default(),
+                    &mut DefaultHost::default(),
+                    ExecutionOptions::default().with_overlapped_trace_build(overlapped),
+                )
+                .expect_err("the failing phase must be reported before proof generation");
+
+                let source =
+                    error.source().expect("the phase wrapper must retain its typed source");
+                match (&error, execution_failure) {
+                    (ProverError::Execution(error), true) => {
+                        assert!(matches!(
+                            error.kind(),
+                            ProcessorError::Operation(OperationError::FailedAssertion { .. })
+                        ));
+                        assert!(source.is::<ExecutionError>());
+                    },
+                    (ProverError::TraceGeneration(error), false) => {
+                        assert!(matches!(
+                            error,
+                            TraceGenerationError::TraceLenExceeded(_)
+                                | TraceGenerationError::ProverMemoryExceeded {
+                                    budget_bytes: 1,
+                                    ..
+                                }
+                        ));
+                        assert!(source.is::<TraceGenerationError>());
+                    },
+                    _ => panic!("wrong proving phase with overlapped={overlapped}: {error:?}"),
+                }
+            }
+        }
+    }
 
     #[test]
     fn prover_uses_canonical_default_and_allows_hash_override() {

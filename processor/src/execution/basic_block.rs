@@ -5,7 +5,6 @@ use miden_mast_package::debug_info::DebugSourceNodeId;
 use crate::{
     BaseHost, BreakReason, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::PackageSourceDebugContext,
     execution::{
         ExecutionState, InternalBreakReason, execute_op, finalize_clock_cycle_with_continuation,
         finalize_clock_cycle_with_continuation_and_op_helpers,
@@ -35,12 +34,9 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state
+        .start_clock_cycle(Continuation::StartNode(node_id), current_forest, None)
+        .map_break(InternalBreakReason::from)?;
 
     // Finalize the clock cycle corresponding to the SPAN operation.
     let source_node_id = state.current_source_node_id();
@@ -148,12 +144,13 @@ where
     {
         {
             // Start clock cycle corresponding to the RESPAN operation before the batch.
-            state.tracer.start_clock_cycle(
-                state.processor,
-                Continuation::Respan { node_id, batch_index },
-                state.continuation_stack,
-                current_forest,
-            );
+            state
+                .start_clock_cycle(
+                    Continuation::Respan { node_id, batch_index },
+                    current_forest,
+                    Some(batch_offset_in_block),
+                )
+                .map_break(InternalBreakReason::from)?;
 
             // Finalize the clock cycle corresponding to the RESPAN operation.
             //
@@ -209,12 +206,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::FinishBasicBlock(node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state.start_clock_cycle(Continuation::FinishBasicBlock(node_id), current_forest, None)?;
 
     // Finalize the clock cycle corresponding to the END operation.
     finalize_clock_cycle_with_continuation(
@@ -259,12 +251,13 @@ where
     for (op_idx_in_batch, op) in batch.ops().iter().enumerate().skip(start_op_idx) {
         let op_idx_in_block = batch_offset_in_block + op_idx_in_batch;
 
-        state.tracer.start_clock_cycle(
-            state.processor,
-            Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch },
-            state.continuation_stack,
-            current_forest,
-        );
+        state
+            .start_clock_cycle(
+                Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch },
+                current_forest,
+                Some(op_idx_in_block),
+            )
+            .map_break(InternalBreakReason::from)?;
 
         // Execute the operation.
         let operation_helpers = match op {
@@ -287,23 +280,14 @@ where
             },
             _ => {
                 // If the operation is not an Emit, we execute it normally.
-                let source_debug_info = state.source_debug_info.clone();
-                let package_source_context = source_debug_info.as_deref().map(|debug_info| {
-                    PackageSourceDebugContext::new_optional(
-                        debug_info,
-                        state.current_source_node_id(),
-                    )
-                });
-                match execute_op(
-                    state.processor,
-                    op,
-                    op_idx_in_block,
-                    state.host,
-                    state.tracer,
-                    package_source_context,
-                ) {
+                match execute_op(state.processor, op, state.tracer) {
                     Ok(operation_helpers) => operation_helpers,
                     Err(err) => {
+                        let err = err.with_context(
+                            state.package_source_context(),
+                            state.host,
+                            Some(op_idx_in_block),
+                        );
                         return ControlFlow::Break(BreakReason::Err(err).into());
                     },
                 }

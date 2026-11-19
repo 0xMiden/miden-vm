@@ -121,14 +121,17 @@ impl Executor {
         self
     }
 
-    /// Register a VM event handler to be available during execution.
+    /// Queues a VM event handler to register when the executor builds its host.
+    ///
+    /// Event name validation and duplicate checks happen when converting this executor into a
+    /// debugger or stepper, alongside the handlers supplied by linked packages.
     pub fn register_event_handler(
         &mut self,
         event: EventName,
         handler: Arc<dyn EventHandler>,
-    ) -> Result<&mut Self, ExecutionError> {
+    ) -> &mut Self {
         self.event_handlers.push((event, handler));
-        Ok(self)
+        self
     }
 
     /// Set the profiler configuration for this executor.

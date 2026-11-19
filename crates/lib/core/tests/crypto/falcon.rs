@@ -14,7 +14,7 @@ use miden_core_lib::{
 };
 use miden_crypto::hash::eidos::domains::{FALCON_HASH_TO_POINT, FALCON_PUBLIC_KEY};
 use miden_processor::{
-    ExecutionError, ProcessorState,
+    ExecutionError, ProcessorError, ProcessorState,
     advice::{AdviceMutation, AdviceStack},
     event::EventError,
     operation::OperationError,
@@ -177,9 +177,7 @@ fn falcon_product_evaluation_checks_each_component(
     } else {
         expect_exec_error_matches!(
             test,
-            ExecutionError::OperationError {
-                err: OperationError::FailedAssertion { err_code, err_msg }, ..
-            } if err_code == ZERO && err_msg.is_none()
+            ProcessorError::Operation(OperationError::FailedAssertion { err_code, err_msg }) if err_code == ZERO && err_msg.is_none()
         );
     }
 }
@@ -257,11 +255,9 @@ proptest! {
         let mut pi = mul_modulo_p_shifted(&h, &s2);
         product_test(&h, &s2, &pi).prop_expect_stack(&[])?;
         pi[index] += Felt::new_unchecked(delta);
-        let result = product_test(&h, &s2, &pi).execute().map(|_| ());
-        prop_assert!(matches!(&result,
-            Err(ExecutionError::OperationError {
-                err: OperationError::FailedAssertion { err_code, .. }, ..
-            }) if *err_code == ZERO
+        let result = product_test(&h, &s2, &pi).execute_for_output().map(|_| ());
+        prop_assert!(matches!(result.as_ref().map_err(ExecutionError::kind),
+            Err(ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. })) if *err_code == ZERO
         ), "expected product identity rejection, got {result:?}");
     }
 
@@ -282,16 +278,12 @@ proptest! {
         if norm < SQUARE_NORM_BOUND {
             test.prop_expect_stack(&[])?;
         } else {
-            let result = test.execute().map(|_| ());
+            let result = test.execute_for_output().map(|_| ());
             if u32::try_from(norm).is_ok() {
-                prop_assert!(matches!(&result, Err(ExecutionError::OperationError {
-                    err: OperationError::FailedAssertion { err_code, .. }, ..
-                }) if *err_code == error_code_from_msg("comparison failed: norm bound")),
+                prop_assert!(matches!(result.as_ref().map_err(ExecutionError::kind), Err(ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. })) if *err_code == error_code_from_msg("comparison failed: norm bound")),
                     "expected norm bound rejection for {norm}, got {result:?}");
             } else {
-                prop_assert!(matches!(&result, Err(ExecutionError::OperationError {
-                    err: OperationError::NotU32Values { .. }, ..
-                })), "expected u32 rejection for {norm}, got {result:?}");
+                prop_assert!(matches!(result.as_ref().map_err(ExecutionError::kind), Err(ProcessorError::Operation(OperationError::NotU32Values { .. }))), "expected u32 rejection for {norm}, got {result:?}");
             }
         }
     }
@@ -345,9 +337,7 @@ fn test_falcon512_probabilistic_product_failure(#[case] index: usize) {
     let test = product_test(&h, &s2, &pi);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_code, err_msg }, ..
-        } if err_code == ZERO && err_msg.is_none()
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, err_msg }) if err_code == ZERO && err_msg.is_none()
     );
 }
 
@@ -364,9 +354,7 @@ fn test_falcon512_probabilistic_product_rejects_unshifted_encoding() {
     let test = product_test(&h, &s2, &pi.map(Felt::new_unchecked));
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_code, err_msg }, ..
-        } if err_code == ZERO && err_msg.is_none()
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, err_msg }) if err_code == ZERO && err_msg.is_none()
     );
 }
 
@@ -385,18 +373,13 @@ fn falcon_product_rejects_out_of_range_coefficient(#[case] in_h: bool) {
             } else {
                 s2[index] = Felt::new_unchecked(value);
             }
-            let result = product_test(&h, &s2, &pi).execute().map(|_| ());
+            let result = product_test(&h, &s2, &pi).execute_for_output().map(|_| ());
             let rejected = if u32::try_from(value).is_ok() {
-                matches!(&result, Err(ExecutionError::OperationError {
-                    err: OperationError::FailedAssertion { err_code, .. }, ..
-                }) if *err_code == error_code_from_msg("comparison failed: modulus"))
+                matches!(result.as_ref().map_err(ExecutionError::kind), Err(ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. })) if *err_code == error_code_from_msg("comparison failed: modulus"))
             } else {
                 matches!(
-                    &result,
-                    Err(ExecutionError::OperationError {
-                        err: OperationError::NotU32Values { .. },
-                        ..
-                    })
+                    result.as_ref().map_err(ExecutionError::kind),
+                    Err(ProcessorError::Operation(OperationError::NotU32Values { .. }))
                 )
             };
             assert!(
@@ -419,9 +402,7 @@ fn falcon_product_binds_each_challenge_limb() {
         let test = build_test!(PROBABILISTIC_PRODUCT_SOURCE, &inputs, &advice);
         expect_exec_error_matches!(
             test,
-            ExecutionError::OperationError {
-                err: OperationError::FailedAssertion { err_code, .. }, ..
-            } if err_code == error_code_from_msg("comparison failed: tau")
+            ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if err_code == error_code_from_msg("comparison failed: tau")
         );
     }
 }
@@ -452,9 +433,7 @@ fn falcon_verify_binds_each_public_key_limb() {
         let test = verify_test(wrong_key, message, &advice);
         expect_exec_error_matches!(
             test,
-            ExecutionError::OperationError {
-                err: OperationError::FailedAssertion { err_code, .. }, ..
-            } if err_code == error_code_from_msg("comparison failed: public key")
+            ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if err_code == error_code_from_msg("comparison failed: public key")
         );
     }
 }
@@ -515,9 +494,7 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] dividend: u64) {
     let test = forged_division_test(dividend, dividend.wrapping_mul(M_INV), 0);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_code, err_msg }, ..
-        } if err_code == error_code_from_msg("comparison failed: quotient overflow")
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, err_msg }) if err_code == error_code_from_msg("comparison failed: quotient overflow")
             && err_msg.is_none()
     );
 }
@@ -531,9 +508,7 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
     let test = forged_division_test(dividend, quotient, remainder);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_code, err_msg }, ..
-        } if err_code == error_code_from_msg("comparison failed: addition overflow")
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, err_msg }) if err_code == error_code_from_msg("comparison failed: addition overflow")
             && err_msg.is_none()
     );
 }
@@ -543,9 +518,7 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
     let test = forged_division_test(100_000, 100_000 / M, Felt::ORDER_U64 - 1);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError {
-            err: OperationError::NotU32Values { values }, ..
-        } if values.iter().any(|value| value.as_canonical_u64() == Felt::ORDER_U64 - 1)
+        ProcessorError::Operation(OperationError::NotU32Values { values }) if values.iter().any(|value| value.as_canonical_u64() == Felt::ORDER_U64 - 1)
     );
 }
 
@@ -702,9 +675,7 @@ fn test_falcon512_probabilistic_product_rejects_chosen_evaluation_point() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_code, err_msg }, ..
-        }
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, err_msg })
         if err_code == error_code_from_msg("comparison failed: tau") && err_msg.is_none()
     );
 }
@@ -722,9 +693,7 @@ fn falcon_verify_norm_boundary(#[case] first: usize, #[case] second: usize, #[ca
     let test = norm_boundary_test(&[(first, sign * 1026), (second, 5743)]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_code, err_msg }, ..
-        } if err_code == error_code_from_msg("comparison failed: norm bound")
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, err_msg }) if err_code == error_code_from_msg("comparison failed: norm bound")
             && err_msg.is_none()
     );
 }
@@ -738,10 +707,7 @@ fn falcon_verify_rejects_high_norm_witness() {
     let test = verify_test(public_key, Word::default(), &advice);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError {
-            err: OperationError::NotU32Values { .. },
-            ..
-        }
+        ProcessorError::Operation(OperationError::NotU32Values { .. })
     );
 }
 

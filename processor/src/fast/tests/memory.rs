@@ -1,7 +1,7 @@
 use core::assert_matches;
 
 use super::*;
-use crate::{ExecutionError, MemoryError, fast::Memory};
+use crate::{MemoryError, ProcessorError, fast::Memory};
 
 #[test]
 fn test_memory_word_access_alignment() {
@@ -271,11 +271,8 @@ fn test_memory_element_limit_enforced_during_execution() {
             .unwrap();
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_matches!(
-        err,
-        ExecutionError::MemoryError {
-            err: MemoryError::MemoryElementLimitExceeded { .. },
-            ..
-        }
+        err.into_kind(),
+        ProcessorError::Memory(MemoryError::MemoryElementLimitExceeded { .. })
     );
 
     // A limit of 4 words' worth of elements accommodates every distinct word the program writes to.
@@ -312,10 +309,7 @@ fn test_memory_element_limit_enforced_via_with_options() {
     let processor = FastProcessor::new(StackInputs::default()).with_options(options).unwrap();
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_matches!(
-        err,
-        ExecutionError::MemoryError {
-            err: MemoryError::MemoryElementLimitExceeded { .. },
-            ..
-        }
+        err.into_kind(),
+        ProcessorError::Memory(MemoryError::MemoryElementLimitExceeded { .. })
     );
 }

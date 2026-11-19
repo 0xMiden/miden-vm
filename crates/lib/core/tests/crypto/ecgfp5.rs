@@ -14,7 +14,8 @@ use miden_crypto::{
     hash::eidos::{Eidos, domains::ECGFP5_PUBLIC_KEY},
 };
 use miden_processor::{
-    ExecutionError, advice::AdviceInputs, event::NoopEventHandler, operation::OperationError,
+    ExecutionError, ProcessorError, advice::AdviceInputs, event::NoopEventHandler,
+    operation::OperationError,
 };
 use miden_utils_testing::Test;
 use rand::{Rng, SeedableRng};
@@ -699,17 +700,14 @@ fn assert_failure(test: &Test, expected_message: &str) {
         Ok(_) => panic!("execution must fail: {expected_message}"),
         Err(error) => error,
     };
-    let err_code = match error {
-        ExecutionError::OperationError {
-            err:
-                OperationError::FailedAssertion { err_code, .. }
-                | OperationError::U32AssertionFailed { err_code, .. },
-            ..
-        } => err_code,
-        ExecutionError::OperationError {
-            err: OperationError::MerklePathVerificationFailed { inner },
-            ..
-        } => inner.err_code,
+    let err_code = match error.into_kind() {
+        ProcessorError::Operation(
+            OperationError::FailedAssertion { err_code, .. }
+            | OperationError::U32AssertionFailed { err_code, .. },
+        ) => err_code,
+        ProcessorError::Operation(OperationError::MerklePathVerificationFailed { inner }) => {
+            inner.err_code
+        },
         other => panic!("wrong failure for {expected_message}: {other}"),
     };
     assert_eq!(
@@ -788,12 +786,10 @@ fn rejects_invalid_scalars_and_missing_paths() {
             original.clone().with_stack(changed.into()),
         );
         assert!(matches!(
-            test.execute_for_output(),
-            Err(ExecutionError::OperationError {
-                err: OperationError::U32AssertionFailed { .. }
-                    | OperationError::NotU32Values { .. },
-                ..
-            })
+            test.execute_for_output().map_err(ExecutionError::into_kind),
+            Err(ProcessorError::Operation(
+                OperationError::U32AssertionFailed { .. } | OperationError::NotU32Values { .. }
+            ))
         ));
     }
     let test = agreement(
@@ -802,11 +798,10 @@ fn rejects_invalid_scalars_and_missing_paths() {
         original.with_merkle_store(MerkleStore::new()),
     );
     assert!(matches!(
-        test.execute_for_output(),
-        Err(ExecutionError::AdviceError {
-            err: miden_processor::advice::AdviceError::MerkleStoreLookupFailed(_),
-            ..
-        })
+        test.execute_for_output().map_err(ExecutionError::into_kind),
+        Err(ProcessorError::Advice(
+            miden_processor::advice::AdviceError::MerkleStoreLookupFailed(_)
+        ))
     ));
 }
 
@@ -1075,8 +1070,8 @@ fn sealing_rejects_unregistered_keys_and_wrong_modes() {
         let test = build_test!(&source, &[]).with_event_handlers(handlers);
         let error = test.execute_for_output().unwrap_err();
         assert!(matches!(
-            error,
-            ExecutionError::EventError { error, .. }
+            error.into_kind(),
+            ProcessorError::Event { source: error, .. }
                 if error.to_string().contains(expected_error)
         ));
     }
@@ -1090,8 +1085,8 @@ fn sealing_requires_a_host_handler_even_with_preloaded_advice() {
         test.advice_inputs = mode.advice(&sample());
         let error = test.execute_for_output().unwrap_err();
         assert!(matches!(
-            error,
-            ExecutionError::EventError { error, .. }
+            error.into_kind(),
+            ProcessorError::Event { source: error, .. }
                 if error.to_string().contains("no event handler registered")
         ));
     }

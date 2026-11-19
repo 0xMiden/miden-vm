@@ -28,7 +28,7 @@ use miden_precompiles_stark::{
     recursive::{PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError},
 };
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, StackInputs,
+    DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, ProcessorError, StackInputs,
     operation::OperationError,
 };
 
@@ -449,13 +449,7 @@ fn assert_pvm_rejects(advice: &AdviceInputs, claim_commitment: Word) {
     let error = run_pvm_verifier_with_advice(advice, claim_commitment)
         .expect_err("PVM MASM verifier accepted an invalid proof");
     assert!(
-        matches!(
-            error,
-            ExecutionError::OperationError {
-                err: OperationError::FailedAssertion { .. },
-                ..
-            }
-        ),
+        matches!(error.kind(), ProcessorError::Operation(OperationError::FailedAssertion { .. })),
         "expected the PVM verifier to fail an assertion, got {error:?}",
     );
 }

@@ -37,14 +37,11 @@ fn clear_deferred_rejects_invalid_context_or_root() {
             .execute_sync(&program, &mut DefaultHost::default())
             .unwrap_err();
         assert_matches!(
-            error,
-            ExecutionError::OperationError {
-                err: OperationError::ClearDeferredOutsideRootContext { .. }
-                    | OperationError::Deferred(PrecompileError::Other(
-                        DeferredError::InvalidDeferredRootReset { .. }
-                    )),
-                ..
-            }
+            error.into_kind(),
+            ProcessorError::Operation(OperationError::ClearDeferredOutsideRootContext { .. })
+                | ProcessorError::Deferred(PrecompileError::Other(
+                    DeferredError::InvalidDeferredRootReset { .. }
+                ))
         );
     }
 }

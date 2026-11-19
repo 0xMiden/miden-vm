@@ -3,7 +3,7 @@ use alloc::sync::Arc;
 use miden_assembly::{Assembler, DefaultSourceManager, PathBuf, Report, ast::ModuleKind};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    ExecutionError, Word,
+    ProcessorError, Word,
     operation::{BinaryValueErrorContext, OperationError},
 };
 use miden_utils_testing::{build_debug_test, build_test, expect_exec_error_matches, push_inputs};
@@ -86,13 +86,10 @@ fn faulty_condition_from_loop() {
     let test = build_test!(source, &[10]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError {
-            err: OperationError::NotBinaryValue {
-                context: BinaryValueErrorContext::Loop,
-                value: _,
-            },
-            ..
-        }
+        ProcessorError::Operation(OperationError::NotBinaryValue {
+            context: BinaryValueErrorContext::Loop,
+            value: _,
+        })
     );
 }
 
@@ -143,10 +140,7 @@ fn faulty_condition_from_tail_controlled_loop() {
     let test = build_test!(source, &[10]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError {
-            err: OperationError::NotBinaryValue { .. },
-            ..
-        }
+        ProcessorError::Operation(OperationError::NotBinaryValue { .. })
     );
 }
 
@@ -239,10 +233,7 @@ fn local_fn_call() {
     let build_test = build_test!(source, &[1, 2]);
     expect_exec_error_matches!(
         build_test,
-        ExecutionError::OperationError {
-            err: OperationError::InvalidStackDepthOnReturn { depth: 17 },
-            ..
-        }
+        ProcessorError::Operation(OperationError::InvalidStackDepthOnReturn { depth: 17 })
     );
 
     let inputs = (1_u64..18).collect::<Vec<_>>();

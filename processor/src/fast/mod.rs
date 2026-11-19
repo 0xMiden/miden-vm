@@ -22,11 +22,9 @@ use miden_mast_package::{
 
 use crate::{
     AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, LoadedMastForest,
-    ProcessorState,
+    ProcessorError, ProcessorState,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::MapExecErrNoCtx,
-    operation::OperationError,
     tracer::{OperationHelperRegisters, Tracer},
 };
 
@@ -38,7 +36,6 @@ mod memory;
 mod operation;
 mod step;
 
-pub use basic_block::SystemEventError;
 pub use debug::{DebugCallFrame, DebugCallFrameResolver, DebugFrameOrigin};
 pub use memory::Memory;
 pub(crate) use step::BreakReason;
@@ -181,9 +178,7 @@ impl FastProcessor {
         let precompile_root = self.deferred_state.root();
         let precompile_witness = self
             .deferred_state
-            .into_witness(self.options.verification_precompile_limits())
-            .map_err(OperationError::from)
-            .map_exec_err_no_ctx()?;
+            .into_witness(self.options.verification_precompile_limits())?;
         Ok(ExecutionOutput {
             stack,
             advice: self.advice,
@@ -334,9 +329,12 @@ impl FastProcessor {
         package: Arc<Package>,
     ) -> Result<ResumeContext, ExecutionError> {
         let program = package.unwrap_program();
-        let package_debug_info = package.debug_info()?.map(Arc::new);
+        let package_debug_info = package
+            .debug_info()
+            .map_err(|error| ProcessorError::PackageDebugInfo(Arc::new(error)))?
+            .map(Arc::new);
         let current_forest = program.mast_forest().clone();
-        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
+        self.advice.extend_map(current_forest.advice_map())?;
 
         let entrypoint_source_node_id = package.entrypoint_source_node();
         let continuation_stack = if let Some(debug_info) = package_debug_info.as_deref() {
@@ -359,9 +357,7 @@ impl FastProcessor {
         &mut self,
         program: &Program,
     ) -> Result<ResumeContext, ExecutionError> {
-        self.advice
-            .extend_map(program.mast_forest().advice_map())
-            .map_exec_err_no_ctx()?;
+        self.advice.extend_map(program.mast_forest().advice_map())?;
 
         Ok(ResumeContext {
             current_forest: program.mast_forest().clone(),
@@ -593,11 +589,11 @@ impl FastProcessor {
     /// and only grows on a push, so enforcing the bound here is sufficient to cap total
     /// operand-stack memory.
     #[inline(always)]
-    fn ensure_stack_capacity_for_push(&mut self) -> Result<(), ExecutionError> {
+    fn ensure_stack_capacity_for_push(&mut self) -> Result<(), ProcessorError> {
         let depth = self.stack_size() + self.saved_overflow_len + 1;
         let max = self.options.max_stack_depth();
         if depth > max {
-            return Err(ExecutionError::StackDepthLimitExceeded { depth, max });
+            return Err(ProcessorError::StackDepthLimitExceeded { depth, max });
         }
 
         if self.stack_top_idx >= self.stack.len() - 1 {
@@ -753,8 +749,9 @@ impl Tracer for NoopTracer {
         _continuation: Continuation<Arc<MastForest>>,
         _continuation_stack: &ContinuationStack<Arc<MastForest>>,
         _current_forest: &Arc<MastForest>,
-    ) {
+    ) -> Result<(), ProcessorError> {
         // do nothing
+        Ok(())
     }
 
     #[inline(always)]
@@ -763,7 +760,7 @@ impl Tracer for NoopTracer {
         _processor: &FastProcessor,
         _op_helper_registers: OperationHelperRegisters,
         _current_forest: &Arc<MastForest>,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), ProcessorError> {
         // do nothing
         Ok(())
     }

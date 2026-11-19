@@ -1,7 +1,7 @@
 use miden_assembly::Assembler;
 use miden_core::{Felt, Word};
 use miden_processor::{
-    ExecutionError, ExecutionOptions, FastProcessor, StackInputs, TestHost,
+    ExecutionError, ExecutionOptions, FastProcessor, ProcessorError, StackInputs, TestHost,
     advice::{AdviceError, AdviceInputs},
 };
 use miden_utils_testing::{build_test, crypto::MerkleStore};
@@ -447,11 +447,8 @@ fn test_adv_insert_mem_existing_key_respects_advice_size_budget() {
 
     let err = run_insert_mem_after_empty_insertion(RANGE_LEN).unwrap_err();
     assert!(matches!(
-        err,
-        ExecutionError::AdviceError {
-            err: AdviceError::SizeBudgetExceeded { .. },
-            ..
-        }
+        err.into_kind(),
+        ProcessorError::Advice(AdviceError::SizeBudgetExceeded { .. })
     ));
 }
 
@@ -467,15 +464,12 @@ fn test_adv_insert_mem_conflict_at_budget_is_rejected_before_allocation() {
 
     let err = run_conflicting_insert(max).unwrap_err();
     assert!(matches!(
-        err,
-        ExecutionError::AdviceError {
-            err: AdviceError::SizeBudgetExceeded {
+        err.into_kind(),
+        ProcessorError::Advice(AdviceError::SizeBudgetExceeded {
                 current,
                 added,
                 max: actual_max,
-            },
-            ..
-        } if current == max && added == entry_bytes && actual_max == max
+            }) if current == max && added == entry_bytes && actual_max == max
     ));
 }
 
@@ -490,15 +484,14 @@ fn test_adv_insert_mem_conflict_with_spare_budget_reports_values() {
     let max = base_store_bytes + 2 * entry_bytes;
 
     let err = run_conflicting_insert(max).unwrap_err();
-    let ExecutionError::AdviceError {
-        err: AdviceError::MapKeyAlreadyPresent { prev_values, new_values, .. },
-        ..
-    } = err
+    let ProcessorError::Advice(AdviceError::MapKeyAlreadyPresent {
+        prev_values, new_values, ..
+    }) = err.kind()
     else {
         panic!("expected conflicting advice map value, got: {err:?}");
     };
-    assert_eq!(prev_values, vec![Felt::new_unchecked(1); RANGE_LEN]);
-    assert_eq!(new_values, vec![Felt::new_unchecked(1), Felt::new_unchecked(2)]);
+    assert_eq!(prev_values, &vec![Felt::new_unchecked(1); RANGE_LEN]);
+    assert_eq!(new_values, &vec![Felt::new_unchecked(1), Felt::new_unchecked(2)]);
 }
 
 // HELPERS
@@ -558,8 +551,7 @@ fn run_insert_mem_with_max_value_elements_and_repeats(
     let options =
         ExecutionOptions::default().with_max_advice_size_bytes(base_store_bytes + map_entry_bytes);
 
-    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
-        .map_err(ExecutionError::advice_error_no_context)?
+    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)?
         .execute_sync(&program, &mut host)?;
     Ok(())
 }
@@ -587,8 +579,7 @@ fn run_insert_mem_after_empty_insertion(range_len: u32) -> Result<(), ExecutionE
     let options = ExecutionOptions::default()
         .with_max_advice_size_bytes(base_store_bytes + Word::SERIALIZED_SIZE);
 
-    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
-        .map_err(ExecutionError::advice_error_no_context)?
+    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)?
         .execute_sync(&program, &mut host)?;
     Ok(())
 }
@@ -616,8 +607,7 @@ fn run_conflicting_insert(max_advice_size_bytes: usize) -> Result<(), ExecutionE
     let mut host = TestHost::default();
     let options = ExecutionOptions::default().with_max_advice_size_bytes(max_advice_size_bytes);
 
-    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
-        .map_err(ExecutionError::advice_error_no_context)?
+    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)?
         .execute_sync(&program, &mut host)?;
     Ok(())
 }

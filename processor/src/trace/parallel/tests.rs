@@ -968,6 +968,85 @@ fn test_build_trace_returns_err_on_empty_memory_reads_replay() {
     );
 }
 
+#[rstest]
+#[case::start_hook(true)]
+#[case::finalize_hook(false)]
+fn replay_tracer_hook_failure_stops_at_original_error(#[case] failing_start: bool) {
+    let (program, stack_inputs, fragment_size, fragment_index, expected_reason) = if failing_start {
+        (
+            dyncall_program(),
+            dyn_target_proc_hash(),
+            12,
+            1,
+            "stack depth is above minimum, but no corresponding overflow pop in the replay",
+        )
+    } else {
+        (
+            basic_block_program_small(),
+            DEFAULT_STACK,
+            4,
+            0,
+            "no block address operations recorded",
+        )
+    };
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(stack_inputs).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(fragment_size)
+            .unwrap(),
+    )
+    .unwrap();
+    let mut witness = processor
+        .execute_for_proving_sync(&program, &mut DefaultHost::default())
+        .unwrap()
+        .into_parts()
+        .0;
+    let replay = witness.trace_replay_mut();
+    let mut fragment = replay.core_trace_contexts.remove(fragment_index);
+    if failing_start {
+        // DYNCALL's start hook needs the overflow pop before execution reads the callee hash.
+        // Both are absent: continuing after the hook failure would replace its original reason.
+        fragment.replay.stack_overflow = Default::default();
+        fragment.replay.memory_reads = Default::default();
+    } else {
+        // The first JOIN's finalizer needs its recorded block address. If replay continues,
+        // the PUSH in the following basic block exceeds the replay stack limit below.
+        fragment.replay.block_address = Default::default();
+    }
+    let mut rows = Felt::zero_vec(fragment_size * CORE_STORAGE_WIDTH);
+    let writer =
+        RowMajorTraceWriter::with_stride(&mut rows, CORE_STORAGE_WIDTH, CORE_STORAGE_WIDTH);
+    let (mut processor, mut tracer, mut continuation_stack, mut current_forest) =
+        split_trace_fragment_context(
+            fragment,
+            writer,
+            fragment_size,
+            &replay.mast_forest_store,
+            MIN_STACK_DEPTH,
+        )
+        .unwrap();
+    let initial_clock = processor.system.clk;
+    let initial_stack = processor.stack.stack_top;
+
+    let result = processor.execute(
+        &mut continuation_stack,
+        &mut current_forest,
+        program.kernel(),
+        &mut tracer,
+    );
+
+    match result {
+        Err(TraceGenerationError::InvalidReplay(reason)) => assert_eq!(reason, expected_reason),
+        other => panic!("expected the original replay hook failure, got {other:?}"),
+    }
+    assert_eq!(processor.system.clk, initial_clock, "a failed hook must not advance the clock");
+    assert_eq!(tracer.into_final_state().num_rows_written, 0);
+    if failing_start {
+        assert_eq!(processor.stack.stack_top, initial_stack);
+    }
+}
+
 /// Verifies that `build_trace` returns `Err` (instead of panicking) when the hasher chiplet replay
 /// contains a `HashBasicBlock` entry whose `MastNodeId` does not exist in the associated
 /// `MastForest`.
@@ -1120,7 +1199,7 @@ fn chiplet_preflight_caps_combined_trace_len() {
             &ace,
             combined_len - 1,
         ),
-        Err(ExecutionError::TraceLenExceeded(limit)) if limit == combined_len - 1
+        Err(TraceGenerationError::TraceLenExceeded(limit)) if limit == combined_len - 1
     ));
     assert_eq!(
         non_hasher_trace_len(&kernel, &[], &memory_writes, &bitwise, &ace, combined_len).unwrap(),
@@ -1136,7 +1215,7 @@ fn validate_heights_within_max_trace_len_rejects_any_height_over_the_cap() {
     assert!(
         matches!(
             validate_heights_within_max_trace_len(&heights),
-            Err(ExecutionError::TraceLenExceeded(limit)) if limit == MAX_TRACE_LEN
+            Err(TraceGenerationError::TraceLenExceeded(limit)) if limit == MAX_TRACE_LEN
         ),
         "expected TraceLenExceeded({MAX_TRACE_LEN}), got: {:?}",
         validate_heights_within_max_trace_len(&heights)
@@ -1198,7 +1277,7 @@ fn test_build_trace_corner_cases(
         assert!(
             matches!(
                 result,
-                Err(ExecutionError::ProverMemoryExceeded { estimated_bytes, budget_bytes })
+                Err(TraceGenerationError::ProverMemoryExceeded { estimated_bytes, budget_bytes })
                     if estimated_bytes == exact_peak && budget_bytes == budget
             ),
             "expected ProverMemoryExceeded {{ estimated_bytes: {exact_peak}, budget_bytes: {budget} }}, \
@@ -1277,7 +1356,7 @@ fn test_build_trace_returns_err_on_fragment_size_overflow() {
     let result = build_trace(vm_witness, &miden_vm_stark::memory::canonical_budget(u64::MAX));
 
     assert!(
-        matches!(result, Err(ExecutionError::TraceLenExceeded(_))),
+        matches!(result, Err(TraceGenerationError::TraceLenExceeded(_))),
         "expected TraceLenExceeded on overflow, got: {result:?}"
     );
 }
@@ -1339,7 +1418,7 @@ fn test_build_trace_returns_err_when_eidos_compression_trace_exceeds_budget() {
     let result = build_trace(vm_witness, &miden_vm_stark::memory::canonical_budget(exact_peak - 1));
 
     assert!(
-        matches!(result, Err(ExecutionError::ProverMemoryExceeded { .. })),
+        matches!(result, Err(TraceGenerationError::ProverMemoryExceeded { .. })),
         "expected ProverMemoryExceeded, got: {result:?}"
     );
 }
@@ -1383,8 +1462,8 @@ fn test_build_trace_returns_err_on_inconsistent_continuation(
 
     let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
     assert!(
-        matches!(result, Err(ExecutionError::Internal(_))),
-        "expected ExecutionError::Internal, got: {result:?}"
+        matches!(result, Err(TraceGenerationError::InvalidReplay(_))),
+        "expected TraceGenerationError::InvalidReplay, got: {result:?}"
     );
 }
 
@@ -1414,8 +1493,8 @@ fn test_build_hasher_chiplet_rejects_invalid_replayed_merkle_path(
     let op = replayed_merkle_path_op(update, depth, index);
     let err = build_hasher_chiplet([Ok(op)], usize::MAX, usize::MAX).err();
     assert!(
-        matches!(err, Some(ExecutionError::Internal(_))),
-        "expected ExecutionError::Internal, got: {err:?}"
+        matches!(err, Some(TraceGenerationError::InvalidReplay(_))),
+        "expected TraceGenerationError::InvalidReplay, got: {err:?}"
     );
 }
 
@@ -1428,8 +1507,9 @@ fn test_build_hasher_chiplet_accepts_replayed_merkle_path_at_max_index(#[case] u
     assert!(build_hasher_chiplet([Ok(op)], usize::MAX, usize::MAX).is_ok());
 }
 
-/// Verifies that `build_trace` returns `ExecutionError::Internal` when `core_trace_contexts` is
-/// empty, since `push_halt_opcode_row` expects at least one fragment to have been processed.
+/// Verifies that `build_trace` returns `TraceGenerationError::InvalidReplay` when
+/// `core_trace_contexts` is empty, since `push_halt_opcode_row` expects at least one fragment to
+/// have been processed.
 #[test]
 fn test_build_trace_returns_err_on_empty_core_trace_contexts() {
     const MAX_FRAGMENT_SIZE: usize = 1 << 20;
@@ -1454,8 +1534,8 @@ fn test_build_trace_returns_err_on_empty_core_trace_contexts() {
     let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
 
     assert!(
-        matches!(result, Err(ExecutionError::Internal(_))),
-        "expected ExecutionError::Internal, got: {result:?}"
+        matches!(result, Err(TraceGenerationError::InvalidReplay(_))),
+        "expected TraceGenerationError::InvalidReplay, got: {result:?}"
     );
 }
 

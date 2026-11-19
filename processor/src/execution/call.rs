@@ -3,7 +3,7 @@ use core::ops::ControlFlow;
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE};
 
 use crate::{
-    BaseHost, BreakReason, ContextId, MapExecErr, Stopper,
+    BaseHost, BreakReason, ContextId, Stopper,
     continuation_stack::Continuation,
     execution::{
         ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation,
@@ -34,12 +34,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(current_node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state.start_clock_cycle(Continuation::StartNode(current_node_id), current_forest, None)?;
 
     state.processor.stack_mut().start_context();
     state.processor.system_mut().save_call_state();
@@ -52,9 +47,7 @@ where
         // check if the callee is in the kernel
         if !state.kernel.contains_proc(callee_hash) {
             let err = OperationError::SyscallTargetNotInKernel { proc_root: callee_hash };
-            return ControlFlow::Break(BreakReason::Err(
-                state.operation_error_with_current_context(err),
-            ));
+            return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
         }
         state.tracer.record_kernel_proc_access(callee_hash);
 
@@ -68,13 +61,10 @@ where
         state.processor.system_mut().set_caller_hash(callee_hash);
 
         // Initialize the frame pointer in memory for the new context.
-        if let Err(err) = state
-            .processor
-            .memory_mut()
-            .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
-            .map_exec_err()
+        if let Err(err) =
+            state.processor.memory_mut().write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
         {
-            return ControlFlow::Break(BreakReason::Err(err));
+            return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
         }
         state.tracer.record_memory_write_element(
             FMP_INIT_VALUE,
@@ -88,7 +78,9 @@ where
     // (to be executed next).
     let callee_source_node_id = match state.child_source_node_id(0) {
         Ok(source_node_id) => source_node_id,
-        Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
+        Err(err) => {
+            return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
+        },
     };
     state.continuation_stack.push_with_source_node_id(
         Continuation::FinishCall(current_node_id),
@@ -124,12 +116,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(current_node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state.start_clock_cycle(Continuation::StartNode(current_node_id), current_forest, None)?;
 
     state.processor.stack_mut().start_context();
     state.processor.system_mut().save_call_state();
@@ -142,9 +129,7 @@ where
         // check if the callee is in the kernel
         if !state.kernel.contains_proc(callee_hash) {
             let err = OperationError::SyscallTargetNotInKernel { proc_root: callee_hash };
-            return ControlFlow::Break(BreakReason::Err(
-                state.operation_error_with_current_context(err),
-            ));
+            return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
         }
         state.tracer.record_kernel_proc_access(callee_hash);
 
@@ -158,13 +143,10 @@ where
         state.processor.system_mut().set_caller_hash(callee_hash);
 
         // Initialize the frame pointer in memory for the new context.
-        if let Err(err) = state
-            .processor
-            .memory_mut()
-            .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
-            .map_exec_err()
+        if let Err(err) =
+            state.processor.memory_mut().write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
         {
-            return ControlFlow::Break(BreakReason::Err(err));
+            return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
         }
         state.tracer.record_memory_write_element(
             FMP_INIT_VALUE,
@@ -203,20 +185,15 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::FinishCall(node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state.start_clock_cycle(Continuation::FinishCall(node_id), current_forest, None)?;
 
     // When returning from a call or a syscall, restore the context of the system registers and the
     // operand stack to what it was prior to the call.
     if let Err(e) = state.processor.stack_mut().restore_context() {
-        return ControlFlow::Break(BreakReason::Err(state.operation_error_with_current_context(e)));
+        return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(e)));
     }
     if let Err(e) = state.processor.system_mut().restore_call_state() {
-        return ControlFlow::Break(BreakReason::Err(state.operation_error_with_current_context(e)));
+        return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(e)));
     }
     // Finalize the clock cycle corresponding to the END operation.
     finalize_clock_cycle_with_continuation(

@@ -2,13 +2,13 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE};
-use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
+use miden_mast_package::debug_info::PackageDebugInfo;
 
 use crate::{
-    BaseHost, BreakReason, ContextId, MapExecErr, Stopper,
+    BaseHost, BreakReason, ContextId, Stopper,
     continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
     execution::{
-        ExecutionState, InternalBreakReason, finalize_clock_cycle,
+        ExecutionState, InternalBreakReason, ResolvedMastForest, finalize_clock_cycle,
         finalize_clock_cycle_with_continuation, get_next_ctx_id,
     },
     mast::{ExecutableMastForest, MastNode, MastNodeId},
@@ -34,12 +34,9 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(current_node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state
+        .start_clock_cycle(Continuation::StartNode(current_node_id), current_forest, None)
+        .map_break(InternalBreakReason::from)?;
 
     let dyn_node = option_map_break_reason(
         current_forest.get_node_by_id(current_node_id).and_then(|node| match node {
@@ -55,17 +52,20 @@ where
     let clk = state.processor.system().clock();
     let mem_addr = state.processor.stack().get(0);
 
-    let callee_hash =
-        match state.processor.memory_mut().read_word(read_ctx, mem_addr, clk).map_exec_err() {
-            Ok(w) => w,
-            Err(err) => {
-                return ControlFlow::Break(BreakReason::Err(err).into());
-            },
-        };
+    let callee_hash = match state.processor.memory_mut().read_word(read_ctx, mem_addr, clk) {
+        Ok(w) => w,
+        Err(err) => {
+            return ControlFlow::Break(
+                BreakReason::Err(state.error_with_current_context(err)).into(),
+            );
+        },
+    };
 
     // Drop the memory address from the stack. This needs to be done before saving the context.
-    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err() {
-        return ControlFlow::Break(InternalBreakReason::from(BreakReason::Err(err)));
+    if let Err(err) = state.processor.stack_mut().decrement_size() {
+        return ControlFlow::Break(InternalBreakReason::from(BreakReason::Err(
+            state.error_with_current_context(err),
+        )));
     }
 
     // For dyncall,
@@ -82,13 +82,12 @@ where
         state.processor.system_mut().set_caller_hash(callee_hash);
 
         // Initialize the frame pointer in memory for the new context.
-        if let Err(err) = state
-            .processor
-            .memory_mut()
-            .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
-            .map_exec_err()
+        if let Err(err) =
+            state.processor.memory_mut().write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
         {
-            return ControlFlow::Break(BreakReason::Err(err).into());
+            return ControlFlow::Break(
+                BreakReason::Err(state.error_with_current_context(err)).into(),
+            );
         }
         state
             .tracer
@@ -162,12 +161,9 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(current_node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state
+        .start_clock_cycle(Continuation::StartNode(current_node_id), current_forest, None)
+        .map_break(InternalBreakReason::from)?;
 
     let dyn_node = option_map_break_reason(
         current_forest.get_node_by_id(current_node_id).and_then(|node| match node {
@@ -183,17 +179,20 @@ where
     let clk = state.processor.system().clock();
     let mem_addr = state.processor.stack().get(0);
 
-    let callee_hash =
-        match state.processor.memory_mut().read_word(read_ctx, mem_addr, clk).map_exec_err() {
-            Ok(w) => w,
-            Err(err) => {
-                return ControlFlow::Break(BreakReason::Err(err).into());
-            },
-        };
+    let callee_hash = match state.processor.memory_mut().read_word(read_ctx, mem_addr, clk) {
+        Ok(w) => w,
+        Err(err) => {
+            return ControlFlow::Break(
+                BreakReason::Err(state.error_with_current_context(err)).into(),
+            );
+        },
+    };
 
     // Drop the memory address from the stack. This needs to be done before saving the context.
-    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err() {
-        return ControlFlow::Break(InternalBreakReason::from(BreakReason::Err(err)));
+    if let Err(err) = state.processor.stack_mut().decrement_size() {
+        return ControlFlow::Break(InternalBreakReason::from(BreakReason::Err(
+            state.error_with_current_context(err),
+        )));
     }
 
     // For dyncall,
@@ -210,13 +209,12 @@ where
         state.processor.system_mut().set_caller_hash(callee_hash);
 
         // Initialize the frame pointer in memory for the new context.
-        if let Err(err) = state
-            .processor
-            .memory_mut()
-            .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
-            .map_exec_err()
+        if let Err(err) =
+            state.processor.memory_mut().write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
         {
-            return ControlFlow::Break(BreakReason::Err(err).into());
+            return ControlFlow::Break(
+                BreakReason::Err(state.error_with_current_context(err)).into(),
+            );
         }
         state
             .tracer
@@ -262,11 +260,8 @@ where
 
 /// Function to be called after [`InternalBreakReason::LoadMastForestFromDyn`] is handled. See the
 /// documentation of that enum variant for more details.
-pub fn finish_load_mast_forest_from_dyn_start<P, S, T, F>(
-    root_id: MastNodeId,
-    new_forest: F,
-    new_package_debug_info: Option<Arc<PackageDebugInfo>>,
-    new_source_node_id: Option<DebugSourceNodeId>,
+pub(crate) fn finish_load_mast_forest_from_dyn_start<P, S, T, F>(
+    resolved: ResolvedMastForest<F>,
     processor: &mut P,
     current_forest: &mut F,
     current_package_debug_info: &mut Option<Arc<PackageDebugInfo>>,
@@ -281,6 +276,12 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
+    let ResolvedMastForest {
+        root_id,
+        forest: new_forest,
+        package_debug_info: new_package_debug_info,
+        source_node_id: new_source_node_id,
+    } = resolved;
     // Save the old forest: the continuation from start_clock_cycle references nodes in it.
     let old_forest = current_forest.clone();
     let old_package_debug_info = current_package_debug_info.clone();
@@ -325,13 +326,8 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
+    state.start_clock_cycle(Continuation::FinishDyn(node_id), current_forest, None)?;
     state.inline_call_contexts.pop();
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::FinishDyn(node_id),
-        state.continuation_stack,
-        current_forest,
-    );
 
     let dyn_node = option_map_break_reason(
         current_forest.get_node_by_id(node_id).and_then(|node| match node {
@@ -343,14 +339,10 @@ where
     // For dyncall, restore the context.
     if dyn_node.is_dyncall() {
         if let Err(e) = state.processor.stack_mut().restore_context() {
-            return ControlFlow::Break(BreakReason::Err(
-                state.operation_error_with_current_context(e),
-            ));
+            return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(e)));
         }
         if let Err(e) = state.processor.system_mut().restore_call_state() {
-            return ControlFlow::Break(BreakReason::Err(
-                state.operation_error_with_current_context(e),
-            ));
+            return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(e)));
         }
     }
 

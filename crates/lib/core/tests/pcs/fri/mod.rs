@@ -418,7 +418,10 @@ fn fri_fold4_ext2_rejects_tampered_remainder(
             t.store.clone(),
             t.advice_map.clone()
         );
-        assert!(test.execute().is_err(), "tampered remainder coordinate {lane} was accepted");
+        assert!(
+            test.execute_for_output().is_err(),
+            "tampered remainder coordinate {lane} was accepted"
+        );
     }
 }
 

@@ -5,7 +5,7 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_core::{deferred::TRUE_DIGEST, program::StackOutputs};
 use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 use miden_processor::{
-    ExecutionError, ExecutionOutput, FastProcessor, Host, ResumeContext, SyncHost,
+    ExecutionError, ExecutionOutput, FastProcessor, Host, ProcessorError, ResumeContext, SyncHost,
 };
 
 use super::{
@@ -281,17 +281,17 @@ impl Stepper {
         match self.state {
             State::Finished => {},
             State::Ready(_) | State::Stepping => {
-                return Err(ExecutionError::Internal("the program has not terminated"));
+                return Err(ProcessorError::Internal("the program has not terminated").into());
             },
             State::Failed => {
-                return Err(ExecutionError::Internal("the program failed and has no output"));
+                return Err(ProcessorError::Internal("the program failed and has no output").into());
             },
         }
         // The processor keeps the stack bottom first and the outputs want the top first. The
         // last step already rejected a final stack deeper than the output width.
         let stack: Vec<_> = self.processor.stack().iter().rev().copied().collect();
         let stack = StackOutputs::new(&stack)
-            .map_err(|_| ExecutionError::Internal("the final stack is not a valid output"))?;
+            .map_err(|_| ProcessorError::Internal("the final stack is not a valid output"))?;
         execution_output(self.processor, stack)
     }
 
@@ -309,15 +309,18 @@ impl Stepper {
             },
             State::Failed => {
                 self.state = State::Failed;
-                return Err(ExecutionError::Internal("the program failed; it cannot be stepped"));
+                return Err(
+                    ProcessorError::Internal("the program failed; it cannot be stepped").into()
+                );
             },
             // The execution is lost; the program counts as failed from here on, so that a
             // caller looping until the program stops is not kept waiting.
             State::Stepping => {
                 self.state = State::Failed;
-                return Err(ExecutionError::Internal(
+                return Err(ProcessorError::Internal(
                     "a step did not complete; the execution is lost",
-                ));
+                )
+                .into());
             },
         };
         // The pending debug info is consumed by the first step whatever the context carries:
@@ -375,18 +378,10 @@ pub(crate) fn execution_output(
     let precompile_witness = if precompile_root == TRUE_DIGEST {
         None
     } else {
-        Some(
-            deferred
-                .witness_for(
-                    precompile_root,
-                    processor.execution_options().verification_precompile_limits(),
-                )
-                .map_err(|err| ExecutionError::DeferredError {
-                    label: Default::default(),
-                    source_file: None,
-                    err,
-                })?,
-        )
+        Some(deferred.witness_for(
+            precompile_root,
+            processor.execution_options().verification_precompile_limits(),
+        )?)
     };
     let (advice, memory) = processor.into_parts();
     Ok(ExecutionOutput {
