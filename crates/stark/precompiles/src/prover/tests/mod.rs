@@ -65,14 +65,6 @@ pub(crate) fn transcript_eval_main(traces: &SessionTraces) -> RowMajorMatrix<Fel
     traces.mains()[4].clone()
 }
 
-/// Return a replacement for the standalone transcript-eval main trace.
-fn with_transcript_eval_main(
-    _traces: &SessionTraces,
-    eval: RowMajorMatrix<Felt>,
-) -> RowMajorMatrix<Felt> {
-    eval
-}
-
 pub(crate) type SessionProof = (StarkProof, DeferredRoot);
 
 pub(crate) trait SessionTracesTestExt {
