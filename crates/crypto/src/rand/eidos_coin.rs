@@ -94,30 +94,21 @@ impl EidosRandomCoin {
 
     /// Draws a uniformly distributed base-field element.
     ///
-    /// This samples the full Goldilocks field, whereas `EidosChallenger::sample_felt` samples only
-    /// values below `2^63`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if output generation requires another block after the `u64` block counter is
-    /// exhausted.
-    pub(crate) fn draw_basefield(&mut self) -> Felt {
-        // Reject noncanonical values to avoid bias from reducing candidates modulo the field.
-        loop {
-            if let Ok(felt) = Felt::new(self.random::<u64>()) {
-                return felt;
-            }
-        }
-    }
-
-    /// Draws a uniformly distributed base-field element.
+    /// This samples the full Goldilocks field by rejecting noncanonical candidates, which avoids
+    /// the bias of reducing them modulo the field. In contrast, `EidosChallenger::sample_felt`
+    /// samples only values below `2^63`.
     ///
     /// # Panics
     ///
     /// Panics if output generation requires another block after the `u64` block counter is
     /// exhausted.
     pub fn draw(&mut self) -> Felt {
-        self.draw_basefield()
+        // Reject noncanonical values to avoid bias from reducing candidates modulo the field.
+        loop {
+            if let Ok(felt) = Felt::new(self.random::<u64>()) {
+                return felt;
+            }
+        }
     }
 
     /// Draws a uniformly distributed extension-field element.
@@ -127,7 +118,7 @@ impl EidosRandomCoin {
     /// Panics if output generation requires another block after the `u64` block counter is
     /// exhausted.
     pub fn draw_ext_field<E: ExtensionField<Felt>>(&mut self) -> E {
-        E::from_basis_coefficients_fn(|_| self.draw_basefield())
+        E::from_basis_coefficients_fn(|_| self.draw())
     }
 
     /// Mixes four additional field elements into the random-coin state.
@@ -322,7 +313,7 @@ mod tests {
         ]);
         let mut coin = EidosRandomCoin::from_parts(Word::default(), output, 1, 0);
 
-        assert_eq!(coin.draw_basefield(), Felt::from_u64(42));
+        assert_eq!(coin.draw(), Felt::from_u64(42));
         assert_eq!(coin.current, 4);
     }
 

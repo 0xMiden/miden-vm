@@ -413,18 +413,6 @@ impl Poseidon2Permutation256 {
 
     /// The output of the hash function can be read from state elements 0, 1, 2, and 3.
     pub const DIGEST_RANGE: Range<usize> = Poseidon2::DIGEST_RANGE;
-
-    // POSEIDON2 PERMUTATION
-    // --------------------------------------------------------------------------------------------
-
-    /// Applies Poseidon2 permutation to the provided state.
-    ///
-    /// This delegates to the Poseidon2 implementation.
-    #[inline(always)]
-    #[cfg(test)]
-    pub(crate) fn apply_permutation(state: &mut [Felt; STATE_WIDTH]) {
-        Poseidon2::apply_permutation(state);
-    }
 }
 
 // PLONKY3 TRAIT IMPLEMENTATIONS
