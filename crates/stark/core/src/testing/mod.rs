@@ -7,7 +7,7 @@
 //! - `configs::goldilocks_blake3`
 //! - `configs::goldilocks_blake3_192`
 
-#[cfg(feature = "testing")]
+#[cfg(any(test, feature = "testing"))]
 pub mod airs;
 #[cfg(any(test, feature = "testing"))]
 pub mod configs;

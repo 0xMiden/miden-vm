@@ -2,7 +2,7 @@ use std::process::{Command, Output};
 
 fn run_benchmark(rust_log: Option<&str>) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_miden-bench"));
-    command.arg("blake3:8").env_remove("RUST_LOG");
+    command.arg("miden:8").env_remove("RUST_LOG");
     if let Some(value) = rust_log {
         command.env("RUST_LOG", value);
     }
@@ -21,10 +21,10 @@ fn rust_log_overrides_are_validated() {
 }
 
 #[test]
-fn verbose_batch_keeps_backend_spans() {
+fn verbose_keeps_backend_spans() {
     let output = Command::new(env!("CARGO_BIN_EXE_miden-bench"))
         .env_remove("RUST_LOG")
-        .args(["-v", "-m", "batch", "-H", "blake3", "blake3:8"])
+        .args(["-v", "-H", "blake3", "miden:8"])
         .output()
         .unwrap();
     let logs = format!(
@@ -33,5 +33,5 @@ fn verbose_batch_keeps_backend_spans() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(output.status.success(), "{logs}");
-    assert!(logs.contains("compute quotient"), "{logs}");
+    assert!(logs.contains("evaluate constraints"), "{logs}");
 }
