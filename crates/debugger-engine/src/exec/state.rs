@@ -14,7 +14,6 @@ use miden_processor::{
 pub(crate) use super::source::{CurrentCycleInfo, extract_current_op};
 use super::{
     DebuggerHost, Event, ExecutionTrace,
-    cycle::CycleInfo,
     source::SourceContext,
     stepper::{Stepped, Stepper},
 };
@@ -193,24 +192,7 @@ impl DebugExecutor {
     ///
     /// Returns the call frame exited this cycle, if any
     pub fn step(&mut self) -> Result<Option<CallFrame>, ExecutionError> {
-        self.step_impl(|_| {}, |_| {})
-    }
-
-    /// Advance the program state by one cycle, describing the cycle to `on_cycle` first.
-    ///
-    /// `on_cycle` runs before the cycle executes, after the profiler's instruments received the
-    /// same record, so it sees a cycle that fails too. The step that finalizes a finished
-    /// program runs no cycle and is not described. Unlike the [`Stepper`] it drives, a step
-    /// after a failure is not an error: it returns `Ok(None)` like a step after the end. A
-    /// step after a panic that unwound through a step, which only a caller that catches panics
-    /// can make, returns the stepper's error once and `Ok(None)` after that. Otherwise like
-    /// [`Self::step`].
-    #[cfg(test)]
-    pub(crate) fn step_with(
-        &mut self,
-        on_cycle: impl FnOnce(&CycleInfo<'_>),
-    ) -> Result<Option<CallFrame>, ExecutionError> {
-        self.step_impl(|_| {}, on_cycle)
+        self.step_impl(|_| {})
     }
 
     /// Observe the executor before a cycle, once the call stack and the declarations were
@@ -220,17 +202,16 @@ impl DebugExecutor {
         &mut self,
         observe: impl FnOnce(&Observation<'_>),
     ) -> Result<Option<CallFrame>, ExecutionError> {
-        self.step_impl(observe, |_| {})
+        self.step_impl(observe)
     }
 
     /// One step through the stepper: before the cycle runs, the call stack and the declarations
     /// are brought up to date, the internal observer sees them with the source context, then
-    /// the instruments and `on_cycle` receive the cycle record; after it, the state for
-    /// inspection is refreshed from the processor.
+    /// the instruments receive the cycle record; after it, the state for inspection is
+    /// refreshed from the processor.
     pub(crate) fn step_impl(
         &mut self,
         observe: impl FnOnce(&Observation<'_>),
-        on_cycle: impl FnOnce(&CycleInfo<'_>),
     ) -> Result<Option<CallFrame>, ExecutionError> {
         // A stepper that is stopped, because it was created so for a stand-in or because a
         // caller reset `stopped` after the program finished or failed, has nothing to run:
@@ -270,7 +251,6 @@ impl DebugExecutor {
             });
             if let Some(cycle) = step.cycle {
                 self.profiler.on_cycle(cycle);
-                on_cycle(cycle);
             }
             DescribedStep {
                 op,
