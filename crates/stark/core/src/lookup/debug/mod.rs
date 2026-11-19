@@ -2,6 +2,4 @@
 
 pub mod validation;
 
-pub use validation::{
-    ValidateLayout, ValidateLookupAir, ValidationBuilder, ValidationError, validate,
-};
+pub use validation::{NativeValidationBuilder, ValidationError, validate_native};

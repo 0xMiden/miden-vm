@@ -1,271 +1,59 @@
-//! AIR traits for the lifted STARK system: [`LiftedAir`] (a single AIR) and
-//! [`MultiAir`] (the AIR collection plus the cross-AIR behavior on it).
+//! Authored relations, concrete auxiliary witnesses, and trusted AIR collections.
 
 use alloc::{boxed::Box, vec::Vec};
 
-use p3_air::BaseAir;
 use p3_challenger::CanObserve;
-use p3_field::{Algebra, ExtensionField, Field};
+use p3_field::{ExtensionField, Field};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::air::{
-    LiftedAirBuilder,
-    symbolic::{
-        AirLayout, SymbolicAirBuilder, SymbolicExpression, SymbolicExpressionExt, eval_air,
-    },
-};
+use super::{AirSpec, Frame, Inputs, LiftedAirBuilder};
 
-/// Inputs that stay fixed throughout one AIR evaluation pass.
+/// An authored relation, independent of witness construction and prepared execution.
 ///
-/// Values use the evaluator's base and extension expression types. Symbolic callers supply
-/// expressions, while concrete callers supply scalar or packed field values.
-pub struct EvalInputs<'a, B, E> {
-    /// This AIR's public inputs, in the order returned by `builder.public_values()`.
-    pub public_values: &'a [B],
-    /// Auxiliary-trace challenges, in the order returned by `builder.permutation_randomness()`.
-    pub challenges: &'a [E],
-    /// Auxiliary boundary values returned by `builder.permutation_values()`.
-    pub aux_values: &'a [E],
-}
+/// Source configuration must remain immutable while its analyzed form is reused. `Sync` alone
+/// does not establish this: dimensions, equation structure, assertion class/order and addressing
+/// must depend only on configuration, never on input values or the selected expression backend.
+pub trait LiftedAir: Sync {
+    type F: Field;
 
-/// Super-trait for AIR definitions used by the lifted STARK prover/verifier.
-///
-/// Inherits from upstream traits for width and public values.
-/// Adds Miden-specific auxiliary trace support and periodic column data.
-/// Every `LiftedAir` must provide an auxiliary trace (even if it is a minimal
-/// 1-column dummy).
-///
-/// # Evaluation
-///
-/// Constraint structure and input indexing must depend only on the AIR configuration and declared
-/// dimensions. Preparation and evaluation must preserve the constraints and their order across
-/// scalar, packed, and symbolic expression types. Symbolic preparation must retain input
-/// dependencies in its expressions so degree analysis and constraint capture see the complete
-/// relation.
-///
-/// The default [`constraint_degree`](Self::constraint_degree) evaluates symbolically with the
-/// declared dimensions. Use [`crate::air::debug::check_builder_shape`] to check that a concrete
-/// builder has matching dimensions before evaluation.
-///
-/// # Type Parameters
-/// - `F`: Base field
-/// - `EF`: Extension field (for aux trace challenges and aux values)
-pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
-    /// Data shared by row evaluations with the same inputs. Use `()` when no preparation is needed.
-    type EvalData<B: Algebra<F>, E: Algebra<B>>: Default;
+    fn spec(&self) -> AirSpec<'_, Self::F>;
 
-    /// Log2 of the fixed native height of this AIR's preprocessed matrix, or `None` if it has none.
+    /// Construct the fixed matrix declared by [`Self::spec`] for setup ownership.
     ///
-    /// Return `None` when [`BaseAir::preprocessed_width`] is zero. Otherwise return
-    /// `Some(log_height)`, where `log_height` is at least 1 and `2^log_height` equals the height of
-    /// the matrix returned by [`BaseAir::preprocessed_trace`].
-    /// This AIR's main and preprocessed traces must have the same native height. Shape validation
-    /// enforces this equality before deriving the committed table order. Return the log height
-    /// without constructing the matrix.
-    fn log_preprocessed_height(&self) -> Option<u8> {
+    /// Setup validates presence and dimensions and caches the result. Capture, descriptor
+    /// construction, verification and row evaluation must not invoke this factory.
+    fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Self::F>> {
         None
     }
 
-    /// Maximum periodic-column length, or `0` if there are none. A trace's height
-    /// must be at least this, so it is the per-AIR lower bound on trace height.
-    ///
-    /// The default derives it from [`periodic_columns`](BaseAir::periodic_columns),
-    /// asserting each column is a non-empty power of two. Override to return it
-    /// directly when known statically; the override is cross-checked by
-    /// [`crate::air::debug::assert_multi_air_valid`].
-    fn max_periodic_length(&self) -> usize {
-        self.periodic_columns()
-            .iter()
-            .map(|col| {
-                assert!(
-                    !col.is_empty() && col.len().is_power_of_two(),
-                    "periodic column length must be a positive power of two, got {}",
-                    col.len(),
-                );
-                col.len()
-            })
-            .max()
-            .unwrap_or(0)
-    }
-
-    /// Number of extension-field challenges required for the auxiliary trace.
-    fn num_randomness(&self) -> usize;
-
-    /// Number of extension-field columns in the auxiliary trace.
-    fn aux_width(&self) -> usize;
-
-    /// Number of extension-field aux values committed to the Fiat-Shamir transcript.
-    ///
-    /// Returned by [`build_aux_trace`](Self::build_aux_trace) alongside the aux trace
-    /// matrix; the count is independent of [`aux_width`](Self::aux_width) (the number
-    /// of aux trace columns). Exposed to constraints as *permutation values* via
-    /// [`PermutationAirBuilder::permutation_values`](crate::air::PermutationAirBuilder::permutation_values).
-    fn num_aux_values(&self) -> usize;
-
-    /// Build this AIR's auxiliary trace and aux values.
-    ///
-    /// `air_inputs` is this AIR's public-input slice; `aux_inputs` contains the
-    /// statement-level inputs. `challenges` contains exactly
-    /// [`num_randomness`](Self::num_randomness) extension-field elements for this AIR. The
-    /// returned `aux_trace` has width [`aux_width`](Self::aux_width) and the same height as
-    /// `main`; `aux_values` has length [`num_aux_values`](Self::num_aux_values). The default
-    /// [`build_aux_trace_with_preprocessed`](Self::build_aux_trace_with_preprocessed)
-    /// delegates to this method.
-    fn build_aux_trace(
+    fn eval<B: LiftedAirBuilder<F = Self::F>>(
         &self,
-        main: &RowMajorMatrix<F>,
-        air_inputs: &[F],
-        aux_inputs: &[F],
-        challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>);
-
-    /// Build the auxiliary trace using the cached preprocessed trace when present.
-    ///
-    /// The prover supplies the preprocessed trace cached in its setup bundle:
-    /// `Some` exactly when this AIR declares preprocessed columns. AIRs that
-    /// do not need it can use the default implementation.
-    fn build_aux_trace_with_preprocessed(
-        &self,
-        main: &RowMajorMatrix<F>,
-        _preprocessed: Option<&RowMajorMatrix<F>>,
-        air_inputs: &[F],
-        aux_inputs: &[F],
-        challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        self.build_aux_trace(main, air_inputs, aux_inputs, challenges)
-    }
-
-    /// Return the [`AirLayout`] describing this AIR's dimensions.
-    ///
-    /// This is the single source of truth for building symbolic or layout builders.
-    fn air_layout(&self) -> AirLayout {
-        AirLayout {
-            preprocessed_width: self.preprocessed_width(),
-            main_width: self.width(),
-            num_public_values: self.num_public_values(),
-            permutation_width: self.aux_width(),
-            num_permutation_challenges: self.num_randomness(),
-            num_permutation_values: self.num_aux_values(),
-            num_periodic_columns: self.periodic_columns().len(),
-        }
-    }
-
-    /// Prepare data for a pass over this AIR's constraints.
-    ///
-    /// The input lengths are [`num_public_values`](BaseAir::num_public_values),
-    /// [`num_randomness`](Self::num_randomness), and [`num_aux_values`](Self::num_aux_values).
-    /// Call once per evaluation batch, using the same expression types as its builders. The data
-    /// can be reused while the AIR configuration and all input values remain unchanged.
-    /// The parallel prover requires its packed `EvalData` to be `Sync`.
-    fn prepare<B: Algebra<F>, E: Algebra<B>>(
-        &self,
-        _inputs: EvalInputs<'_, B, E>,
-    ) -> Self::EvalData<B, E> {
-        Default::default()
-    }
-
-    /// Evaluate all constraints using data from [`prepare`](Self::prepare).
-    ///
-    /// The data must have been prepared for this AIR configuration and the public values,
-    /// auxiliary challenges, and auxiliary values exposed by `builder`.
-    fn eval<AB: LiftedAirBuilder<F = F>>(
-        &self,
-        builder: &mut AB,
-        data: &Self::EvalData<AB::Expr, AB::ExprEF>,
+        frame: &Frame<'_, B>,
+        inputs: Inputs<'_, B>,
+        sink: &mut B,
     );
-
-    /// Symbolic constraint degree multiples, split into base-field and
-    /// extension-field maxima (see [`ConstraintDegrees`]).
-    ///
-    /// The split lets callers report base and extension constraint degree maxima
-    /// separately; STARK prover/verifier code derives quotient degrees from these
-    /// raw symbolic bounds later. Override this when the split is known statically
-    /// so a per-AIR bound can be sharp without redoing the symbolic pass.
-    fn constraint_degree(&self) -> ConstraintDegrees
-    where
-        Self: Sized,
-    {
-        ConstraintDegrees::from_air::<F, EF, Self>(self)
-    }
 }
 
-/// Symbolic constraint degree multiples, split by constraint kind.
-///
-/// `base` is the maximum degree multiple over the base-field constraints and
-/// `ext` over the extension-field constraints (each `0` if the AIR has none of
-/// that kind). Consumers that need a single value take [`max`](Self::max).
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct ConstraintDegrees {
-    /// Max degree multiple over base-field constraints (`0` if there are none).
-    pub base: usize,
-    /// Max degree multiple over extension-field constraints (`0` if there are none).
-    pub ext: usize,
-}
+// Borrowed local/debug consumers retain the original source and its witness capability. These
+// forwards neither capture a descriptor nor construct any data on their own.
+impl<A: LiftedAir + ?Sized> LiftedAir for &A {
+    type F = A::F;
 
-impl ConstraintDegrees {
-    /// Compute symbolic constraint degree multiples from an AIR.
-    pub fn from_air<F, EF, A>(air: &A) -> Self
-    where
-        F: Field,
-        A: LiftedAir<F, EF>,
-    {
-        let mut builder = SymbolicAirBuilder::<F>::new(air.air_layout());
-        eval_air(air, &mut builder);
-
-        let base = builder
-            .base_constraints()
-            .iter()
-            .map(SymbolicExpression::degree_multiple)
-            .max()
-            .unwrap_or(0);
-        let ext = builder
-            .extension_constraints()
-            .iter()
-            .map(SymbolicExpressionExt::degree_multiple)
-            .max()
-            .unwrap_or(0);
-        Self { base, ext }
+    fn spec(&self) -> AirSpec<'_, Self::F> {
+        A::spec(self)
     }
 
-    /// The combined degree multiple: the larger of [`base`](Self::base) and
-    /// [`ext`](Self::ext).
-    pub fn max(&self) -> usize {
-        self.base.max(self.ext)
-    }
-}
-
-/// Symbolic constraint counts, split by constraint kind.
-///
-/// Soundness of the constraint-batching round scales with how many constraints are folded into the
-/// composition polynomial, so a security estimate needs the count alongside
-/// [`ConstraintDegrees`].
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct ConstraintCounts {
-    /// Number of base-field constraints.
-    pub base: usize,
-    /// Number of extension-field constraints.
-    pub ext: usize,
-}
-
-impl ConstraintCounts {
-    /// Compute symbolic constraint counts from an AIR.
-    pub fn from_air<F, EF, A>(air: &A) -> Self
-    where
-        F: Field,
-        A: LiftedAir<F, EF>,
-    {
-        let mut builder = SymbolicAirBuilder::<F>::new(air.air_layout());
-        eval_air(air, &mut builder);
-
-        Self {
-            base: builder.base_constraints().len(),
-            ext: builder.extension_constraints().len(),
-        }
+    fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Self::F>> {
+        A::build_preprocessed_trace(self)
     }
 
-    /// Total number of constraints folded into the composition polynomial.
-    pub fn total(&self) -> usize {
-        self.base + self.ext
+    fn eval<B: LiftedAirBuilder<F = Self::F>>(
+        &self,
+        frame: &Frame<'_, B>,
+        inputs: Inputs<'_, B>,
+        sink: &mut B,
+    ) {
+        A::eval(self, frame, inputs, sink);
     }
 }
 
@@ -295,14 +83,14 @@ pub type ReductionError = Box<dyn core::error::Error + Send + Sync>;
 /// [`crate::air::debug::assert_multi_air_valid`]. In particular, `airs()` must be
 /// non-empty and each AIR's dimensions and periodic columns must be well-formed.
 /// Public inputs are stored in instance order, with each AIR's slice sized
-/// by [`BaseAir::num_public_values`].
+/// by each kernel descriptor's `num_public_values`.
 pub trait MultiAir<F, EF>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
     /// AIR type. Heterogeneous AIRs are expressed via caller-defined enum wrappers.
-    type Air: LiftedAir<F, EF>;
+    type Air: crate::air::AirKernel<F = F>;
 
     /// The AIRs in instance order — the single source of that ordering.
     fn airs(&self) -> &[Self::Air];
