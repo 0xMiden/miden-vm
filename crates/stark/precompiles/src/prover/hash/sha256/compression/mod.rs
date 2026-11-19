@@ -4,5 +4,5 @@ mod trace;
 
 pub use miden_air_definitions::precompiles::hash::sha256::compression::*;
 #[cfg(test)]
-pub(crate) use testing::{generate_trace, generate_trace_padded_to};
+pub(crate) use testing::generate_trace_padded_to;
 pub use trace::*;

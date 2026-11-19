@@ -40,7 +40,7 @@ use crate::prover::{
             UintMulAir,
             trace::{UintMulRequires, generate_trace as mul_trace},
         },
-        trace::{UintPtr, UintStoreRequires, generate_trace as store_trace},
+        trace::{UintPtr, UintStoreRequires, generate_trace_padded_to as store_trace},
     },
 };
 
@@ -126,7 +126,7 @@ impl Fixture {
     fn traces(mut self) -> FixtureTraces {
         let mut bpl = BytePairLutRequires::new();
         let mul = mul_trace(self.muls, &mut self.store, &mut bpl);
-        let store = store_trace(self.store, &mut bpl);
+        let store = store_trace(self.store, &mut bpl, 0);
         let (groups, points) = ec_store_traces(self.ec);
         FixtureTraces {
             bpl: bpl_trace(bpl),

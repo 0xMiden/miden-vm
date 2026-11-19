@@ -293,15 +293,6 @@ fn bound_value(requires: &UintStoreRequires, u: &Uint, is_pad: bool) -> U256 {
     requires.uint(u.bound_ptr).value
 }
 
-/// Builds the main trace at its natural height.
-#[cfg(test)]
-pub(crate) fn generate_trace(
-    requires: UintStoreRequires,
-    bpl: &mut BytePairLutRequires,
-) -> RowMajorMatrix<Felt> {
-    generate_trace_padded_to(requires, bpl, 0)
-}
-
 /// Build the UintStore main trace from the [`UintStoreRequires`]
 /// accumulator — the sorted uints (padded per `padded_blocks`) plus the
 /// `UintVal` demand ledger (each uint's `uintval_mult` = its total

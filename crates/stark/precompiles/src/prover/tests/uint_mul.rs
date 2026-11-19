@@ -30,7 +30,7 @@ use crate::prover::{
             GAMMA_SLOTS, NUM_GAMMA_SLOTS, NUM_MAIN_COLS, PERIOD, ROW_Q, ROW_R, UintMulAir,
             trace::{UintMulRequires, canonical_q, gamma_halves, generate_trace, op_block},
         },
-        trace::{UintPtr, UintStoreRequires, generate_trace as store_trace},
+        trace::{UintPtr, UintStoreRequires, generate_trace_padded_to as store_trace},
     },
 };
 
@@ -110,7 +110,7 @@ fn check_and_balance(
 ) -> RowMajorMatrix<Felt> {
     let mut bpl = BytePairLutRequires::new();
     let mul_main = generate_trace(mul, &mut store, &mut bpl);
-    let store_main = store_trace(store, &mut bpl);
+    let store_main = store_trace(store, &mut bpl, 0);
     let bpl_main = bpl_trace(bpl);
 
     crate::prover::tests::check_local(UintMulAir, &mul_main);
@@ -306,7 +306,7 @@ fn mul_q_range_checks_reject_an_oversized_limb() {
     crate::prover::tests::check_local(UintMulAir, &mul_main);
 
     // …but the bus does not: the 17-bit limb's Range16 is unprovidable.
-    let store_main = store_trace(store, &mut bpl);
+    let store_main = store_trace(store, &mut bpl, 0);
     let bpl_main = bpl_trace(bpl);
 
     let [alpha, beta] = [rand_qf(&mut rng), rand_qf(&mut rng)];

@@ -28,7 +28,7 @@ use crate::prover::{
             GAMMA_SLOTS, NUM_MAIN_COLS, PERIOD, ROW_AB, ROW_CP, TERM_CELL_MULT, UintAddAir,
             trace::{UintAddRequires, generate_trace},
         },
-        trace::{UintStoreRequires, generate_trace as store_trace},
+        trace::{UintStoreRequires, generate_trace_padded_to as store_trace},
     },
 };
 
@@ -156,7 +156,7 @@ fn add_buses_balance_against_store() {
     // consumes; the store's pass drives the Range16 demand into BPL.
     let add_main = generate_trace(add, &mut store);
     let mut bpl = BytePairLutRequires::new();
-    let store_main = store_trace(store, &mut bpl);
+    let store_main = store_trace(store, &mut bpl, 0);
     let bpl_main = bpl_trace(bpl);
 
     let [alpha, beta] = [rand_qf(&mut rng), rand_qf(&mut rng)];
@@ -258,7 +258,7 @@ fn add_pad_blocks_stay_off_the_bus() {
     let add_main = generate_trace(add, &mut store);
     assert_eq!(add_main.height(), 8, "3 ops pad to 4 blocks");
     let mut bpl = BytePairLutRequires::new();
-    let store_main = store_trace(store, &mut bpl);
+    let store_main = store_trace(store, &mut bpl, 0);
     let bpl_main = bpl_trace(bpl);
 
     crate::prover::tests::check_local(UintAddAir, &add_main);
@@ -332,7 +332,7 @@ fn negation_holds_and_balances() {
     crate::prover::tests::check_local(UintAddAir, &main);
 
     let mut bpl = BytePairLutRequires::new();
-    let store_main = store_trace(store, &mut bpl);
+    let store_main = store_trace(store, &mut bpl, 0);
     let bpl_main = bpl_trace(bpl);
 
     let [alpha, beta] = [rand_qf(&mut rng), rand_qf(&mut rng)];
@@ -379,7 +379,7 @@ fn equality_certificate_holds_and_balances() {
     crate::prover::tests::check_local(UintAddAir, &main);
 
     let mut bpl = BytePairLutRequires::new();
-    let store_main = store_trace(store, &mut bpl);
+    let store_main = store_trace(store, &mut bpl, 0);
     let bpl_main = bpl_trace(bpl);
 
     let [alpha, beta] = [rand_qf(&mut rng), rand_qf(&mut rng)];
@@ -523,7 +523,7 @@ fn nz_cert_holds_and_balances() {
     crate::prover::tests::check_local(UintAddAir, &main);
 
     let mut bpl = BytePairLutRequires::new();
-    let store_main = store_trace(store, &mut bpl);
+    let store_main = store_trace(store, &mut bpl, 0);
     let bpl_main = bpl_trace(bpl);
     let [alpha, beta] = [rand_qf(&mut rng), rand_qf(&mut rng)];
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
@@ -812,7 +812,7 @@ proptest! {
         let (add, mut store, _k) = arrangement(bound, a, b);
         let add_main = generate_trace(add, &mut store);
         let mut bpl = BytePairLutRequires::new();
-        let store_main = store_trace(store, &mut bpl);
+        let store_main = store_trace(store, &mut bpl, 0);
         let bpl_main = bpl_trace(bpl);
 
         let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
@@ -853,7 +853,7 @@ proptest! {
         let add_main = generate_trace(add, &mut store);
         prop_assert_eq!(add_main.height(), 8, "3 ops pad to 4 blocks");
         let mut bpl = BytePairLutRequires::new();
-        let store_main = store_trace(store, &mut bpl);
+        let store_main = store_trace(store, &mut bpl, 0);
         let bpl_main = bpl_trace(bpl);
         crate::prover::tests::check_local(UintAddAir, &add_main);
 
