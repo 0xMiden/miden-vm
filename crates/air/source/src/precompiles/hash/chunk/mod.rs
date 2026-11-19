@@ -11,30 +11,26 @@
 
 pub mod message;
 
-use alloc::vec::Vec;
+use alloc::borrow::Cow;
 use core::array;
 
 pub use message::ChunkChainMsg;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
-    utils::RowMajorMatrix,
 };
 use miden_stark::{
-    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
-    lookup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup,
-    },
+    air,
+    air::LiftedAirBuilder as _,
+    lookup::{self, Deg, LookupBatch, LookupColumn, LookupGroup},
 };
-use p3_field::Algebra;
+use p3_field::Dup;
 
 use crate::precompiles::{
     hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg},
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::eidos::EidosBlockMsg,
-    utils::{current_main, next_main},
 };
 
 // MAIN COLUMN LAYOUT
@@ -103,65 +99,54 @@ pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 1];
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ChunkAir;
 
-impl BaseAir<Felt> for ChunkAir {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
-    }
-}
-
 // LIFTED AIR
 // ================================================================================================
 
-impl LiftedAir<Felt, QuadFelt> for ChunkAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+impl air::LiftedAir for ChunkAir {
+    type F = Felt;
 
-    fn num_randomness(&self) -> usize {
-        NUM_RANDOMNESS
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
+            main_width: NUM_MAIN_COLS,
+            aux_width: NUM_AUX_COLS,
+            num_public_values: 0,
+            num_challenges: NUM_RANDOMNESS,
+            num_exports: NUM_LOGUP_VALUES,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(&[]),
+        }
     }
 
-    fn aux_width(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
-
-    fn build_aux_trace(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        miden_stark::lookup::build_logup_aux_trace(&ChunkAir, main, challenges)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
         // Phase 1: local row constraints.
-        let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
+        let local = frame.main.current;
+        let next = frame.main.next;
 
-        let chunk_seq_id: AB::Expr = local[COL_CHUNK_SEQ_ID].into();
-        let chunk_seq_id_next: AB::Expr = next[COL_CHUNK_SEQ_ID].into();
-        let absorption_id: AB::Expr = local[COL_ABSORPTION_ID].into();
-        let absorption_id_next: AB::Expr = next[COL_ABSORPTION_ID].into();
-        let act: AB::Expr = local[COL_ACT].into();
-        let act_next: AB::Expr = next[COL_ACT].into();
-        let is_head: AB::Expr = local[COL_IS_HEAD].into();
-        let is_head_next: AB::Expr = next[COL_IS_HEAD].into();
+        let chunk_seq_id: AB::Expr = local[COL_CHUNK_SEQ_ID].dup();
+        let chunk_seq_id_next: AB::Expr = next[COL_CHUNK_SEQ_ID].dup();
+        let absorption_id: AB::Expr = local[COL_ABSORPTION_ID].dup();
+        let absorption_id_next: AB::Expr = next[COL_ABSORPTION_ID].dup();
+        let act: AB::Expr = local[COL_ACT].dup();
+        let act_next: AB::Expr = next[COL_ACT].dup();
+        let is_head: AB::Expr = local[COL_IS_HEAD].dup();
+        let is_head_next: AB::Expr = next[COL_IS_HEAD].dup();
 
         // Boundary (`when_first_row`) ---------------------------
         // chunk_seq_id starts at 0. absorption_id / act / is_head are
         // unpinned at row 0: an all-padding trace is valid, and the
         // first head's Eidos cycle is bus-pinned.
-        builder.when_first_row().assert_zero(chunk_seq_id.clone());
+        builder.when(frame.first_row()).assert_zero(chunk_seq_id.clone());
 
         // chunk_seq_id chain ------------------------------------
         // +1 per row, globally. `when_transition` leaves the cyclic
         // wrap unconstrained.
         builder
-            .when_transition()
+            .when(frame.transition())
             .assert_zero(chunk_seq_id_next - chunk_seq_id - AB::Expr::ONE);
 
         // absorption_id chain -------------------------------------
@@ -170,31 +155,42 @@ impl LiftedAir<Felt, QuadFelt> for ChunkAir {
         // heads the gate vanishes and it jumps freely to the new
         // chain's Eidos cycle. This lockstep makes Eidos's absorption order
         // equal the downstream hasher's Memory64 order.
-        builder.when_transition().assert_zero(
+        builder.when(frame.transition()).assert_zero(
             (AB::Expr::ONE - is_head_next) * (absorption_id_next - absorption_id - AB::Expr::ONE),
         );
 
         // Activity ----------------------------------------------
-        builder.assert_bool(local[COL_ACT]);
-        builder.when_transition().assert_zero((AB::Expr::ONE - act.clone()) * act_next);
+        builder.assert_bool(local[COL_ACT].dup());
+        builder
+            .when(frame.transition())
+            .assert_zero((AB::Expr::ONE - act.clone()) * act_next);
 
         // Selector ----------------------------------------------
-        builder.assert_bool(local[COL_IS_HEAD]);
+        builder.assert_bool(local[COL_IS_HEAD].dup());
         builder.assert_zero(is_head * (AB::Expr::ONE - act));
 
         // Phase 2: LogUp argument via the LogUp adapter.
-        let mut lb = ConstraintLookupBuilder::new(builder, self);
-        <Self as LookupAir<_>>::eval(self, &mut lb);
-        lb.finish();
+        lookup::eval_lookup(self, frame, inputs, builder);
+    }
+}
+
+impl air::ProverAir<QuadFelt> for ChunkAir {
+    type Error = lookup::LookupError;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
 // LOOKUP AIR
 // ================================================================================================
 
-impl<LB> LookupAir<LB> for ChunkAir
+impl<LB> lookup::LookupAir<LB> for ChunkAir
 where
-    LB: LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -208,14 +204,14 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, builder: &mut LB) {
-        let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        let local = frame.main.current;
 
-        let chunk_seq_id: LB::Expr = local[COL_CHUNK_SEQ_ID].into();
-        let absorption_id: LB::Expr = local[COL_ABSORPTION_ID].into();
-        let act: LB::Expr = local[COL_ACT].into();
-        let is_head: LB::Expr = local[COL_IS_HEAD].into();
-        let f: [LB::Expr; NUM_F] = array::from_fn(|i| local[COL_F_BEGIN + i].into());
+        let chunk_seq_id: LB::Expr = local[COL_CHUNK_SEQ_ID].dup();
+        let absorption_id: LB::Expr = local[COL_ABSORPTION_ID].dup();
+        let act: LB::Expr = local[COL_ACT].dup();
+        let is_head: LB::Expr = local[COL_IS_HEAD].dup();
+        let f: [LB::Expr; NUM_F] = array::from_fn(|i| local[COL_F_BEGIN + i].dup());
 
         // Memory64 lane addresses: CHUNK_ADDR_BASE + 4·chunk_seq_id + j.
         let chunk_addr_base =
@@ -320,7 +316,7 @@ where
                 "emit",
                 neg_act_head,
                 ChunkChainMsg {
-                    chunk_seq_id_head: local[COL_CHUNK_SEQ_ID].into(),
+                    chunk_seq_id_head: local[COL_CHUNK_SEQ_ID].dup(),
                     absorption_id_head: absorption_id,
                 },
                 interaction_deg

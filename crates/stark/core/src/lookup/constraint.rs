@@ -23,11 +23,11 @@
 //!
 //! ## Algebra location
 //!
-//! Per Amendment B the per-interaction encoding lives inside each
+//! Per-interaction encoding lives inside each
 //! [`LookupMessage::encode`] body, so the adapter carries **no scratch
 //! buffer**: every `add` / `remove` / `insert` body is a two-liner that
 //! calls `msg.encode(self.challenges)` and absorbs the resulting
-//! `AB::ExprEF` denominator into the running `(V, U)` (group) or
+//! `EE` denominator into the running `(V, U)` (group) or
 //! `(N, D)` (batch) pair.
 //!
 //! The running-pair updates are also inlined at every call site (no
@@ -38,237 +38,116 @@
 //!
 //! ## Challenge handling
 //!
-//! The top-level [`ConstraintLookupBuilder`] reads α/β out of
-//! `ab.permutation_randomness()[0..2]` exactly once at construction time
-//! and stores them in a [`Challenges<AB::ExprEF>`], which
-//! precomputes both the β-power table (β⁰..β^(W-1)) and the bus-prefix
-//! table (`bus_prefix[i] = α + (i + 1) · β^W`) sized from the
-//! [`LookupAir`] passed to [`ConstraintLookupBuilder::new`]. The cached
-//! challenges flow through the per-column / per-group handles by shared
-//! reference, so each interaction sees the same precomputed tables
-//! without reconstructing them.
-//!
-//! The permutation column slices are *not* cached — each
-//! [`LookupBuilder::next_column`] call re-queries `ab.permutation()` to pick
-//! up the current-row / next-row `VarEF` values. `ab.permutation()` is
-//! cheap (it builds a window over references) and not caching keeps the
-//! builder small.
+//! The top-level [`ConstraintLookupBuilder`](super::ConstraintLookupBuilder) reads α/β from
+//! the borrowed uniform inputs once at construction and stores shared [`Challenges<EE>`].
+//! Its β powers and bus prefixes are sized from the authored
+//! [`LookupAir`](super::LookupAir). Immutable current/next auxiliary slices stay with that
+//! adapter and each completed column emits its equations through the separate assertion sink.
 
 use core::marker::PhantomData;
 
-use miden_crypto::field::PrimeCharacteristicRing;
+use p3_field::{Algebra, Dup, PrimeCharacteristicRing};
 
 use super::{
-    Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
+    Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupFrame, LookupGroup,
     LookupMessage,
 };
-use crate::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
+use crate::air::{Frame, Inputs, LiftedAirBuilder, Rows};
 
-// CONSTRAINT LOOKUP BUILDER
-// ================================================================================================
+/// Inputs used only when closing the accumulator column.
+struct AccumulatorInputs<E, EE> {
+    pub next: EE,
+    pub sigma: EE,
+    pub first: E,
+}
 
-/// Constraint-path [`LookupBuilder`] over a wrapped [`LiftedAirBuilder`].
+/// Finalization in native lookup assertion order.
 ///
-/// Column 0 is the sole running-sum accumulator; columns 1+ are fraction columns.
-/// All constraints are emitted inline during [`LookupBuilder::next_column`].
-pub struct ConstraintLookupBuilder<'ab, AB>
+/// `current` contains the declared LogUp prefix for the accumulator, or just the selected
+/// fraction-column value otherwise. Trailing auxiliary registers never enter the recurrence.
+/// The optional anchor precedes the all-row equation and uses the `acc * first` multiplication
+/// order.
+fn column_constraints<E, EE>(
+    u: EE,
+    v: EE,
+    mut current: impl Iterator<Item = EE>,
+    accumulator: Option<AccumulatorInputs<E, EE>>,
+) -> (Option<EE>, EE)
 where
-    AB: LiftedAirBuilder + 'ab,
+    E: PrimeCharacteristicRing,
+    EE: Algebra<E>,
 {
-    ab: &'ab mut AB,
-    challenges: Challenges<AB::ExprEF>,
-    column_idx: usize,
-    num_columns: usize,
-}
-
-impl<'ab, AB> ConstraintLookupBuilder<'ab, AB>
-where
-    AB: LiftedAirBuilder,
-{
-    pub fn new<A>(ab: &'ab mut AB, air: &A) -> Self
-    where
-        A: LookupAir<Self>,
-    {
-        let num_columns = air.column_shape().len();
-        assert!(num_columns > 0, "a LogUp argument must declare at least one column");
-        let (alpha, beta): (AB::ExprEF, AB::ExprEF) = {
-            let r = ab.permutation_randomness();
-            (r[0].into(), r[1].into())
-        };
-        let challenges =
-            Challenges::<AB::ExprEF>::new(alpha, beta, air.max_message_width(), air.num_bus_ids());
-
-        Self {
-            ab,
-            challenges,
-            column_idx: 0,
-            num_columns,
+    let acc = current.next().expect("a lookup column must supply its current auxiliary value");
+    if let Some(AccumulatorInputs { next, sigma, first }) = accumulator {
+        let mut sum = acc.dup();
+        for value in current {
+            sum += value;
         }
-    }
-
-    /// Finish one symbolic lookup evaluation and validate its declared column shape.
-    pub fn finish(self) {
-        assert_eq!(
-            self.column_idx, self.num_columns,
-            "LookupAir::eval emitted {} columns, but column_shape declares {}",
-            self.column_idx, self.num_columns,
-        );
-    }
-}
-
-impl<'ab, AB> LookupBuilder for ConstraintLookupBuilder<'ab, AB>
-where
-    AB: LiftedAirBuilder,
-{
-    type F = AB::F;
-    type Expr = AB::Expr;
-    type Var = AB::Var;
-
-    type EF = AB::EF;
-    type ExprEF = AB::ExprEF;
-    type VarEF = AB::VarEF;
-
-    type PeriodicVar = AB::PeriodicVar;
-
-    type MainWindow = AB::MainWindow;
-    type PreprocessedWindow = AB::PreprocessedWindow;
-
-    type Column<'a>
-        = ConstraintColumn<'a, AB>
-    where
-        Self: 'a,
-        AB: 'a;
-
-    fn main(&self) -> Self::MainWindow {
-        self.ab.main()
-    }
-
-    fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        self.ab.preprocessed()
-    }
-
-    fn periodic_values(&self) -> &[Self::PeriodicVar] {
-        self.ab.periodic_values()
-    }
-
-    fn next_column<'a, R>(
-        &'a mut self,
-        f: impl FnOnce(&mut Self::Column<'a>) -> R,
-        _deg: Deg,
-    ) -> R {
-        // Open the column with an empty `(V, U) = (0, 1)` accumulator.
-        // The column only holds a shared borrow of the challenges and
-        // the two running-pair slots — the `&mut AB` stays on the
-        // builder and is only reached back into for the constraint
-        // emission below.
-        let mut col = ConstraintColumn {
-            challenges: &self.challenges,
-            u: AB::ExprEF::ONE,
-            v: AB::ExprEF::ZERO,
-            _phantom: PhantomData,
-        };
-        let result = f(&mut col);
-        let ConstraintColumn { u, v, .. } = col;
-
-        // Pick up permutation column values now that the column borrow is released.
-        let col_idx = self.column_idx;
-        assert!(
-            col_idx < self.num_columns,
-            "LookupAir::eval emitted more columns than column_shape declares ({})",
-            self.num_columns,
-        );
-        self.column_idx += 1;
-
-        if col_idx == 0 {
-            let (acc, acc_next, sigma_prime) = {
-                let mp = self.ab.permutation();
-                let acc: AB::ExprEF = mp.current_slice()[0].into();
-                let acc_next: AB::ExprEF = mp.next_slice()[0].into();
-                let sigma_prime: AB::ExprEF = self.ab.permutation_values()[0].clone().into();
-                (acc, acc_next, sigma_prime)
-            };
-
-            // Sum the declared LogUp prefix only. Any trailing extension-field registers are
-            // independently constrained by the AIR and do not belong to this lookup argument.
-            let all_curr_sum = {
-                let mp = self.ab.permutation();
-                let current = mp.current_slice();
-                assert!(
-                    current.len() >= self.num_columns,
-                    "auxiliary trace has {} columns, but LogUp declares {}",
-                    current.len(),
-                    self.num_columns,
-                );
-                let mut sum: AB::ExprEF = current[0].into();
-                for &aux_i in &current[1..self.num_columns] {
-                    sum += aux_i.into();
-                }
-                sum
-            };
-
-            // The recurrence is deliberately unfiltered: the permutation window wraps from the
-            // last row to the first, and summing all rows yields `n * sigma_prime = sigma`.
-            self.ab.when_first_row().assert_zero_ext(acc);
-            self.ab.assert_zero_ext(u * (acc_next - all_curr_sum + sigma_prime) - v);
-        } else {
-            // Fraction columns are bound on every row because the cyclic accumulator consumes the
-            // last row's contribution as well.
-            let acc_curr: AB::ExprEF = {
-                let mp = self.ab.permutation();
-                mp.current_slice()[col_idx].into()
-            };
-            self.ab.assert_zero_ext(u * acc_curr - v);
-        }
-
-        result
+        // This remains unfiltered on the last-to-first edge. Summing over all rows gives
+        // n*sigma = the global LogUp sum; the anchor fixes the additive constant.
+        (Some(acc * first), u * (next - sum + sigma) - v)
+    } else {
+        (None, u * acc - v)
     }
 }
 
 // CONSTRAINT COLUMN
 // ================================================================================================
 
-/// Per-column handle returned by [`ConstraintLookupBuilder::next_column`].
+/// Per-column arithmetic for native constraint emission.
 ///
-/// Holds only the running `(V, U)` accumulator and a shared borrow of
-/// the precomputed [`Challenges`]. The wrapped `&mut AB` and the
-/// permutation `acc` / `acc_next` values do **not** live on the column
-/// — the enclosing `next_column` method handles finalization
-/// directly after the closure returns.
-pub struct ConstraintColumn<'a, AB>
+/// Holds only the running `(V, U)` accumulator and shared precomputed challenges. Inputs and
+/// mutable assertion emission stay with the top-level adapter, outside this callback's borrow.
+pub struct ConstraintColumn<'a, E, EE>
 where
-    AB: LiftedAirBuilder + 'a,
+    E: PrimeCharacteristicRing,
+    EE: Algebra<E>,
 {
-    challenges: &'a Challenges<AB::ExprEF>,
-    u: AB::ExprEF,
-    v: AB::ExprEF,
-    _phantom: PhantomData<AB>,
+    challenges: &'a Challenges<EE>,
+    u: EE,
+    v: EE,
+    _phantom: PhantomData<E>,
 }
 
-impl<'a, AB> ConstraintColumn<'a, AB>
+impl<'a, E, EE> ConstraintColumn<'a, E, EE>
 where
-    AB: LiftedAirBuilder,
+    E: PrimeCharacteristicRing,
+    EE: Algebra<E>,
 {
-    /// Compose an inner-group `(V_g, U_g)` pair into this column's
-    /// running `(V, U)` using the cross-multiplication rule
-    /// `V ← V·U_g + V_g·U`, `U ← U·U_g`.
-    fn fold_group(&mut self, u_g: AB::ExprEF, v_g: AB::ExprEF) {
-        self.v = self.v.clone() * u_g.clone() + v_g * self.u.clone();
-        self.u = self.u.clone() * u_g;
+    pub(super) fn new(challenges: &'a Challenges<EE>) -> Self {
+        Self {
+            challenges,
+            u: EE::ONE,
+            v: EE::ZERO,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub(super) fn into_pair(self) -> (EE, EE) {
+        (self.u, self.v)
+    }
+
+    /// Compose an inner group with `V ← V·U_g + V_g·U`, `U ← U·U_g`.
+    fn fold_group(&mut self, u_g: EE, v_g: EE) {
+        self.v = self.v.dup() * u_g.dup() + v_g * self.u.dup();
+        self.u = self.u.dup() * u_g;
     }
 }
 
-impl<'a, AB> LookupColumn for ConstraintColumn<'a, AB>
+impl<'a, E, EE> LookupColumn for ConstraintColumn<'a, E, EE>
 where
-    AB: LiftedAirBuilder,
+    E: PrimeCharacteristicRing,
+    EE: Algebra<E>,
 {
-    type Expr = AB::Expr;
-    type ExprEF = AB::ExprEF;
+    type Expr = E;
+    type ExprEF = EE;
 
     type Group<'g>
-        = ConstraintGroup<'g, AB>
+        = ConstraintGroup<'g, E, EE>
     where
         Self: 'g,
-        AB: 'g;
+        E: 'g,
+        EE: 'g;
 
     fn group<'g>(
         &'g mut self,
@@ -278,8 +157,8 @@ where
     ) {
         let mut group = ConstraintGroup {
             challenges: self.challenges,
-            u: AB::ExprEF::ONE,
-            v: AB::ExprEF::ZERO,
+            u: EE::ONE,
+            v: EE::ZERO,
             _phantom: PhantomData,
         };
         f(&mut group);
@@ -299,8 +178,8 @@ where
         // split where `canonical` is the prover-path description.
         let mut group = ConstraintGroup {
             challenges: self.challenges,
-            u: AB::ExprEF::ONE,
-            v: AB::ExprEF::ZERO,
+            u: EE::ONE,
+            v: EE::ZERO,
             _phantom: PhantomData,
         };
         encoded(&mut group);
@@ -326,28 +205,31 @@ where
 /// `msg.encode(self.challenges)` directly and folds the resulting
 /// denominator into `(V_g, U_g)` inline — no intermediate scratch
 /// buffer and no helper method call.
-pub struct ConstraintGroup<'a, AB>
+pub struct ConstraintGroup<'a, E, EE>
 where
-    AB: LiftedAirBuilder + 'a,
+    E: PrimeCharacteristicRing,
+    EE: Algebra<E>,
 {
-    challenges: &'a Challenges<AB::ExprEF>,
-    u: AB::ExprEF,
-    v: AB::ExprEF,
-    _phantom: PhantomData<AB>,
+    challenges: &'a Challenges<EE>,
+    u: EE,
+    v: EE,
+    _phantom: PhantomData<E>,
 }
 
-impl<'a, AB> LookupGroup for ConstraintGroup<'a, AB>
+impl<'a, E, EE> LookupGroup for ConstraintGroup<'a, E, EE>
 where
-    AB: LiftedAirBuilder,
+    E: PrimeCharacteristicRing,
+    EE: Algebra<E>,
 {
-    type Expr = AB::Expr;
-    type ExprEF = AB::ExprEF;
+    type Expr = E;
+    type ExprEF = EE;
 
     type Batch<'b>
-        = ConstraintBatch<'b, AB>
+        = ConstraintBatch<'b, E, EE>
     where
         Self: 'b,
-        AB: 'b;
+        E: 'b,
+        EE: 'b;
 
     fn add<M>(&mut self, _name: &'static str, flag: Self::Expr, msg: impl FnOnce() -> M, _deg: Deg)
     where
@@ -357,7 +239,7 @@ where
         // the redundant multiplication that a generic `insert` would
         // emit.
         let v = msg().encode(self.challenges);
-        self.u += (v - AB::ExprEF::ONE) * flag.clone();
+        self.u += (v - EE::ONE) * flag.dup();
         self.v += flag;
     }
 
@@ -372,7 +254,7 @@ where
     {
         // `remove` = multiplicity −1. `V_g += flag · (−1) = −flag`.
         let v = msg().encode(self.challenges);
-        self.u += (v - AB::ExprEF::ONE) * flag.clone();
+        self.u += (v - EE::ONE) * flag.dup();
         self.v -= flag;
     }
 
@@ -388,7 +270,7 @@ where
     {
         // General case: `V_g += flag · multiplicity`.
         let v = msg().encode(self.challenges);
-        self.u += (v - AB::ExprEF::ONE) * flag.clone();
+        self.u += (v - EE::ONE) * flag.dup();
         self.v += flag * multiplicity;
     }
 
@@ -404,13 +286,13 @@ where
         // `V_g += N · flag`, `U_g += (D − 1) · flag`.
         let mut batch = ConstraintBatch {
             challenges: self.challenges,
-            n: AB::ExprEF::ZERO,
-            d: AB::ExprEF::ONE,
+            n: EE::ZERO,
+            d: EE::ONE,
             _phantom: PhantomData,
         };
         build(&mut batch);
         let ConstraintBatch { n, d, .. } = batch;
-        self.u += (d - AB::ExprEF::ONE) * flag.clone();
+        self.u += (d - EE::ONE) * flag.dup();
         self.v += n * flag;
     }
 
@@ -419,7 +301,7 @@ where
     }
 
     fn bus_prefix(&self, bus_id: usize) -> Self::ExprEF {
-        self.challenges.bus_prefix[bus_id].clone()
+        self.challenges.bus_prefix[bus_id].dup()
     }
 
     fn insert_encoded(
@@ -434,7 +316,7 @@ where
         // comes straight from the user's pre-computed closure instead
         // of a `LookupMessage::encode` call.
         let v = encoded();
-        self.u += (v - AB::ExprEF::ONE) * flag.clone();
+        self.u += (v - EE::ONE) * flag.dup();
         self.v += flag * multiplicity;
     }
 }
@@ -453,22 +335,24 @@ where
 /// ([`LookupMessage::encode`]), and the `(N, D)` update is inlined at
 /// every call site (no `absorb` helper) so the `add` / `remove` paths
 /// can skip the `m · D` multiplication when `m = ±1`.
-pub struct ConstraintBatch<'a, AB>
+pub struct ConstraintBatch<'a, E, EE>
 where
-    AB: LiftedAirBuilder + 'a,
+    E: PrimeCharacteristicRing,
+    EE: Algebra<E>,
 {
-    challenges: &'a Challenges<AB::ExprEF>,
-    n: AB::ExprEF,
-    d: AB::ExprEF,
-    _phantom: PhantomData<AB>,
+    challenges: &'a Challenges<EE>,
+    n: EE,
+    d: EE,
+    _phantom: PhantomData<E>,
 }
 
-impl<'a, AB> LookupBatch for ConstraintBatch<'a, AB>
+impl<'a, E, EE> LookupBatch for ConstraintBatch<'a, E, EE>
 where
-    AB: LiftedAirBuilder,
+    E: PrimeCharacteristicRing,
+    EE: Algebra<E>,
 {
-    type Expr = AB::Expr;
-    type ExprEF = AB::ExprEF;
+    type Expr = E;
+    type ExprEF = EE;
 
     fn add<M>(&mut self, _name: &'static str, msg: M, _deg: Deg)
     where
@@ -476,9 +360,9 @@ where
     {
         // `m = 1`: `(N, D) ← (N·v + D, D·v)`. Skips the `m · D` mul.
         let v = msg.encode(self.challenges);
-        let d_prev = self.d.clone();
-        self.n = self.n.clone() * v.clone() + d_prev;
-        self.d = self.d.clone() * v;
+        let d_prev = self.d.dup();
+        self.n = self.n.dup() * v.dup() + d_prev;
+        self.d = self.d.dup() * v;
     }
 
     fn remove<M>(&mut self, _name: &'static str, msg: M, _deg: Deg)
@@ -487,9 +371,9 @@ where
     {
         // `m = −1`: `(N, D) ← (N·v − D, D·v)`.
         let v = msg.encode(self.challenges);
-        let d_prev = self.d.clone();
-        self.n = self.n.clone() * v.clone() - d_prev;
-        self.d = self.d.clone() * v;
+        let d_prev = self.d.dup();
+        self.n = self.n.dup() * v.dup() - d_prev;
+        self.d = self.d.dup() * v;
     }
 
     fn insert<M>(&mut self, _name: &'static str, multiplicity: Self::Expr, msg: M, _deg: Deg)
@@ -498,9 +382,9 @@ where
     {
         // General case: `(N, D) ← (N·v + m·D, D·v)`.
         let v = msg.encode(self.challenges);
-        let d_prev = self.d.clone();
-        self.n = self.n.clone() * v.clone() + d_prev * multiplicity;
-        self.d = self.d.clone() * v;
+        let d_prev = self.d.dup();
+        self.n = self.n.dup() * v.dup() + d_prev * multiplicity;
+        self.d = self.d.dup() * v;
     }
 
     fn insert_encoded(
@@ -514,8 +398,311 @@ where
         // pre-encoded `ExprEF` instead of a `LookupMessage::encode`
         // call.
         let v = encoded();
-        let d_prev = self.d.clone();
-        self.n = self.n.clone() * v.clone() + d_prev * multiplicity;
-        self.d = self.d.clone() * v;
+        let d_prev = self.d.dup();
+        self.n = self.n.dup() * v.dup() + d_prev * multiplicity;
+        self.d = self.d.dup() * v;
+    }
+}
+
+/// Constraint adapter with immutable row inputs separate from mutable assertion emission.
+///
+/// The builder owns one challenge table and duplicates only the first selector and normalized
+/// export it needs. Column callbacks borrow that table, not the sink or row frame. Auxiliary
+/// columns after the declared LogUp prefix are independently constrained by the source.
+pub struct ConstraintLookupBuilder<'rows, 'sink, B: LiftedAirBuilder> {
+    sink: &'sink mut B,
+    aux: Rows<'rows, B::ExtExpr>,
+    first: B::Expr,
+    sigma: B::ExtExpr,
+    challenges: Challenges<B::ExtExpr>,
+    column_idx: usize,
+    num_columns: usize,
+}
+
+impl<'rows, 'sink, B: LiftedAirBuilder> ConstraintLookupBuilder<'rows, 'sink, B> {
+    /// Build challenge tables once for one lookup evaluation.
+    ///
+    /// The caller supplies the same frame/uniform inputs as its source evaluation. LogUp requires
+    /// two challenge values, normalized export zero, and enough current/next auxiliary columns.
+    /// Malformed source geometry is a construction invariant and panics here.
+    pub fn new<A>(
+        frame: &Frame<'rows, B>,
+        inputs: Inputs<'_, B>,
+        sink: &'sink mut B,
+        air: &A,
+    ) -> Self
+    where
+        A: LookupAir<Self>,
+    {
+        let num_columns = air.column_shape().len();
+        assert!(num_columns > 0, "a LogUp argument must declare at least one column");
+        assert!(inputs.challenges.len() >= 2, "LogUp requires alpha and beta challenges");
+        assert!(!inputs.exports.is_empty(), "LogUp requires normalized export zero");
+        assert!(frame.aux.current.len() >= num_columns, "LogUp auxiliary prefix is missing");
+        assert!(frame.aux.next.len() >= num_columns, "LogUp next auxiliary prefix is missing");
+        let challenges = Challenges::new(
+            inputs.challenge(0),
+            inputs.challenge(1),
+            air.max_message_width(),
+            air.num_bus_ids(),
+        );
+        Self {
+            sink,
+            aux: frame.aux,
+            first: frame.first_row(),
+            sigma: inputs.export(0),
+            challenges,
+            column_idx: 0,
+            num_columns,
+        }
+    }
+
+    pub fn finish(self) {
+        assert_eq!(
+            self.column_idx, self.num_columns,
+            "LookupAir::eval emitted {} columns, but column_shape declares {}",
+            self.column_idx, self.num_columns,
+        );
+    }
+}
+
+impl<B: LiftedAirBuilder> LookupBuilder for ConstraintLookupBuilder<'_, '_, B> {
+    type F = B::F;
+    type Expr = B::Expr;
+    type ExprEF = B::ExtExpr;
+
+    type Column<'a>
+        = ConstraintColumn<'a, B::Expr, B::ExtExpr>
+    where
+        Self: 'a;
+
+    fn next_column<'a, R>(
+        &'a mut self,
+        f: impl FnOnce(&mut Self::Column<'a>) -> R,
+        _deg: Deg,
+    ) -> R {
+        let mut column = ConstraintColumn::new(&self.challenges);
+        let result = f(&mut column);
+        let (u, v) = column.into_pair();
+        let index = self.column_idx;
+        assert!(index < self.num_columns, "LookupAir::eval emitted more columns than declared");
+        self.column_idx += 1;
+
+        let (band, accumulator) = if index == 0 {
+            (
+                &self.aux.current[..self.num_columns],
+                Some(AccumulatorInputs {
+                    next: self.aux.next[0].dup(),
+                    sigma: self.sigma.dup(),
+                    first: self.first.dup(),
+                }),
+            )
+        } else {
+            (&self.aux.current[index..index + 1], None)
+        };
+        let (anchor, relation) = column_constraints(u, v, band.iter().map(Dup::dup), accumulator);
+        if let Some(anchor) = anchor {
+            self.sink.assert_zero_ext(anchor);
+        }
+        self.sink.assert_zero_ext(relation);
+        result
+    }
+}
+
+/// Evaluate one authored lookup declaration using the source's exact frame and inputs.
+pub fn eval_lookup<'rows, 'sink, A, B>(
+    air: &A,
+    frame: &Frame<'rows, B>,
+    inputs: Inputs<'_, B>,
+    sink: &'sink mut B,
+) where
+    B: LiftedAirBuilder,
+    A: LookupAir<ConstraintLookupBuilder<'rows, 'sink, B>>,
+{
+    let lookup_frame = LookupFrame::from_frame(frame);
+    let mut builder = ConstraintLookupBuilder::new(frame, inputs, sink, air);
+    air.eval(&lookup_frame, &mut builder);
+    builder.finish();
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::{borrow::Cow, vec, vec::Vec};
+
+    use p3_field::PrimeCharacteristicRing;
+    use p3_goldilocks::Goldilocks as F;
+
+    use super::*;
+    use crate::{
+        air::{
+            AirFrame, AirSpec, Assertion, ConstraintMeta, LiftedAir, Selectors, UniformInputs,
+            capture,
+            symbolic::{AuxInput, BaseLeaf, ExtLeaf, RowOffset, SymbolicExpr},
+        },
+        lookup::{LookupColumn, LookupGroup},
+    };
+
+    struct EmptyLookup;
+
+    impl<LB: LookupBuilder<F = F>> LookupAir<LB> for EmptyLookup {
+        fn column_shape(&self) -> &[usize] {
+            &[1, 1]
+        }
+        fn max_message_width(&self) -> usize {
+            1
+        }
+        fn num_bus_ids(&self) -> usize {
+            1
+        }
+
+        fn eval(&self, _frame: &LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+            for result in [17, 23] {
+                let observed = builder.next_column(
+                    |column| {
+                        column.group("empty", |_| {}, Deg { v: 0, u: 0 });
+                        result
+                    },
+                    Deg { v: 0, u: 0 },
+                );
+                assert_eq!(observed, result);
+            }
+        }
+    }
+
+    impl LiftedAir for EmptyLookup {
+        type F = F;
+
+        fn spec(&self) -> AirSpec<'_, F> {
+            AirSpec {
+                main_width: 1,
+                aux_width: 3,
+                num_public_values: 0,
+                num_challenges: 2,
+                num_exports: 1,
+                preprocessed: None,
+                periodic_columns: Cow::Borrowed(&[]),
+            }
+        }
+
+        fn eval<B: LiftedAirBuilder<F = F>>(
+            &self,
+            frame: &Frame<'_, B>,
+            inputs: Inputs<'_, B>,
+            sink: &mut B,
+        ) {
+            eval_lookup(self, frame, inputs, sink);
+        }
+    }
+
+    struct CachedLookup;
+
+    impl<LB: LookupBuilder<F = F>> LookupAir<LB> for CachedLookup {
+        fn column_shape(&self) -> &[usize] {
+            &[2]
+        }
+        fn max_message_width(&self) -> usize {
+            1
+        }
+        fn num_bus_ids(&self) -> usize {
+            1
+        }
+
+        fn eval(&self, _frame: &LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+            builder.next_column(
+                |column| {
+                    column.group_with_cached_encoding(
+                        "cached",
+                        |_| panic!("constraint path must use the encoded description"),
+                        |group| {
+                            group.selected_batch2_encoded(
+                                "two slots",
+                                "first",
+                                LB::Expr::ONE,
+                                || LB::ExprEF::from(LB::Expr::from_u32(3)),
+                                "second",
+                                LB::Expr::TWO,
+                                || LB::ExprEF::from(LB::Expr::from_u32(5)),
+                            )
+                        },
+                        Deg { v: 0, u: 0 },
+                    );
+                },
+                Deg { v: 0, u: 0 },
+            );
+        }
+    }
+
+    #[derive(Default)]
+    struct Sink(Vec<F>);
+
+    impl LiftedAirBuilder for Sink {
+        type F = F;
+        type Expr = F;
+        type ExtExpr = F;
+
+        fn emit_base(&mut self, _value: F, _meta: ConstraintMeta<'_>) {
+            panic!("lookup equations must remain extension assertions")
+        }
+
+        fn emit_ext(&mut self, value: F, _meta: ConstraintMeta<'_>) {
+            self.0.push(value);
+        }
+    }
+
+    #[test]
+    fn zero_anchor_prefix_and_fraction_slots_preserve_their_order() {
+        let current = [F::TWO, F::from_u32(3), F::from_u32(999)];
+        let next = [F::from_u32(7), F::from_u32(11), F::from_u32(888)];
+        let frame = AirFrame {
+            main: Rows { current: &[F::ZERO], next: &[F::ZERO] },
+            preprocessed: Rows { current: &[], next: &[] },
+            aux: Rows { current: &current, next: &next },
+            periodic: &[],
+            selectors: Selectors {
+                first: F::ZERO,
+                last: F::ONE,
+                transition: F::ONE,
+            },
+        };
+        let inputs = UniformInputs {
+            public_values: &[],
+            challenges: &[F::from_u32(13), F::from_u32(17)],
+            exports: &[F::from_u32(5)],
+        };
+        let mut sink = Sink::default();
+        eval_lookup(&EmptyLookup, &frame, inputs, &mut sink);
+        // 2*0; 1*(7-(2+3)+5)-0; 1*3-0. Suffix 999 is not part of LogUp.
+        assert_eq!(sink.0, vec![F::ZERO, F::from_u32(7), F::from_u32(3)]);
+        let mut sink = Sink::default();
+        eval_lookup(&CachedLookup, &frame, inputs, &mut sink);
+        // The two fractions combine to (V,U)=(11,15), so 15*(7-2+5)-11=139.
+        assert_eq!(sink.0, vec![F::ZERO, F::from_u32(139)]);
+    }
+
+    #[test]
+    fn noncopy_symbolic_inputs_keep_anchor_operand_and_emission_order() {
+        let captured = capture(&EmptyLookup).unwrap();
+        assert_eq!(captured.assertions.len(), 3);
+        assert_eq!(captured.descriptor.analysis().counts().ext, 3);
+        let Assertion::Extension(SymbolicExpr::Mul { x, y, .. }) = &captured.assertions[0] else {
+            panic!("anchor must be acc * first")
+        };
+        assert!(matches!(
+            x.as_ref(),
+            SymbolicExpr::Leaf(ExtLeaf::Input(AuxInput::Trace {
+                offset: RowOffset::Current,
+                index: 0,
+            }))
+        ));
+        assert!(matches!(
+            y.as_ref(),
+            SymbolicExpr::Leaf(ExtLeaf::Base(SymbolicExpr::Leaf(BaseLeaf::IsFirstRow)))
+        ));
+        assert!(
+            captured
+                .assertions
+                .iter()
+                .all(|assertion| matches!(assertion, Assertion::Extension(_)))
+        );
     }
 }

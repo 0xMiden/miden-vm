@@ -10,7 +10,7 @@ use super::enforce_main;
 use crate::vm::constraints::{
     columns::CoreCols,
     op_flags::{OpFlags, generate_test_row},
-    test_utils::ConstraintEvalBuilder,
+    test_utils::NativeConstraintEvalBuilder,
 };
 
 /// Sets the u32 helper registers (hasher_state[2..7]) in the decoder.
@@ -38,7 +38,7 @@ fn eval_stack_arith(
     next: &CoreCols<Felt>,
     op_flags: &OpFlags<Felt>,
 ) -> Vec<QuadFelt> {
-    let mut builder = ConstraintEvalBuilder::new();
+    let mut builder = NativeConstraintEvalBuilder::default();
     enforce_main(&mut builder, local, next, op_flags);
     builder.evaluations
 }

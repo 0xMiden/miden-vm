@@ -3,10 +3,8 @@
 use core::borrow::Borrow;
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_stark::{
-    air::WindowAccess,
-    lookup::{Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, LookupMessage},
-};
+use miden_stark::lookup::{self, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage};
+use p3_field::Dup;
 
 use super::messages::{BytePairLookupMsg, EidosRotationMsg, RangeMsg};
 use crate::vm::{
@@ -16,9 +14,6 @@ use crate::vm::{
         eidos::{self, BytePairRelation},
     },
 };
-
-/// Extension trait required by the byte-pair table [`LookupAir`](miden_stark::lookup::LookupAir).
-pub(crate) trait And8LookupBuilder: LookupBuilder<F = Felt> {}
 
 /// Per-column fraction stride for the byte-pair table AIR.
 pub(crate) const AND8_LOOKUP_COLUMN_SHAPE: [usize; 4] = [1, 2, 2, 2];
@@ -32,7 +27,7 @@ fn emit_byte_table_single<LB, M>(
     multiplicity: LB::Expr,
     msg: impl FnOnce() -> M,
 ) where
-    LB: And8LookupBuilder,
+    LB: lookup::LookupBuilder<F = Felt>,
     M: LookupMessage<LB::Expr, LB::ExprEF>,
 {
     builder.next_column(
@@ -66,7 +61,7 @@ fn emit_byte_table_pair<LB, M0, M1>(
     multiplicity1: LB::Expr,
     msg1: impl FnOnce() -> M1,
 ) where
-    LB: And8LookupBuilder,
+    LB: lookup::LookupBuilder<F = Felt>,
     M0: LookupMessage<LB::Expr, LB::ExprEF>,
     M1: LookupMessage<LB::Expr, LB::ExprEF>,
 {
@@ -93,22 +88,23 @@ fn emit_byte_table_pair<LB, M0, M1>(
 }
 
 /// Emit the table side of the byte-pair lookup.
-pub(crate) fn emit_and8_lookup_columns<LB>(builder: &mut LB, local: &And8LookupCols<LB::Var>)
-where
-    LB: And8LookupBuilder,
+pub(crate) fn emit_and8_lookup_columns<LB>(
+    frame: &lookup::LookupFrame<'_, LB::Expr>,
+    builder: &mut LB,
+) where
+    LB: lookup::LookupBuilder<F = Felt>,
 {
-    let preprocessed = builder.preprocessed();
-    let fixed: &And8LookupPreprocessedCols<LB::Var> = preprocessed.current_slice().borrow();
-    let a: LB::Expr = fixed.a.into();
-    let b: LB::Expr = fixed.b.into();
-    let x: LB::Expr = fixed.xor.into();
-    let relation_values =
-        eidos::provider_values(x.clone(), fixed.wrap12.into(), fixed.wrap7.into());
+    let local: &And8LookupCols<LB::Expr> = frame.main.current.borrow();
+    let fixed: &And8LookupPreprocessedCols<LB::Expr> = frame.preprocessed.current.borrow();
+    let a = fixed.a.dup();
+    let b = fixed.b.dup();
+    let x = fixed.xor.dup();
+    let relation_values = eidos::provider_values(x.clone(), fixed.wrap12.dup(), fixed.wrap7.dup());
 
     emit_byte_table_single(
         builder,
         "canonical_xor",
-        local.relation_multiplicities[BytePairRelation::CanonicalXor.index()].into(),
+        local.relation_multiplicities[BytePairRelation::CanonicalXor.index()].dup(),
         || BytePairLookupMsg::from_xor(a.clone(), b.clone(), x),
     );
 
@@ -120,7 +116,7 @@ where
             builder,
             "eidos_rotation_tables",
             "rotation_row_0",
-            local.relation_multiplicities[relation0.index()].into(),
+            local.relation_multiplicities[relation0.index()].dup(),
             || {
                 EidosRotationMsg::from_normalized(
                     relation0,
@@ -130,7 +126,7 @@ where
                 )
             },
             "rotation_row_1",
-            local.relation_multiplicities[relation1.index()].into(),
+            local.relation_multiplicities[relation1.index()].dup(),
             || {
                 EidosRotationMsg::from_normalized(
                     relation1,
@@ -146,7 +142,7 @@ where
         builder,
         "eidos_rotation_and_range_tables",
         "rot7_pos3_row",
-        local.relation_multiplicities[BytePairRelation::Rot7Pos3.index()].into(),
+        local.relation_multiplicities[BytePairRelation::Rot7Pos3.index()].dup(),
         || {
             EidosRotationMsg::from_normalized(
                 BytePairRelation::Rot7Pos3,
@@ -156,7 +152,7 @@ where
             )
         },
         "range_row",
-        local.range_multiplicity.into(),
+        local.range_multiplicity.dup(),
         || RangeMsg {
             value: a.clone() * LB::Expr::from_u16(256) + b.clone(),
         },

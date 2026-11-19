@@ -1,7 +1,8 @@
 //! Miden VM controller and AEAD constraints around the shared Eidos compression core.
 
 use miden_core::{Felt, field::PrimeCharacteristicRing};
-use miden_stark::air::{AirBuilder, LiftedAirBuilder, WindowAccess};
+use miden_stark::air::{Frame, LiftedAirBuilder};
+use p3_field::Dup;
 
 use super::{
     layout::*,
@@ -19,9 +20,10 @@ use crate::shared::eidos::constraints::{
 
 /// Enforces the fused-to-footer bridge and all four footer rows of each cycle.
 pub(crate) fn enforce_footer_rows<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    local: &[AB::Var],
-    next: &[AB::Var],
+    local: &[AB::Expr],
+    next: &[AB::Expr],
     selectors: &EidosCompressionSelectors<AB::Expr>,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
@@ -35,8 +37,8 @@ pub(crate) fn enforce_footer_rows<AB>(
 
         enforce_footer_word_bindings::<AB>(builder, local, is_footer.clone(), &words);
 
-        let mode = AB::Expr::from(local[F_MODE_COL]);
-        let compression_multiplicity = AB::Expr::from(local[F_COMPRESSION_MULTIPLICITY_COL]);
+        let mode = local[F_MODE_COL].dup();
+        let compression_multiplicity = local[F_COMPRESSION_MULTIPLICITY_COL].dup();
         let inactive = AB::Expr::ONE - mode.clone();
         builder.when(is_footer.clone()).assert_zero(mode.clone() * inactive);
         builder.when(is_footer.clone()).assert_zero(mode * compression_multiplicity);
@@ -50,8 +52,8 @@ pub(crate) fn enforce_footer_rows<AB>(
 
         for idx in 1..4 {
             builder
-                .when(selectors.is_footer() * AB::Expr::from(local[F_MODE_COL]))
-                .assert_zero(AB::Expr::from(local[footer_interface_tail_col(idx)]));
+                .when(selectors.is_footer() * local[F_MODE_COL].dup())
+                .assert_zero(local[footer_interface_tail_col(idx)].dup());
         }
     }
 
@@ -62,15 +64,15 @@ pub(crate) fn enforce_footer_rows<AB>(
 
         builder
             .when(gate.clone())
-            .assert_zero(AB::Expr::from(local[F_MODE_COL]) - AB::Expr::from(next[F_MODE_COL]));
+            .assert_zero(local[F_MODE_COL].dup() - next[F_MODE_COL].dup());
         builder.when(gate.clone()).assert_zero(
-            AB::Expr::from(local[F_COMPRESSION_MULTIPLICITY_COL])
-                - AB::Expr::from(next[F_COMPRESSION_MULTIPLICITY_COL]),
+            local[F_COMPRESSION_MULTIPLICITY_COL].dup()
+                - next[F_COMPRESSION_MULTIPLICITY_COL].dup(),
         );
         enforce_footer_cycle_id_transition::<AB>(builder, local, next, gate);
     }
 
-    enforce_footer_cycle_advance::<AB>(builder, local, next, selectors);
+    enforce_footer_cycle_advance::<AB>(frame, builder, local, next, selectors);
 }
 
 /// Enforces the footer constraints shared with the PVM compression AIR.
@@ -78,16 +80,24 @@ pub(crate) fn enforce_footer_rows<AB>(
 /// The MVM mode column must be zero so that the shared output slots carry the ordinary digest.
 #[cfg(any(test, feature = "testing"))]
 pub(crate) fn enforce_common_footer_rows<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    local: &[AB::Var],
-    next: &[AB::Var],
+    local: &[AB::Expr],
+    next: &[AB::Expr],
     selectors: &EidosCompressionSelectors<AB::Expr>,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    enforce_core_footer_rows(builder, local, next, selectors, |builder, footer, packed_output| {
-        enforce_mvm_footer_output(builder, local, selectors, footer, packed_output);
-    });
+    enforce_core_footer_rows(
+        frame,
+        builder,
+        local,
+        next,
+        selectors,
+        |builder, footer, packed_output| {
+            enforce_mvm_footer_output(builder, local, selectors, footer, packed_output);
+        },
+    );
 }
 
 /// Pins the external-input fraction column outside the final footer.
@@ -96,35 +106,35 @@ pub(crate) fn enforce_common_footer_rows<AB>(
 /// this constraint, a zero denominator would leave the auxiliary cell unconstrained and allow it
 /// to alter the cyclic accumulator.
 pub(crate) fn enforce_inactive_footer_input_aux<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
     selectors: &EidosCompressionSelectors<AB::Expr>,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
     let inactive = AB::Expr::ONE - selectors.is_footer_row(FOOTER_ROWS - 1);
-    let footer_input_aux: AB::ExprEF =
-        builder.permutation().current_slice()[FOOTER_INPUT_COLUMN].into();
+    let footer_input_aux = frame.aux.current[FOOTER_INPUT_COLUMN].dup();
     builder.assert_zero_ext(footer_input_aux * inactive);
 }
 
 /// Pins the paired AEAD-output fraction column whenever its two relations are inactive.
 pub(crate) fn enforce_inactive_footer_output_aux<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    local: &[AB::Var],
+    local: &[AB::Expr],
     selectors: &EidosCompressionSelectors<AB::Expr>,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    let active = selectors.is_footer() * AB::Expr::from(local[F_MODE_COL]);
+    let active = selectors.is_footer() * local[F_MODE_COL].dup();
     let inactive = AB::Expr::ONE - active;
-    let footer_output_aux: AB::ExprEF =
-        builder.permutation().current_slice()[FOOTER_OUTPUT_COLUMN].into();
+    let footer_output_aux = frame.aux.current[FOOTER_OUTPUT_COLUMN].dup();
     builder.assert_zero_ext(footer_output_aux * inactive);
 }
 
 fn enforce_mvm_footer_output<AB>(
     builder: &mut AB,
-    local: &[AB::Var],
+    local: &[AB::Expr],
     selectors: &EidosCompressionSelectors<AB::Expr>,
     footer: usize,
     packed_output: AB::Expr,
@@ -133,6 +143,6 @@ fn enforce_mvm_footer_output<AB>(
 {
     let gate = selectors.is_footer_row(footer);
     builder
-        .when(gate * (AB::Expr::ONE - AB::Expr::from(local[F_MODE_COL])))
-        .assert_eq(AB::Expr::from(local[footer_interface_tail_col(footer)]), packed_output);
+        .when(gate * (AB::Expr::ONE - local[F_MODE_COL].dup()))
+        .assert_eq(local[footer_interface_tail_col(footer)].dup(), packed_output);
 }

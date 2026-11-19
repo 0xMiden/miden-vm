@@ -44,7 +44,7 @@ use miden_core::{
 };
 use miden_stark::{
     StarkConfig,
-    air::{BaseAir, ProverStatement, Statement},
+    air::{LiftedAir, ProverStatement, Statement},
     debug,
     lookup::{Challenges, LookupFractions, LookupMessage, accumulate, build_lookup_fractions},
 };
@@ -289,14 +289,14 @@ fn deduplicated_compress_keeps_unit_controller_multiplicity() {
         &MidenAir::CHIPLETS,
         &chip_matrix,
         None,
-        &BaseAir::<Felt>::periodic_columns(&MidenAir::CHIPLETS),
+        &MidenAir::CHIPLETS.spec().periodic_columns.into_owned(),
         &log.challenges,
     );
     let eidos_compression_fractions = build_lookup_fractions(
         &MidenAir::EIDOS_COMPRESSION,
         &eidos_compression_matrix,
         None,
-        &BaseAir::<Felt>::periodic_columns(&MidenAir::EIDOS_COMPRESSION),
+        &MidenAir::EIDOS_COMPRESSION.spec().periodic_columns.into_owned(),
         &log.challenges,
     );
     let matching_multiplicities = |fractions: &LookupFractions<Felt, QuadFelt>| {
@@ -360,7 +360,7 @@ fn eidos_compression_lookup_row_shape_matches_expected_interactions() {
     let challenges =
         Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
     let eidos_compression_periodic =
-        BaseAir::<Felt>::periodic_columns(&MidenAir::EIDOS_COMPRESSION);
+        MidenAir::EIDOS_COMPRESSION.spec().periodic_columns.into_owned();
     let eidos_compression_fractions = build_lookup_fractions(
         &MidenAir::EIDOS_COMPRESSION,
         &eidos_compression_matrix,
@@ -494,7 +494,7 @@ fn eidos_compression_lookup_ledger_fits_narrow_slot_cap() {
     let challenges =
         Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
     let eidos_compression_periodic =
-        BaseAir::<Felt>::periodic_columns(&MidenAir::EIDOS_COMPRESSION);
+        MidenAir::EIDOS_COMPRESSION.spec().periodic_columns.into_owned();
     let eidos_compression_fractions = build_lookup_fractions(
         &MidenAir::EIDOS_COMPRESSION,
         &eidos_compression_matrix,
@@ -778,11 +778,11 @@ fn lookup_multiplicities(
     and8_matrix: &RowMajorMatrix<Felt>,
     challenges: &Challenges<QuadFelt>,
 ) -> HashMap<QuadFelt, Felt> {
-    let chip_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::CHIPLETS);
+    let chip_periodic = MidenAir::CHIPLETS.spec().periodic_columns.into_owned();
     let eidos_compression_periodic =
-        BaseAir::<Felt>::periodic_columns(&MidenAir::EIDOS_COMPRESSION);
+        MidenAir::EIDOS_COMPRESSION.spec().periodic_columns.into_owned();
     let and8_preprocessed = MidenAir::AND8_LOOKUP
-        .preprocessed_trace()
+        .build_preprocessed_trace()
         .expect("And8 lookup AIR declares a preprocessed table");
     let fractions = [
         build_lookup_fractions(&MidenAir::CORE, core_matrix, None, &[], challenges),
@@ -846,7 +846,13 @@ pub(super) fn assert_trace_constraints_reject(
     let panic_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        debug::check_constraints(&prover_statement, config.challenger());
+        let raw_setup: Vec<_> = prover_statement
+            .statement()
+            .airs()
+            .iter()
+            .map(LiftedAir::build_preprocessed_trace)
+            .collect();
+        debug::check_constraints(&prover_statement, Some(&raw_setup), config.challenger());
     }));
     std::panic::set_hook(panic_hook);
     assert!(result.is_err(), "mutated trace should violate AIR constraints");
@@ -875,7 +881,7 @@ fn and8_columns_bind_every_aux_column_through_the_cyclic_wrap() {
     let trace = build_trace_from_ops(tiny_span(), &[]);
     let (_, _, _, and8_matrix) = trace.into_air_matrices();
     let preprocessed = MidenAir::AND8_LOOKUP
-        .preprocessed_trace()
+        .build_preprocessed_trace()
         .expect("And8 AIR must declare its fixed byte-pair table");
 
     let raw = rand::random::<[Felt; 4]>();
@@ -925,7 +931,7 @@ fn and8_paired_columns_reject_opposite_multiplicity_deltas_across_domains() {
     let (core_matrix, chip_matrix, eidos_compression_matrix, honest_and8_matrix) =
         trace.main_trace().clone().into_air_matrices();
     let preprocessed = MidenAir::AND8_LOOKUP
-        .preprocessed_trace()
+        .build_preprocessed_trace()
         .expect("And8 AIR must declare its fixed byte-pair table");
 
     let raw = rand::random::<[Felt; 4]>();
@@ -993,11 +999,11 @@ fn assert_lookup_fractions_run(label: &str, trace: &VmTrace) {
     let (core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
         trace.main_trace().clone().into_air_matrices();
     // Core has no periodic columns.
-    let chip_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::CHIPLETS);
+    let chip_periodic = MidenAir::CHIPLETS.spec().periodic_columns.into_owned();
     let eidos_compression_periodic =
-        BaseAir::<Felt>::periodic_columns(&MidenAir::EIDOS_COMPRESSION);
+        MidenAir::EIDOS_COMPRESSION.spec().periodic_columns.into_owned();
     let and8_preprocessed = MidenAir::AND8_LOOKUP
-        .preprocessed_trace()
+        .build_preprocessed_trace()
         .expect("byte-pair lookup AIR declares a preprocessed table");
 
     // QuadFelt challenges for LogUp, built from 4 random Felts (QuadFelt itself doesn't

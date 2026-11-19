@@ -4,14 +4,11 @@ use alloc::{vec, vec::Vec};
 use core::borrow::Borrow;
 
 use miden_core::Felt;
-use miden_stark::{air::WindowAccess, lookup::LookupAir};
+use miden_stark::lookup;
 
 use super::{
     layout::*,
-    lookup::{
-        EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, EidosCompressionCols, EidosCompressionLookupBuilder,
-        emit_lookup_columns,
-    },
+    lookup::{EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, EidosCompressionCols, emit_lookup_columns},
     model::initial_working_state,
     narrow::{NARROW_SLOTS, NarrowSlotBus},
     schedule::{G_IDX_COL, G_IDX_DIAG, SIGMA, fused_step_at},
@@ -76,30 +73,20 @@ impl LookupPlan {
 #[derive(Copy, Clone, Debug, Default)]
 pub struct EidosCompressionLookupAir;
 
-impl<LB> LookupAir<LB> for EidosCompressionLookupAir
-where
-    LB: EidosCompressionLookupBuilder,
-{
+impl<LB: lookup::LookupBuilder<F = Felt>> lookup::LookupAir<LB> for EidosCompressionLookupAir {
     fn column_shape(&self) -> &[usize] {
         &EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE
     }
-
     fn max_message_width(&self) -> usize {
         MIDEN_MAX_MESSAGE_WIDTH
     }
-
     fn num_bus_ids(&self) -> usize {
         crate::vm::logup::BusId::COUNT
     }
-
-    fn eval(&self, builder: &mut LB) {
-        let main = builder.main();
-        let local: &EidosCompressionCols<_> = main.current_slice().borrow();
-        let next: &EidosCompressionCols<_> = main.next_slice().borrow();
-        let periodic_values: Vec<LB::Expr> =
-            builder.periodic_values().iter().map(|value| (*value).into()).collect();
-        let selectors = EidosCompressionSelectors::new(&periodic_values, 0);
-
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        let local: &EidosCompressionCols<_> = frame.main.current.borrow();
+        let next: &EidosCompressionCols<_> = frame.main.next.borrow();
+        let selectors = EidosCompressionSelectors::new(frame.periodic, 0);
         emit_lookup_columns(builder, local, next, &selectors);
     }
 }

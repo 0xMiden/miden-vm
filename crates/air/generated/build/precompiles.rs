@@ -5,7 +5,10 @@ use miden_air_definitions::{
     compiler::precompiles::{self as compiler, CapturedPvmRelation},
     precompiles::{fixed, relation::AIRS},
 };
-use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_optimized_module};
+use miden_constraint_compiler::backend::{
+    rust_descriptor::{self, AirDescriptorEmitter},
+    rust_eval::{AirEvaluator, emit_native_optimized_module},
+};
 
 pub fn generate() {
     println!("cargo:rerun-if-changed=build/precompiles.rs");
@@ -16,6 +19,7 @@ pub fn generate() {
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
     };
     let captured = CapturedPvmRelation::new().expect("capture PVM AIRs");
+    assert_eq!(captured.airs().len(), AIRS.len(), "canonical PVM capture count");
     let evals: Vec<_> = captured
         .airs()
         .iter()
@@ -25,22 +29,21 @@ pub fn generate() {
             air_label: declaration.file_token(),
             graph: air.graph(),
             constraints: air.constraints(),
+            descriptor: air.descriptor(),
         })
         .collect();
-    write("evaluators.rs", emit_optimized_module("", &evals));
-    let degree_arms = AIRS
+    let descriptors: Vec<_> = captured
+        .airs()
         .iter()
-        .zip(captured.airs())
-        .map(|(air, capture)| {
-            format!("definitions::ChipletAir::{air:?} => {:?},", capture.degrees())
+        .zip(&AIRS)
+        .map(|(air, declaration)| AirDescriptorEmitter {
+            name: declaration.file_token(),
+            air_label: declaration.file_token(),
+            descriptor: air.descriptor(),
         })
-        .collect::<String>();
-    write(
-        "degrees.rs",
-        format!(
-            "fn generated_degrees(air: ChipletAir) -> ConstraintDegrees {{ match air.0 {{ {degree_arms} }} }}"
-        ),
-    );
+        .collect();
+    write("native_evaluators.rs", emit_native_optimized_module("", &evals));
+    write("native_descriptors.rs", rust_descriptor::emit_module("", &descriptors));
     let compiled = captured.compile().expect("compile PVM relation");
     let circuit: RecursiveAceCircuit = compiled
         .build_circuit(LayoutKind::Masm)

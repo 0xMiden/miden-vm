@@ -1,5 +1,5 @@
 //! Miden-side extension-trait impls pinning the generic
-//! [`ConstraintLookupBuilder`] and [`ProverLookupBuilder`] adapters to the
+//! [`lookup::ConstraintLookupBuilder`] and [`ProverLookupBuilder`] adapters to the
 //! Miden lookup-builder extension traits.
 //!
 //! These traits require `LookupBuilder<F = Felt>`, so the impls live here
@@ -7,8 +7,8 @@
 //! code itself is field-polymorphic.
 //!
 //! The constraint-path adapter and the validation builder pick up the default
-//! polynomial bodies of [`MainLookupBuilder::build_op_flags`] and
-//! [`ChipletLookupBuilder::build_chiplet_active`]. The prover-path adapter
+//! polynomial bodies of [`NativeMainLookupBuilder::build_op_flags`] and
+//! [`NativeChipletLookupBuilder::build_chiplet_active`]. The prover-path adapter
 //! overrides `build_op_flags` with
 //! [`LookupOpFlags::from_boolean_row`](super::buses::LookupOpFlags::from_boolean_row),
 //! which decodes the 7-bit opcode as a `u8` and flips exactly one flag per row
@@ -18,79 +18,36 @@
 
 use miden_core::field::ExtensionField;
 use miden_stark::{
-    air::LiftedAirBuilder,
-    lookup::{ConstraintLookupBuilder, ProverLookupBuilder},
+    air,
+    lookup::{self, ProverLookupBuilder},
 };
 
 use super::{
-    and8_lookup_air::And8LookupBuilder, buses::LookupOpFlags, chiplet_air::ChipletLookupBuilder,
-    main_air::MainLookupBuilder,
+    buses::LookupOpFlags, chiplet_air::NativeChipletLookupBuilder,
+    main_air::NativeMainLookupBuilder,
 };
 use crate::vm::{CoreCols, Felt};
 
-// CONSTRAINT PATH
-// ================================================================================================
-
-impl<'ab, AB> MainLookupBuilder for ConstraintLookupBuilder<'ab, AB> where
-    AB: LiftedAirBuilder<F = Felt>
+impl<B: air::LiftedAirBuilder<F = Felt>> NativeMainLookupBuilder
+    for lookup::ConstraintLookupBuilder<'_, '_, B>
 {
 }
 
-impl<'ab, AB> ChipletLookupBuilder for ConstraintLookupBuilder<'ab, AB> where
-    AB: LiftedAirBuilder<F = Felt>
-{
-}
-
-impl<'ab, AB> And8LookupBuilder for ConstraintLookupBuilder<'ab, AB> where
-    AB: LiftedAirBuilder<F = Felt>
-{
-}
-
-// PROVER PATH
-// ================================================================================================
-
-impl<'a, EF> MainLookupBuilder for ProverLookupBuilder<'a, Felt, EF>
-where
-    EF: ExtensionField<Felt>,
-{
-    /// Override: use the boolean fast path instead of the default polynomial body.
-    ///
-    /// On the prover side `decoder.op_bits` are concrete 0/1 Felt values (enforced by the
-    /// decoder's boolean constraint), so a `u8` opcode decode + single-field write replaces
-    /// ~100 Felt multiplications in the shared prefix tree. Semantics match the default body
-    /// on any valid trace; a `debug_assertions` parity check inside `from_boolean_row`
-    /// surfaces divergences immediately.
-    fn build_op_flags(
-        &self,
-        local: &CoreCols<Self::Var>,
-        next: &CoreCols<Self::Var>,
-    ) -> LookupOpFlags<Self::Expr> {
+impl<EF: ExtensionField<Felt>> NativeMainLookupBuilder for ProverLookupBuilder<'_, Felt, EF> {
+    fn build_op_flags(&self, local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> LookupOpFlags<Felt> {
         LookupOpFlags::from_boolean_row(&local.decoder, &local.stack, &next.decoder)
     }
 }
 
-impl<'a, EF> ChipletLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where
-    EF: ExtensionField<Felt>
+#[cfg(feature = "std")]
+impl NativeMainLookupBuilder for lookup::NativeValidationBuilder<'_> {}
+
+impl<B: air::LiftedAirBuilder<F = Felt>> NativeChipletLookupBuilder
+    for lookup::ConstraintLookupBuilder<'_, '_, B>
 {
 }
 
-impl<'a, EF> And8LookupBuilder for ProverLookupBuilder<'a, Felt, EF> where EF: ExtensionField<Felt> {}
-
-// VALIDATION BUILDER
-// ================================================================================================
-//
-// Empty impls for the Felt/QuadFelt-pinned validation builder. It picks up the default
-// polynomial bodies of `build_op_flags` / `build_chiplet_active`; the builder only
-// compile when the `debug` module is available (gated on `std`), so there's no need
-// for a boolean fast-path override.
+impl<EF: ExtensionField<Felt>> NativeChipletLookupBuilder for ProverLookupBuilder<'_, Felt, EF> {}
 
 #[cfg(feature = "std")]
-mod debug_impls {
-    use miden_stark::lookup::debug::ValidationBuilder;
-
-    use super::{And8LookupBuilder, ChipletLookupBuilder, MainLookupBuilder};
-
-    impl<'ab, 'r> MainLookupBuilder for ValidationBuilder<'ab, 'r> {}
-    impl<'ab, 'r> ChipletLookupBuilder for ValidationBuilder<'ab, 'r> {}
-    impl<'ab, 'r> And8LookupBuilder for ValidationBuilder<'ab, 'r> {}
-}
+impl NativeChipletLookupBuilder for lookup::NativeValidationBuilder<'_> {}

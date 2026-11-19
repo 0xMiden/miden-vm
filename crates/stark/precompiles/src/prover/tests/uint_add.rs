@@ -4,15 +4,8 @@
 
 use std::{collections::HashMap, vec::Vec};
 
-use miden_core::{
-    Felt,
-    field::QuadFelt,
-    utils::{Matrix, RowMajorMatrix},
-};
-use miden_stark::{
-    air::LiftedAir,
-    lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions},
-};
+use miden_core::{Felt, field::QuadFelt, utils::Matrix};
+use miden_stark::lookup::Challenges;
 use proptest::prelude::*;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
@@ -20,7 +13,10 @@ use crate::prover::{
     math::{U256, add_reduce, from_limbs16, sub_reduce},
     primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    tests::uint::{arb_modulus, arb_qf, arb_uint_below, random_modulus, random_uint_below},
+    tests::{
+        fold_multiplicities,
+        uint::{arb_modulus, arb_qf, arb_uint_below, random_modulus, random_uint_below},
+    },
     uint::{
         UintStoreAir,
         add::{
@@ -34,25 +30,6 @@ use crate::prover::{
 
 fn rand_qf(rng: &mut impl Rng) -> QuadFelt {
     QuadFelt::new([Felt::from(rng.random::<u32>()), Felt::from(rng.random::<u32>())])
-}
-
-/// Accumulate one chiplet's net per-denom LogUp multiplicity. Mirrors
-/// `tests::uint::fold_balance`.
-fn fold_balance<A>(
-    air: &A,
-    main: &RowMajorMatrix<Felt>,
-    challenges: &Challenges<QuadFelt>,
-    net: &mut HashMap<QuadFelt, Felt>,
-) where
-    A: LiftedAir<Felt, QuadFelt> + Sync,
-    for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
-{
-    let periodic = air.periodic_columns();
-    let preprocessed = air.preprocessed_trace();
-    let fractions = build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, challenges);
-    for &(multiplicity, denom) in fractions.fractions() {
-        *net.entry(denom).or_insert(Felt::ZERO) += multiplicity;
-    }
 }
 
 /// One add op `a + b ≡ c (mod p)` over a backing store (mod @1, a @2,
@@ -163,9 +140,9 @@ fn add_buses_balance_against_store() {
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
 
     let mut net: HashMap<QuadFelt, Felt> = HashMap::new();
-    fold_balance(&UintAddAir, &add_main, &challenges, &mut net);
-    fold_balance(&UintStoreAir, &store_main, &challenges, &mut net);
-    fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
+    fold_multiplicities(&UintAddAir, &add_main, &challenges, &mut net);
+    fold_multiplicities(&UintStoreAir, &store_main, &challenges, &mut net);
+    fold_multiplicities(&BytePairLutAir, &bpl_main, &challenges, &mut net);
 
     let residual = net.values().filter(|m| **m != Felt::ZERO).count();
     assert_eq!(
@@ -266,9 +243,9 @@ fn add_pad_blocks_stay_off_the_bus() {
     let [alpha, beta] = [rand_qf(&mut rng), rand_qf(&mut rng)];
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let mut net: HashMap<QuadFelt, Felt> = HashMap::new();
-    fold_balance(&UintAddAir, &add_main, &challenges, &mut net);
-    fold_balance(&UintStoreAir, &store_main, &challenges, &mut net);
-    fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
+    fold_multiplicities(&UintAddAir, &add_main, &challenges, &mut net);
+    fold_multiplicities(&UintStoreAir, &store_main, &challenges, &mut net);
+    fold_multiplicities(&BytePairLutAir, &bpl_main, &challenges, &mut net);
     let residual = net.values().filter(|m| **m != Felt::ZERO).count();
     assert_eq!(residual, 0, "the act = 0 pad block contributes nothing");
 }
@@ -338,9 +315,9 @@ fn negation_holds_and_balances() {
     let [alpha, beta] = [rand_qf(&mut rng), rand_qf(&mut rng)];
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let mut net: HashMap<QuadFelt, Felt> = HashMap::new();
-    fold_balance(&UintAddAir, &main, &challenges, &mut net);
-    fold_balance(&UintStoreAir, &store_main, &challenges, &mut net);
-    fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
+    fold_multiplicities(&UintAddAir, &main, &challenges, &mut net);
+    fold_multiplicities(&UintStoreAir, &store_main, &challenges, &mut net);
+    fold_multiplicities(&BytePairLutAir, &bpl_main, &challenges, &mut net);
     let residual = net.values().filter(|m| **m != Felt::ZERO).count();
     assert_eq!(residual, 0, "negation balances with no stored zero result");
 }
@@ -385,9 +362,9 @@ fn equality_certificate_holds_and_balances() {
     let [alpha, beta] = [rand_qf(&mut rng), rand_qf(&mut rng)];
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let mut net: HashMap<QuadFelt, Felt> = HashMap::new();
-    fold_balance(&UintAddAir, &main, &challenges, &mut net);
-    fold_balance(&UintStoreAir, &store_main, &challenges, &mut net);
-    fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
+    fold_multiplicities(&UintAddAir, &main, &challenges, &mut net);
+    fold_multiplicities(&UintStoreAir, &store_main, &challenges, &mut net);
+    fold_multiplicities(&BytePairLutAir, &bpl_main, &challenges, &mut net);
     let residual = net.values().filter(|m| **m != Felt::ZERO).count();
     assert_eq!(residual, 0, "the equality certificate balances with no b");
 }
@@ -528,9 +505,9 @@ fn nz_cert_holds_and_balances() {
     let [alpha, beta] = [rand_qf(&mut rng), rand_qf(&mut rng)];
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let mut net: HashMap<QuadFelt, Felt> = HashMap::new();
-    fold_balance(&UintAddAir, &main, &challenges, &mut net);
-    fold_balance(&UintStoreAir, &store_main, &challenges, &mut net);
-    fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
+    fold_multiplicities(&UintAddAir, &main, &challenges, &mut net);
+    fold_multiplicities(&UintStoreAir, &store_main, &challenges, &mut net);
+    fold_multiplicities(&BytePairLutAir, &bpl_main, &challenges, &mut net);
     let residual = net.values().filter(|m| **m != Felt::ZERO).count();
     assert_eq!(residual, 0, "the nz-cert block balances like any other add");
 }
@@ -817,9 +794,9 @@ proptest! {
 
         let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
         let mut net: HashMap<QuadFelt, Felt> = HashMap::new();
-        fold_balance(&UintAddAir, &add_main, &challenges, &mut net);
-        fold_balance(&UintStoreAir, &store_main, &challenges, &mut net);
-        fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
+        fold_multiplicities(&UintAddAir, &add_main, &challenges, &mut net);
+        fold_multiplicities(&UintStoreAir, &store_main, &challenges, &mut net);
+        fold_multiplicities(&BytePairLutAir, &bpl_main, &challenges, &mut net);
         let residual = net.values().filter(|m| **m != Felt::ZERO).count();
         prop_assert_eq!(residual, 0, "the buses must balance for generated operands");
     }
@@ -859,9 +836,9 @@ proptest! {
 
         let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
         let mut net: HashMap<QuadFelt, Felt> = HashMap::new();
-        fold_balance(&UintAddAir, &add_main, &challenges, &mut net);
-        fold_balance(&UintStoreAir, &store_main, &challenges, &mut net);
-        fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
+        fold_multiplicities(&UintAddAir, &add_main, &challenges, &mut net);
+        fold_multiplicities(&UintStoreAir, &store_main, &challenges, &mut net);
+        fold_multiplicities(&BytePairLutAir, &bpl_main, &challenges, &mut net);
         let residual = net.values().filter(|m| **m != Felt::ZERO).count();
         prop_assert_eq!(residual, 0, "the act = 0 pad block contributes nothing");
     }

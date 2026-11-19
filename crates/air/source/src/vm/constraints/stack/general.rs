@@ -23,9 +23,9 @@
 //!
 //! 4. **Top binary**: Enforced by the specific op constraints that require it.
 
-use miden_stark::air::AirBuilder;
+use miden_stark::air::{Frame, LiftedAirBuilder};
 
-use crate::vm::{CoreCols, MidenAirBuilder, constraints::op_flags::OpFlags};
+use crate::vm::{CoreCols, NativeMidenAirBuilder, constraints::op_flags::OpFlags};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -35,12 +35,13 @@ use crate::vm::{CoreCols, MidenAirBuilder, constraints::op_flags::OpFlags};
 /// This includes:
 /// - 16 constraints for stack item transitions at each position
 pub fn enforce_main<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    local: &CoreCols<AB::Var>,
-    next: &CoreCols<AB::Var>,
+    local: &CoreCols<AB::Expr>,
+    next: &CoreCols<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
     // For each position i, the constraint ensures that the next value is consistent
     // with the current value based on the shift flags:
@@ -55,11 +56,11 @@ pub fn enforce_main<AB>(
     // next[0] * flag_sum = no_shift[0] * current[0] + left_shift[1] * current[1]
     {
         let flag_sum = op_flags.no_shift_at(0) + op_flags.left_shift_at(1);
-        let expected = op_flags.no_shift_at(0) * local.stack.get(0).into()
-            + op_flags.left_shift_at(1) * local.stack.get(1).into();
+        let expected = op_flags.no_shift_at(0) * local.stack.get(0)
+            + op_flags.left_shift_at(1) * local.stack.get(1);
         let actual = next.stack.get(0);
 
-        builder.when_transition().assert_zero(actual * flag_sum - expected);
+        builder.when(frame.transition()).assert_zero(actual * flag_sum - expected);
     }
 
     // Positions 1-14: all three shift types possible.
@@ -68,23 +69,23 @@ pub fn enforce_main<AB>(
             + op_flags.left_shift_at(i + 1)
             + op_flags.right_shift_at(i - 1);
 
-        let expected = op_flags.no_shift_at(i) * local.stack.get(i).into()
-            + op_flags.left_shift_at(i + 1) * local.stack.get(i + 1).into()
-            + op_flags.right_shift_at(i - 1) * local.stack.get(i - 1).into();
+        let expected = op_flags.no_shift_at(i) * local.stack.get(i)
+            + op_flags.left_shift_at(i + 1) * local.stack.get(i + 1)
+            + op_flags.right_shift_at(i - 1) * local.stack.get(i - 1);
         let actual = next.stack.get(i);
 
-        builder.when_transition().assert_zero(actual * flag_sum - expected);
+        builder.when(frame.transition()).assert_zero(actual * flag_sum - expected);
     }
 
     // Position 15: no left shift (handled by overflow constraints)
     // next[15] * flag_sum = no_shift[15] * current[15] + right_shift[14] * current[14]
     {
         let flag_sum = op_flags.no_shift_at(15) + op_flags.right_shift_at(14);
-        let expected = op_flags.no_shift_at(15) * local.stack.get(15).into()
-            + op_flags.right_shift_at(14) * local.stack.get(14).into();
+        let expected = op_flags.no_shift_at(15) * local.stack.get(15)
+            + op_flags.right_shift_at(14) * local.stack.get(14);
         let actual = next.stack.get(15);
 
-        builder.when_transition().assert_zero(actual * flag_sum - expected);
+        builder.when(frame.transition()).assert_zero(actual * flag_sum - expected);
     }
 }
 
@@ -102,13 +103,14 @@ mod tests {
     use crate::vm::constraints::{
         columns::CoreCols,
         op_flags::{OpFlags, generate_test_row},
-        test_utils::ConstraintEvalBuilder,
+        test_utils::{ConstraintEvalContext, NativeConstraintEvalBuilder},
     };
 
     fn eval_stack_general(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> Vec<QuadFelt> {
-        let mut builder = ConstraintEvalBuilder::new();
+        let context = ConstraintEvalContext::new();
+        let mut builder = NativeConstraintEvalBuilder::default();
         let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
-        enforce_main(&mut builder, local, next, &op_flags);
+        enforce_main(&context.frame(local, next), &mut builder, local, next, &op_flags);
         builder.evaluations
     }
 

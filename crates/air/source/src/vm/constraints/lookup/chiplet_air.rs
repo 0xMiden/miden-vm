@@ -11,10 +11,12 @@
 //! - shared wiring column: ACE wiring + hasher compression link.
 //! - four-Felt hasher result and chaining-value returns.
 //!
-//! [`ChipletLookupBuilder`] builds the shared active flags from the chiplet selector columns.
+//! [`NativeChipletLookupBuilder`] builds the shared active flags from the chiplet selector columns.
 //! Adapters may override the default construction while preserving those flag semantics.
 
-use miden_stark::lookup::LookupBuilder;
+use core::borrow::Borrow;
+
+use miden_stark::lookup;
 
 use super::buses::{
     chiplet_responses::{self, emit_chiplet_responses},
@@ -22,26 +24,20 @@ use super::buses::{
     hasher_returns::{self, emit_hasher_returns},
     wiring::{self, emit_v_wiring},
 };
-use crate::vm::{ChipletCols, Felt, constraints::chiplets::selectors::ChipletActiveFlags};
+use crate::vm::{
+    ChipletCols, Felt,
+    constraints::chiplets::{columns::PeriodicCols, selectors::ChipletActiveFlags},
+};
 
-// CHIPLET LOOKUP BUILDER
+// NATIVE CHIPLET LOOKUP BUILDER
 // ================================================================================================
 
-/// Extension trait the chiplet-trace [`LookupAir`] requires from its [`LookupBuilder`].
-///
-/// Carries a single hook, [`build_chiplet_active`](Self::build_chiplet_active), for
-/// constructing the shared [`ChipletActiveFlags`] snapshot consumed by the four
-/// chiplet-trace bus emitters. Symmetric to [`super::main_air::MainLookupBuilder`]; see its
-/// docs for the rationale behind the explicit-impl-no-blanket pattern.
-pub(crate) trait ChipletLookupBuilder: LookupBuilder<F = Felt> {
-    /// Build the shared [`ChipletActiveFlags`] snapshot for one `eval` call.
-    ///
-    /// Default body calls [`ChipletActiveFlags::from_chiplet_cols`] against the multi-AIR
-    /// `ChipletCols` view. Adapters can override this when a cheaper construction path is
-    /// worthwhile.
+/// Activity construction over immutable expression rows. Explicit adapter implementations preserve
+/// the source-specific override seam; the concrete prover uses the same polynomial default.
+pub(crate) trait NativeChipletLookupBuilder: lookup::LookupBuilder<F = Felt> {
     fn build_chiplet_active(
         &self,
-        local: &ChipletCols<Self::Var>,
+        local: &ChipletCols<Self::Expr>,
     ) -> ChipletActiveFlags<Self::Expr> {
         ChipletActiveFlags::from_chiplet_cols(local)
     }
@@ -50,35 +46,26 @@ pub(crate) trait ChipletLookupBuilder: LookupBuilder<F = Felt> {
 // CHIPLET BUS CONTEXT
 // ================================================================================================
 
-/// Shared context for the chiplet-trace bus emitters.
-///
-/// Holds the two-row window plus a single [`ChipletActiveFlags`] snapshot built once per
-/// `eval` through [`ChipletLookupBuilder::build_chiplet_active`].
-pub(crate) struct ChipletBusContext<'a, LB>
-where
-    LB: LookupBuilder<F = Felt>,
-{
-    /// Typed view of the current row (Chiplets half of the trace).
-    pub local: &'a ChipletCols<LB::Var>,
-    /// Typed view of the next row (Chiplets half of the trace).
-    pub next: &'a ChipletCols<LB::Var>,
-    /// Per-chiplet `is_active` flags, computed from `local`'s selector columns via the
-    /// builder-provided hook.
-    pub chiplet_active: ChipletActiveFlags<LB::Expr>,
+/// Borrowed expression inputs and one owned activity snapshot for the four chiplet columns.
+pub(crate) struct ChipletBusContext<'a, E> {
+    pub local: &'a ChipletCols<E>,
+    pub next: &'a ChipletCols<E>,
+    pub periodic: &'a PeriodicCols<E>,
+    pub chiplet_active: ChipletActiveFlags<E>,
 }
 
-impl<'a, LB> ChipletBusContext<'a, LB>
-where
-    LB: ChipletLookupBuilder,
-{
-    /// Build the shared chiplet-trace context for one `eval` call.
-    pub fn new(
+impl<'a, E> ChipletBusContext<'a, E> {
+    fn new<LB>(
         builder: &LB,
-        local: &'a ChipletCols<LB::Var>,
-        next: &'a ChipletCols<LB::Var>,
-    ) -> Self {
+        local: &'a ChipletCols<E>,
+        next: &'a ChipletCols<E>,
+        periodic: &'a PeriodicCols<E>,
+    ) -> Self
+    where
+        LB: NativeChipletLookupBuilder<Expr = E>,
+    {
         let chiplet_active = builder.build_chiplet_active(local);
-        Self { local, next, chiplet_active }
+        Self { local, next, periodic, chiplet_active }
     }
 }
 
@@ -96,12 +83,14 @@ pub(crate) const CHIPLET_COLUMN_SHAPE: [usize; 4] = [
 /// Emit the chiplet-trace LogUp columns.
 ///
 /// Driven by `ChipletsAir`'s [`LookupAir`] impl.
-pub(crate) fn emit_chiplet_lookup_columns<LB: ChipletLookupBuilder>(
+pub(crate) fn emit_chiplet_lookup_columns<LB: NativeChipletLookupBuilder>(
+    frame: &lookup::LookupFrame<'_, LB::Expr>,
     builder: &mut LB,
-    local: &ChipletCols<LB::Var>,
-    next: &ChipletCols<LB::Var>,
 ) {
-    let ctx = ChipletBusContext::new(&*builder, local, next);
+    let local: &ChipletCols<_> = frame.main.current.borrow();
+    let next: &ChipletCols<_> = frame.main.next.borrow();
+    let periodic: &PeriodicCols<_> = frame.periodic.borrow();
+    let ctx = ChipletBusContext::new(&*builder, local, next, periodic);
     emit_chiplet_responses::<LB>(builder, &ctx);
     emit_hash_kernel_table::<LB>(builder, &ctx);
     emit_v_wiring::<LB>(builder, &ctx);

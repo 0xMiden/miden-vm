@@ -4,27 +4,41 @@ use std::collections::HashMap;
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{Algebra, BasedVectorSpace, PrimeCharacteristicRing};
-use miden_stark::air::{
-    AirBuilder, EvalInputs, ExtensionBuilder, LiftedAir, PermutationAirBuilder, RowWindow,
-    symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpr, eval_air},
-};
+use miden_stark::air::{self, AirKernel};
 use p3_field::{PackedField, PackedValue};
 
 use crate::ir::{Class, Graph, Leaf, Node, OpKind};
 
 /// Degree of every assertion in each class, preserving its local order. This
 /// uses the builder's symbolic degree rules independently of the optimizer IR.
-pub fn constraint_degrees<A: LiftedAir<Felt, QuadFelt>>(air: &A) -> [Vec<usize>; 2] {
-    let mut builder = SymbolicAirBuilder::<Felt>::new(air.air_layout());
-    eval_air(air, &mut builder);
-    [
-        builder.base_constraints().iter().map(SymbolicExpr::degree_multiple).collect(),
-        builder
-            .extension_constraints()
-            .iter()
-            .map(SymbolicExpr::degree_multiple)
-            .collect(),
-    ]
+pub fn constraint_degrees<A: air::LiftedAir<F = Felt>>(air: &A) -> [Vec<usize>; 2] {
+    assertion_degrees(air::capture_with::<_, QuadFelt>(air).expect("authored source capture"))
+}
+
+/// Degree observations of actual prepared execution, used only as a comparison subject.
+pub fn kernel_constraint_degrees<K: AirKernel<F = Felt>>(kernel: &K) -> [Vec<usize>; 2] {
+    let captured = air::capture_from_spec::<Felt, QuadFelt>(
+        kernel.descriptor().spec().as_borrowed(),
+        |frame, inputs, sink| {
+            kernel
+                .bind(inputs)
+                .expect("symbolic dimensions match descriptor")
+                .eval(frame, sink);
+        },
+    )
+    .expect("prepared kernel capture");
+    assertion_degrees(captured)
+}
+
+fn assertion_degrees(captured: air::Capture<Felt, QuadFelt>) -> [Vec<usize>; 2] {
+    let mut classes = [Vec::new(), Vec::new()];
+    for assertion in captured.assertions {
+        match assertion {
+            air::Assertion::Base(expression) => classes[0].push(expression.degree_multiple()),
+            air::Assertion::Extension(expression) => classes[1].push(expression.degree_multiple()),
+        }
+    }
+    classes
 }
 
 /// Canonical id per node: a second hash-cons pass with `Add`/`Mul` children
@@ -137,7 +151,7 @@ pub struct EvaluationInputs<P, PE> {
     main: [Vec<P>; 2],
     preprocessed: [Vec<P>; 2],
     aux: [Vec<PE>; 2],
-    public: Vec<Felt>,
+    public: Vec<P>,
     periodic: Vec<P>,
     challenges: Vec<PE>,
     values: Vec<PE>,
@@ -149,7 +163,7 @@ where
     P: PackedField<Scalar = Felt>,
     PE: Algebra<P> + Algebra<QuadFelt> + BasedVectorSpace<P> + Copy + Send + Sync,
 {
-    pub fn new(layout: AirLayout, seed: u64) -> Self {
+    pub fn new(spec: &air::AirSpec<'_, Felt>, seed: u64) -> Self {
         let base = |leaf| {
             P::from_fn(|lane| {
                 leaf_value(seed.wrapping_add(lane as u64), leaf).as_basis_coefficients_slice()[0]
@@ -165,61 +179,82 @@ where
         };
         Self {
             main: core::array::from_fn(|offset| {
-                (0..layout.main_width).map(|index| base(Leaf::Main { offset, index })).collect()
+                (0..spec.main_width).map(|index| base(Leaf::Main { offset, index })).collect()
             }),
             preprocessed: core::array::from_fn(|offset| {
-                (0..layout.preprocessed_width)
+                (0..spec.preprocessed_width())
                     .map(|index| base(Leaf::Preprocessed { offset, index }))
                     .collect()
             }),
             aux: core::array::from_fn(|offset| {
-                (0..layout.permutation_width)
-                    .map(|index| ext(Leaf::Aux { offset, index }))
-                    .collect()
+                (0..spec.aux_width).map(|index| ext(Leaf::Aux { offset, index })).collect()
             }),
-            public: (0..layout.num_public_values)
-                .map(|index| leaf_value(seed, Leaf::Public(index)).as_basis_coefficients_slice()[0])
+            public: (0..spec.num_public_values)
+                .map(|index| {
+                    P::broadcast(
+                        leaf_value(seed, Leaf::Public(index)).as_basis_coefficients_slice()[0],
+                    )
+                })
                 .collect(),
-            periodic: (0..layout.num_periodic_columns)
+            periodic: (0..spec.periodic_columns.len())
                 .map(|index| base(Leaf::Periodic(index)))
                 .collect(),
-            challenges: (0..layout.num_permutation_challenges)
-                .map(|index| ext(Leaf::Challenge(index)))
-                .collect(),
-            values: (0..layout.num_permutation_values)
-                .map(|index| ext(Leaf::PermValue(index)))
-                .collect(),
+            challenges: (0..spec.num_challenges).map(|index| ext(Leaf::Challenge(index))).collect(),
+            values: (0..spec.num_exports).map(|index| ext(Leaf::PermValue(index))).collect(),
             selectors: [base(Leaf::IsFirst), base(Leaf::IsLast), base(Leaf::IsTransition)],
         }
     }
 
-    pub fn builder(&self) -> EvaluationBuilder<'_, P, PE> {
-        EvaluationBuilder {
-            main: RowWindow::from_two_rows(&self.main[0], &self.main[1]),
-            preprocessed: RowWindow::from_two_rows(&self.preprocessed[0], &self.preprocessed[1]),
-            aux: RowWindow::from_two_rows(&self.aux[0], &self.aux[1]),
-            inputs: self,
-            base_constraints: Vec::new(),
-            ext_constraints: Vec::new(),
-            base_indices: Vec::new(),
-            ext_indices: Vec::new(),
+    fn frame(&self) -> air::AirFrame<'_, P, PE> {
+        air::AirFrame {
+            main: air::Rows {
+                current: &self.main[0],
+                next: &self.main[1],
+            },
+            preprocessed: air::Rows {
+                current: &self.preprocessed[0],
+                next: &self.preprocessed[1],
+            },
+            aux: air::Rows {
+                current: &self.aux[0],
+                next: &self.aux[1],
+            },
+            periodic: &self.periodic,
+            selectors: air::Selectors {
+                first: self.selectors[0],
+                last: self.selectors[1],
+                transition: self.selectors[2],
+            },
+        }
+    }
+
+    fn uniforms(&self) -> air::UniformInputs<'_, P, PE> {
+        air::UniformInputs {
+            public_values: &self.public,
+            challenges: &self.challenges,
+            exports: &self.values,
         }
     }
 }
 
-/// Collects actual field assertions, retaining their global order and base/extension class.
-pub struct EvaluationBuilder<'a, P, PE> {
-    main: RowWindow<'a, P>,
-    preprocessed: RowWindow<'a, P>,
-    aux: RowWindow<'a, PE>,
-    inputs: &'a EvaluationInputs<P, PE>,
+/// Concrete assertion collector, independent of row and uniform input ownership.
+pub struct EvaluationBuilder<P, PE> {
     pub base_constraints: Vec<P>,
     pub ext_constraints: Vec<PE>,
     pub base_indices: Vec<usize>,
     pub ext_indices: Vec<usize>,
 }
 
-impl<P, PE> EvaluationBuilder<'_, P, PE> {
+impl<P, PE> EvaluationBuilder<P, PE> {
+    fn new() -> Self {
+        Self {
+            base_constraints: Vec::new(),
+            ext_constraints: Vec::new(),
+            base_indices: Vec::new(),
+            ext_indices: Vec::new(),
+        }
+    }
+
     /// Retain allocations between timing iterations.
     pub fn clear(&mut self) {
         self.base_constraints.clear();
@@ -229,110 +264,62 @@ impl<P, PE> EvaluationBuilder<'_, P, PE> {
     }
 }
 
-impl<'a, P, PE> AirBuilder for EvaluationBuilder<'a, P, PE>
+impl<P, PE> air::LiftedAirBuilder for EvaluationBuilder<P, PE>
 where
     P: PackedField<Scalar = Felt>,
-    PE: Algebra<P> + Algebra<QuadFelt> + BasedVectorSpace<P> + Copy + Send + Sync,
+    PE: Algebra<P>,
 {
     type F = Felt;
     type Expr = P;
-    type Var = P;
-    type MainWindow = RowWindow<'a, P>;
-    type PreprocessedWindow = RowWindow<'a, P>;
-    type PublicVar = Felt;
-    type PeriodicVar = P;
-    fn main(&self) -> Self::MainWindow {
-        self.main
-    }
-    fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        &self.preprocessed
-    }
-    fn public_values(&self) -> &[Felt] {
-        &self.inputs.public
-    }
-    fn periodic_values(&self) -> &[P] {
-        &self.inputs.periodic
-    }
-    fn is_first_row(&self) -> P {
-        self.inputs.selectors[0]
-    }
-    fn is_last_row(&self) -> P {
-        self.inputs.selectors[1]
-    }
-    fn is_transition(&self) -> P {
-        self.inputs.selectors[2]
-    }
-    fn assert_zero<I: Into<P>>(&mut self, value: I) {
+    type ExtExpr = PE;
+
+    fn emit_base(&mut self, value: P, _meta: air::ConstraintMeta<'_>) {
         self.base_indices.push(self.base_constraints.len() + self.ext_constraints.len());
-        self.base_constraints.push(value.into());
+        self.base_constraints.push(value);
     }
-}
-impl<P, PE> ExtensionBuilder for EvaluationBuilder<'_, P, PE>
-where
-    P: PackedField<Scalar = Felt>,
-    PE: Algebra<P> + Algebra<QuadFelt> + BasedVectorSpace<P> + Copy + Send + Sync,
-{
-    type EF = QuadFelt;
-    type ExprEF = PE;
-    type VarEF = PE;
-    fn assert_zero_ext<I: Into<PE>>(&mut self, value: I) {
+
+    fn emit_ext(&mut self, value: PE, _meta: air::ConstraintMeta<'_>) {
         self.ext_indices.push(self.base_constraints.len() + self.ext_constraints.len());
-        self.ext_constraints.push(value.into());
-    }
-}
-impl<'a, P, PE> PermutationAirBuilder for EvaluationBuilder<'a, P, PE>
-where
-    P: PackedField<Scalar = Felt>,
-    PE: Algebra<P> + Algebra<QuadFelt> + BasedVectorSpace<P> + Copy + Send + Sync,
-{
-    type MP = RowWindow<'a, PE>;
-    type RandomVar = PE;
-    type PermutationVar = PE;
-    fn permutation(&self) -> Self::MP {
-        self.aux
-    }
-    fn permutation_randomness(&self) -> &[PE] {
-        &self.inputs.challenges
-    }
-    fn permutation_values(&self) -> &[PE] {
-        &self.inputs.values
+        self.ext_constraints.push(value);
     }
 }
 
-/// Compare scalar/SIMD evaluations with independently captured graph values,
-/// including global assertion order and class. Packed lanes receive distinct full-field inputs.
-pub fn assert_concrete_evaluation<A: LiftedAir<Felt, QuadFelt>>(
-    air: &A,
+/// Compare actual scalar/packed kernel execution to independently captured source graph values.
+/// Public inputs are shared across lanes; other namespaces use distinct full-field lane seeds.
+pub fn assert_concrete_evaluation<K: AirKernel<F = Felt>>(
+    kernel: &K,
     graph: &Graph,
     captured: &crate::ir::CapturedConstraints,
     seed: u64,
 ) {
     type P = <Felt as miden_crypto::field::Field>::Packing;
     type PE = <QuadFelt as miden_crypto::field::ExtensionField<Felt>>::ExtensionPacking;
-    let scalar_inputs = EvaluationInputs::<Felt, QuadFelt>::new(air.air_layout(), seed);
-    let packed_inputs = EvaluationInputs::<P, PE>::new(air.air_layout(), seed);
-    let mut scalar = scalar_inputs.builder();
-    let data = air.prepare(EvalInputs {
-        public_values: &scalar_inputs.public,
-        challenges: &scalar_inputs.challenges,
-        aux_values: &scalar_inputs.values,
-    });
-    air.eval(&mut scalar, &data);
-    assert_eq!(scalar.base_indices, captured.base_global_indices);
-    assert_eq!(scalar.ext_indices, captured.ext_global_indices);
-    let mut packed = packed_inputs.builder();
-    let public: Vec<P> = packed_inputs.public.iter().copied().map(P::broadcast).collect();
-    let data = air.prepare(EvalInputs {
-        public_values: &public,
-        challenges: &packed_inputs.challenges,
-        aux_values: &packed_inputs.values,
-    });
-    air.eval(&mut packed, &data);
-    assert_eq!(packed.base_indices, captured.base_global_indices);
-    assert_eq!(packed.ext_indices, captured.ext_global_indices);
+    let spec = kernel.descriptor().spec();
+    let scalar_inputs = EvaluationInputs::<Felt, QuadFelt>::new(spec, seed);
+    let packed_inputs = EvaluationInputs::<P, PE>::new(spec, seed);
+    let mut scalar = EvaluationBuilder::new();
+    kernel
+        .bind(scalar_inputs.uniforms())
+        .expect("scalar dimensions")
+        .eval(&scalar_inputs.frame(), &mut scalar);
+    let mut packed = EvaluationBuilder::new();
+    kernel
+        .bind(packed_inputs.uniforms())
+        .expect("packed dimensions")
+        .eval(&packed_inputs.frame(), &mut packed);
+    for (base, ext) in [
+        (&scalar.base_indices, &scalar.ext_indices),
+        (&packed.base_indices, &packed.ext_indices),
+    ] {
+        assert_eq!(base, &captured.base_global_indices);
+        assert_eq!(ext, &captured.ext_global_indices);
+    }
+    assert_eq!(scalar.base_constraints.len(), captured.base_roots.len());
+    assert_eq!(scalar.ext_constraints.len(), captured.ext_roots.len());
+    assert_eq!(packed.base_constraints.len(), captured.base_roots.len());
+    assert_eq!(packed.ext_constraints.len(), captured.ext_roots.len());
     for lane in 0..P::WIDTH {
         let oracle = eval_graph_with(graph, |leaf| {
-            // Public values are shared scalar inputs across the SIMD lanes.
             let leaf_seed = if matches!(leaf, Leaf::Public(_)) {
                 seed
             } else {
@@ -367,41 +354,36 @@ pub fn assert_concrete_evaluation<A: LiftedAir<Felt, QuadFelt>>(
     }
 }
 
-/// Times scalar and packed row evaluation with prepared data and reused input/output allocations.
-/// Build in release mode; preparation, input generation and graph capture are outside the timer.
-pub fn time_evaluation<A: LiftedAir<Felt, QuadFelt>>(
-    air: &A,
+/// Times reused scalar/packed execution; binding, source capture and allocations precede the timer.
+pub fn time_evaluation<K: AirKernel<F = Felt>>(
+    kernel: &K,
     iterations: usize,
 ) -> [std::time::Duration; 2] {
-    fn measure<A, P, PE>(air: &A, iterations: usize) -> std::time::Duration
+    fn measure<K, P, PE>(kernel: &K, iterations: usize) -> std::time::Duration
     where
-        A: LiftedAir<Felt, QuadFelt>,
+        K: AirKernel<F = Felt>,
         P: PackedField<Scalar = Felt>,
         PE: Algebra<P> + Algebra<QuadFelt> + BasedVectorSpace<P> + Copy + Send + Sync,
     {
-        let inputs = EvaluationInputs::<P, PE>::new(air.air_layout(), 0x243f6a8885a308d3);
-        let mut builder = inputs.builder();
-        let public: Vec<P> = inputs.public.iter().copied().map(P::broadcast).collect();
-        let data = air.prepare(EvalInputs {
-            public_values: &public,
-            challenges: &inputs.challenges,
-            aux_values: &inputs.values,
-        });
-        air.eval(&mut builder, &data);
+        let inputs = EvaluationInputs::<P, PE>::new(kernel.descriptor().spec(), 0x243f6a8885a308d3);
+        let mut sink = EvaluationBuilder::new();
+        let session = kernel.bind(inputs.uniforms()).expect("timing dimensions");
+        let frame = inputs.frame();
+        session.eval(&frame, &mut sink);
         let start = std::time::Instant::now();
         for _ in 0..iterations {
-            builder.clear();
-            air.eval(std::hint::black_box(&mut builder), &data);
-            std::hint::black_box((&builder.base_constraints, &builder.ext_constraints));
+            sink.clear();
+            session.eval(std::hint::black_box(&frame), &mut sink);
+            std::hint::black_box((&sink.base_constraints, &sink.ext_constraints));
         }
         start.elapsed()
     }
     [
-        measure::<A, Felt, QuadFelt>(air, iterations),
+        measure::<K, Felt, QuadFelt>(kernel, iterations),
         measure::<
-            A,
+            K,
             <Felt as miden_crypto::field::Field>::Packing,
             <QuadFelt as miden_crypto::field::ExtensionField<Felt>>::ExtensionPacking,
-        >(air, iterations),
+        >(kernel, iterations),
     ]
 }

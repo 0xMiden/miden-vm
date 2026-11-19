@@ -1,7 +1,8 @@
 //! Shared AIR constraints for the 32-row Eidos compression trace.
 
 use miden_core::{Felt, field::PrimeCharacteristicRing};
-use miden_stark::air::{AirBuilder, LiftedAirBuilder};
+use miden_stark::air::{Frame, LiftedAirBuilder};
+use p3_field::Dup;
 
 use super::{
     algebra::{
@@ -15,22 +16,25 @@ use super::{
 
 /// Enforces all constraints which are active on the 28 fused Eidos compression rows of each cycle.
 pub fn enforce_fused_rows<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    local: &[AB::Var],
-    next: &[AB::Var],
+    local: &[AB::Expr],
+    next: &[AB::Expr],
     selectors: &EidosCompressionSelectors<AB::Expr>,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
     // Pin the first cycle ID to zero; footer increments make physical cycle IDs canonical and
     // unique.
-    builder.when_first_row().assert_zero(fused_compression_cycle_id::<AB>(local));
+    builder
+        .when(frame.first_row())
+        .assert_zero(fused_compression_cycle_id::<AB>(local));
 
     // Constrain each k3 overlay to {0, 1, 2}, and each fused-row k2 carry to a bit.
     let is_fused = selectors.is_ab() + selectors.is_cd();
     for g in 0..NUM_G {
-        let k3 = AB::Expr::from(local[g_k3_col(g)]);
-        let k2 = AB::Expr::from(local[G_K2_BASE_COL + g]);
+        let k3 = local[g_k3_col(g)].dup();
+        let k2 = local[G_K2_BASE_COL + g].dup();
         builder
             .assert_zero(k3.clone() * (k3.clone() - AB::Expr::ONE) * (k3 - AB::Expr::from_u64(2)));
         builder.when(is_fused.clone()).assert_zero(k2.clone() * (AB::Expr::ONE - k2));
@@ -56,7 +60,7 @@ pub fn enforce_fused_rows<AB>(
         selectors.is_ab() + selectors.is_cd() - selectors.is_last_fused();
 
     builder
-        .when_transition()
+        .when(frame.transition())
         .when(is_inner_fused_transition)
         .assert_eq(fused_compression_cycle_id::<AB>(next), fused_compression_cycle_id::<AB>(local));
 
@@ -120,9 +124,10 @@ pub fn enforce_fused_rows<AB>(
 /// `enforce_output` receives each footer index and its packed compression output, after that
 /// row's input bindings. It must gate its assertions with `selectors.is_footer_row(footer)`.
 pub fn enforce_core_footer_rows<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    local: &[AB::Var],
-    next: &[AB::Var],
+    local: &[AB::Expr],
+    next: &[AB::Expr],
     selectors: &EidosCompressionSelectors<AB::Expr>,
     mut enforce_output: impl FnMut(&mut AB, usize, AB::Expr),
 ) where
@@ -147,13 +152,13 @@ pub fn enforce_core_footer_rows<AB>(
         enforce_footer_cycle_id_transition::<AB>(builder, local, next, gate);
     }
 
-    enforce_footer_cycle_advance::<AB>(builder, local, next, selectors);
+    enforce_footer_cycle_advance::<AB>(frame, builder, local, next, selectors);
 }
 
 pub(crate) fn enforce_footer_bridge<AB>(
     builder: &mut AB,
-    local: &[AB::Var],
-    next: &[AB::Var],
+    local: &[AB::Expr],
+    next: &[AB::Expr],
     selectors: &EidosCompressionSelectors<AB::Expr>,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
@@ -166,10 +171,9 @@ pub(crate) fn enforce_footer_bridge<AB>(
     builder.when(gate.clone()).assert_zero(f0_words.v_low_odd - final_w(1));
     builder.when(gate.clone()).assert_zero(f0_words.v_high_even - final_w(8));
     builder.when(gate.clone()).assert_zero(f0_words.v_high_odd - final_w(9));
-    builder.when(gate.clone()).assert_eq(
-        AB::Expr::from(next[F_COMPRESSION_CYCLE_ID_COL]),
-        fused_compression_cycle_id::<AB>(local),
-    );
+    builder
+        .when(gate.clone())
+        .assert_eq(next[F_COMPRESSION_CYCLE_ID_COL].dup(), fused_compression_cycle_id::<AB>(local));
 
     for (idx, word_idx) in F_FUTURE_W_WORD_INDICES.into_iter().enumerate() {
         // The affected B word is carried by the total relation instead of a direct bridge.
@@ -178,7 +182,7 @@ pub(crate) fn enforce_footer_bridge<AB>(
         }
         builder
             .when(gate.clone())
-            .assert_zero(AB::Expr::from(next[footer_future_w_col(0, idx)]) - final_w(word_idx));
+            .assert_zero(next[footer_future_w_col(0, idx)].dup() - final_w(word_idx));
     }
 
     let footer_b_sum = [4usize, 5, 6, 7].into_iter().fold(AB::Expr::ZERO, |sum, word_idx| {
@@ -186,16 +190,16 @@ pub(crate) fn enforce_footer_bridge<AB>(
             .iter()
             .position(|&candidate| candidate == word_idx)
             .expect("all final B words are carried by footer 0");
-        sum + AB::Expr::from(next[footer_future_w_col(0, idx)])
+        sum + next[footer_future_w_col(0, idx)].dup()
     });
     builder
         .when(gate)
-        .assert_zero(sum_input_b(|col| AB::Expr::from(next[col])) - footer_b_sum);
+        .assert_zero(sum_input_b(|col| next[col].dup()) - footer_b_sum);
 }
 
 pub(crate) fn enforce_footer_word_bindings<AB>(
     builder: &mut AB,
-    local: &[AB::Var],
+    local: &[AB::Expr],
     is_footer: AB::Expr,
     words: &FooterWords<AB::Expr>,
 ) where
@@ -209,16 +213,15 @@ pub(crate) fn enforce_footer_word_bindings<AB>(
         .assert_zero(words.high_odd_duplicate.clone() - words.v_high_odd.clone());
     builder
         .when(is_footer.clone())
-        .assert_zero(AB::Expr::from(local[F_TOP_BIT_SLOT_BASE_COL]) - words.out_odd_byte3.clone());
+        .assert_zero(local[F_TOP_BIT_SLOT_BASE_COL].dup() - words.out_odd_byte3.clone());
     builder.when(is_footer).assert_zero(
-        AB::Expr::from(local[F_TOP_BIT_SLOT_BASE_COL + 1])
-            - AB::Expr::from_u64(F_TOP_BIT_MASK as u64),
+        local[F_TOP_BIT_SLOT_BASE_COL + 1].dup() - AB::Expr::from_u64(F_TOP_BIT_MASK as u64),
     );
 }
 
 pub(crate) fn enforce_footer_payload<AB>(
     builder: &mut AB,
-    local: &[AB::Var],
+    local: &[AB::Expr],
     is_footer: AB::Expr,
     words: &FooterWords<AB::Expr>,
 ) where
@@ -231,20 +234,20 @@ pub(crate) fn enforce_footer_payload<AB>(
 
     for limb in 0..F_RANGE_SLOTS {
         let base = footer_range_slot_col(limb, 0);
-        builder.when(is_footer.clone()).assert_zero(AB::Expr::from(local[base + 1]));
-        builder.when(is_footer.clone()).assert_zero(AB::Expr::from(local[base + 2]));
+        builder.when(is_footer.clone()).assert_zero(local[base + 1].dup());
+        builder.when(is_footer.clone()).assert_zero(local[base + 2].dup());
     }
 
     for pair in 0..2 {
-        let lo = footer_message_word(|col| AB::Expr::from(local[col]), 2 * pair);
-        let hi = footer_message_word(|col| AB::Expr::from(local[col]), 2 * pair + 1);
+        let lo = footer_message_word(|col| local[col].dup(), 2 * pair);
+        let hi = footer_message_word(|col| local[col].dup(), 2 * pair + 1);
         enforce_canonical_pair::<AB>(
             builder,
             is_footer.clone(),
             lo,
             hi,
-            AB::Expr::from(local[F_R_CANON_INV_BASE_COL + pair]),
-            AB::Expr::from(local[F_R_CANON_Z_BASE_COL + pair]),
+            local[F_R_CANON_INV_BASE_COL + pair].dup(),
+            local[F_R_CANON_Z_BASE_COL + pair].dup(),
         );
     }
 
@@ -253,15 +256,15 @@ pub(crate) fn enforce_footer_payload<AB>(
         is_footer,
         words.h_even.clone(),
         words.h_odd.clone(),
-        AB::Expr::from(local[F_C_CANON_INV_COL]),
-        AB::Expr::from(local[F_C_CANON_Z_COL]),
+        local[F_C_CANON_INV_COL].dup(),
+        local[F_C_CANON_Z_COL].dup(),
     );
 }
 
 pub(crate) fn enforce_footer_transition<AB>(
     builder: &mut AB,
-    local: &[AB::Var],
-    next: &[AB::Var],
+    local: &[AB::Expr],
+    next: &[AB::Expr],
     gate: AB::Expr,
     footer: usize,
 ) where
@@ -277,15 +280,14 @@ pub(crate) fn enforce_footer_transition<AB>(
 
     for idx in 0..2 * footer {
         builder.when(gate.clone()).assert_zero(
-            AB::Expr::from(local[footer_r_col(footer, idx)])
-                - AB::Expr::from(next[footer_r_col(footer + 1, idx)]),
+            local[footer_r_col(footer, idx)].dup() - next[footer_r_col(footer + 1, idx)].dup(),
         );
     }
     for pair in 0..2 {
-        let lo = footer_message_word(|col| AB::Expr::from(local[col]), 2 * pair);
-        let hi = footer_message_word(|col| AB::Expr::from(local[col]), 2 * pair + 1);
+        let lo = footer_message_word(|col| local[col].dup(), 2 * pair);
+        let hi = footer_message_word(|col| local[col].dup(), 2 * pair + 1);
         builder.when(gate.clone()).assert_zero(
-            pack_pair(lo, hi) - AB::Expr::from(next[footer_r_col(footer + 1, 2 * footer + pair)]),
+            pack_pair(lo, hi) - next[footer_r_col(footer + 1, 2 * footer + pair)].dup(),
         );
     }
     for idx in 0..=2 * footer + 1 {
@@ -294,61 +296,60 @@ pub(crate) fn enforce_footer_transition<AB>(
             .assert_zero(cv_word::<AB>(local, idx) - cv_word::<AB>(next, idx));
     }
     for idx in 0..=footer {
-        builder.when(gate.clone()).assert_eq(
-            AB::Expr::from(local[footer_output_col(idx)]),
-            AB::Expr::from(next[footer_output_col(idx)]),
-        );
+        builder
+            .when(gate.clone())
+            .assert_eq(local[footer_output_col(idx)].dup(), next[footer_output_col(idx)].dup());
     }
     for (idx, expected) in consumed.into_iter().enumerate() {
         builder
             .when(gate.clone())
-            .assert_zero(AB::Expr::from(local[footer_future_w_col(footer, idx)]) - expected);
+            .assert_zero(local[footer_future_w_col(footer, idx)].dup() - expected);
     }
     for idx in 0..footer_future_w_indices(footer + 1).len() {
         builder.when(gate.clone()).assert_zero(
-            AB::Expr::from(local[footer_future_w_col(footer, 4 + idx)])
-                - AB::Expr::from(next[footer_future_w_col(footer + 1, idx)]),
+            local[footer_future_w_col(footer, 4 + idx)].dup()
+                - next[footer_future_w_col(footer + 1, idx)].dup(),
         );
     }
 }
 
 pub(crate) fn enforce_footer_cycle_id_transition<AB>(
     builder: &mut AB,
-    local: &[AB::Var],
-    next: &[AB::Var],
+    local: &[AB::Expr],
+    next: &[AB::Expr],
     gate: AB::Expr,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    builder.when(gate).assert_eq(
-        AB::Expr::from(next[F_COMPRESSION_CYCLE_ID_COL]),
-        AB::Expr::from(local[F_COMPRESSION_CYCLE_ID_COL]),
-    );
+    builder
+        .when(gate)
+        .assert_eq(next[F_COMPRESSION_CYCLE_ID_COL].dup(), local[F_COMPRESSION_CYCLE_ID_COL].dup());
 }
 
 pub(crate) fn enforce_footer_cycle_advance<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    local: &[AB::Var],
-    next: &[AB::Var],
+    local: &[AB::Expr],
+    next: &[AB::Expr],
     selectors: &EidosCompressionSelectors<AB::Expr>,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
     // `when_transition` excludes the cyclic wrap after the final footer.
     builder
-        .when_transition()
+        .when(frame.transition())
         .when(selectors.is_footer_row(FOOTER_ROWS - 1))
         .assert_eq(
             fused_compression_cycle_id::<AB>(next),
-            AB::Expr::from(local[F_COMPRESSION_CYCLE_ID_COL]) + AB::Expr::ONE,
+            local[F_COMPRESSION_CYCLE_ID_COL].dup() + AB::Expr::ONE,
         );
 }
 
 fn accumulate_transition_for_maps<AB>(
     residuals: &mut [[AB::Expr; 4]; NUM_G],
     gate: AB::Expr,
-    local: &[AB::Var],
-    next: &[AB::Var],
+    local: &[AB::Expr],
+    next: &[AB::Expr],
     local_map: &LaneMap,
     next_map: &LaneMap,
     d_rotation: u32,
@@ -371,7 +372,7 @@ fn accumulate_transition_for_maps<AB>(
 
 pub(crate) fn enforce_footer_row_inputs<AB>(
     builder: &mut AB,
-    local: &[AB::Var],
+    local: &[AB::Expr],
     selectors: &EidosCompressionSelectors<AB::Expr>,
     footer: usize,
     words: &FooterWords<AB::Expr>,
@@ -387,7 +388,10 @@ pub(crate) fn enforce_footer_row_inputs<AB>(
         .assert_zero(cv_word::<AB>(local, 2 * footer + 1) - words.h_odd.clone());
 }
 
-pub(crate) fn packed_footer_output<AB>(local: &[AB::Var], words: &FooterWords<AB::Expr>) -> AB::Expr
+pub(crate) fn packed_footer_output<AB>(
+    local: &[AB::Expr],
+    words: &FooterWords<AB::Expr>,
+) -> AB::Expr
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
@@ -413,18 +417,23 @@ fn enforce_canonical_pair<AB>(
     builder.assert_zero(z * lo);
 }
 
-fn footer_top_bit<AB>(row: &[AB::Var]) -> AB::Expr
+fn footer_top_bit<AB>(row: &[AB::Expr]) -> AB::Expr
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    let a = AB::Expr::from(row[F_TOP_BIT_SLOT_BASE_COL]);
-    let b = AB::Expr::from(row[F_TOP_BIT_SLOT_BASE_COL + 1]);
-    let scaled_x = AB::Expr::from(row[F_TOP_BIT_SLOT_BASE_COL + 2]);
+    let a = row[F_TOP_BIT_SLOT_BASE_COL].dup();
+    let b = row[F_TOP_BIT_SLOT_BASE_COL + 1].dup();
+    let scaled_x = row[F_TOP_BIT_SLOT_BASE_COL + 2].dup();
     let x = eidos_lookup::normalize(F_TOP_BIT_LOOKUP_BYTE_POSITION, scaled_x);
     (a + b - x).halve()
 }
 
-fn input_word<AB>(row: &[AB::Var], lane_map: &LaneMap, word_idx: usize, d_rotation: u32) -> AB::Expr
+fn input_word<AB>(
+    row: &[AB::Expr],
+    lane_map: &LaneMap,
+    word_idx: usize,
+    d_rotation: u32,
+) -> AB::Expr
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
@@ -439,7 +448,7 @@ where
 }
 
 fn output_word<AB>(
-    row: &[AB::Var],
+    row: &[AB::Expr],
     lane_map: &LaneMap,
     word_idx: usize,
     selectors: &EidosCompressionSelectors<AB::Expr>,
@@ -458,7 +467,7 @@ where
 }
 
 fn transition_output_word<AB>(
-    row: &[AB::Var],
+    row: &[AB::Expr],
     lane_map: &LaneMap,
     word_idx: usize,
     d_rotation: u32,
@@ -491,7 +500,7 @@ pub(crate) struct FooterWords<E> {
     out_odd_byte3: E,
 }
 
-pub(crate) fn footer_words<AB>(row: &[AB::Var]) -> FooterWords<AB::Expr>
+pub(crate) fn footer_words<AB>(row: &[AB::Expr]) -> FooterWords<AB::Expr>
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
@@ -518,21 +527,21 @@ where
     }
 }
 
-fn footer_xor_word<AB>(row: &[AB::Var], slot_base: usize) -> (AB::Expr, AB::Expr, AB::Expr)
+fn footer_xor_word<AB>(row: &[AB::Expr], slot_base: usize) -> (AB::Expr, AB::Expr, AB::Expr)
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
     let lhs = pack_u32_le(
-        AB::Expr::from(row[footer_xor_slot_col(slot_base, 0)]),
-        AB::Expr::from(row[footer_xor_slot_col(slot_base + 1, 0)]),
-        AB::Expr::from(row[footer_xor_slot_col(slot_base + 2, 0)]),
-        AB::Expr::from(row[footer_xor_slot_col(slot_base + 3, 0)]),
+        row[footer_xor_slot_col(slot_base, 0)].dup(),
+        row[footer_xor_slot_col(slot_base + 1, 0)].dup(),
+        row[footer_xor_slot_col(slot_base + 2, 0)].dup(),
+        row[footer_xor_slot_col(slot_base + 3, 0)].dup(),
     );
     let rhs = pack_u32_le(
-        AB::Expr::from(row[footer_xor_slot_col(slot_base, 1)]),
-        AB::Expr::from(row[footer_xor_slot_col(slot_base + 1, 1)]),
-        AB::Expr::from(row[footer_xor_slot_col(slot_base + 2, 1)]),
-        AB::Expr::from(row[footer_xor_slot_col(slot_base + 3, 1)]),
+        row[footer_xor_slot_col(slot_base, 1)].dup(),
+        row[footer_xor_slot_col(slot_base + 1, 1)].dup(),
+        row[footer_xor_slot_col(slot_base + 2, 1)].dup(),
+        row[footer_xor_slot_col(slot_base + 3, 1)].dup(),
     );
     let xor = pack_u32_le(
         footer_xor_byte::<AB>(row, slot_base),
@@ -544,14 +553,14 @@ where
     (lhs, rhs, xor)
 }
 
-fn footer_xor_byte<AB>(row: &[AB::Var], slot: usize) -> AB::Expr
+fn footer_xor_byte<AB>(row: &[AB::Expr], slot: usize) -> AB::Expr
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
     let base = footer_xor_slot_col(slot, 0);
-    let lhs = AB::Expr::from(row[base]);
-    let rhs = AB::Expr::from(row[base + 1]);
-    let and = AB::Expr::from(row[base + 2]);
+    let lhs = row[base].dup();
+    let rhs = row[base + 1].dup();
+    let and = row[base + 2].dup();
     xor_from_and(lhs, rhs, and)
 }
 
@@ -566,77 +575,77 @@ fn lane_position(lane_map: &LaneMap, word_idx: usize) -> (usize, usize) {
     unreachable!("word index must appear exactly once in the lane map");
 }
 
-fn cv_word<AB>(row: &[AB::Var], idx: usize) -> AB::Expr
+fn cv_word<AB>(row: &[AB::Expr], idx: usize) -> AB::Expr
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    footer_cv_word(|col| AB::Expr::from(row[col]), idx)
+    footer_cv_word(|col| row[col].dup(), idx)
 }
 
-fn input_b<AB>(row: &[AB::Var], g: usize) -> AB::Expr
+fn input_b<AB>(row: &[AB::Expr], g: usize) -> AB::Expr
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
     pack_u32_le(
-        AB::Expr::from(row[g_bd_rot_slot_col(g, 0, 0)]),
-        AB::Expr::from(row[g_bd_rot_slot_col(g, 1, 0)]),
-        AB::Expr::from(row[g_bd_rot_slot_col(g, 2, 0)]),
-        AB::Expr::from(row[g_bd_rot_slot_col(g, 3, 0)]),
+        row[g_bd_rot_slot_col(g, 0, 0)].dup(),
+        row[g_bd_rot_slot_col(g, 1, 0)].dup(),
+        row[g_bd_rot_slot_col(g, 2, 0)].dup(),
+        row[g_bd_rot_slot_col(g, 3, 0)].dup(),
     )
 }
 
-fn input_c_for_rotation<AB>(row: &[AB::Var], g: usize, d_rotation: u32) -> AB::Expr
+fn input_c_for_rotation<AB>(row: &[AB::Expr], g: usize, d_rotation: u32) -> AB::Expr
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    c_new::<AB>(row, g) + AB::Expr::from_u64(1u64 << 32) * AB::Expr::from(row[G_K2_BASE_COL + g])
+    c_new::<AB>(row, g) + AB::Expr::from_u64(1u64 << 32) * row[G_K2_BASE_COL + g].dup()
         - d_new_for_rotation::<AB>(row, g, d_rotation)
 }
 
-fn input_d<AB>(row: &[AB::Var], g: usize) -> AB::Expr
+fn input_d<AB>(row: &[AB::Expr], g: usize) -> AB::Expr
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
     pack_u32_le(
-        AB::Expr::from(row[g_ac_byte_slot_col(g, 0, 0)]),
-        AB::Expr::from(row[g_ac_byte_slot_col(g, 1, 0)]),
-        AB::Expr::from(row[g_ac_byte_slot_col(g, 2, 0)]),
-        AB::Expr::from(row[g_ac_byte_slot_col(g, 3, 0)]),
+        row[g_ac_byte_slot_col(g, 0, 0)].dup(),
+        row[g_ac_byte_slot_col(g, 1, 0)].dup(),
+        row[g_ac_byte_slot_col(g, 2, 0)].dup(),
+        row[g_ac_byte_slot_col(g, 3, 0)].dup(),
     )
 }
 
-fn fused_compression_cycle_id<AB>(row: &[AB::Var]) -> AB::Expr
+fn fused_compression_cycle_id<AB>(row: &[AB::Expr]) -> AB::Expr
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    AB::Expr::from(row[G_COMPRESSION_CYCLE_ID_COL])
+    row[G_COMPRESSION_CYCLE_ID_COL].dup()
 }
 
-fn a_new<AB>(row: &[AB::Var], g: usize) -> AB::Expr
-where
-    AB: LiftedAirBuilder<F = Felt>,
-{
-    pack_u32_le(
-        AB::Expr::from(row[g_ac_byte_slot_col(g, 0, 1)]),
-        AB::Expr::from(row[g_ac_byte_slot_col(g, 1, 1)]),
-        AB::Expr::from(row[g_ac_byte_slot_col(g, 2, 1)]),
-        AB::Expr::from(row[g_ac_byte_slot_col(g, 3, 1)]),
-    )
-}
-
-fn c_new<AB>(row: &[AB::Var], g: usize) -> AB::Expr
+fn a_new<AB>(row: &[AB::Expr], g: usize) -> AB::Expr
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
     pack_u32_le(
-        AB::Expr::from(row[g_bd_rot_slot_col(g, 0, 1)]),
-        AB::Expr::from(row[g_bd_rot_slot_col(g, 1, 1)]),
-        AB::Expr::from(row[g_bd_rot_slot_col(g, 2, 1)]),
-        AB::Expr::from(row[g_bd_rot_slot_col(g, 3, 1)]),
+        row[g_ac_byte_slot_col(g, 0, 1)].dup(),
+        row[g_ac_byte_slot_col(g, 1, 1)].dup(),
+        row[g_ac_byte_slot_col(g, 2, 1)].dup(),
+        row[g_ac_byte_slot_col(g, 3, 1)].dup(),
     )
 }
 
-fn b_new<AB>(row: &[AB::Var], g: usize) -> AB::Expr
+fn c_new<AB>(row: &[AB::Expr], g: usize) -> AB::Expr
+where
+    AB: LiftedAirBuilder<F = Felt>,
+{
+    pack_u32_le(
+        row[g_bd_rot_slot_col(g, 0, 1)].dup(),
+        row[g_bd_rot_slot_col(g, 1, 1)].dup(),
+        row[g_bd_rot_slot_col(g, 2, 1)].dup(),
+        row[g_bd_rot_slot_col(g, 3, 1)].dup(),
+    )
+}
+
+fn b_new<AB>(row: &[AB::Expr], g: usize) -> AB::Expr
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
@@ -644,11 +653,15 @@ where
     (0..BYTES_PER_WORD).fold(AB::Expr::ZERO, |acc, byte| {
         let col = g_bd_rot_result_col(g, byte)
             .expect("only the final lane has a derived rotation result");
-        acc + AB::Expr::from(row[col])
+        acc + row[col].dup()
     })
 }
 
-fn d_new<AB>(row: &[AB::Var], g: usize, selectors: &EidosCompressionSelectors<AB::Expr>) -> AB::Expr
+fn d_new<AB>(
+    row: &[AB::Expr],
+    g: usize,
+    selectors: &EidosCompressionSelectors<AB::Expr>,
+) -> AB::Expr
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
@@ -656,7 +669,7 @@ where
         + selectors.is_cd() * d_new_for_rotation::<AB>(row, g, 8)
 }
 
-fn d_new_for_rotation<AB>(row: &[AB::Var], g: usize, rotation: u32) -> AB::Expr
+fn d_new_for_rotation<AB>(row: &[AB::Expr], g: usize, rotation: u32) -> AB::Expr
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
@@ -674,12 +687,12 @@ where
     }
 }
 
-fn xor_byte<AB>(row: &[AB::Var], g: usize, byte: usize) -> AB::Expr
+fn xor_byte<AB>(row: &[AB::Expr], g: usize, byte: usize) -> AB::Expr
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    let lhs = AB::Expr::from(row[g_ac_byte_slot_col(g, byte, 0)]);
-    let rhs = AB::Expr::from(row[g_ac_byte_slot_col(g, byte, 1)]);
-    let and = AB::Expr::from(row[g_ac_byte_slot_col(g, byte, 2)]);
+    let lhs = row[g_ac_byte_slot_col(g, byte, 0)].dup();
+    let rhs = row[g_ac_byte_slot_col(g, byte, 1)].dup();
+    let and = row[g_ac_byte_slot_col(g, byte, 2)].dup();
     xor_from_and(lhs, rhs, and)
 }

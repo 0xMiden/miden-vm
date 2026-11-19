@@ -1,134 +1,72 @@
-//! Constraint evaluation for the verifier.
-//!
-//! Provides [`ConstraintFolder`], a minimal EF-only folder evaluating the AIR's
-//! constraints at a single OOD extension-field point.
+//! Scalar OOD folding in exact global assertion order.
 
 use core::marker::PhantomData;
 
 use p3_field::{ExtensionField, Field};
 
-use crate::{
-    air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow},
-    selectors::Selectors,
-};
+use crate::air;
 
-// ============================================================================
-// ConstraintFolder
-// ============================================================================
-
-/// Minimal constraint folder for verifier OOD evaluation.
-///
-/// Implements the AIR builder traits needed to evaluate constraints at an out-of-domain
-/// point. Uses the extension field throughout since the verifier only evaluates at a
-/// single EF point (z).
-///
-/// The verifier folds constraints on the fly using Horner:
-///
-/// acc = acc·α + Cₖ(z).
-///
-/// This matches the prover's random linear combination
-/// `Σₖ α^{K−1−k}·Cₖ(z)`, but is cheaper for a single-point evaluation.
-/// The prover computes an equivalent fold over the whole quotient domain, optimized
-/// with base-field SIMD where possible.
-pub(super) struct ConstraintFolder<'a, F, EF>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    pub main: RowWindow<'a, EF>,
-    pub preprocessed: RowWindow<'a, EF>,
-    pub aux: RowWindow<'a, EF>,
-    pub randomness: &'a [EF],
-    pub public_values: &'a [F],
-    pub periodic_values: &'a [EF],
-    pub permutation_values: &'a [EF],
-    pub selectors: Selectors<EF>,
+/// The verifier streams `acc = acc * alpha + assertion` across both assertion classes.
+pub(super) struct ConstraintFolder<F: Field, EF: ExtensionField<F>> {
     pub alpha: EF,
     pub accumulator: EF,
     pub _phantom: PhantomData<F>,
 }
 
-impl<'a, F, EF> AirBuilder for ConstraintFolder<'a, F, EF>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
+impl<F: Field, EF: ExtensionField<F>> ConstraintFolder<F, EF> {
+    fn fold(&mut self, value: EF) {
+        self.accumulator = self.accumulator * self.alpha + value;
+    }
+}
+
+impl<F: Field, EF: ExtensionField<F>> air::LiftedAirBuilder for ConstraintFolder<F, EF> {
     type F = F;
     type Expr = EF;
-    type Var = EF;
-    type PreprocessedWindow = RowWindow<'a, EF>;
-    type MainWindow = RowWindow<'a, EF>;
-    type PublicVar = F;
-    type PeriodicVar = EF;
+    type ExtExpr = EF;
 
-    fn main(&self) -> Self::MainWindow {
-        self.main
+    fn emit_base(&mut self, value: EF, _meta: air::ConstraintMeta<'_>) {
+        self.fold(value);
     }
 
-    fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        &self.preprocessed
-    }
-
-    fn is_first_row(&self) -> Self::Expr {
-        self.selectors.is_first_row
-    }
-
-    fn is_last_row(&self) -> Self::Expr {
-        self.selectors.is_last_row
-    }
-
-    fn is_transition(&self) -> Self::Expr {
-        self.selectors.is_transition
-    }
-
-    fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
-        self.accumulator = self.accumulator * self.alpha + x.into();
-    }
-
-    fn public_values(&self) -> &[Self::PublicVar] {
-        self.public_values
-    }
-
-    fn periodic_values(&self) -> &[Self::PeriodicVar] {
-        self.periodic_values
+    fn emit_ext(&mut self, value: EF, _meta: air::ConstraintMeta<'_>) {
+        self.fold(value);
     }
 }
 
-impl<'a, F, EF> ExtensionBuilder for ConstraintFolder<'a, F, EF>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    type EF = EF;
-    type ExprEF = EF;
-    type VarEF = EF;
+#[cfg(test)]
+mod tests {
+    use p3_field::PrimeCharacteristicRing;
 
-    fn assert_zero_ext<I>(&mut self, x: I)
-    where
-        I: Into<Self::ExprEF>,
-    {
-        self.accumulator = self.accumulator * self.alpha + x.into();
-    }
-}
+    use super::*;
+    use crate::testing::configs::{Felt, QuadFelt};
 
-impl<'a, F, EF> PermutationAirBuilder for ConstraintFolder<'a, F, EF>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    type MP = RowWindow<'a, EF>;
-    type RandomVar = EF;
-    type PermutationVar = EF;
-
-    fn permutation(&self) -> Self::MP {
-        self.aux
+    fn folder(alpha: QuadFelt) -> ConstraintFolder<Felt, QuadFelt> {
+        ConstraintFolder {
+            alpha,
+            accumulator: QuadFelt::ZERO,
+            _phantom: PhantomData,
+        }
     }
 
-    fn permutation_randomness(&self) -> &[Self::RandomVar] {
-        self.randomness
-    }
+    #[test]
+    fn native_scalar_folder_keeps_zero_and_repeated_interleaved_emissions() {
+        let alpha = QuadFelt::new([Felt::from_u32(7), Felt::from_u32(11)]);
+        let first = QuadFelt::from_u32(13);
+        let repeated = QuadFelt::new([Felt::from_u32(17), Felt::from_u32(19)]);
+        let last = QuadFelt::from_u32(23);
+        let mut native_folder = folder(alpha);
+        air::LiftedAirBuilder::assert_zero(&mut native_folder, first);
+        air::LiftedAirBuilder::assert_zero_ext(
+            &mut air::LiftedAirBuilder::when(&mut native_folder, QuadFelt::ZERO),
+            repeated,
+        );
+        air::LiftedAirBuilder::assert_zero(&mut native_folder, repeated);
+        air::LiftedAirBuilder::assert_zero_ext(&mut native_folder, repeated);
+        air::LiftedAirBuilder::assert_zero(&mut native_folder, last);
 
-    fn permutation_values(&self) -> &[Self::PermutationVar] {
-        self.permutation_values
+        // Five emissions assign descending powers 4 through 0, including the zero-gated emission.
+        let expected =
+            first * alpha.exp_u64(4) + repeated * alpha.square() + repeated * alpha + last;
+        assert_eq!(native_folder.accumulator, expected);
     }
 }

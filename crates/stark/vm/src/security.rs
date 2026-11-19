@@ -458,7 +458,11 @@ mod tests {
     /// verified.
     #[test]
     fn air_shape_matches_symbolic() {
-        assert_eq!(AIR_SHAPE, derive_air_shape(), "AIR_SHAPE in security.rs is stale");
+        assert_eq!(
+            AIR_SHAPE,
+            derive_air_shape().expect("valid source security shape"),
+            "AIR_SHAPE in security.rs is stale"
+        );
     }
 
     /// `num_deep_terms` at [`miden_air::vm::security::COMMITMENT_ALIGNMENT`] (algebraic sponges)

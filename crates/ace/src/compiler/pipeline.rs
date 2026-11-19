@@ -7,7 +7,7 @@
 //! - emit a circuit that matches verifier evaluation.
 
 use miden_core::{Felt, field::QuadFelt};
-use miden_stark::air::LiftedAir;
+use miden_stark::air;
 
 use crate::{
     AceError, EXT_DEGREE,
@@ -63,7 +63,7 @@ pub fn build_ace_circuit_for_air<A>(
     config: AceConfig,
 ) -> Result<AceCircuit<QuadFelt>, AceError>
 where
-    A: LiftedAir<Felt, QuadFelt>,
+    A: air::LiftedAir<F = Felt>,
 {
     let artifacts = build_ace_dag_for_air(air, config)?;
     emit_circuit(&artifacts.dag, artifacts.layout)
@@ -77,9 +77,9 @@ pub fn build_ace_dag_for_air<A>(
     config: AceConfig,
 ) -> Result<AceArtifacts<QuadFelt>, AceError>
 where
-    A: LiftedAir<Felt, QuadFelt>,
+    A: air::LiftedAir<F = Felt>,
 {
-    let air = CapturedAir::new(air)?;
+    let air = CapturedAir::new_native(air)?;
     let shared_period = air.max_periodic_length.max(1);
     build_ace_dag_from_capture(&air, config, shared_period)
 }
@@ -191,9 +191,9 @@ pub fn build_canonical_multi_air_ace_circuit<A>(
     trace_width_alignment: usize,
 ) -> Result<AceCircuit<QuadFelt>, AceError>
 where
-    A: LiftedAir<Felt, QuadFelt>,
+    A: air::LiftedAir<F = Felt>,
 {
-    let captured = airs.iter().map(CapturedAir::new).collect::<Result<Vec<_>, _>>()?;
+    let captured = airs.iter().map(CapturedAir::new_native).collect::<Result<Vec<_>, _>>()?;
     let captured = captured.iter().collect::<Vec<_>>();
     let relation = CompiledRelation::with_quotient_chunks(
         &captured,

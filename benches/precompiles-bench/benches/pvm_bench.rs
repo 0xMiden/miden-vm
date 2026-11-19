@@ -6,12 +6,11 @@ use codspeed_criterion_compat::{
     BatchSize, Criterion, SamplingMode, criterion_group, criterion_main,
 };
 use miden_air::precompiles::ChipletAir;
-use miden_core::{Felt, field::QuadFelt};
 use miden_precompiles_stark::prover::{
     DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES, HashFunction,
     prove_precompiles_with_limits_and_budget, testing,
 };
-use miden_stark::air::{BaseAir, LiftedAir};
+use miden_stark::air::AirKernel;
 use miden_vm::Verifier;
 use miden_vm_precompiles_bench::{PrecompileFixture, PrecompileWorkload, benchmark_workloads};
 
@@ -83,8 +82,9 @@ fn pvm_bench(c: &mut Criterion) {
             .expect("import PVM workload")
             .build_trace();
         for (air, (height, width)) in ChipletAir::all().iter().zip(traces.main_trace_shapes()) {
-            let aux_width = LiftedAir::<Felt, QuadFelt>::aux_width(air);
-            let preprocessed_width = BaseAir::<Felt>::preprocessed_width(air);
+            let geometry = air.geometry();
+            let aux_width = geometry.aux_width;
+            let preprocessed_width = geometry.preprocessed_width;
             println!(
                 "BENCH_PVM_SHAPE workload={name} air={air:?} height={height} main_width={width} aux_width={aux_width} preprocessed_width={preprocessed_width}"
             );

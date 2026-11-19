@@ -1,26 +1,13 @@
 //! Production VM AIR adapters backed by build-generated evaluators.
 
-use alloc::{borrow::Cow, vec::Vec};
+use miden_air_definitions::vm::{self as source, MidenAir as Source};
 
-use miden_air_definitions::vm as source;
-use miden_core::{
-    Felt,
-    field::{Algebra, ExtensionField},
-    utils::RowMajorMatrix,
-};
-use miden_stark::{
-    air::{BaseAir, ConstraintDegrees, EvalInputs, LiftedAir, LiftedAirBuilder},
-    lookup,
-};
-
-use super::generated;
-
-include!(concat!(env!("OUT_DIR"), "/degrees.rs"));
+use crate::kernel::define_dispatch;
 
 /// Production evaluator for an authored VM AIR.
 ///
-/// Constraint evaluation and degrees use build-generated code. Trace metadata, auxiliary-trace
-/// construction, and lookup interactions delegate to the authored definition.
+/// Kernel capabilities are implemented by generated dispatch alongside this wrapper; authored
+/// source and witness capabilities retain their independent source ownership.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct MidenAir(pub source::MidenAir);
 
@@ -49,122 +36,18 @@ impl MidenAir {
     }
 }
 
-impl BaseAir<Felt> for MidenAir {
-    fn width(&self) -> usize {
-        self.0.width()
-    }
-    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
-        self.0.preprocessed_trace()
-    }
-    fn preprocessed_width(&self) -> usize {
-        self.0.preprocessed_width()
-    }
-    fn num_public_values(&self) -> usize {
-        BaseAir::<Felt>::num_public_values(&self.0)
-    }
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        self.0.periodic_columns()
-    }
-}
-impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = Vec<E>;
-
-    fn log_preprocessed_height(&self) -> Option<u8> {
-        LiftedAir::<Felt, EF>::log_preprocessed_height(&self.0)
-    }
-
-    fn num_randomness(&self) -> usize {
-        LiftedAir::<Felt, EF>::num_randomness(&self.0)
-    }
-
-    fn aux_width(&self) -> usize {
-        LiftedAir::<Felt, EF>::aux_width(&self.0)
-    }
-
-    fn num_aux_values(&self) -> usize {
-        LiftedAir::<Felt, EF>::num_aux_values(&self.0)
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        self.0.build_aux_trace(main, air_inputs, aux_inputs, challenges)
-    }
-
-    fn build_aux_trace_with_preprocessed(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        preprocessed: Option<&RowMajorMatrix<Felt>>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        self.0.build_aux_trace_with_preprocessed(
-            main,
-            preprocessed,
-            air_inputs,
-            aux_inputs,
-            challenges,
-        )
-    }
-
-    fn constraint_degree(&self) -> ConstraintDegrees {
-        generated_degrees(*self)
-    }
-
-    fn prepare<B: Algebra<Felt>, E: Algebra<B>>(&self, inputs: EvalInputs<'_, B, E>) -> Vec<E> {
-        let challenges = inputs.challenges;
-        match self.0 {
-            source::MidenAir::Core => generated::precompute_core::<B, E>(challenges).into(),
-            source::MidenAir::Chiplets => generated::precompute_chiplets::<B, E>(challenges).into(),
-            source::MidenAir::EidosCompression => {
-                generated::precompute_eidos_compression::<B, E>(challenges).into()
-            },
-            source::MidenAir::And8Lookup => {
-                generated::precompute_and8_lookup::<B, E>(challenges).into()
-            },
-        }
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(
-        &self,
-        builder: &mut AB,
-        terms: &Self::EvalData<AB::Expr, AB::ExprEF>,
-    ) {
-        match self.0 {
-            source::MidenAir::Core => generated::eval_core(builder, terms),
-            source::MidenAir::Chiplets => generated::eval_chiplets(builder, terms),
-            source::MidenAir::EidosCompression => generated::eval_eidos_compression(builder, terms),
-            source::MidenAir::And8Lookup => generated::eval_and8_lookup(builder, terms),
-        }
-    }
+#[allow(clippy::eq_op)]
+mod evaluators {
+    include!(concat!(env!("OUT_DIR"), "/native_evaluators.rs"));
 }
 
-impl<LB> lookup::LookupAir<LB> for MidenAir
-where
-    LB: lookup::LookupBuilder<F = Felt>,
-    source::MidenAir: lookup::LookupAir<LB>,
-{
-    fn column_shape(&self) -> &[usize] {
-        MidenAir::column_shape(*self)
-    }
-    fn max_message_width(&self) -> usize {
-        <source::MidenAir as lookup::LookupAir<LB>>::max_message_width(&self.0)
-    }
-    fn num_bus_ids(&self) -> usize {
-        <source::MidenAir as lookup::LookupAir<LB>>::num_bus_ids(&self.0)
-    }
-    fn eval(&self, builder: &mut LB) {
-        <source::MidenAir as lookup::LookupAir<LB>>::eval(&self.0, builder)
-    }
-    fn eval_boundary<B>(&self, builder: &mut B)
-    where
-        B: lookup::BoundaryBuilder<F = LB::F, EF = LB::EF>,
-    {
-        <source::MidenAir as lookup::LookupAir<LB>>::eval_boundary(&self.0, builder)
-    }
+mod descriptors {
+    include!(concat!(env!("OUT_DIR"), "/native_descriptors.rs"));
 }
+
+define_dispatch!(MidenAir, Source, VmPrepared;
+    Core => (CORE_DESCRIPTOR, descriptor_core, CORE_GEOMETRY, precompute_core, eval_core, CORE_PREPARED_TERMS),
+    Chiplets => (CHIPLETS_DESCRIPTOR, descriptor_chiplets, CHIPLETS_GEOMETRY, precompute_chiplets, eval_chiplets, CHIPLETS_PREPARED_TERMS),
+    EidosCompression => (EIDOS_DESCRIPTOR, descriptor_eidos_compression, EIDOS_COMPRESSION_GEOMETRY, precompute_eidos_compression, eval_eidos_compression, EIDOS_COMPRESSION_PREPARED_TERMS),
+    And8Lookup => (AND8_DESCRIPTOR, descriptor_and8_lookup, AND8_LOOKUP_GEOMETRY, precompute_and8_lookup, eval_and8_lookup, AND8_LOOKUP_PREPARED_TERMS),
+);

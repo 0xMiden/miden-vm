@@ -30,7 +30,9 @@ use super::{
     selectors::build_chiplet_selectors,
 };
 use crate::vm::{
-    ChipletCols, constraints::test_utils::ConstraintEvalBuilder, trace::CHIPLETS_WIDTH,
+    ChipletCols,
+    constraints::test_utils::{ConstraintEvalContext, NativeConstraintEvalBuilder},
+    trace::CHIPLETS_WIDTH,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -84,12 +86,12 @@ fn assert_acceptance(evaluations: &[QuadFelt], expected: bool, context: &str) {
     assert_eq!(accepted(evaluations), expected, "{context}; nonzero residuals: {violations:?}");
 }
 
-fn builder_at(row_index: usize) -> ConstraintEvalBuilder {
+fn context_at(row_index: usize) -> ConstraintEvalContext {
     let periodic_values = PeriodicCols::periodic_columns()
         .iter()
         .map(|column| column[row_index % column.len()])
         .collect();
-    ConstraintEvalBuilder::new().with_periodic_values(periodic_values)
+    ConstraintEvalContext::new().with_periodic_values(periodic_values)
 }
 
 #[test]
@@ -133,8 +135,10 @@ fn section_transitions_and_empty_sections_follow_the_phase_aware_matrix() {
                 }
                 let row_index = 8 + phase;
                 let context = format!("{from:?} -> {to:?} at row {row_index} ({rule:?})");
-                let mut builder = builder_at(row_index);
-                let selectors = build_chiplet_selectors(&mut builder, &local, &next);
+                let row_inputs = context_at(row_index);
+                let frame = row_inputs.frame_rows(&local.chiplets, &next.chiplets);
+                let mut builder = NativeConstraintEvalBuilder::default();
+                let selectors = build_chiplet_selectors(&frame, &mut builder, &local, &next);
                 assert_acceptance(
                     &builder.evaluations,
                     rule != No,
@@ -165,6 +169,7 @@ fn section_transitions_and_empty_sections_follow_the_phase_aware_matrix() {
 
                 builder.evaluations.clear();
                 enforce_aead_stream_constraints(
+                    &frame,
                     &mut builder,
                     local.aead_stream_cols(),
                     next.aead_stream_cols(),
@@ -183,8 +188,12 @@ fn section_transitions_and_empty_sections_follow_the_phase_aware_matrix() {
 #[test]
 fn only_padding_may_occupy_the_last_row() {
     for section in SECTIONS {
-        let mut builder = builder_at(15).with_row_flags(false, true, false);
-        build_chiplet_selectors(&mut builder, &section.row(), &Controller.row());
+        let context = context_at(15).with_row_flags(false, true, false);
+        let local = section.row();
+        let next = Controller.row();
+        let frame = context.frame_rows(&local.chiplets, &next.chiplets);
+        let mut builder = NativeConstraintEvalBuilder::default();
+        build_chiplet_selectors(&frame, &mut builder, &local, &next);
         assert_acceptance(
             &builder.evaluations,
             matches!(section, Padding),
@@ -196,8 +205,12 @@ fn only_padding_may_occupy_the_last_row() {
 #[test]
 fn padding_can_wrap_to_controller_only_at_the_cyclic_opening() {
     for is_last_row in [false, true] {
-        let mut builder = builder_at(15).with_row_flags(false, is_last_row, !is_last_row);
-        let selectors = build_chiplet_selectors(&mut builder, &Padding.row(), &Controller.row());
+        let context = context_at(15).with_row_flags(false, is_last_row, !is_last_row);
+        let local = Padding.row();
+        let next = Controller.row();
+        let frame = context.frame_rows(&local.chiplets, &next.chiplets);
+        let mut builder = NativeConstraintEvalBuilder::default();
+        let selectors = build_chiplet_selectors(&frame, &mut builder, &local, &next);
         assert_acceptance(
             &builder.evaluations,
             is_last_row,
@@ -229,8 +242,14 @@ fn only_active_prefix_cells_are_required_to_be_boolean() {
             for value in [0, 1, 2] {
                 let mut local = section.row();
                 local.chiplets[column] = Felt::from_u8(value);
-                let mut builder = ConstraintEvalBuilder::new().with_row_flags(false, false, false);
-                build_chiplet_selectors(&mut builder, &local, &next);
+                let context = ConstraintEvalContext::new().with_row_flags(false, false, false);
+                let mut builder = NativeConstraintEvalBuilder::default();
+                build_chiplet_selectors(
+                    &context.frame_rows(&local.chiplets, &next.chiplets),
+                    &mut builder,
+                    &local,
+                    &next,
+                );
                 assert_eq!(
                     accepted(&builder.evaluations),
                     value != 2,
@@ -243,8 +262,14 @@ fn only_active_prefix_cells_are_required_to_be_boolean() {
         for column in section.prefix().len()..5 {
             let mut local = section.row();
             local.chiplets[column] = Felt::from_u8(2);
-            let mut builder = ConstraintEvalBuilder::new().with_row_flags(false, false, false);
-            build_chiplet_selectors(&mut builder, &local, &next);
+            let context = ConstraintEvalContext::new().with_row_flags(false, false, false);
+            let mut builder = NativeConstraintEvalBuilder::default();
+            build_chiplet_selectors(
+                &context.frame_rows(&local.chiplets, &next.chiplets),
+                &mut builder,
+                &local,
+                &next,
+            );
             assert!(
                 accepted(&builder.evaluations),
                 "{section:?}: column {column} is payload, not a selector",
@@ -255,8 +280,14 @@ fn only_active_prefix_cells_are_required_to_be_boolean() {
 
 fn memory_entry_evaluations(from: Section, next: &ChipletCols<Felt>) -> Vec<QuadFelt> {
     let local = from.row();
-    let mut builder = ConstraintEvalBuilder::new();
-    let selectors = build_chiplet_selectors(&mut builder, &local, next);
+    let context = ConstraintEvalContext::new();
+    let mut builder = NativeConstraintEvalBuilder::default();
+    let selectors = build_chiplet_selectors(
+        &context.frame_rows(&local.chiplets, &next.chiplets),
+        &mut builder,
+        &local,
+        next,
+    );
     assert!(accepted(&builder.evaluations), "{from:?} -> Memory: valid section order");
     assert_eq!(selectors.memory_entry_next, Felt::ONE, "{from:?} -> Memory: initializes memory");
     builder.evaluations.clear();
@@ -326,8 +357,14 @@ fn empty_sections_do_not_skip_ace_initialization() {
             let mut next = Ace.row();
             let ace: &mut AceCols<Felt> = next.chiplets[4..20].borrow_mut();
             ace.s_start = Felt::from_u8(s_start);
-            let mut builder = ConstraintEvalBuilder::new();
-            let selectors = build_chiplet_selectors(&mut builder, &local, &next);
+            let context = ConstraintEvalContext::new();
+            let mut builder = NativeConstraintEvalBuilder::default();
+            let selectors = build_chiplet_selectors(
+                &context.frame_rows(&local.chiplets, &next.chiplets),
+                &mut builder,
+                &local,
+                &next,
+            );
             assert!(accepted(&builder.evaluations), "{from:?} -> ACE: valid section order");
             assert_eq!(selectors.ace_entry_next, Felt::ONE, "{from:?} -> ACE: initializes ACE");
             builder.evaluations.clear();

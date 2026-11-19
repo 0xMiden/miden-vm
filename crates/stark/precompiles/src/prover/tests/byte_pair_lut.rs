@@ -8,13 +8,10 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt, batch_multiplicative_inverse},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_stark::{
-    air::{BaseAir, LiftedAir},
-    lookup::debug::{ValidateLayout, ValidateLookupAir},
-};
+use miden_stark::air::LiftedAir;
 
 use crate::prover::{
-    logup::{Challenges, LookupMessage, NUM_RANDOMNESS, lookup_challenges_from_slice},
+    logup::{Challenges, LookupMessage, lookup_challenges_from_slice},
     primitives::byte_pair_lut::{
         BytePairLutAir, BytePairLutMsg, BytePairLutRequires, BytePairOp, NUM_AUX_COLS,
         NUM_MAIN_COLS, NUM_PREPROCESSED_COLS, PRE_A, PRE_B, PRE_WRAP7, PRE_WRAP12, PRE_XOR,
@@ -247,18 +244,13 @@ fn trace_rows_carry_the_aggregated_relation_multiplicities() {
 
 #[test]
 fn lookup_degree_annotations_match_the_unified_table_layout() {
+    assert_eq!(BytePairLutAir.spec().num_public_values, 0);
     assert_eq!((NUM_MAIN_COLS, NUM_PREPROCESSED_COLS, NUM_AUX_COLS), (7, 5, 4));
-    BytePairLutAir
-        .validate(ValidateLayout {
-            preprocessed_width: NUM_PREPROCESSED_COLS,
-            trace_width: NUM_MAIN_COLS,
-            num_public_values: 0,
-            num_periodic_columns: 0,
-            permutation_width: NUM_AUX_COLS,
-            num_permutation_challenges: NUM_RANDOMNESS,
-            num_permutation_values: 1,
-        })
-        .unwrap_or_else(|error| panic!("byte-pair lookup validation failed: {error}"));
+    miden_stark::lookup::validate_native(
+        &BytePairLutAir,
+        &miden_stark::air::LiftedAir::spec(&BytePairLutAir),
+    )
+    .unwrap_or_else(|error| panic!("byte-pair lookup validation failed: {error}"));
     assert_eq!(crate::prover::tests::log_quotient_degree(&BytePairLutAir), 1);
 }
 
@@ -268,7 +260,19 @@ fn build_aux(
 ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<QuadFelt>, QuadFelt) {
     let main = generate_trace(requires);
     let flat = test_alpha_beta();
-    let (aux, aux_values) = BytePairLutAir.build_aux_trace(&main, &[], &[], &flat);
+    let preprocessed = miden_stark::air::LiftedAir::build_preprocessed_trace(&BytePairLutAir);
+    let miden_stark::air::AuxTrace { columns: aux, exports: aux_values } =
+        miden_stark::air::ProverAir::build_aux_trace(
+            &BytePairLutAir,
+            miden_stark::air::AuxTraceInputs {
+                main: &main,
+                preprocessed: preprocessed.as_ref(),
+                public_values: &[],
+                statement: &[],
+                challenges: &flat,
+            },
+        )
+        .expect("table witness inputs are valid");
     assert_eq!(aux_values.len(), 1, "byte-pair table exposes one centered residue");
     (main, aux, aux_values[0])
 }
@@ -348,9 +352,4 @@ fn committed_logup_value_is_the_centered_full_sum() {
     let inverses = batch_multiplicative_inverse(&encodings);
     let expected_sum: QuadFelt = -inverses.iter().copied().sum::<QuadFelt>();
     assert_eq!(QuadFelt::from_usize(TRACE_HEIGHT) * residue, expected_sum);
-}
-
-#[test]
-fn num_public_values_is_zero() {
-    assert_eq!(BytePairLutAir.num_public_values(), 0);
 }

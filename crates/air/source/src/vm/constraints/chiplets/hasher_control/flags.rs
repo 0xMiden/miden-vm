@@ -19,6 +19,7 @@
 //! The two remaining patterns are invalid.
 
 use miden_core::field::PrimeCharacteristicRing;
+use p3_field::Dup;
 
 use crate::vm::constraints::{chiplets::columns::ControllerCols, utils::BoolNot};
 
@@ -36,10 +37,10 @@ pub struct ControllerFlags<E> {
 
 impl<E: PrimeCharacteristicRing + Clone> ControllerFlags<E> {
     /// Build all row-kind flags from the current row's sub-selector columns.
-    pub fn new<V: Copy + Into<E>>(cols: &ControllerCols<V>) -> Self {
-        let s0: E = cols.s0.into();
-        let s1: E = cols.s1.into();
-        let s2: E = cols.s2.into();
+    pub fn new<V: Dup + Into<E>>(cols: &ControllerCols<V>) -> Self {
+        let s0: E = cols.s0.dup().into();
+        let s1: E = cols.s1.dup().into();
+        let s2: E = cols.s2.dup().into();
         let not_s0 = s0.not();
         let not_s1 = s1.not();
         let not_s2 = s2.not();

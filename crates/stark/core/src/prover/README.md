@@ -10,13 +10,16 @@ Protocol-level overview lives in `miden-stark/README.md`.
 
 | Item | Purpose |
 |------|---------|
-| `prove` | Prove one or more AIR instances |
+| `ProverInstance` | Own validated proving input and prove one or more AIR instances |
 | `ProverStatement` | Validated proving input: a `Statement` plus per-AIR main witness traces in instance order |
 | `Statement` | A `MultiAir` plus the per-proof inputs (`air_inputs`, optional `aux_inputs`) |
 | `MultiAir` | Trusted statement definition: AIR instances, cross-AIR assertions, and a Fiat-Shamir `observe` hook |
 
 ```text
-prove(config, &prover_statement, challenger)
+// Call sketch: config, prover_statement and challenger are supplied by the application.
+let setup = Preprocessed::build(prover_statement.statement(), &config)?;
+let prover = ProverInstance::new(&config, prover_statement, setup.as_ref())?;
+let (output, statement) = prover.prove(challenger)?;
 ```
 
 A `MultiAir` impl exposes its AIRs via `type Air` + `fn airs() -> &[Self::Air]`
@@ -24,9 +27,12 @@ and optionally overrides `max_aux_inputs()`, `eval_external(...)`, and
 `observe(challenger, ...)` (defaults: zero `aux_inputs` budget, no cross-AIR assertions,
 and framed observation of the total public-input count, flattened `air_inputs`, `max_aux_inputs()`,
 `aux_inputs.len()`, then `aux_inputs`; the protocol observes instance count and
-`log_heights` after that hook). Each AIR builds its auxiliary trace via
-`LiftedAir::build_aux_trace_with_preprocessed`. The default delegates to
-`build_aux_trace` for AIRs that do not use the cached preprocessed trace.
+`log_heights` after that hook). `MultiAir::Air` implements native `AirKernel`.
+Proving additionally requires authored `LiftedAir` and `ProverAir<EF>` capabilities.
+`ProverAir::build_aux_trace` receives borrowed main/setup matrices, public and statement
+inputs, and its challenge prefix; its `Result` contains owned auxiliary columns and ordered
+exports. A kernel session borrows uniform inputs and prepares state once per evaluation pass.
+See [AIR and setup ownership](../../README.md#air-api).
 
 A `Statement` wraps a `MultiAir` with per-AIR `air_inputs` and optional `aux_inputs`.
 `Statement::new` accepts `(AIR instance index, public inputs)` entries, validates each
@@ -51,10 +57,10 @@ Rust module-level docs for the full contract and code examples.
 
 ## Protocol flow
 
-0. Absorb caller-supplied inputs via `Statement::observe`, then absorb the instance count and per-instance log trace heights into the challenger.
-1. Validate trace dimensions against AIR definition.
+0. Check trace dimensions, setup association, descriptor degree capacity, quotient allocation and domains before transcript work.
+1. Observe the optional trusted fixed-data commitment, then caller inputs via `Statement::observe`, then the instance count and log trace heights in instance order.
 2. Commit main trace LDE on nested coset (bit-reversed), observe commitment.
-3. Sample aux randomness, build aux trace, commit aux LDE.
+3. Sample aux randomness, build auxiliary traces, commit their LDEs, then send each AIR's ordered exports in proof order before sampling alpha/beta.
 4. Sample constraint folding challenge `alpha` and cross-trace accumulator `beta`.
 5. Build periodic LDEs for periodic columns.
 6. Compute each AIR's quotient on its native quotient coset.

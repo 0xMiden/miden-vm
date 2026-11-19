@@ -17,7 +17,10 @@ use miden_core::{
     program::{KernelDescriptor, Program, StackInputs},
     utils::RowMajorMatrix,
 };
-use miden_stark::lookup::build_logup_aux_trace;
+use miden_stark::{
+    air::LiftedAir,
+    lookup::{Challenges, LookupAir, ProverLookupBuilder, accumulate, build_lookup_fractions},
+};
 use miden_utils_testing::get_column_name;
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
@@ -441,8 +444,28 @@ fn test_trace_generation_at_fragment_boundaries(
         ),
         ("And8Lookup", MidenAir::AND8_LOOKUP, &and8_from_fragments, &and8_from_single),
     ] {
-        let (aux_frag, committed_frag) = build_logup_aux_trace(&air, air_frag, &challenges);
-        let (aux_single, committed_single) = build_logup_aux_trace(&air, air_single, &challenges);
+        // This comparison covers the lookup prefix, independently of source-owned suffix registers.
+        // Construct fixed data once and lend the same table to both fragment collections.
+        type Collector<'a> = ProverLookupBuilder<'a, Felt, QuadFelt>;
+        let spec = air.spec();
+        let preprocessed = air.build_preprocessed_trace();
+        let encoding = Challenges::new(
+            challenges[0],
+            challenges[1],
+            <MidenAir as LookupAir<Collector<'_>>>::max_message_width(&air),
+            <MidenAir as LookupAir<Collector<'_>>>::num_bus_ids(&air),
+        );
+        let collect = |main: &RowMajorMatrix<Felt>| {
+            accumulate(&build_lookup_fractions(
+                &air,
+                main,
+                preprocessed.as_ref(),
+                &spec.periodic_columns,
+                &encoding,
+            ))
+        };
+        let (aux_frag, committed_frag) = collect(air_frag);
+        let (aux_single, committed_single) = collect(air_single);
         assert_eq!(
             aux_frag.values, aux_single.values,
             "{label} LogUp aux trace mismatch between fragments and single fragment"

@@ -89,22 +89,18 @@ use core::array;
 use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
-    utils::RowMajorMatrix,
 };
 use miden_stark::{
-    air::{BaseAir, LiftedAir, LiftedAirBuilder},
-    lookup::{
-        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage,
-    },
+    air,
+    lookup::{self, Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage},
 };
 use miden_utils_sync::LazyLock;
+use p3_field::Dup;
 
 use crate::precompiles::{
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     uint::UintValMsg,
-    utils::{current_main, next_main},
 };
 
 // MESSAGES
@@ -285,192 +281,6 @@ pub struct UintAddAir;
 
 static PERIODIC_COLUMNS: LazyLock<[Vec<Felt>; 1]> = LazyLock::new(|| [vec![Felt::ONE, Felt::ZERO]]);
 
-impl BaseAir<Felt> for UintAddAir {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
-    }
-
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Borrowed(PERIODIC_COLUMNS.as_slice())
-    }
-}
-
-impl LiftedAir<Felt, QuadFelt> for UintAddAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn max_periodic_length(&self) -> usize {
-        PERIOD
-    }
-
-    fn num_randomness(&self) -> usize {
-        NUM_RANDOMNESS
-    }
-
-    fn aux_width(&self) -> usize {
-        AUX_WIDTH
-    }
-
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        miden_stark::lookup::build_logup_aux_trace(&UintAddAir, main, challenges)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
-
-        // The role selector is one on the open row; its complement marks the closing row. Every
-        // next-row constraint is gated by `ab_sel`, so none applies across the cyclic last-to-first
-        // boundary.
-        let ab_sel: AB::Expr = builder.periodic_values()[0].into();
-        let cp_sel: AB::Expr = AB::Expr::ONE - ab_sel.clone();
-
-        // β^0 .. β^7.
-        let beta: AB::ExprEF = builder.permutation_randomness()[1].into();
-        let mut bp: Vec<AB::ExprEF> = Vec::with_capacity(8);
-        bp.push(AB::ExprEF::ONE);
-        for i in 1..8 {
-            bp.push(bp[i - 1].clone() * beta.clone());
-        }
-        let t32: AB::Expr = AB::Expr::from(Felt::new(1u64 << 32).expect("2^32 < Goldilocks p"));
-
-        // The four values at β (Σⱼ limbⱼ·βʲ — t = 2³² is the limb radix, so
-        // the 32-bit limbs recombine to the 256-bit value at β), all read
-        // from the open row's window: a ‖ b local, c ‖ p next.
-        let a_beta: AB::ExprEF = (0..NUM_LIMBS)
-            .fold(AB::ExprEF::ZERO, |s, j| s + bp[j].clone() * AB::Expr::from(local[j]));
-        let b_beta: AB::ExprEF = (0..NUM_LIMBS)
-            .fold(AB::ExprEF::ZERO, |s, j| s + bp[j].clone() * AB::Expr::from(local[CELL_HI + j]));
-        let c_beta: AB::ExprEF = (0..NUM_LIMBS)
-            .fold(AB::ExprEF::ZERO, |s, j| s + bp[j].clone() * AB::Expr::from(next[j]));
-        let p_beta: AB::ExprEF = (0..NUM_LIMBS)
-            .fold(AB::ExprEF::ZERO, |s, j| s + bp[j].clone() * AB::Expr::from(next[CELL_HI + j]));
-
-        // Block scalars, read from the row that hosts them.
-        let is_b_zero: AB::Expr = local[CELL_IS_B_ZERO].into();
-        let is_c_zero_next: AB::Expr = next[CELL_IS_C_ZERO].into();
-        let k_next: AB::Expr = next[CELL_K].into();
-
-        // Σⱼ (β^{j+1} − t·βʲ)·γⱼ — the (β − t)·Γ(β) term, each slot read
-        // from whichever block row the placement table hosts it on.
-        let mut carry: AB::ExprEF = AB::ExprEF::ZERO;
-        for (j, &(row, cell)) in GAMMA_SLOTS.iter().enumerate() {
-            let w: AB::ExprEF = bp[j + 1].clone() - bp[j].clone() * t32.clone();
-            let g: AB::Expr = if row == ROW_AB {
-                local[cell].into()
-            } else {
-                next[cell].into()
-            };
-            carry += w * g;
-        }
-
-        // The block-local SZ identity, one ext constraint on the open
-        // row's window: a(β) + b(β)·(1−is_b_zero) − c(β)·(1−is_c_zero)
-        // − k·(bound(β)+1) + (β−t)·Γ(β) = 0. Padding rows satisfy it
-        // trivially (all-zero cells), so no act gate is needed.
-        let identity: AB::ExprEF = a_beta + b_beta * (AB::Expr::ONE - is_b_zero.clone())
-            - c_beta * (AB::Expr::ONE - is_c_zero_next)
-            - (p_beta + bp[0].clone()) * k_next
-            + carry;
-        builder.assert_zero_ext(identity * ab_sel.clone());
-
-        // Ternary carries: each carry column hosts only Γ slots (or a
-        // structural zero), so the {−1, 0, 1} range check runs ungated on
-        // every row — degree 3 with no selector, lqd-safe.
-        for &cell in &local[FIRST_GAMMA_COL..FIRST_GAMMA_COL + NUM_GAMMA_COLS] {
-            let g: AB::Expr = cell.into();
-            builder.assert_zero(g.clone() * (AB::Expr::ONE - g.clone()) * (AB::Expr::ONE + g));
-        }
-
-        // Columns 20 and 23 host booleans on both rows (is_b_zero / k and
-        // b_on / is_c_zero) — one ungated check per column covers both.
-        for col in [CELL_FLAG, CELL_B_ON] {
-            let f: AB::Expr = local[col].into();
-            builder.assert_zero(f.clone() * (AB::Expr::ONE - f));
-        }
-
-        // act / nz: boolean cycle-constant flags.
-        let act: AB::Expr = local[COL_ACT].into();
-        builder.assert_zero(act.clone() * (AB::Expr::ONE - act.clone()));
-        let nz: AB::Expr = local[COL_NZ].into();
-        builder.assert_zero(nz.clone() * (AB::Expr::ONE - nz.clone()));
-
-        // A provide must come from an active block. The `UintAdd` provide
-        // is gated only by the closing-row selector (not `act`), and the
-        // operand consumes are act-gated — so an `act = 0` block with
-        // zeroed limbs (the SZ closes trivially) and a witnessed `mult`
-        // would provide a *false* relation onto the bus. Force the mult to
-        // 0 when act = 0.
-        builder.assert_zero(
-            cp_sel.clone() * (AB::Expr::ONE - act.clone()) * local[TERM_CELL_MULT].into(),
-        );
-
-        // is_c_zero (read locally on the closing row) forces c_ptr = 0 —
-        // the zero result has no stored address, and the tuple's c_ptr = 0
-        // reads as "≡ 0" to a consumer.
-        let is_c_zero: AB::Expr = local[CELL_IS_C_ZERO].into();
-        let c_ptr_local: AB::Expr = local[COL_C_PTR].into();
-        builder.assert_zero(cp_sel.clone() * is_c_zero.clone() * c_ptr_local);
-
-        // is_b_zero (an open-row scalar) likewise forces b_ptr = 0 so the
-        // tuple reads as the `a + 0 ≡ c` equality form.
-        let b_ptr_local: AB::Expr = local[COL_B_PTR].into();
-        builder.assert_zero(ab_sel.clone() * is_b_zero.clone() * b_ptr_local);
-
-        // The nonzero certificate speaks about the stored `b`, so it cannot
-        // ride an `a + 0 ≡ c` block, whose `b` limbs the identity ignores.
-        builder.assert_zero(ab_sel.clone() * nz.clone() * is_b_zero.clone());
-
-        // b_on / c_on host act·(1 − is_zero): the witnessed activity gates
-        // that let the gated b/c UintVal consumes carry a degree-2
-        // multiplicity `sel·on` instead of `sel·(1−is_zero)·act`
-        // (degree 3). Each is pinned on its own row, all cells local.
-        let b_on: AB::Expr = local[CELL_B_ON].into();
-        builder.assert_zero(ab_sel.clone() * (b_on - act.clone() * (AB::Expr::ONE - is_b_zero)));
-        let c_on: AB::Expr = local[CELL_C_ON].into();
-        builder.assert_zero(cp_sel * (c_on - act * (AB::Expr::ONE - is_c_zero)));
-
-        // Nonzero certificate (open row): when `nz = 1`, this block
-        // additionally certifies `b ≠ 0` — the disequality cert the EC
-        // group law's generic-add case consumes in place of a full inverse
-        // modmul. `S = Σⱼ bⱼ` (a native sum of `b`'s eight 32-bit limbs —
-        // no β-weighting, so no LogUp challenge needed here — stays
-        // `< 2³⁵ < p_Goldilocks`, no wrap) is `0 ⟺ b = 0`; `w` is the
-        // witnessed candidate inverse, `wS` its pinned product (hoisted so
-        // the main check stays degree 3 instead of stacking
-        // `ab_sel·nz·w·S` at degree 5).
-        let s_sum: AB::Expr =
-            (0..NUM_LIMBS).fold(AB::Expr::ZERO, |s, j| s + AB::Expr::from(local[CELL_HI + j]));
-        let w: AB::Expr = local[CELL_D_W].into();
-        let ws: AB::Expr = local[CELL_D_WS].into();
-        builder.assert_zero(ab_sel.clone() * (ws.clone() - w * s_sum));
-        builder.assert_zero(ab_sel.clone() * nz * (ws - AB::Expr::ONE));
-
-        // Cycle-constancy: the four ptrs + act + nz are constant within a
-        // block — the open row pins the closing row; the closing → open
-        // edge (the block boundary, and the cyclic wrap) is free.
-        for col in [COL_A_PTR, COL_B_PTR, COL_C_PTR, COL_BOUND_PTR, COL_ACT, COL_NZ] {
-            let here: AB::Expr = local[col].into();
-            let there: AB::Expr = next[col].into();
-            builder.assert_zero(ab_sel.clone() * (there - here));
-        }
-
-        // Phase 2: LogUp — UintVal consumes + the UintAdd provide.
-        let mut lb = ConstraintLookupBuilder::new(builder, self);
-        <Self as LookupAir<_>>::eval(self, &mut lb);
-        lb.finish();
-    }
-}
-
 // LOOKUP AIR
 // ================================================================================================
 
@@ -484,7 +294,7 @@ fn consume_column<LB>(
     consumes: Vec<(LB::Expr, LB::Expr, [LB::Expr; 8], Deg)>,
     col_deg: Deg,
 ) where
-    LB: LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     builder.next_column(
         |col| {
@@ -518,9 +328,9 @@ fn consume_column<LB>(
     );
 }
 
-impl<LB> LookupAir<LB> for UintAddAir
+impl<LB> lookup::LookupAir<LB> for UintAddAir
 where
-    LB: LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -534,35 +344,36 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, builder: &mut LB) {
-        let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        let local: &[LB::Expr; NUM_MAIN_COLS] =
+            frame.main.current[..NUM_MAIN_COLS].try_into().expect("uint lookup row band");
 
-        let ab_sel: LB::Expr = builder.periodic_values()[0].into();
+        let ab_sel: LB::Expr = frame.periodic[0].dup();
         let cp_sel: LB::Expr = LB::Expr::ONE - ab_sel.clone();
 
-        let a_ptr: LB::Expr = local[COL_A_PTR].into();
-        let b_ptr: LB::Expr = local[COL_B_PTR].into();
-        let c_ptr: LB::Expr = local[COL_C_PTR].into();
-        let bound_ptr: LB::Expr = local[COL_BOUND_PTR].into();
-        let act: LB::Expr = local[COL_ACT].into();
-        let nz: LB::Expr = local[COL_NZ].into();
-        let neg_mult: LB::Expr = LB::Expr::ZERO - local[TERM_CELL_MULT].into();
+        let a_ptr: LB::Expr = local[COL_A_PTR].dup();
+        let b_ptr: LB::Expr = local[COL_B_PTR].dup();
+        let c_ptr: LB::Expr = local[COL_C_PTR].dup();
+        let bound_ptr: LB::Expr = local[COL_BOUND_PTR].dup();
+        let act: LB::Expr = local[COL_ACT].dup();
+        let nz: LB::Expr = local[COL_NZ].dup();
+        let neg_mult: LB::Expr = LB::Expr::ZERO - local[TERM_CELL_MULT].dup();
 
         // The row's two full 8×32 views: `lo` is the a / c value (cells
         // 0–7 on the open / closing row), `hi` the b / p value (cells
         // 8–15). Which interpretation is live is decided by the
         // multiplicity's row gate; everything is local — no next-row
         // reads anywhere on the lookup path.
-        let lo: [LB::Expr; NUM_LIMBS] = array::from_fn(|j| local[j].into());
-        let hi: [LB::Expr; NUM_LIMBS] = array::from_fn(|j| local[CELL_HI + j].into());
+        let lo: [LB::Expr; NUM_LIMBS] = array::from_fn(|j| local[j].dup());
+        let hi: [LB::Expr; NUM_LIMBS] = array::from_fn(|j| local[CELL_HI + j].dup());
 
         // The gated b/c consumes read their witnessed activity gate
         // `on = act·(1 − is_zero)` locally on their firing row. `sel·on`
         // is degree 2 (the pinned `on` folds the act gate in), so the two
         // gated consumes pair per fraction column instead of sitting alone
         // at degree 3 (`sel·(1−is_zero)·act`).
-        let b_on: LB::Expr = local[CELL_B_ON].into();
-        let c_on: LB::Expr = local[CELL_C_ON].into();
+        let b_on: LB::Expr = local[CELL_B_ON].dup();
+        let c_on: LB::Expr = local[CELL_C_ON].dup();
 
         let consume_deg = Deg { v: 2, u: 1 };
         let provide_deg = Deg { v: 2, u: 1 };
@@ -630,5 +441,180 @@ where
             },
             cp_col_deg,
         );
+    }
+}
+
+impl air::LiftedAir for UintAddAir {
+    type F = Felt;
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
+            main_width: NUM_MAIN_COLS,
+            aux_width: AUX_WIDTH,
+            num_public_values: 0,
+            num_challenges: NUM_RANDOMNESS,
+            num_exports: NUM_LOGUP_VALUES,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(PERIODIC_COLUMNS.as_slice()),
+        }
+    }
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        let local: &[AB::Expr; NUM_MAIN_COLS] =
+            frame.main.current[..NUM_MAIN_COLS].try_into().expect("uint main row band");
+        let next: &[AB::Expr; NUM_MAIN_COLS] =
+            frame.main.next[..NUM_MAIN_COLS].try_into().expect("uint main row band");
+
+        // The role selector is one on the open row; its complement marks the closing row. Every
+        // next-row constraint is gated by `ab_sel`, so none applies across the cyclic last-to-first
+        // boundary.
+        let ab_sel: AB::Expr = frame.periodic[0].dup();
+        let cp_sel: AB::Expr = AB::Expr::ONE - ab_sel.clone();
+
+        // β^0 .. β^7.
+        let beta: AB::ExtExpr = inputs.challenge(1);
+        let mut bp: Vec<AB::ExtExpr> = Vec::with_capacity(8);
+        bp.push(AB::ExtExpr::ONE);
+        for i in 1..8 {
+            bp.push(bp[i - 1].clone() * beta.clone());
+        }
+        let t32: AB::Expr = AB::Expr::from(Felt::new(1u64 << 32).expect("2^32 < Goldilocks p"));
+
+        // The four values at β (Σⱼ limbⱼ·βʲ — t = 2³² is the limb radix, so
+        // the 32-bit limbs recombine to the 256-bit value at β), all read
+        // from the open row's window: a ‖ b local, c ‖ p next.
+        let a_beta: AB::ExtExpr =
+            (0..NUM_LIMBS).fold(AB::ExtExpr::ZERO, |s, j| s + bp[j].clone() * local[j].dup());
+        let b_beta: AB::ExtExpr = (0..NUM_LIMBS)
+            .fold(AB::ExtExpr::ZERO, |s, j| s + bp[j].clone() * local[CELL_HI + j].dup());
+        let c_beta: AB::ExtExpr =
+            (0..NUM_LIMBS).fold(AB::ExtExpr::ZERO, |s, j| s + bp[j].clone() * next[j].dup());
+        let p_beta: AB::ExtExpr = (0..NUM_LIMBS)
+            .fold(AB::ExtExpr::ZERO, |s, j| s + bp[j].clone() * next[CELL_HI + j].dup());
+
+        // Block scalars, read from the row that hosts them.
+        let is_b_zero: AB::Expr = local[CELL_IS_B_ZERO].dup();
+        let is_c_zero_next: AB::Expr = next[CELL_IS_C_ZERO].dup();
+        let k_next: AB::Expr = next[CELL_K].dup();
+
+        // Σⱼ (β^{j+1} − t·βʲ)·γⱼ — the (β − t)·Γ(β) term, each slot read
+        // from whichever block row the placement table hosts it on.
+        let mut carry: AB::ExtExpr = AB::ExtExpr::ZERO;
+        for (j, &(row, cell)) in GAMMA_SLOTS.iter().enumerate() {
+            let w: AB::ExtExpr = bp[j + 1].clone() - bp[j].clone() * t32.clone();
+            let g: AB::Expr = if row == ROW_AB {
+                local[cell].dup()
+            } else {
+                next[cell].dup()
+            };
+            carry += w * g;
+        }
+
+        // The block-local SZ identity, one ext constraint on the open
+        // row's window: a(β) + b(β)·(1−is_b_zero) − c(β)·(1−is_c_zero)
+        // − k·(bound(β)+1) + (β−t)·Γ(β) = 0. Padding rows satisfy it
+        // trivially (all-zero cells), so no act gate is needed.
+        let identity: AB::ExtExpr = a_beta + b_beta * (AB::Expr::ONE - is_b_zero.clone())
+            - c_beta * (AB::Expr::ONE - is_c_zero_next)
+            - (p_beta + bp[0].clone()) * k_next
+            + carry;
+        builder.assert_zero_ext(identity * ab_sel.clone());
+
+        // Ternary carries: each carry column hosts only Γ slots (or a
+        // structural zero), so the {−1, 0, 1} range check runs ungated on
+        // every row — degree 3 with no selector, lqd-safe.
+        for cell in &local[FIRST_GAMMA_COL..FIRST_GAMMA_COL + NUM_GAMMA_COLS] {
+            let g = cell.dup();
+            builder.assert_zero(g.clone() * (AB::Expr::ONE - g.clone()) * (AB::Expr::ONE + g));
+        }
+
+        // Columns 20 and 23 host booleans on both rows (is_b_zero / k and
+        // b_on / is_c_zero) — one ungated check per column covers both.
+        for col in [CELL_FLAG, CELL_B_ON] {
+            let f: AB::Expr = local[col].dup();
+            builder.assert_zero(f.clone() * (AB::Expr::ONE - f));
+        }
+
+        // act / nz: boolean cycle-constant flags.
+        let act: AB::Expr = local[COL_ACT].dup();
+        builder.assert_zero(act.clone() * (AB::Expr::ONE - act.clone()));
+        let nz: AB::Expr = local[COL_NZ].dup();
+        builder.assert_zero(nz.clone() * (AB::Expr::ONE - nz.clone()));
+
+        // A provide must come from an active block. The `UintAdd` provide
+        // is gated only by the closing-row selector (not `act`), and the
+        // operand consumes are act-gated — so an `act = 0` block with
+        // zeroed limbs (the SZ closes trivially) and a witnessed `mult`
+        // would provide a *false* relation onto the bus. Force the mult to
+        // 0 when act = 0.
+        builder.assert_zero(
+            cp_sel.clone() * (AB::Expr::ONE - act.clone()) * local[TERM_CELL_MULT].dup(),
+        );
+
+        // is_c_zero (read locally on the closing row) forces c_ptr = 0 —
+        // the zero result has no stored address, and the tuple's c_ptr = 0
+        // reads as "≡ 0" to a consumer.
+        let is_c_zero: AB::Expr = local[CELL_IS_C_ZERO].dup();
+        let c_ptr_local: AB::Expr = local[COL_C_PTR].dup();
+        builder.assert_zero(cp_sel.clone() * is_c_zero.clone() * c_ptr_local);
+
+        // is_b_zero (an open-row scalar) likewise forces b_ptr = 0 so the
+        // tuple reads as the `a + 0 ≡ c` equality form.
+        let b_ptr_local: AB::Expr = local[COL_B_PTR].dup();
+        builder.assert_zero(ab_sel.clone() * is_b_zero.clone() * b_ptr_local);
+
+        // The nonzero certificate speaks about the stored `b`, so it cannot
+        // ride an `a + 0 ≡ c` block, whose `b` limbs the identity ignores.
+        builder.assert_zero(ab_sel.clone() * nz.clone() * is_b_zero.clone());
+
+        // b_on / c_on host act·(1 − is_zero): the witnessed activity gates
+        // that let the gated b/c UintVal consumes carry a degree-2
+        // multiplicity `sel·on` instead of `sel·(1−is_zero)·act`
+        // (degree 3). Each is pinned on its own row, all cells local.
+        let b_on: AB::Expr = local[CELL_B_ON].dup();
+        builder.assert_zero(ab_sel.clone() * (b_on - act.clone() * (AB::Expr::ONE - is_b_zero)));
+        let c_on: AB::Expr = local[CELL_C_ON].dup();
+        builder.assert_zero(cp_sel * (c_on - act * (AB::Expr::ONE - is_c_zero)));
+
+        // Nonzero certificate (open row): when `nz = 1`, this block
+        // additionally certifies `b ≠ 0` — the disequality cert the EC
+        // group law's generic-add case consumes in place of a full inverse
+        // modmul. `S = Σⱼ bⱼ` (a native sum of `b`'s eight 32-bit limbs —
+        // no β-weighting, so no LogUp challenge needed here — stays
+        // `< 2³⁵ < p_Goldilocks`, no wrap) is `0 ⟺ b = 0`; `w` is the
+        // witnessed candidate inverse, `wS` its pinned product (hoisted so
+        // the main check stays degree 3 instead of stacking
+        // `ab_sel·nz·w·S` at degree 5).
+        let s_sum: AB::Expr =
+            (0..NUM_LIMBS).fold(AB::Expr::ZERO, |s, j| s + local[CELL_HI + j].dup());
+        let w: AB::Expr = local[CELL_D_W].dup();
+        let ws: AB::Expr = local[CELL_D_WS].dup();
+        builder.assert_zero(ab_sel.clone() * (ws.clone() - w * s_sum));
+        builder.assert_zero(ab_sel.clone() * nz * (ws - AB::Expr::ONE));
+
+        // Cycle-constancy: the four ptrs + act + nz are constant within a
+        // block — the open row pins the closing row; the closing → open
+        // edge (the block boundary, and the cyclic wrap) is free.
+        for col in [COL_A_PTR, COL_B_PTR, COL_C_PTR, COL_BOUND_PTR, COL_ACT, COL_NZ] {
+            let here: AB::Expr = local[col].dup();
+            let there: AB::Expr = next[col].dup();
+            builder.assert_zero(ab_sel.clone() * (there - here));
+        }
+
+        // Phase 2: LogUp — UintVal consumes + the UintAdd provide.
+        lookup::eval_lookup(self, frame, inputs, builder);
+    }
+}
+
+impl air::ProverAir<QuadFelt> for UintAddAir {
+    type Error = lookup::LookupError;
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }

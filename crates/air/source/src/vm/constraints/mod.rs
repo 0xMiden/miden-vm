@@ -11,8 +11,9 @@
 //!   [`miden_stark::lookup::ConstraintLookupBuilder`].
 
 use chiplets::selectors::ChipletSelectors;
+use miden_stark::air::Frame;
 
-use crate::vm::{ChipletCols, CoreCols, MidenAirBuilder};
+use crate::vm::{ChipletCols, CoreCols, NativeMidenAirBuilder};
 
 pub mod and8_lookup;
 pub mod chiplets;
@@ -43,28 +44,30 @@ mod test_utils;
 /// Public-input boundary constraints ([`public_inputs::enforce_main`]) are owned by Core too
 /// but live on a separate entry point because they don't read `next` or `op_flags`.
 pub fn enforce_core<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    local: &CoreCols<AB::Var>,
-    next: &CoreCols<AB::Var>,
+    local: &CoreCols<AB::Expr>,
+    next: &CoreCols<AB::Expr>,
     op_flags: &op_flags::OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
-    system::enforce_main(builder, local, next, op_flags);
-    stack::enforce_main(builder, local, next, op_flags);
-    decoder::enforce_main(builder, local, next, op_flags);
+    system::enforce_main(frame, builder, local, next, op_flags);
+    stack::enforce_main(frame, builder, local, next, op_flags);
+    decoder::enforce_main(frame, builder, local, next, op_flags);
 }
 
 /// Enforces the Chiplets-trace main constraints (hasher controller, bitwise, memory, ACE).
 /// Selector validity is enforced separately via
 /// [`chiplets::selectors::build_chiplet_selectors`].
 pub fn enforce_chiplets<AB>(
+    frame: &Frame<'_, AB>,
     builder: &mut AB,
-    local: &ChipletCols<AB::Var>,
-    next: &ChipletCols<AB::Var>,
+    local: &ChipletCols<AB::Expr>,
+    next: &ChipletCols<AB::Expr>,
     selectors: &ChipletSelectors<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: NativeMidenAirBuilder,
 {
-    chiplets::enforce_main(builder, local, next, selectors);
+    chiplets::enforce_main(frame, builder, local, next, selectors);
 }

@@ -1,3 +1,5 @@
+use p3_field::Dup;
+
 use crate::vm::trace::decoder::{
     NUM_HASHER_COLUMNS, NUM_OP_BITS, NUM_OP_BITS_EXTRA_COLS, NUM_USER_OP_HELPERS,
 };
@@ -26,16 +28,16 @@ pub struct DecoderCols<T> {
     pub extra: [T; NUM_OP_BITS_EXTRA_COLS],
 }
 
-impl<T: Copy> DecoderCols<T> {
+impl<T: Dup> DecoderCols<T> {
     /// Returns the 6 user-op helper registers (hasher_state[2..8]).
     pub fn user_op_helpers(&self) -> [T; NUM_USER_OP_HELPERS] {
         [
-            self.hasher_state[2],
-            self.hasher_state[3],
-            self.hasher_state[4],
-            self.hasher_state[5],
-            self.hasher_state[6],
-            self.hasher_state[7],
+            self.hasher_state[2].dup(),
+            self.hasher_state[3].dup(),
+            self.hasher_state[4].dup(),
+            self.hasher_state[5].dup(),
+            self.hasher_state[6].dup(),
+            self.hasher_state[7].dup(),
         ]
     }
 
@@ -43,9 +45,9 @@ impl<T: Copy> DecoderCols<T> {
     /// Column 7 is constrained to zero on END rows.
     pub fn end_block_flags(&self) -> EndBlockFlags<T> {
         EndBlockFlags {
-            is_loop_body: self.hasher_state[4],
-            is_loop: self.hasher_state[5],
-            restores_caller_frame: self.hasher_state[6],
+            is_loop_body: self.hasher_state[4].dup(),
+            is_loop: self.hasher_state[5].dup(),
+            restores_caller_frame: self.hasher_state[6].dup(),
         }
     }
 }

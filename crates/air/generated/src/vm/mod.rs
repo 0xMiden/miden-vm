@@ -6,21 +6,16 @@
 pub mod ace;
 mod airs;
 pub mod config;
-#[allow(clippy::eq_op)]
-mod generated;
 mod proof_order;
 pub mod security;
 mod statement;
 
-pub use airs::MidenAir;
+pub use airs::{MidenAir, VmPrepared};
 pub use miden_air_definitions::vm::{NUM_PUBLIC_VALUES, PublicInputs};
 pub use miden_core::{Felt, serde::DeserializationError};
 pub use miden_stark::{
     StarkConfig,
-    air::{
-        AirBuilder, BaseAir, ConstraintCounts, ConstraintDegrees, ExtensionBuilder, LiftedAir,
-        LiftedAirBuilder, MultiAir, PermutationAirBuilder, ProverStatement, Statement,
-    },
+    air::{MultiAir, ProverStatement, Statement},
     debug,
     pcs::PcsParams,
 };

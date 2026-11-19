@@ -105,18 +105,9 @@ pub const TRACE_WIDTH: usize =
 // AUXILIARY COLUMNS LAYOUT
 // ------------------------------------------------------------------------------------------------
 //
-// The auxiliary trace is the LogUp lookup-argument segment built per-AIR by `CoreAir`'s
-// and `ChipletsAir`'s `AuxBuilder` impls: 4 main-trace LogUp columns for Core and 4
-// chiplet-trace LogUp columns for Chiplets. See
-// [`crate::vm::constraints::lookup::main_air::MainLookupAir`] and
-// [`crate::vm::constraints::lookup::chiplet_air::emit_chiplet_lookup_columns`] for the
-// per-column contents.
-
-/// Auxiliary width reserved by the combined VM trace layout.
-///
-/// Each AIR reports its actual LogUp width through `MidenAir::aux_width`; this value is not the
-/// sum of the four independent AIR widths.
-pub const AUX_TRACE_WIDTH: usize = crate::vm::LOGUP_AUX_TRACE_WIDTH;
+// Each AIR declares its auxiliary width in its native AirSpec and constructs the corresponding
+// witness through ProverAir. Lookup columns occupy the declared prefix; source-specific registers
+// follow it when needed.
 
 /// Number of random challenges used for auxiliary trace constraints.
 pub const AUX_TRACE_RAND_CHALLENGES: usize = 2;

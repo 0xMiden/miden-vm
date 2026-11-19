@@ -8,18 +8,17 @@ use alloc::{borrow::Cow, vec::Vec};
 use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
-    utils::RowMajorMatrix,
 };
 use miden_stark::{
-    air::{BaseAir, LiftedAir, LiftedAirBuilder},
-    lookup::{ConstraintLookupBuilder, Deg, LookupAir, LookupBuilder, LookupColumn, LookupMessage},
+    air,
+    lookup::{self, Deg, LookupColumn, LookupMessage},
 };
 use miden_utils_sync::LazyLock;
+use p3_field::Dup;
 
 use crate::precompiles::{
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    utils::{current_main, next_main},
 };
 
 pub const IO_PERIODIC_OFFSET: usize = compression::NUM_PERIODIC_COLS;
@@ -84,98 +83,92 @@ static PERIODIC_COLUMNS: LazyLock<Vec<Vec<Felt>>> = LazyLock::new(|| {
     columns
 });
 
-impl BaseAir<Felt> for Sha256Air {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
+impl air::LiftedAir for Sha256Air {
+    type F = Felt;
+
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
+            main_width: NUM_MAIN_COLS,
+            aux_width: NUM_AUX_COLS,
+            num_public_values: 0,
+            num_challenges: NUM_RANDOMNESS,
+            num_exports: NUM_LOGUP_VALUES,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(PERIODIC_COLUMNS.as_slice()),
+        }
     }
 
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Borrowed(PERIODIC_COLUMNS.as_slice())
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        let local = frame.main.current;
+        let next = frame.main.next;
+        let io_periods: &[AB::Expr; io::NUM_PERIODIC_COLS] = frame.periodic
+            [IO_PERIODIC_OFFSET..IO_PERIODIC_OFFSET + io::NUM_PERIODIC_COLS]
+            .try_into()
+            .expect("SHA-256 composed IO periodic band");
+        let io_act: AB::Expr = local[COL_IO_ACT].dup();
+        builder.assert_bool(local[COL_IO_ACT].dup());
+        builder.assert_zero(
+            io_act.dup()
+                - local[compression::COL_ACT].dup()
+                    * local[compression::COL_PHASE_BEGIN + compression::program::PHASE_PADDING]
+                        .dup()
+                    * local[compression::COL_PHASE_END].dup(),
+        );
+        compression::eval_main_with_io(frame, builder, 0, 0, io_act.dup());
+        let io_local = IO_COLUMNS.map(|column| local[column].dup());
+        let io_next = IO_COLUMNS.map(|column| next[column].dup());
+        let carry = io_act.dup() * (AB::Expr::ONE - io_periods[io::program::P_LAST].dup());
+        io::eval_main_rows(frame, builder, &io_local, &io_next, io_periods, io_act, carry);
+
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl LiftedAir<Felt, QuadFelt> for Sha256Air {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn max_periodic_length(&self) -> usize {
-        <compression::Sha256CompressionAir as LiftedAir<Felt, QuadFelt>>::max_periodic_length(
-            &compression::Sha256CompressionAir,
-        )
-    }
-
-    fn num_randomness(&self) -> usize {
-        NUM_RANDOMNESS
-    }
-
-    fn aux_width(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
+impl air::ProverAir<QuadFelt> for Sha256Air {
+    type Error = lookup::LookupError;
 
     fn build_aux_trace(
         &self,
-        main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        miden_stark::lookup::build_logup_aux_trace(self, main, challenges)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
-        let periods = builder.periodic_values();
-        let io_periods = core::array::from_fn(|i| periods[IO_PERIODIC_OFFSET + i].into());
-        let io_act: AB::Expr = local[COL_IO_ACT].into();
-        builder.assert_bool(local[COL_IO_ACT]);
-        builder.assert_zero(
-            io_act.clone()
-                - AB::Expr::from(local[compression::COL_ACT])
-                    * local[compression::COL_PHASE_BEGIN + compression::program::PHASE_PADDING]
-                        .into()
-                    * local[compression::COL_PHASE_END].into(),
-        );
-        compression::eval_main_with_io(builder, 0, 0, io_act.clone());
-        let io_local = IO_COLUMNS.map(|column| local[column]);
-        let io_next = IO_COLUMNS.map(|column| next[column]);
-        let carry = io_act.clone() * (AB::Expr::ONE - io_periods[io::program::P_LAST].clone());
-        io::eval_main_rows(builder, &io_local, &io_next, &io_periods, io_act, carry);
-
-        let mut lb = ConstraintLookupBuilder::new(builder, self);
-        <Self as LookupAir<_>>::eval(self, &mut lb);
-        lb.finish();
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
-impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha256Air {
+impl<LB: lookup::LookupBuilder<F = Felt>> lookup::LookupAir<LB> for Sha256Air {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
-
     fn max_message_width(&self) -> usize {
         MAX_MESSAGE_WIDTH
     }
-
     fn num_bus_ids(&self) -> usize {
         NUM_BUS_IDS
     }
-
-    fn eval(&self, builder: &mut LB) {
-        let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let comp_local = core::array::from_fn(|i| local[i]);
-        let io_local = IO_COLUMNS.map(|column| local[column]);
-        let next: [LB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
-        let io_next = IO_COLUMNS.map(|column| next[column]);
-        let periods = builder.periodic_values();
-        let comp_periods = core::array::from_fn(|i| periods[i].into());
-        let io_periods: [LB::Expr; io::NUM_PERIODIC_COLS] =
-            core::array::from_fn(|i| periods[IO_PERIODIC_OFFSET + i].into());
-        let io_act: LB::Expr = local[COL_IO_ACT].into();
-        let exec_act = LB::Expr::from(local[compression::COL_ACT]) - io_act.clone();
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        let local = frame.main.current;
+        let comp_local: &[LB::Expr; compression::NUM_MAIN_COLS] = local
+            [..compression::NUM_MAIN_COLS]
+            .try_into()
+            .expect("SHA-256 composed compression lookup row band");
+        let io_local = IO_COLUMNS.map(|column| local[column].dup());
+        let next = frame.main.next;
+        let io_next = IO_COLUMNS.map(|column| next[column].dup());
+        let comp_periods: &[LB::Expr; compression::NUM_PERIODIC_COLS] = frame.periodic
+            [..IO_PERIODIC_OFFSET]
+            .try_into()
+            .expect("SHA-256 composed compression lookup periodic band");
+        let io_periods: &[LB::Expr; io::NUM_PERIODIC_COLS] = frame.periodic
+            [IO_PERIODIC_OFFSET..IO_PERIODIC_OFFSET + io::NUM_PERIODIC_COLS]
+            .try_into()
+            .expect("SHA-256 composed IO lookup periodic band");
+        let io_act: LB::Expr = local[COL_IO_ACT].dup();
+        let exec_act = local[compression::COL_ACT].dup() - io_act.dup();
         for index in 0..NUM_AUX_COLS {
             let comp = compression::lookup_column_degree(index);
             let io = io::lookup_column_degree(index, true);
@@ -188,17 +181,17 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha256Air {
                             compression::eval_lookup_group(
                                 group,
                                 index,
-                                &comp_local,
-                                &comp_periods,
-                                exec_act.clone(),
+                                comp_local,
+                                comp_periods,
+                                exec_act.dup(),
                             );
                             io::eval_lookup_group(
                                 group,
                                 index,
                                 &io_local,
                                 &io_next,
-                                &io_periods,
-                                io_act.clone(),
+                                io_periods,
+                                io_act.dup(),
                                 true,
                             );
                         },
@@ -213,60 +206,22 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha256Air {
 
 #[cfg(all(test, feature = "std"))]
 mod tests {
-    use miden_core::{Felt, field::QuadFelt};
-    use miden_stark::{
-        air::{ConstraintDegrees, LiftedAir},
-        lookup::{
-            LookupAir,
-            debug::{ValidateLayout, ValidateLookupAir, ValidationBuilder},
-        },
-    };
+    use alloc::vec::Vec;
 
-    fn validate_degrees<A>(air: A)
-    where
-        A: LiftedAir<Felt, QuadFelt>,
-        for<'ab, 'r> A: LookupAir<ValidationBuilder<'ab, 'r>>,
-    {
-        let layout = air.air_layout();
-        air.validate(ValidateLayout {
-            trace_width: layout.main_width,
-            preprocessed_width: layout.preprocessed_width,
-            num_public_values: layout.num_public_values,
-            num_periodic_columns: layout.num_periodic_columns,
-            permutation_width: layout.permutation_width,
-            num_permutation_challenges: layout.num_permutation_challenges,
-            num_permutation_values: layout.num_permutation_values,
-        })
-        .expect("SHA-256 lookup degree annotations must match their symbolic expressions");
-    }
+    use super::super::assert_sha_source;
 
     #[test]
-    fn sha256_compression_lookup_degrees_match_annotations() {
-        validate_degrees(super::compression::Sha256CompressionAir);
-    }
-
-    #[test]
-    fn sha256_io_lookup_degrees_match_annotations() {
-        validate_degrees(super::io::Sha256IoAir);
-    }
-
-    #[test]
-    fn sha256_composite_lookup_degrees_match_annotations() {
-        validate_degrees(super::Sha256Air);
-    }
-
-    #[test]
-    fn sha256_constraints_fit_the_deployed_degree_bound() {
-        // Pin the deployed degree independently of the AIRs being measured.
-        let bound = 5;
-        let degrees = [
-            ConstraintDegrees::from_air::<Felt, QuadFelt, _>(
-                &super::compression::Sha256CompressionAir,
-            )
-            .max(),
-            ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&super::io::Sha256IoAir).max(),
-            ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&super::Sha256Air).max(),
-        ];
-        assert!(degrees.iter().all(|&degree| degree <= bound), "{degrees:?} exceed {bound}");
+    fn sha256_sources_preserve_constraint_layout_and_lookup_degrees() {
+        assert_sha_source(super::compression::Sha256CompressionAir, 39, 4, 115, 128, 48);
+        assert_sha_source(super::io::Sha256IoAir, 28, 4, 23, 32, 58);
+        assert_sha_source(super::Sha256Air, 40, 4, 138, 128, 100);
+        assert_eq!(super::IO_ROW_START, 4064);
+        assert_eq!(super::IO_PERIODIC_OFFSET, 115);
+        assert_eq!(super::IO_COLUMNS[super::io::COL_ACT], 39);
+        assert_eq!(super::IO_COLUMNS[super::io::COL_BLOCK_ID], 0);
+        assert_eq!(&super::IO_COLUMNS[2..], &(11..37).collect::<Vec<_>>());
+        assert_eq!(super::COLUMN_SHAPE, [2; 4]);
+        assert_eq!(super::compression::COLUMN_SHAPE, [2; 4]);
+        assert_eq!(super::io::COLUMN_SHAPE, [2; 4]);
     }
 }

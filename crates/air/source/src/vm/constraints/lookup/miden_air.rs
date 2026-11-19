@@ -100,25 +100,13 @@ mod tests {
         utils::{Matrix, RowMajorMatrix},
     };
     use miden_stark::{
-        air::BaseAir,
-        lookup::{
-            Challenges, build_lookup_fractions,
-            debug::{ValidateLayout, ValidateLookupAir},
-        },
+        air::LiftedAir,
+        lookup::{Challenges, build_lookup_fractions, validate_native},
     };
 
     use crate::vm::{
-        ChipletsAir, EidosCompressionAir, Felt, MidenAir, NUM_EIDOS_COMPRESSION_COLS,
-        NUM_PUBLIC_VALUES,
-        constraints::{
-            columns::{NUM_CHIPLETS_COLS, NUM_CORE_COLS},
-            eidos_compression::lookup::EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE,
-            lookup::{
-                BusId, MIDEN_MAX_MESSAGE_WIDTH, chiplet_air::CHIPLET_COLUMN_SHAPE,
-                main_air::MAIN_COLUMN_SHAPE,
-            },
-        },
-        trace::AUX_TRACE_RAND_CHALLENGES,
+        Felt, MidenAir,
+        constraints::lookup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     };
 
     /// Pin the `BlockHashMsg::End -> Child` boundary collapse: at the root END row, the
@@ -168,73 +156,12 @@ mod tests {
         );
     }
 
-    /// Lookup-structure validation for `CoreAir`.
     #[test]
-    fn core_air_lookup_validates() {
-        let layout = ValidateLayout {
-            preprocessed_width: 0,
-            trace_width: NUM_CORE_COLS,
-            num_public_values: NUM_PUBLIC_VALUES,
-            num_periodic_columns: 0,
-            permutation_width: MAIN_COLUMN_SHAPE.len(),
-            num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
-            num_permutation_values: 1,
-        };
-        ValidateLookupAir::validate(&MidenAir::Core, layout)
-            .unwrap_or_else(|err| panic!("CoreAir LookupAir validation failed: {err}"));
-    }
-
-    /// Lookup-structure validation for `ChipletsAir`.
-    #[test]
-    fn chiplets_air_lookup_validates() {
-        let num_periodic = ChipletsAir.periodic_columns().len();
-        let layout = ValidateLayout {
-            preprocessed_width: 0,
-            trace_width: NUM_CHIPLETS_COLS,
-            num_public_values: 0,
-            num_periodic_columns: num_periodic,
-            permutation_width: CHIPLET_COLUMN_SHAPE.len(),
-            num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
-            num_permutation_values: 1,
-        };
-        ValidateLookupAir::validate(&MidenAir::Chiplets, layout)
-            .unwrap_or_else(|err| panic!("ChipletsAir LookupAir validation failed: {err}"));
-    }
-    #[test]
-    fn eidos_compression_air_lookup_validates() {
-        let num_periodic = EidosCompressionAir.periodic_columns().len();
-        let layout = ValidateLayout {
-            preprocessed_width: 0,
-            trace_width: NUM_EIDOS_COMPRESSION_COLS,
-            num_public_values: 0,
-            num_periodic_columns: num_periodic,
-            permutation_width: EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len(),
-            num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
-            num_permutation_values: 1,
-        };
-        ValidateLookupAir::validate(&MidenAir::EIDOS_COMPRESSION, layout)
-            .unwrap_or_else(|err| panic!("EidosCompressionAir LookupAir validation failed: {err}"));
-    }
-
-    #[test]
-    fn and8_lookup_air_lookup_validates() {
-        let layout = ValidateLayout {
-            preprocessed_width:
-                crate::vm::constraints::and8_lookup::columns::NUM_AND8_LOOKUP_PREPROCESSED_COLS,
-            trace_width: crate::vm::constraints::and8_lookup::columns::NUM_AND8_LOOKUP_COLS,
-            num_public_values: 0,
-            num_periodic_columns: 0,
-            permutation_width:
-                crate::vm::constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE.len(),
-            num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
-            num_permutation_values: 1,
-        };
-        ValidateLookupAir::validate(&MidenAir::AND8_LOOKUP, layout)
-            .unwrap_or_else(|err| panic!("And8LookupAir LookupAir validation failed: {err}"));
-        assert_eq!(
-            crate::vm::constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE,
-            [1, 2, 2, 2],
-        );
+    fn all_vm_lookup_degrees_match_their_declarations() {
+        for air in crate::vm::AIRS {
+            validate_native(&air, &air.spec())
+                .unwrap_or_else(|err| panic!("{air:?} lookup degree mismatch: {err:?}"));
+        }
     }
 
     #[test]
@@ -242,8 +169,9 @@ mod tests {
         const NUM_ROWS: usize = 2;
 
         let air = MidenAir::AND8_LOOKUP;
-        let full_preprocessed =
-            air.preprocessed_trace().expect("And8 lookup AIR declares a preprocessed table");
+        let full_preprocessed = air
+            .build_preprocessed_trace()
+            .expect("And8 lookup AIR declares a preprocessed table");
         let preprocessed_width = full_preprocessed.width();
         let last_row = full_preprocessed.height() - 1;
         let mut preprocessed_values = Vec::with_capacity(NUM_ROWS * preprocessed_width);

@@ -4,49 +4,35 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_stark::air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
-use p3_matrix::dense::RowMajorMatrix;
-
-use crate::vm::trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH};
-
-pub(in crate::vm::constraints) struct ConstraintEvalBuilder {
-    main: RowMajorMatrix<Felt>,
-    aux: RowMajorMatrix<QuadFelt>,
-    randomness: Vec<QuadFelt>,
-    permutation_values: Vec<QuadFelt>,
+/// Numerical immutable input context for helpers with a separate native assertion sink.
+pub(in crate::vm::constraints) struct ConstraintEvalContext {
+    selectors: miden_stark::air::Selectors<Felt>,
     periodic_values: Vec<Felt>,
-    pub(in crate::vm::constraints) evaluations: Vec<QuadFelt>,
-    preprocessed_window: RowWindow<'static, Felt>,
-    first_row: Felt,
-    last_row: Felt,
-    transition: Felt,
 }
 
-impl ConstraintEvalBuilder {
+impl ConstraintEvalContext {
     pub(in crate::vm::constraints) fn new() -> Self {
         Self {
-            main: RowMajorMatrix::new(vec![Felt::ZERO; TRACE_WIDTH * 2], TRACE_WIDTH),
-            aux: RowMajorMatrix::new(vec![QuadFelt::ZERO; AUX_TRACE_WIDTH * 2], AUX_TRACE_WIDTH),
-            randomness: vec![QuadFelt::ZERO; AUX_TRACE_RAND_CHALLENGES],
-            permutation_values: vec![QuadFelt::ZERO; AUX_TRACE_WIDTH],
+            selectors: miden_stark::air::Selectors {
+                first: Felt::ZERO,
+                last: Felt::ZERO,
+                transition: Felt::ONE,
+            },
             periodic_values: Vec::new(),
-            evaluations: Vec::new(),
-            preprocessed_window: RowWindow::from_two_rows(&[], &[]),
-            first_row: Felt::ZERO,
-            last_row: Felt::ZERO,
-            transition: Felt::ONE,
         }
     }
 
     pub(in crate::vm::constraints) fn with_row_flags(
         mut self,
-        first_row: bool,
-        last_row: bool,
+        first: bool,
+        last: bool,
         transition: bool,
     ) -> Self {
-        self.first_row = Felt::from_bool(first_row);
-        self.last_row = Felt::from_bool(last_row);
-        self.transition = Felt::from_bool(transition);
+        self.selectors = miden_stark::air::Selectors {
+            first: Felt::from_bool(first),
+            last: Felt::from_bool(last),
+            transition: Felt::from_bool(transition),
+        };
         self
     }
 
@@ -54,82 +40,47 @@ impl ConstraintEvalBuilder {
         self.periodic_values = values;
         self
     }
+
+    pub(in crate::vm::constraints) fn frame<'a>(
+        &'a self,
+        local: &'a super::columns::CoreCols<Felt>,
+        next: &'a super::columns::CoreCols<Felt>,
+    ) -> miden_stark::air::AirFrame<'a, Felt, QuadFelt> {
+        self.frame_rows(local.as_slice(), next.as_slice())
+    }
+
+    pub(in crate::vm::constraints) fn frame_rows<'a>(
+        &'a self,
+        local: &'a [Felt],
+        next: &'a [Felt],
+    ) -> miden_stark::air::AirFrame<'a, Felt, QuadFelt> {
+        use miden_stark::air::{AirFrame, Rows};
+        AirFrame {
+            main: Rows { current: local, next },
+            preprocessed: Rows { current: &[], next: &[] },
+            aux: Rows { current: &[], next: &[] },
+            periodic: &self.periodic_values,
+            selectors: self.selectors,
+        }
+    }
 }
 
-impl AirBuilder for ConstraintEvalBuilder {
+/// Numerical sink with no row, selector, or uniform input access.
+#[derive(Default)]
+pub(in crate::vm::constraints) struct NativeConstraintEvalBuilder {
+    pub(in crate::vm::constraints) evaluations: Vec<QuadFelt>,
+}
+
+impl miden_stark::air::LiftedAirBuilder for NativeConstraintEvalBuilder {
     type F = Felt;
     type Expr = Felt;
-    type Var = Felt;
-    type PreprocessedWindow = RowWindow<'static, Felt>;
-    type MainWindow = RowMajorMatrix<Felt>;
-    type PublicVar = Felt;
-    type PeriodicVar = Felt;
+    type ExtExpr = QuadFelt;
 
-    fn main(&self) -> Self::MainWindow {
-        self.main.clone()
+    fn emit_base(&mut self, value: Felt, _: miden_stark::air::ConstraintMeta<'_>) {
+        self.evaluations.push(value.into());
     }
 
-    fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        &self.preprocessed_window
-    }
-
-    fn is_first_row(&self) -> Self::Expr {
-        self.first_row
-    }
-
-    fn is_last_row(&self) -> Self::Expr {
-        self.last_row
-    }
-
-    fn is_transition(&self) -> Self::Expr {
-        self.transition
-    }
-
-    fn is_transition_window(&self, size: usize) -> Self::Expr {
-        assert_eq!(size, 2, "constraint tests use two-row transition windows");
-        self.is_transition()
-    }
-
-    fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
-        self.evaluations.push(QuadFelt::from(x.into()));
-    }
-
-    fn public_values(&self) -> &[Self::PublicVar] {
-        &[]
-    }
-
-    fn periodic_values(&self) -> &[Self::PeriodicVar] {
-        &self.periodic_values
-    }
-}
-
-impl ExtensionBuilder for ConstraintEvalBuilder {
-    type EF = QuadFelt;
-    type ExprEF = QuadFelt;
-    type VarEF = QuadFelt;
-
-    fn assert_zero_ext<I>(&mut self, x: I)
-    where
-        I: Into<Self::ExprEF>,
-    {
-        self.evaluations.push(x.into());
-    }
-}
-
-impl PermutationAirBuilder for ConstraintEvalBuilder {
-    type MP = RowMajorMatrix<QuadFelt>;
-    type RandomVar = QuadFelt;
-    type PermutationVar = QuadFelt;
-
-    fn permutation(&self) -> Self::MP {
-        self.aux.clone()
-    }
-
-    fn permutation_randomness(&self) -> &[Self::RandomVar] {
-        &self.randomness
-    }
-
-    fn permutation_values(&self) -> &[Self::PermutationVar] {
-        &self.permutation_values
+    fn emit_ext(&mut self, value: QuadFelt, _: miden_stark::air::ConstraintMeta<'_>) {
+        self.evaluations.push(value);
     }
 }

@@ -1,23 +1,12 @@
 //! Production precompile AIR adapters and build-generated evaluation.
 
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::vec::Vec;
 
-use miden_air_definitions::precompiles as definitions;
-use miden_core::{
-    Felt,
-    field::{Algebra, QuadFelt},
-    utils::RowMajorMatrix,
-};
-use miden_stark::air::{
-    BaseAir, ConstraintDegrees, EvalInputs, LiftedAir, LiftedAirBuilder, MultiAir, ReductionError,
-};
+use miden_air_definitions::precompiles::{self as definitions, ChipletAir as Source};
+use miden_core::{Felt, field::QuadFelt};
+use miden_stark::air::{MultiAir, ReductionError};
 
-include!(concat!(env!("OUT_DIR"), "/pvm_degrees.rs"));
-
-#[allow(clippy::eq_op)]
-mod generated {
-    include!(concat!(env!("OUT_DIR"), "/pvm_evaluators.rs"));
-}
+use crate::kernel::define_dispatch;
 
 /// Number of AIR instances in the precompile relation.
 pub const NUM_CHIPLETS: usize = definitions::NUM_CHIPLETS;
@@ -55,145 +44,6 @@ impl ChipletAir {
     }
 }
 
-impl BaseAir<Felt> for ChipletAir {
-    fn width(&self) -> usize {
-        self.0.width()
-    }
-    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
-        self.0.preprocessed_trace()
-    }
-    fn preprocessed_width(&self) -> usize {
-        self.0.preprocessed_width()
-    }
-    fn num_public_values(&self) -> usize {
-        self.0.num_public_values()
-    }
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        self.0.periodic_columns()
-    }
-}
-
-impl LiftedAir<Felt, QuadFelt> for ChipletAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = Vec<E>;
-
-    fn log_preprocessed_height(&self) -> Option<u8> {
-        self.0.log_preprocessed_height()
-    }
-
-    fn constraint_degree(&self) -> ConstraintDegrees {
-        generated_degrees(*self)
-    }
-
-    fn max_periodic_length(&self) -> usize {
-        self.0.max_periodic_length()
-    }
-
-    fn num_randomness(&self) -> usize {
-        self.0.num_randomness()
-    }
-    fn aux_width(&self) -> usize {
-        self.0.aux_width()
-    }
-    fn num_aux_values(&self) -> usize {
-        self.0.num_aux_values()
-    }
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        self.0.build_aux_trace(main, air_inputs, aux_inputs, challenges)
-    }
-    fn build_aux_trace_with_preprocessed(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        preprocessed: Option<&RowMajorMatrix<Felt>>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        self.0.build_aux_trace_with_preprocessed(
-            main,
-            preprocessed,
-            air_inputs,
-            aux_inputs,
-            challenges,
-        )
-    }
-    fn prepare<B: Algebra<Felt>, E: Algebra<B>>(&self, inputs: EvalInputs<'_, B, E>) -> Vec<E> {
-        let challenges = inputs.challenges;
-        match self.0 {
-            definitions::ChipletAir::ChunkNodeSponge => {
-                generated::precompute_chunk_node_sponge::<B, E>(challenges).into()
-            },
-            definitions::ChipletAir::EidosCompression => {
-                generated::precompute_eidos_compression::<B, E>(challenges).into()
-            },
-            definitions::ChipletAir::KeccakRound => {
-                generated::precompute_keccak_round::<B, E>(challenges).into()
-            },
-            definitions::ChipletAir::BytePairLut => {
-                generated::precompute_byte_pair_lut::<B, E>(challenges).into()
-            },
-            definitions::ChipletAir::TranscriptEval => {
-                generated::precompute_transcript_eval::<B, E>(challenges).into()
-            },
-            definitions::ChipletAir::UintStoreMul => {
-                generated::precompute_uint_store_mul::<B, E>(challenges).into()
-            },
-            definitions::ChipletAir::UintAdd => {
-                generated::precompute_uint_add::<B, E>(challenges).into()
-            },
-            definitions::ChipletAir::EcPointStoreGroups => {
-                generated::precompute_ec_point_store_groups::<B, E>(challenges).into()
-            },
-            definitions::ChipletAir::EcGroupAdd => {
-                generated::precompute_ec_group_add::<B, E>(challenges).into()
-            },
-            definitions::ChipletAir::EcMsm => {
-                generated::precompute_ec_msm::<B, E>(challenges).into()
-            },
-            definitions::ChipletAir::Sha512 => {
-                generated::precompute_sha512::<B, E>(challenges).into()
-            },
-            definitions::ChipletAir::Sha256 => {
-                generated::precompute_sha256::<B, E>(challenges).into()
-            },
-        }
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(
-        &self,
-        builder: &mut AB,
-        terms: &Self::EvalData<AB::Expr, AB::ExprEF>,
-    ) {
-        match self.0 {
-            definitions::ChipletAir::ChunkNodeSponge => {
-                generated::eval_chunk_node_sponge(builder, terms)
-            },
-            definitions::ChipletAir::EidosCompression => {
-                generated::eval_eidos_compression(builder, terms)
-            },
-            definitions::ChipletAir::KeccakRound => generated::eval_keccak_round(builder, terms),
-            definitions::ChipletAir::BytePairLut => generated::eval_byte_pair_lut(builder, terms),
-            definitions::ChipletAir::TranscriptEval => {
-                generated::eval_transcript_eval(builder, terms)
-            },
-            definitions::ChipletAir::UintStoreMul => generated::eval_uint_store_mul(builder, terms),
-            definitions::ChipletAir::UintAdd => generated::eval_uint_add(builder, terms),
-            definitions::ChipletAir::EcPointStoreGroups => {
-                generated::eval_ec_point_store_groups(builder, terms)
-            },
-            definitions::ChipletAir::EcGroupAdd => generated::eval_ec_group_add(builder, terms),
-            definitions::ChipletAir::EcMsm => generated::eval_ec_msm(builder, terms),
-            definitions::ChipletAir::Sha512 => generated::eval_sha512(builder, terms),
-            definitions::ChipletAir::Sha256 => generated::eval_sha256(builder, terms),
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct ChipletMultiAir {
     airs: Vec<ChipletAir>,
@@ -228,3 +78,27 @@ impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
         )
     }
 }
+
+#[allow(clippy::eq_op)]
+mod evaluators {
+    include!(concat!(env!("OUT_DIR"), "/pvm_native_evaluators.rs"));
+}
+
+mod descriptors {
+    include!(concat!(env!("OUT_DIR"), "/pvm_native_descriptors.rs"));
+}
+
+define_dispatch!(ChipletAir, Source, PvmPrepared;
+    ChunkNodeSponge => (CHUNK_NODE_SPONGE_DESCRIPTOR, descriptor_chunk_node_sponge, CHUNK_NODE_SPONGE_GEOMETRY, precompute_chunk_node_sponge, eval_chunk_node_sponge, CHUNK_NODE_SPONGE_PREPARED_TERMS),
+    EidosCompression => (EIDOS_DESCRIPTOR, descriptor_eidos_compression, EIDOS_COMPRESSION_GEOMETRY, precompute_eidos_compression, eval_eidos_compression, EIDOS_COMPRESSION_PREPARED_TERMS),
+    KeccakRound => (KECCAK_ROUND_DESCRIPTOR, descriptor_keccak_round, KECCAK_ROUND_GEOMETRY, precompute_keccak_round, eval_keccak_round, KECCAK_ROUND_PREPARED_TERMS),
+    BytePairLut => (BYTE_PAIR_LUT_DESCRIPTOR, descriptor_byte_pair_lut, BYTE_PAIR_LUT_GEOMETRY, precompute_byte_pair_lut, eval_byte_pair_lut, BYTE_PAIR_LUT_PREPARED_TERMS),
+    TranscriptEval => (TRANSCRIPT_DESCRIPTOR, descriptor_transcript_eval, TRANSCRIPT_EVAL_GEOMETRY, precompute_transcript_eval, eval_transcript_eval, TRANSCRIPT_EVAL_PREPARED_TERMS),
+    UintStoreMul => (UINT_STORE_MUL_DESCRIPTOR, descriptor_uint_store_mul, UINT_STORE_MUL_GEOMETRY, precompute_uint_store_mul, eval_uint_store_mul, UINT_STORE_MUL_PREPARED_TERMS),
+    UintAdd => (UINT_ADD_DESCRIPTOR, descriptor_uint_add, UINT_ADD_GEOMETRY, precompute_uint_add, eval_uint_add, UINT_ADD_PREPARED_TERMS),
+    EcPointStoreGroups => (EC_POINT_STORE_GROUPS_DESCRIPTOR, descriptor_ec_point_store_groups, EC_POINT_STORE_GROUPS_GEOMETRY, precompute_ec_point_store_groups, eval_ec_point_store_groups, EC_POINT_STORE_GROUPS_PREPARED_TERMS),
+    EcGroupAdd => (EC_GROUP_ADD_DESCRIPTOR, descriptor_ec_group_add, EC_GROUP_ADD_GEOMETRY, precompute_ec_group_add, eval_ec_group_add, EC_GROUP_ADD_PREPARED_TERMS),
+    EcMsm => (EC_MSM_DESCRIPTOR, descriptor_ec_msm, EC_MSM_GEOMETRY, precompute_ec_msm, eval_ec_msm, EC_MSM_PREPARED_TERMS),
+    Sha512 => (SHA512_DESCRIPTOR, descriptor_sha512, SHA512_GEOMETRY, precompute_sha512, eval_sha512, SHA512_PREPARED_TERMS),
+    Sha256 => (SHA256_DESCRIPTOR, descriptor_sha256, SHA256_GEOMETRY, precompute_sha256, eval_sha256, SHA256_PREPARED_TERMS),
+);

@@ -9,8 +9,8 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_stark::{
-    air::{BaseAir, LiftedAir},
-    lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions},
+    air::LiftedAir,
+    lookup::{Challenges, ProverLookupBuilder},
 };
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
@@ -32,20 +32,13 @@ use crate::prover::{
 };
 
 #[test]
-fn hash_airs_preserve_the_deployed_quotient_degree() {
-    // Both hash AIRs must fit the existing blowup/folding parameters.
-    assert_eq!(crate::prover::tests::log_quotient_degree(&ChunkNodeSpongeAir), 2);
-    assert_eq!(crate::prover::tests::log_quotient_degree(&Sha512Air), 2);
-}
-
-#[test]
 fn sha512_reuses_compression_padding_for_io() {
     // IO needs only sixty-four rows per block. It must share both witness and lookup columns
     // with compression instead of adding a mostly empty band to all 4096 rows.
-    assert_eq!(Sha512Air.width(), 54);
+    assert_eq!(Sha512Air.spec().main_width, 54);
     assert_eq!(miden_air_definitions::precompiles::hash::sha512::io::NUM_MAIN_COLS, 37);
     assert_eq!(miden_air_definitions::precompiles::hash::sha512::io::IO_PERIOD, 64);
-    assert_eq!(Sha512Air.aux_width(), 7);
+    assert_eq!(Sha512Air.spec().aux_width, 7);
     assert_eq!(NUM_CHIPLETS, 12);
     assert_eq!(crate::prover::tests::log_quotient_degree(&Sha512Air), 2);
 }
@@ -54,8 +47,8 @@ fn sha512_reuses_compression_padding_for_io() {
 fn sha256_reuses_compression_padding_for_io() {
     // IO needs only thirty-two rows per block. It must share both witness and lookup columns
     // with compression instead of adding a mostly empty band to all 4096 rows.
-    assert_eq!(Sha256Air.width(), 40);
-    assert_eq!(Sha256Air.aux_width(), 4);
+    assert_eq!(Sha256Air.spec().main_width, 40);
+    assert_eq!(Sha256Air.spec().aux_width, 4);
     assert_eq!(NUM_CHIPLETS, 12);
     assert_eq!(crate::prover::tests::log_quotient_degree(&Sha256Air), 2);
 }
@@ -134,13 +127,10 @@ pub(crate) fn fold_balance<A>(
     challenges: &Challenges<QuadFelt>,
     net: &mut HashMap<QuadFelt, (Felt, String)>,
 ) where
-    A: LiftedAir<Felt, QuadFelt> + Sync,
-    for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
+    A: miden_stark::air::LiftedAir<F = Felt>,
+    for<'a> A: miden_stark::lookup::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
-    let periodic = air.periodic_columns();
-    let preprocessed = air.preprocessed_trace();
-    let fractions = build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, challenges);
-    for &(multiplicity, denom) in fractions.fractions() {
+    for &(multiplicity, denom) in super::lookup_fractions(air, main, challenges).fractions() {
         net.entry(denom)
             .or_insert_with(|| (Felt::ZERO, core::any::type_name::<A>().into()))
             .0 += multiplicity;
@@ -154,8 +144,8 @@ pub(crate) fn assert_unprovidable_xor_lookup<A>(
     main: &RowMajorMatrix<Felt>,
     [a, b, c]: [Felt; 3],
 ) where
-    A: LiftedAir<Felt, QuadFelt> + Sync,
-    for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
+    A: miden_stark::air::LiftedAir<F = Felt>,
+    for<'a> A: miden_stark::lookup::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
     let mut rng = StdRng::seed_from_u64(0xb9e1);
     let challenges = Challenges::new(
@@ -181,8 +171,8 @@ pub(crate) fn assert_unprovidable_xor_lookup<A>(
 /// `[0, 2^16)` range.
 pub(crate) fn assert_unprovidable_range16_lookup<A>(air: &A, main: &RowMajorMatrix<Felt>, w: Felt)
 where
-    A: LiftedAir<Felt, QuadFelt> + Sync,
-    for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
+    A: miden_stark::air::LiftedAir<F = Felt>,
+    for<'a> A: miden_stark::lookup::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
     let mut rng = StdRng::seed_from_u64(0x5e16);
     let challenges = Challenges::new(

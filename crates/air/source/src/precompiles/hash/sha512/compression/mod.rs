@@ -14,16 +14,14 @@ use core::array;
 use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
-    utils::RowMajorMatrix,
 };
 use miden_stark::{
-    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
-    lookup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, LookupMessage, build_logup_aux_trace,
-    },
+    air,
+    air::LiftedAirBuilder as _,
+    lookup::{self, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage},
 };
 use miden_utils_sync::LazyLock;
+use p3_field::Dup;
 pub use program::{
     COMPRESSION_PERIOD, INPUT_ADDR_BASE, MAX_PERIODIC_LENGTH, NUM_PERIODIC_COLS, OUTPUT_SLOTS, Op,
     Slot, compression_program, real_slot_count, slots,
@@ -33,7 +31,7 @@ use crate::precompiles::{
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     primitives::byte_pair_lut::{BytePairLutMsg, Range16Msg},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    utils::{current_main, halves_le, next_main, pack_le},
+    utils::{halves_le, pack_le},
 };
 
 pub const NUM_MAIN_COLS: usize = 53;
@@ -132,54 +130,50 @@ pub struct Sha512CompressionAir;
 static PERIODIC_COLUMNS: LazyLock<[Vec<Felt>; NUM_PERIODIC_COLS]> =
     LazyLock::new(compression_program);
 
-impl BaseAir<Felt> for Sha512CompressionAir {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
+impl air::LiftedAir for Sha512CompressionAir {
+    type F = Felt;
+
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
+            main_width: NUM_MAIN_COLS,
+            aux_width: NUM_AUX_COLS,
+            num_public_values: 0,
+            num_challenges: NUM_RANDOMNESS,
+            num_exports: NUM_LOGUP_VALUES,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(PERIODIC_COLUMNS.as_slice()),
+        }
     }
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Borrowed(PERIODIC_COLUMNS.as_slice())
+
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        eval_main(frame, builder, 0, 0);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl LiftedAir<Felt, QuadFelt> for Sha512CompressionAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+impl air::ProverAir<QuadFelt> for Sha512CompressionAir {
+    type Error = lookup::LookupError;
 
-    fn max_periodic_length(&self) -> usize {
-        MAX_PERIODIC_LENGTH
-    }
-
-    fn num_randomness(&self) -> usize {
-        NUM_RANDOMNESS
-    }
-    fn aux_width(&self) -> usize {
-        NUM_AUX_COLS
-    }
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
     fn build_aux_trace(
         &self,
-        main: &RowMajorMatrix<Felt>,
-        _: &[Felt],
-        _: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        build_logup_aux_trace(self, main, challenges)
-    }
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        eval_main(builder, 0, 0);
-        let mut lb = ConstraintLookupBuilder::new(builder, self);
-        eval_lookups(&mut lb, 0, 0);
-        lb.finish();
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        lookup::build_logup_aux_trace(self, inputs)
     }
 }
 
-pub fn eval_main<AB: LiftedAirBuilder<F = Felt>>(
+pub fn eval_main<AB: air::LiftedAirBuilder<F = Felt>>(
+    frame: &air::Frame<'_, AB>,
     builder: &mut AB,
     main_col_offset: usize,
     periodic_col_offset: usize,
 ) {
-    eval_main_with_io(builder, main_col_offset, periodic_col_offset, AB::Expr::ZERO);
+    eval_main_with_io(frame, builder, main_col_offset, periodic_col_offset, AB::Expr::ZERO);
 }
 
 /// Keep the block controller live while the final sixty-four NOP rows hold IO witnesses.
@@ -187,123 +181,131 @@ pub fn eval_main<AB: LiftedAirBuilder<F = Felt>>(
 /// The controller fixes the instruction schedule; the row equations below enforce ADD, CONST,
 /// and the ROL decomposition. Operand provenance, bytewise logic, range checks, and round metadata
 /// are enforced by `eval_lookup_batch`. Both parts are needed to prove a compression.
-pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
+pub(super) fn eval_main_with_io<AB: air::LiftedAirBuilder<F = Felt>>(
+    frame: &air::Frame<'_, AB>,
     builder: &mut AB,
     main_col_offset: usize,
     periodic_col_offset: usize,
     io_act: AB::Expr,
 ) {
-    let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
-    let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), main_col_offset);
-    let p = builder.periodic_values().to_vec();
+    let local: &[AB::Expr; NUM_MAIN_COLS] = frame.main.current
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("SHA-512 current row band");
+    let next: &[AB::Expr; NUM_MAIN_COLS] = frame.main.next
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("SHA-512 next row band");
     // The phase machine runs on inactive rows too, permitting a 128-row empty
     // trace while anchoring every active compression to exactly 4096 rows.
-    let block_id: AB::Expr = local[COL_BLOCK_ID].into();
-    let act: AB::Expr = local[COL_ACT].into();
-    let act_next: AB::Expr = next[COL_ACT].into();
-    let cycle: AB::Expr = local[COL_CYCLE].into();
-    let phase_end: AB::Expr = local[COL_PHASE_END].into();
+    let block_id: AB::Expr = local[COL_BLOCK_ID].dup();
+    let act: AB::Expr = local[COL_ACT].dup();
+    let act_next: AB::Expr = next[COL_ACT].dup();
+    let cycle: AB::Expr = local[COL_CYCLE].dup();
+    let phase_end: AB::Expr = local[COL_PHASE_END].dup();
     let phases: [AB::Expr; program::NUM_PHASES] =
-        array::from_fn(|i| local[COL_PHASE_BEGIN + i].into());
-    let periodic: Vec<AB::Expr> = p[periodic_col_offset..].iter().map(|&v| v.into()).collect();
-    let last = periodic[program::COL_P32_LAST].clone();
-    let block_last = last.clone() * phase_end.clone() * phases[program::PHASE_PADDING].clone();
+        array::from_fn(|i| local[COL_PHASE_BEGIN + i].dup());
+    let periodic: &[AB::Expr; NUM_PERIODIC_COLS] = frame.periodic
+        [periodic_col_offset..periodic_col_offset + NUM_PERIODIC_COLS]
+        .try_into()
+        .expect("SHA-512 compression periodic band");
+    let last = periodic[program::COL_P32_LAST].dup();
+    let block_last = last.dup() * phase_end.dup() * phases[program::PHASE_PADDING].dup();
     // Exactly one phase is selected, even in inactive padding. Combined with the fixed initial
     // state and transitions below, this prevents the witness from skipping or mixing phases.
-    builder.assert_bool(local[COL_ACT]);
-    builder.assert_bool(local[COL_PHASE_END]);
+    builder.assert_bool(local[COL_ACT].dup());
+    builder.assert_bool(local[COL_PHASE_END].dup());
     for i in 0..program::NUM_PHASES {
-        builder.assert_bool(local[COL_PHASE_BEGIN + i]);
+        builder.assert_bool(local[COL_PHASE_BEGIN + i].dup());
     }
-    builder.assert_zero(phases.iter().cloned().sum::<AB::Expr>() - AB::Expr::ONE);
+    builder.assert_zero(phases.iter().map(Dup::dup).sum::<AB::Expr>() - AB::Expr::ONE);
     // Start at block zero, in the first cycle of MASK. The periodic lane already starts at zero.
-    builder.when_first_row().assert_zero(block_id.clone());
+    builder.when(frame.first_row()).assert_zero(block_id.dup());
     builder
-        .when_first_row()
-        .assert_zero(phases[program::PHASE_MASK].clone() - AB::Expr::ONE);
-    builder.when_first_row().assert_zero(cycle.clone());
+        .when(frame.first_row())
+        .assert_zero(phases[program::PHASE_MASK].dup() - AB::Expr::ONE);
+    builder.when(frame.first_row()).assert_zero(cycle.dup());
     let phase_length: AB::Expr = phases
         .iter()
         .zip(program::PHASE_CYCLES)
-        .map(|(phase, length)| phase.clone() * Felt::from(length))
+        .map(|(phase, length)| phase.dup() * Felt::from(length))
         .sum();
     // `phase_end` marks the entire final 32-row cycle. The inverse witness makes it an
     // exact zero test; the lane-31 selector below controls when the phase actually advances.
     // For d = cycle + 1 - phase_length: d = 0 forces phase_end = 1; otherwise phase_end = 0
     // and phase_inv = 1/d. Neither an early exit nor a delayed phase change is possible.
-    let remaining = cycle.clone() + AB::Expr::ONE - phase_length;
-    builder.assert_zero(remaining.clone() * phase_end.clone());
-    builder
-        .assert_zero(remaining * local[COL_PHASE_INV].into() - (AB::Expr::ONE - phase_end.clone()));
+    let remaining = cycle.dup() + AB::Expr::ONE - phase_length;
+    builder.assert_zero(remaining.dup() * phase_end.dup());
+    builder.assert_zero(remaining * local[COL_PHASE_INV].dup() - (AB::Expr::ONE - phase_end.dup()));
     // Active blocks form a prefix: activity cannot restart after becoming zero, and it can
     // change only at a block's last row. Thus an active block cannot omit any of its 4096 rows.
     builder
-        .when_transition()
-        .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
+        .when(frame.transition())
+        .assert_zero((AB::Expr::ONE - act.dup()) * act_next.dup());
     builder
-        .when_transition()
-        .assert_zero((AB::Expr::ONE - block_last.clone()) * (act_next - act.clone()));
+        .when(frame.transition())
+        .assert_zero((AB::Expr::ONE - block_last.dup()) * (act_next - act.dup()));
     // Give each block a unique consecutive ID for all word and metadata lookups.
     builder
-        .when_transition()
-        .assert_zero(next[COL_BLOCK_ID].into() - block_id - block_last.clone());
+        .when(frame.transition())
+        .assert_zero(next[COL_BLOCK_ID].dup() - block_id - block_last.dup());
     // Hold the cycle within its 32 lanes. At lane 31, increment it unless the phase ends;
     // the final term then cancels cycle + 1, resetting the next phase's cycle to zero.
-    builder.when_transition().assert_zero(
-        next[COL_CYCLE].into() - cycle.clone() - last.clone()
-            + last.clone() * phase_end.clone() * (cycle.clone() + AB::Expr::ONE),
+    builder.when(frame.transition()).assert_zero(
+        next[COL_CYCLE].dup() - cycle.dup() - last.dup()
+            + last.dup() * phase_end.dup() * (cycle.dup() + AB::Expr::ONE),
     );
     // Advance the one-hot phase only at the last lane of its last cycle. The cyclic previous
     // index also implements PADDING -> MASK at the start of the next compression block.
     for i in 0..program::NUM_PHASES {
         let previous = (i + program::NUM_PHASES - 1) % program::NUM_PHASES;
-        builder.when_transition().assert_zero(
-            next[COL_PHASE_BEGIN + i].into()
-                - phases[i].clone()
-                - last.clone() * phase_end.clone() * (phases[previous].clone() - phases[i].clone()),
+        builder.when(frame.transition()).assert_zero(
+            next[COL_PHASE_BEGIN + i].dup()
+                - phases[i].dup()
+                - last.dup() * phase_end.dup() * (phases[previous].dup() - phases[i].dup()),
         );
     }
     // Transition constraints alone would accept a truncated active block.
-    builder.when_last_row().assert_zero(act.clone() * (AB::Expr::ONE - block_last));
+    builder
+        .when(frame.last_row())
+        .assert_zero(act.dup() * (AB::Expr::ONE - block_last));
     // IO rows retain the controller but reinterpret the remaining cells. `act` gates execution
     // and lookups; `program_gate` still enforces template equations on inactive, non-IO rows.
-    let act = act - io_act.clone();
+    let act = act - io_act.dup();
     let program_gate = AB::Expr::ONE - io_act;
 
-    let word_phase = phases[program::PHASE_WORDS].clone();
-    let hash_phase = phases[program::PHASE_HASH].clone();
-    let round: AB::Expr = local[COL_META_T].into();
-    let input_word: AB::Expr = local[COL_META_INPUT_WORD].into();
+    let word_phase = phases[program::PHASE_WORDS].dup();
+    let hash_phase = phases[program::PHASE_HASH].dup();
+    let round: AB::Expr = local[COL_META_T].dup();
+    let input_word: AB::Expr = local[COL_META_INPUT_WORD].dup();
     // Opcode lookup selectors must be Boolean before the metadata lookup is interpreted.
     // IO uses this cell only in the padding phase, where word_phase is zero.
-    builder.assert_zero(
-        word_phase.clone() * input_word.clone() * (input_word.clone() - AB::Expr::ONE),
-    );
+    builder.assert_zero(word_phase.dup() * input_word.dup() * (input_word.dup() - AB::Expr::ONE));
     // A word-schedule cycle contains rounds 2*cycle and 2*cycle+1; a hash cycle contains one
     // round. Binding t to these counters prevents substituting another round's constants/fanout.
     builder.assert_zero(
-        word_phase.clone()
-            * (round.clone()
-                - cycle.clone() * Felt::from(2u8)
-                - periodic[program::COL_LANE_HALF].clone()),
+        word_phase.dup()
+            * (round.dup()
+                - cycle.dup() * Felt::from(2u8)
+                - periodic[program::COL_LANE_HALF].dup()),
     );
-    builder.assert_zero(hash_phase.clone() * (round.clone() - cycle.clone()));
+    builder.assert_zero(hash_phase.dup() * (round.dup() - cycle.dup()));
     // A metadata lookup authenticates only the first row of each word/hash round. Hold all
     // fields throughout its 16/32-row round so every instruction uses that authenticated data.
-    let hold_metadata = word_phase * (AB::Expr::ONE - periodic[program::COL_WORD_LAST].clone())
-        + hash_phase.clone() * (AB::Expr::ONE - last);
+    let hold_metadata = word_phase * (AB::Expr::ONE - periodic[program::COL_WORD_LAST].dup())
+        + hash_phase.dup() * (AB::Expr::ONE - last);
     for column in COL_META_T..=COL_META_K_HI {
         builder
-            .when_transition()
-            .assert_zero(hold_metadata.clone() * (next[column].into() - local[column].into()));
+            .when(frame.transition())
+            .assert_zero(hold_metadata.dup() * (next[column].dup() - local[column].dup()));
     }
 
     // Materialize the opcode, sources, and rotation parameters from the selected fixed template.
     // On active compression rows this fixes opcode selectors (all zero for NOP), source addresses,
     // and ROL parameters rather than letting the witness choose an instruction. Destination fanout
     // can be used directly by its lookup without increasing the maximum degree.
-    let word_last = periodic[program::COL_WORD_LAST].clone();
-    let is_add: AB::Expr = local[COL_PROG_BEGIN + program::T_IS_ADD].into();
+    let word_last = periodic[program::COL_WORD_LAST].dup();
+    let is_add: AB::Expr = local[COL_PROG_BEGIN + program::T_IS_ADD].dup();
     for field in 0..11 {
         let mut expected = AB::Expr::ZERO;
         for (phase, phase_selector) in phases.iter().enumerate() {
@@ -311,96 +313,97 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
             // The expansion template starts at W[16], after eight cycles of two input words.
             // Its affine source addresses therefore use cycle - 8; hash templates use cycle.
             let template_cycle = if phase == program::PHASE_WORDS {
-                cycle.clone() - AB::Expr::from(Felt::from(8u8))
+                cycle.dup() - AB::Expr::from(Felt::from(8u8))
             } else {
-                cycle.clone()
+                cycle.dup()
             };
             let value = match field {
-                0..=6 => template[field].clone(),
+                0..=6 => template[field].dup(),
                 7 => {
-                    template[program::T_SRC_A_BASE].clone()
-                        + template_cycle * template[program::T_SRC_A_CYCLE_COEFF].clone()
+                    template[program::T_SRC_A_BASE].dup()
+                        + template_cycle * template[program::T_SRC_A_CYCLE_COEFF].dup()
                 },
                 8 => {
-                    template[program::T_SRC_B_BASE].clone()
-                        + template_cycle * template[program::T_SRC_B_CYCLE_COEFF].clone()
+                    template[program::T_SRC_B_BASE].dup()
+                        + template_cycle * template[program::T_SRC_B_CYCLE_COEFF].dup()
                 },
-                9 => template[program::T_ROL_K].clone(),
-                10 => template[program::T_SWAP].clone(),
+                9 => template[program::T_ROL_K].dup(),
+                10 => template[program::T_SWAP].dup(),
                 _ => unreachable!(),
             };
             // The first 16 words use only the last lane, reading an external
             // input. Later words execute the full 16-instruction schedule.
             let value = if phase == program::PHASE_WORDS {
                 let input_value = match field {
-                    0 => word_last.clone(),
-                    7 => word_last.clone() * round.clone(),
+                    0 => word_last.dup(),
+                    7 => word_last.dup() * round.dup(),
                     _ => AB::Expr::ZERO,
                 };
-                value.clone() + input_word.clone() * (input_value - value)
+                value.dup() + input_word.dup() * (input_value - value)
             } else {
                 value
             };
-            expected += phase_selector.clone() * value;
+            expected += phase_selector.dup() * value;
         }
-        let residual = local[COL_PROG_BEGIN + field].into() - expected;
+        let residual = local[COL_PROG_BEGIN + field].dup() - expected;
         if field >= 9 {
             // ADD uses these otherwise idle rotation cells for its two carries.
-            builder.assert_zero(program_gate.clone() * (AB::Expr::ONE - is_add.clone()) * residual);
+            builder.assert_zero(program_gate.dup() * (AB::Expr::ONE - is_add.dup()) * residual);
         } else {
-            builder.assert_zero(program_gate.clone() * residual);
+            builder.assert_zero(program_gate.dup() * residual);
         }
     }
-    let is_const: AB::Expr = local[COL_PROG_BEGIN + program::T_IS_CONST].into();
-    let is_rol: AB::Expr = local[COL_PROG_BEGIN + program::T_IS_ROL].into();
-    let k: AB::Expr = local[COL_ROL_K].into();
+    let is_const: AB::Expr = local[COL_PROG_BEGIN + program::T_IS_CONST].dup();
+    let is_rol: AB::Expr = local[COL_PROG_BEGIN + program::T_IS_ROL].dup();
+    let k: AB::Expr = local[COL_ROL_K].dup();
     let mask_template = program::TEMPLATE_BEGIN + program::PHASE_MASK * program::TEMPLATE_COLS;
     // MASK constants come directly from the periodic template. Hash-round K[t] is carried in
     // witness metadata and authenticated by the metadata lookup, then held across the round.
-    let const_lo = phases[program::PHASE_MASK].clone()
-        * periodic[mask_template + program::T_CONST_LO].clone()
-        + hash_phase.clone() * local[COL_META_K_LO].into();
-    let const_hi = phases[program::PHASE_MASK].clone()
-        * periodic[mask_template + program::T_CONST_HI].clone()
-        + hash_phase * local[COL_META_K_HI].into();
+    let const_lo = phases[program::PHASE_MASK].dup()
+        * periodic[mask_template + program::T_CONST_LO].dup()
+        + hash_phase.dup() * local[COL_META_K_LO].dup();
+    let const_hi = phases[program::PHASE_MASK].dup()
+        * periodic[mask_template + program::T_CONST_HI].dup()
+        + hash_phase * local[COL_META_K_HI].dup();
 
-    let a: [AB::Var; 8] = array::from_fn(|i| local[COL_A_BEGIN + i]);
-    let b: [AB::Var; 8] = array::from_fn(|i| local[COL_B_BEGIN + i]);
-    let r: [AB::Var; 8] = array::from_fn(|i| local[COL_R_BEGIN + i]);
-    let limbs: [AB::Var; 8] = array::from_fn(|i| local[COL_ROT_BEGIN + i]);
-    let [a_lo, a_hi] = halves_le(&a, 256);
-    let [b_lo, b_hi] = halves_le(&b, 256);
-    let [r_lo, r_hi] = value_halves(&r);
-    let carry_lo: AB::Expr = local[COL_CARRY_LO].into();
-    let carry_hi: AB::Expr = local[COL_CARRY_HI].into();
+    let a: &[AB::Expr; 8] = local[COL_A_BEGIN..COL_A_BEGIN + 8].try_into().expect("SHA-512 a band");
+    let b: &[AB::Expr; 8] = local[COL_B_BEGIN..COL_B_BEGIN + 8].try_into().expect("SHA-512 b band");
+    let r: &[AB::Expr; 8] = local[COL_R_BEGIN..COL_R_BEGIN + 8].try_into().expect("SHA-512 r band");
+    let limbs: &[AB::Expr; 8] =
+        local[COL_ROT_BEGIN..COL_ROT_BEGIN + 8].try_into().expect("SHA-512 limbs band");
+    let [a_lo, a_hi] = halves_le::<AB::Expr, _>(a, 256);
+    let [b_lo, b_hi] = halves_le::<AB::Expr, _>(b, 256);
+    let [r_lo, r_hi] = value_halves(r);
+    let carry_lo: AB::Expr = local[COL_CARRY_LO].dup();
+    let carry_hi: AB::Expr = local[COL_CARRY_HI].dup();
     // ADD reuses the two ROL-parameter cells as Boolean carries. Its operand halves are bound
     // to prior u32 results by source lookups; Range16 bounds the four result limbs.
     builder
-        .when(program_gate.clone() * is_add.clone())
-        .assert_bool(local[COL_CARRY_LO]);
-    builder.when(program_gate * is_add.clone()).assert_bool(local[COL_CARRY_HI]);
-    let gate_add = act.clone() * is_add;
+        .when(program_gate.dup() * is_add.dup())
+        .assert_bool(local[COL_CARRY_LO].dup());
+    builder.when(program_gate * is_add.dup()).assert_bool(local[COL_CARRY_HI].dup());
+    let gate_add = act.dup() * is_add;
     // Enforce r = a + b mod 2^64 through two integer equalities:
     // a_lo + b_lo = r_lo + 2^32*carry_lo,
     // a_hi + b_hi + carry_lo = r_hi + 2^32*carry_hi.
     // Each side is far below the base-field modulus, so field equality cannot hide overflow.
     // The high carry is deliberately discarded to implement wrapping addition.
     builder.assert_zero(
-        gate_add.clone()
-            * (a_lo.clone() + b_lo
-                - r_lo.clone()
-                - AB::Expr::from(Felt::new(1u64 << 32).unwrap()) * carry_lo.clone()),
+        gate_add.dup()
+            * (a_lo.dup() + b_lo
+                - r_lo.dup()
+                - AB::Expr::from(Felt::new(1u64 << 32).unwrap()) * carry_lo.dup()),
     );
     builder.assert_zero(
         gate_add
-            * (a_hi.clone() + b_hi + carry_lo
-                - r_hi.clone()
+            * (a_hi.dup() + b_hi + carry_lo
+                - r_hi.dup()
                 - AB::Expr::from(Felt::new(1u64 << 32).unwrap()) * carry_hi),
     );
     // CONST has no source lookup: bind its result halves directly to the selected mask
     // or round constant. The same result is then available to consumers through the word bus.
-    let gate_const = act.clone() * is_const;
-    builder.assert_zero(gate_const.clone() * (r_lo - const_lo));
+    let gate_const = act.dup() * is_const;
+    builder.assert_zero(gate_const.dup() * (r_lo - const_lo));
     builder.assert_zero(gate_const * (r_hi - const_hi));
     // On ROL rows, B holds two four-u16 decompositions of
     // y = (input_half + 2^32) * k, where k = 2^(shift mod 32). For shift mod 32 in 1..=30,
@@ -413,26 +416,22 @@ pub(super) fn eval_main_with_io<AB: LiftedAirBuilder<F = Felt>>(
     let lo_decomp: AB::Expr = pack_le(&limbs[0..4], 1u64 << 16);
     let hi_decomp: AB::Expr = pack_le(&limbs[4..8], 1u64 << 16);
     let two32 = AB::Expr::from(Felt::new(1u64 << 32).unwrap());
-    builder.assert_zero(rol_gate.clone() * ((a_lo + two32.clone()) * k.clone() - lo_decomp));
+    builder.assert_zero(rol_gate.dup() * ((a_lo + two32.dup()) * k.dup() - lo_decomp));
     builder.assert_zero(rol_gate * ((a_hi + two32) * k - hi_decomp));
 }
 
 /// Join each shifted half's low 32 bits with the bits spilling from the opposite half.
 /// Subtract `k` to remove the decomposition bias, then swap halves for rotations of 32 or more.
-fn rotated_halves<E: Algebra<Felt>, V: Copy + Into<E>>(limbs: &[V; 8], k: E, swap: E) -> [E; 2] {
-    let x: [E; 8] = array::from_fn(|i| limbs[i].into());
+fn rotated_halves<E: Algebra<Felt>>(limbs: &[E; 8], k: E, swap: E) -> [E; 2] {
+    let x: [E; 8] = array::from_fn(|i| limbs[i].dup());
     let two16 = E::from(Felt::from(1u32 << 16));
-    let lo =
-        x[0].clone() + x[6].clone() + two16.clone() * (x[1].clone() + x[7].clone()) - k.clone();
-    let hi = x[2].clone() + x[4].clone() + two16 * (x[3].clone() + x[5].clone()) - k;
-    [
-        lo.clone() + swap.clone() * (hi.clone() - lo.clone()),
-        hi.clone() + swap * (lo - hi),
-    ]
+    let lo = x[0].dup() + x[6].dup() + two16.dup() * (x[1].dup() + x[7].dup()) - k.dup();
+    let hi = x[2].dup() + x[4].dup() + two16 * (x[3].dup() + x[5].dup()) - k;
+    [lo.dup() + swap.dup() * (hi.dup() - lo.dup()), hi.dup() + swap * (lo - hi)]
 }
 
 /// Pack four u16 limbs as two u32 halves. Other result cells are unused on value rows.
-fn value_halves<E: Algebra<Felt>, V: Copy + Into<E>>(r: &[V; 8]) -> [E; 2] {
+fn value_halves<E: Algebra<Felt>>(r: &[E; 8]) -> [E; 2] {
     [pack_le(&r[..2], 1 << 16), pack_le(&r[2..4], 1 << 16)]
 }
 
@@ -459,18 +458,17 @@ pub(super) const fn lookup_column_degree(index: usize) -> Deg {
 }
 
 /// Add compression fractions to a group whose other alternatives use disjoint IO rows.
-pub(super) fn eval_lookup_group<G, V>(
+pub(super) fn eval_lookup_group<G>(
     group: &mut G,
     index: usize,
-    local: &[V; NUM_MAIN_COLS],
+    local: &[G::Expr; NUM_MAIN_COLS],
     periodic: &[G::Expr; NUM_PERIODIC_COLS],
     act: G::Expr,
 ) where
     G: LookupGroup,
     G::Expr: Algebra<Felt>,
-    V: Copy + Into<G::Expr>,
 {
-    let opcode = |i: usize| -> G::Expr { local[COL_PROG_BEGIN + i].into() };
+    let opcode = |i: usize| -> G::Expr { local[COL_PROG_BEGIN + i].dup() };
     let emit = |group: &mut G, flag: G::Expr, kinds: &[LookupKind], degree| {
         group.batch(
             "compression",
@@ -503,11 +501,11 @@ pub(super) fn eval_lookup_group<G, V>(
             let logic = opcode(program::T_IS_XOR)
                 + opcode(program::T_IS_AND)
                 + opcode(program::T_IS_ANDNOT);
-            emit(group, act.clone() * logic, &[LookupKind::LogicPair(pair)], degree);
+            emit(group, act.dup() * logic, &[LookupKind::LogicPair(pair)], degree);
             if pair < 2 {
                 emit(
                     group,
-                    act.clone() * (opcode(program::T_IS_ADD) + opcode(program::T_IS_INPUT)),
+                    act.dup() * (opcode(program::T_IS_ADD) + opcode(program::T_IS_INPUT)),
                     &[LookupKind::ValuePair(pair)],
                     degree,
                 );
@@ -521,18 +519,17 @@ pub(super) fn eval_lookup_group<G, V>(
 /// Emit one compression lookup batch into an already-opened lookup batch.
 /// Negative multiplicities provide words/table entries; positive multiplicities consume them.
 /// The enclosing group supplies the activity and, for logic/range checks, opcode selectors.
-pub(super) fn eval_lookup_batch<B, V>(
+pub(super) fn eval_lookup_batch<B>(
     batch: &mut B,
     kind: LookupKind,
-    local: &[V; NUM_MAIN_COLS],
+    local: &[B::Expr; NUM_MAIN_COLS],
     periodic: &[B::Expr; NUM_PERIODIC_COLS],
 ) where
     B: LookupBatch,
     B::Expr: Algebra<Felt>,
-    V: Copy + Into<B::Expr>,
 {
-    let v = |index: usize| -> B::Expr { local[index].into() };
-    let p = |index: usize| -> B::Expr { periodic[index].clone() };
+    let v = |index: usize| -> B::Expr { local[index].dup() };
+    let p = |index: usize| -> B::Expr { periodic[index].dup() };
     let act = B::Expr::ONE;
     let entry_degree = match kind {
         LookupKind::Destination => Deg { v: 3, u: 3 },
@@ -558,7 +555,7 @@ pub(super) fn eval_lookup_batch<B, V>(
                     } else {
                         p(template + program::T_DST_CONST)
                     };
-                    selector.clone()
+                    selector.dup()
                         * (constant
                             + p(template + program::T_DST_W) * v(COL_META_W_MULT)
                             + p(template + program::T_DST_A) * v(COL_META_A_MULT)
@@ -570,34 +567,37 @@ pub(super) fn eval_lookup_batch<B, V>(
             let slot = phases
                 .iter()
                 .zip(program::PHASE_BASES)
-                .map(|(phase, base)| phase.clone() * Felt::from(base))
+                .map(|(phase, base)| phase.dup() * Felt::from(base))
                 .sum::<B::Expr>()
                 + v(COL_CYCLE) * Felt::from(32u8)
                 + p(program::COL_LANE);
-            let r: [V; 8] = array::from_fn(|i| local[COL_R_BEGIN + i]);
-            let limbs: [V; 8] = array::from_fn(|i| local[COL_ROT_BEGIN + i]);
-            let [r_lo, r_hi] = value_halves(&r);
-            let [x_lo, x_hi] = halves_le(&r, 256);
-            let a: [V; 8] = array::from_fn(|i| local[COL_A_BEGIN + i]);
-            let b: [V; 8] = array::from_fn(|i| local[COL_B_BEGIN + i]);
-            let [a_lo, a_hi] = halves_le(&a, 256);
-            let [b_lo, b_hi] = halves_le(&b, 256);
-            let [c_lo, c_hi] = rotated_halves(&limbs, v(COL_ROL_K), v(COL_SWAP));
+            let r: &[B::Expr; 8] =
+                local[COL_R_BEGIN..COL_R_BEGIN + 8].try_into().expect("SHA-512 lookup r band");
+            let limbs: &[B::Expr; 8] = local[COL_ROT_BEGIN..COL_ROT_BEGIN + 8]
+                .try_into()
+                .expect("SHA-512 lookup limbs band");
+            let [r_lo, r_hi] = value_halves(r);
+            let [x_lo, x_hi] = halves_le::<B::Expr, _>(r, 256);
+            let a: &[B::Expr; 8] =
+                local[COL_A_BEGIN..COL_A_BEGIN + 8].try_into().expect("SHA-512 lookup a band");
+            let b: &[B::Expr; 8] =
+                local[COL_B_BEGIN..COL_B_BEGIN + 8].try_into().expect("SHA-512 lookup b band");
+            let [a_lo, a_hi] = halves_le::<B::Expr, _>(a, 256);
+            let [b_lo, b_hi] = halves_le::<B::Expr, _>(b, 256);
+            let [c_lo, c_hi] = rotated_halves(limbs, v(COL_ROL_K), v(COL_SWAP));
             let is_rol = v(COL_PROG_BEGIN + program::T_IS_ROL);
             let is_and = v(COL_PROG_BEGIN + program::T_IS_AND);
             let is_andnot = v(COL_PROG_BEGIN + program::T_IS_ANDNOT);
-            let logic = v(COL_PROG_BEGIN + program::T_IS_XOR) + is_and.clone() + is_andnot.clone();
+            let logic = v(COL_PROG_BEGIN + program::T_IS_XOR) + is_and.dup() + is_andnot.dup();
             let half = B::Expr::from(Felt::new_unchecked(0x7fff_ffff_8000_0001));
             // X is the bytewise XOR. AND=(A+B-X)/2 and ANDNOT=(X-A+B)/2 as integers.
             // Keep the ROL term separate: nesting it around the logic correction raises degree.
             let output = |r: B::Expr, x: B::Expr, a: B::Expr, b: B::Expr, rotated: B::Expr| {
-                r.clone()
-                    + logic.clone() * (x.clone() - r.clone())
-                    + is_and.clone()
-                        * (a.clone() + b.clone() - x.clone() * Felt::from_u8(3))
-                        * half.clone()
-                    + is_andnot.clone() * (b - a - x) * half.clone()
-                    + is_rol.clone() * (rotated - r)
+                r.dup()
+                    + logic.dup() * (x.dup() - r.dup())
+                    + is_and.dup() * (a.dup() + b.dup() - x.dup() * Felt::from_u8(3)) * half.dup()
+                    + is_andnot.dup() * (b - a - x) * half.dup()
+                    + is_rol.dup() * (rotated - r)
             };
             let out_lo = output(r_lo, x_lo, a_lo, b_lo, c_lo);
             let out_hi = output(r_hi, x_hi, a_hi, b_hi, c_hi);
@@ -617,25 +617,26 @@ pub(super) fn eval_lookup_batch<B, V>(
             // Every operand read must match a provided (block, address, lo, hi) tuple. ROL
             // reads only A; binary instructions read both A and B; INPUT/CONST/NOP read neither.
             let bid = v(COL_BLOCK_ID);
-            let a: [V; 8] = array::from_fn(|i| local[COL_A_BEGIN + i]);
-            let b: [V; 8] = array::from_fn(|i| local[COL_B_BEGIN + i]);
-            let [a_lo, a_hi] = halves_le(&a, 256);
-            let [b_lo, b_hi] = halves_le(&b, 256);
+            let a: &[B::Expr; 8] =
+                local[COL_A_BEGIN..COL_A_BEGIN + 8].try_into().expect("SHA-512 lookup a band");
+            let b: &[B::Expr; 8] =
+                local[COL_B_BEGIN..COL_B_BEGIN + 8].try_into().expect("SHA-512 lookup b band");
+            let [a_lo, a_hi] = halves_le::<B::Expr, _>(a, 256);
+            let [b_lo, b_hi] = halves_le::<B::Expr, _>(b, 256);
             let is_xor = v(COL_PROG_BEGIN + program::T_IS_XOR);
             let is_and = v(COL_PROG_BEGIN + program::T_IS_AND);
             let is_andnot = v(COL_PROG_BEGIN + program::T_IS_ANDNOT);
             let is_add = v(COL_PROG_BEGIN + program::T_IS_ADD);
             let is_rol = v(COL_PROG_BEGIN + program::T_IS_ROL);
-            let reads_a =
-                is_xor.clone() + is_and.clone() + is_andnot.clone() + is_add.clone() + is_rol;
+            let reads_a = is_xor.dup() + is_and.dup() + is_andnot.dup() + is_add.dup() + is_rol;
             let reads_b = is_xor + is_and + is_andnot + is_add;
             let addrs = [v(COL_SRC_A), v(COL_SRC_B)];
             batch.insert(
                 "src_a",
-                act.clone() * reads_a,
+                act.dup() * reads_a,
                 Sha512WordMsg {
-                    block_id: bid.clone(),
-                    addr: addrs[0].clone(),
+                    block_id: bid.dup(),
+                    addr: addrs[0].dup(),
                     lo: a_lo,
                     hi: a_hi,
                 },
@@ -646,7 +647,7 @@ pub(super) fn eval_lookup_batch<B, V>(
                 act * reads_b,
                 Sha512WordMsg {
                     block_id: bid,
-                    addr: addrs[1].clone(),
+                    addr: addrs[1].dup(),
                     lo: b_lo,
                     hi: b_hi,
                 },
@@ -657,8 +658,9 @@ pub(super) fn eval_lookup_batch<B, V>(
             // INPUT copies a word supplied by IO. The external address range is disjoint from
             // instruction slots, so an internal result cannot stand in for a message/state word.
             let bid = v(COL_BLOCK_ID);
-            let r: [V; 8] = array::from_fn(|i| local[COL_R_BEGIN + i]);
-            let [r_lo, r_hi] = value_halves(&r);
+            let r: &[B::Expr; 8] =
+                local[COL_R_BEGIN..COL_R_BEGIN + 8].try_into().expect("SHA-512 lookup r band");
+            let [r_lo, r_hi] = value_halves(r);
             let is_input = v(COL_PROG_BEGIN + program::T_IS_INPUT);
             let ext_addr = B::Expr::from(Felt::from(INPUT_ADDR_BASE)) + v(COL_SRC_A);
             batch.insert(
@@ -707,7 +709,7 @@ pub(super) fn eval_lookup_batch<B, V>(
             let phases: [B::Expr; program::NUM_PHASES] = array::from_fn(|i| v(COL_PHASE_BEGIN + i));
             let provider = -B::Expr::from(Felt::from(2u8))
                 * act
-                * phases[program::PHASE_BOOTSTRAP].clone()
+                * phases[program::PHASE_BOOTSTRAP].dup()
                 * p(program::COL_META_VALID);
             batch.insert(
                 "provider",
@@ -731,8 +733,8 @@ pub(super) fn eval_lookup_batch<B, V>(
             let bid = v(COL_BLOCK_ID);
             let phases: [B::Expr; program::NUM_PHASES] = array::from_fn(|i| v(COL_PHASE_BEGIN + i));
             let consumer = act
-                * (phases[program::PHASE_WORDS].clone() * p(program::COL_WORD_FIRST)
-                    + phases[program::PHASE_HASH].clone() * p(program::COL_HASH_FIRST));
+                * (phases[program::PHASE_WORDS].dup() * p(program::COL_WORD_FIRST)
+                    + phases[program::PHASE_HASH].dup() * p(program::COL_HASH_FIRST));
             batch.insert(
                 "consumer",
                 consumer,
@@ -752,14 +754,21 @@ pub(super) fn eval_lookup_batch<B, V>(
     }
 }
 
-pub fn eval_lookups<LB: LookupBuilder<F = Felt>>(
+pub fn eval_lookups<LB: lookup::LookupBuilder<F = Felt>>(
+    frame: &lookup::LookupFrame<'_, LB::Expr>,
     builder: &mut LB,
     main_col_offset: usize,
     periodic_col_offset: usize,
 ) {
-    let local = current_main(builder.main(), main_col_offset);
-    let periodic = array::from_fn(|i| builder.periodic_values()[periodic_col_offset + i].into());
-    let act: LB::Expr = local[COL_ACT].into();
+    let local: &[LB::Expr; NUM_MAIN_COLS] = frame.main.current
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("SHA-512 compression lookup row band");
+    let periodic: &[LB::Expr; NUM_PERIODIC_COLS] = frame.periodic
+        [periodic_col_offset..periodic_col_offset + NUM_PERIODIC_COLS]
+        .try_into()
+        .expect("SHA-512 compression lookup periodic band");
+    let act = local[COL_ACT].dup();
     for index in 0..NUM_AUX_COLS {
         let degree = lookup_column_degree(index);
         builder.next_column(
@@ -767,7 +776,7 @@ pub fn eval_lookups<LB: LookupBuilder<F = Felt>>(
                 column.group(
                     "sha512",
                     |group| {
-                        eval_lookup_group(group, index, &local, &periodic, act.clone());
+                        eval_lookup_group(group, index, local, periodic, act.dup());
                     },
                     degree,
                 );
@@ -777,7 +786,7 @@ pub fn eval_lookups<LB: LookupBuilder<F = Felt>>(
     }
 }
 
-impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha512CompressionAir {
+impl<LB: lookup::LookupBuilder<F = Felt>> lookup::LookupAir<LB> for Sha512CompressionAir {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
@@ -787,7 +796,7 @@ impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for Sha512CompressionAir {
     fn num_bus_ids(&self) -> usize {
         NUM_BUS_IDS
     }
-    fn eval(&self, builder: &mut LB) {
-        eval_lookups(builder, 0, 0);
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        eval_lookups(frame, builder, 0, 0);
     }
 }

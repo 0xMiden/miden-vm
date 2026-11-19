@@ -6,17 +6,14 @@
 //! across the canonical edge cases (empty input, single-byte, full
 //! block, multi-block, padding-only trailing block).
 
-use std::{borrow::Cow, vec, vec::Vec};
+use std::{vec, vec::Vec};
 
 use miden_core::{
     Felt,
-    field::{Algebra, PrimeCharacteristicRing, QuadFelt},
+    field::{PrimeCharacteristicRing, QuadFelt},
 };
 use miden_crypto::hash::keccak::Keccak256;
-use miden_stark::{
-    air::{BaseAir, ConstraintDegrees, LiftedAir},
-    lookup::debug::{ValidateLayout, ValidateLookupAir},
-};
+use miden_stark::air::{ConstraintDegrees, LiftedAir};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::prover::{
@@ -116,7 +113,7 @@ fn keccak_sponge_msg_encoding_is_bus_distinct_from_memory64() {
 }
 
 #[test]
-fn main_column_layout_matches_sponge_band() {
+fn sponge_layout_and_degree_match_design() {
     // The 40 main witness columns are partitioned into these half-open ranges:
     // - Structural (5): sponge_seq_id through chunk_ptr, 0..5.
     // - Padding state (9): flags, offset bits and their product, and suffix limbs, 5..14.
@@ -138,64 +135,28 @@ fn main_column_layout_matches_sponge_band() {
     assert_eq!(STATE_NEW_BYTES_RANGE, 32..40);
     // Total matches the spec.
     assert_eq!(NUM_MAIN_COLS, 40);
-    // `BaseAir::width()` agrees.
-    assert_eq!(<KeccakSpongeAir as BaseAir<Felt>>::width(&KeccakSpongeAir), NUM_MAIN_COLS);
-}
 
-#[test]
-fn lifted_air_validates_and_layout_matches_spec() {
     let air = KeccakSpongeAir;
-    // `air_layout` is the single source of truth that downstream
+    // The source schema is the single source of truth that downstream
     // builders consume. Pin every dimension to a documented constant
     // so any column-count drift fails fast.
-    let layout = <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::air_layout(&air);
-    assert_eq!(layout.preprocessed_width, 0);
+    let layout = air.spec();
+    assert_eq!(layout.preprocessed_width(), 0);
     assert_eq!(layout.main_width, NUM_MAIN_COLS);
     assert_eq!(layout.num_public_values, 0);
-    assert_eq!(layout.permutation_width, NUM_AUX_COLS);
-    assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
-    assert_eq!(layout.num_permutation_values, NUM_LOGUP_VALUES);
-    assert_eq!(layout.num_periodic_columns, NUM_PERIODIC_COLS);
+    assert_eq!(layout.aux_width, NUM_AUX_COLS);
+    assert_eq!(layout.num_challenges, NUM_RANDOMNESS);
+    assert_eq!(layout.num_exports, NUM_LOGUP_VALUES);
+    assert_eq!(layout.periodic_columns.len(), NUM_PERIODIC_COLS);
     assert_eq!(NUM_AUX_COLS, 5);
     assert_eq!(crate::prover::tests::lookup_column_shape(&air), &[3, 3, 4, 4, 2]);
 
-    assert_eq!(
-        ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
-        ConstraintDegrees { base: 5, ext: 5 },
-    );
-    ValidateLookupAir::validate(
-        &air,
-        ValidateLayout {
-            preprocessed_width: air.preprocessed_width(),
-            trace_width: air.width(),
-            num_public_values: 0,
-            num_periodic_columns: air.periodic_columns().len(),
-            permutation_width: NUM_AUX_COLS,
-            num_permutation_challenges: NUM_RANDOMNESS,
-            num_permutation_values: NUM_LOGUP_VALUES,
-        },
-    )
-    .unwrap_or_else(|err| panic!("KeccakSpongeAir lookup validation failed: {err}"));
-}
+    assert_eq!(crate::prover::tests::raw_degrees(&air), ConstraintDegrees { base: 5, ext: 5 },);
+    miden_stark::lookup::validate_native(&air, &miden_stark::air::LiftedAir::spec(&air))
+        .unwrap_or_else(|err| panic!("KeccakSpongeAir lookup validation failed: {err}"));
+    assert!(layout.periodic_columns.iter().all(|column| column.len() == SPONGE_PERIOD));
 
-#[test]
-fn periodic_columns_match_program() {
-    // `BaseAir::periodic_columns()` is plumbed through to the
-    // verifier; ensure it returns exactly what `sponge_program()`
-    // produced (same shape, same values).
-    let air = KeccakSpongeAir;
-    let cols = <KeccakSpongeAir as BaseAir<Felt>>::periodic_columns(&air);
-    assert_eq!(cols.len(), NUM_PERIODIC_COLS);
-    for c in cols.iter() {
-        assert_eq!(c.len(), SPONGE_PERIOD);
-    }
-}
-
-#[test]
-fn log_quotient_degree_matches_design_target() {
-    // Four XOR fractions share each byte column. The input-handshake/chunk column also closes
-    // within degree five, preserving log_quotient_degree = 2.
-    let air = KeccakSpongeAir;
+    // Four XOR fractions share each byte column; the closing constraints stay within degree five.
     assert_eq!(crate::prover::tests::log_quotient_degree(&air), 2);
 }
 
@@ -458,68 +419,43 @@ fn corruption_seq_id_breaks_row_counter_transition() {
 fn corruption_aux_cell_breaks_logup_recurrence() {
     // Rebuilding the auxiliary trace after main-trace corruption produces a consistent witness.
     // Perturbing the built accumulator instead directly exercises the centered recurrence.
-    // `check_local` obtains the auxiliary trace through `LiftedAir::build_aux_trace`, so the test
-    // wrapper overrides that method to inject the corruption.
-    use miden_core::{field::PrimeCharacteristicRing, utils::RowMajorMatrix};
-    use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
+    // The wrapper keeps the same relation and perturbs only the constructed auxiliary witness.
+    use miden_core::field::PrimeCharacteristicRing;
+    use miden_stark::{air, lookup};
 
     use crate::prover::hash::keccak::sponge::NUM_AUX_COLS;
 
     #[derive(Debug, Clone, Copy)]
     struct AuxCorruptAir;
 
-    impl BaseAir<Felt> for AuxCorruptAir {
-        fn width(&self) -> usize {
-            <KeccakSpongeAir as BaseAir<Felt>>::width(&KeccakSpongeAir)
+    impl air::LiftedAir for AuxCorruptAir {
+        type F = Felt;
+
+        fn spec(&self) -> air::AirSpec<'_, Felt> {
+            air::LiftedAir::spec(&KeccakSpongeAir)
         }
 
-        fn num_public_values(&self) -> usize {
-            <KeccakSpongeAir as BaseAir<Felt>>::num_public_values(&KeccakSpongeAir)
-        }
-
-        fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-            Cow::Owned(
-                <KeccakSpongeAir as BaseAir<Felt>>::periodic_columns(&KeccakSpongeAir).into_owned(),
-            )
+        fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
+            &self,
+            frame: &air::Frame<'_, AB>,
+            inputs: air::Inputs<'_, AB>,
+            builder: &mut AB,
+        ) {
+            air::LiftedAir::eval(&KeccakSpongeAir, frame, inputs, builder);
         }
     }
 
-    impl LiftedAir<Felt, QuadFelt> for AuxCorruptAir {
-        type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-        fn num_randomness(&self) -> usize {
-            <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::num_randomness(&KeccakSpongeAir)
-        }
-
-        fn aux_width(&self) -> usize {
-            <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::aux_width(&KeccakSpongeAir)
-        }
-
-        fn num_aux_values(&self) -> usize {
-            <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::num_aux_values(&KeccakSpongeAir)
-        }
+    impl air::ProverAir<QuadFelt> for AuxCorruptAir {
+        type Error = lookup::LookupError;
 
         fn build_aux_trace(
             &self,
-            main: &RowMajorMatrix<Felt>,
-            air_inputs: &[Felt],
-            aux_inputs: &[Felt],
-            challenges: &[QuadFelt],
-        ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-            let (mut aux, normalized_sum) =
-                <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::build_aux_trace(
-                    &KeccakSpongeAir,
-                    main,
-                    air_inputs,
-                    aux_inputs,
-                    challenges,
-                );
-            aux.values[NUM_AUX_COLS] += QuadFelt::ONE;
-            (aux, normalized_sum)
-        }
-
-        fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-            <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::eval(&KeccakSpongeAir, builder, &());
+            inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+        ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+            let mut auxiliary = air::ProverAir::build_aux_trace(&KeccakSpongeAir, inputs)?;
+            // Preserve the existing negative witness: row1, column0 alone is changed.
+            auxiliary.columns.values[NUM_AUX_COLS] += QuadFelt::ONE;
+            Ok(auxiliary)
         }
     }
 

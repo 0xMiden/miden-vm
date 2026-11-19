@@ -4,9 +4,10 @@
 //! - First row: stack[0..16] == stack_inputs[0..16]
 //! - Last row:  stack[0..16] == stack_outputs[0..16]
 
-use miden_stark::air::AirBuilder;
+use miden_stark::air::{Frame, Inputs, LiftedAirBuilder};
+use p3_field::Dup;
 
-use crate::vm::{CoreCols, MidenAirBuilder};
+use crate::vm::{CoreCols, NativeMidenAirBuilder};
 
 // CONSTANTS
 // ================================================================================================
@@ -23,38 +24,31 @@ const PUBLIC_LEN: usize = STACK_DEPTH + STACK_DEPTH;
 ///
 /// - First row: `stack[i] == stack_inputs[i]` for i in 0..16
 /// - Last row:  `stack[i] == stack_outputs[i]` for i in 0..16
-pub fn enforce_main<AB>(builder: &mut AB, local: &CoreCols<AB::Var>)
-where
-    AB: MidenAirBuilder,
+pub fn enforce_main<AB>(
+    frame: &Frame<'_, AB>,
+    inputs: Inputs<'_, AB>,
+    builder: &mut AB,
+    local: &CoreCols<AB::Expr>,
+) where
+    AB: NativeMidenAirBuilder,
 {
-    // Copy public values into local arrays to release the immutable borrow on builder.
-    let pv = builder.public_values();
+    let pv = inputs.public_values;
     let n = pv.len();
     assert!(n >= PUBLIC_LEN, "public values too short: {n} < {PUBLIC_LEN}");
-    let si: [AB::PublicVar; STACK_DEPTH] = core::array::from_fn(|i| pv[i]);
-    let so: [AB::PublicVar; STACK_DEPTH] = core::array::from_fn(|i| pv[STACK_DEPTH + i]);
 
     // First row: stack[i] == stack_inputs[i]
     {
-        let builder = &mut builder.when_first_row();
-        #[expect(
-            clippy::needless_range_loop,
-            reason = "index-based loop keeps the stack input slot mapping explicit"
-        )]
-        for i in 0..STACK_DEPTH {
-            builder.assert_eq(local.stack.get(i), si[i]);
+        let builder = &mut builder.when(frame.first_row());
+        for (i, value) in pv[..STACK_DEPTH].iter().enumerate() {
+            builder.assert_eq(local.stack.get(i), value.dup());
         }
     }
 
     // Last row: stack[i] == stack_outputs[i]
     {
-        let builder = &mut builder.when_last_row();
-        #[expect(
-            clippy::needless_range_loop,
-            reason = "index-based loop keeps the stack output slot mapping explicit"
-        )]
-        for i in 0..STACK_DEPTH {
-            builder.assert_eq(local.stack.get(i), so[i]);
+        let builder = &mut builder.when(frame.last_row());
+        for (i, value) in pv[STACK_DEPTH..PUBLIC_LEN].iter().enumerate() {
+            builder.assert_eq(local.stack.get(i), value.dup());
         }
     }
 }

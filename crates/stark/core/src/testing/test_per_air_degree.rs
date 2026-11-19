@@ -7,17 +7,18 @@
 extern crate alloc;
 
 use alloc::{borrow::Cow, vec, vec::Vec};
+use core::convert::Infallible;
 
-use p3_field::{Algebra, PrimeCharacteristicRing};
+use p3_field::{Dup, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    air::{
-        AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, Statement,
-        WindowAccess,
-    },
+    air,
+    air::{LiftedAirBuilder as _, ProverStatement, Statement},
     domain::log_quotient_degree,
-    testing::configs::goldilocks_poseidon2::{Felt, QuadFelt, prove_and_verify_statement},
+    testing::configs::goldilocks_poseidon2::{
+        Felt, QuadFelt, TestMultiAir, prove_and_verify_statement,
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -29,58 +30,52 @@ struct PowerAir {
     power: u64,
 }
 
-impl BaseAir<Felt> for PowerAir {
-    fn width(&self) -> usize {
-        1
-    }
-}
+impl air::LiftedAir for PowerAir {
+    type F = Felt;
 
-impl LiftedAir<Felt, QuadFelt> for PowerAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        1
-    }
-
-    fn aux_width(&self) -> usize {
-        1
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
+            main_width: 1,
+            aux_width: 1,
+            num_public_values: 0,
+            num_challenges: 1,
+            num_exports: 0,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(&[]),
+        }
     }
 
-    fn num_aux_values(&self) -> usize {
-        0
-    }
-
-    fn build_aux_trace(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        // Trivial aux: a single constant-challenge column.
-        (RowMajorMatrix::new(vec![challenges[0]; main.height()], 1), vec![])
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        let main = builder.main();
-        let (local, next) = (main.current_slice().to_vec(), main.next_slice().to_vec());
-
-        let x: AB::Expr = local[0].into();
-        let x_power: AB::Expr = match self.power {
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        let x = frame.main.current[0].dup();
+        let x_power = match self.power {
             2 => x.clone() * x,
             5 => x.clone().exp_power_of_2(2) * x,
             9 => x.clone().exp_power_of_2(3) * x,
             _ => unreachable!("tests only use power in {{2, 5, 9}}"),
         };
-        builder.when_transition().assert_eq(next[0].into(), x_power);
+        builder.when(frame.transition()).assert_eq(frame.main.next[0].dup(), x_power);
 
         // Trivial aux: aux_local == challenge (extension-field identity, degree 1).
-        let aux = builder.permutation();
-        let aux_local = aux.current_slice().to_vec();
-        let challenge = builder.permutation_randomness()[0];
-        let aux_expr: AB::ExprEF = aux_local[0].into();
-        let challenge_expr: AB::ExprEF = challenge.into();
-        builder.assert_eq_ext(aux_expr, challenge_expr);
+        builder.assert_eq_ext(frame.aux.current[0].dup(), inputs.challenge(0));
+    }
+}
+
+impl air::ProverAir<QuadFelt> for PowerAir {
+    type Error = Infallible;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        Ok(air::AuxTrace {
+            columns: RowMajorMatrix::new(vec![inputs.challenges[0]; inputs.main.height()], 1),
+            exports: vec![],
+        })
     }
 }
 
@@ -93,92 +88,54 @@ struct PeriodicPowerAir {
     power: u64,
 }
 
-impl BaseAir<Felt> for PeriodicPowerAir {
-    fn width(&self) -> usize {
-        1
+impl air::LiftedAir for PeriodicPowerAir {
+    type F = Felt;
+
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
+            main_width: 1,
+            aux_width: 1,
+            num_public_values: 0,
+            num_challenges: 1,
+            num_exports: 0,
+            preprocessed: None,
+            periodic_columns: Cow::Owned(vec![vec![Felt::ONE, Felt::ZERO]]),
+        }
     }
 
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        // Period 2: entries [1, 0] repeat across the trace.
-        Cow::Owned(vec![vec![Felt::ONE, Felt::ZERO]])
-    }
-}
-
-impl LiftedAir<Felt, QuadFelt> for PeriodicPowerAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        1
-    }
-
-    fn aux_width(&self) -> usize {
-        1
-    }
-
-    fn num_aux_values(&self) -> usize {
-        0
-    }
-
-    fn build_aux_trace(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        // Trivial aux: a single constant-challenge column.
-        (RowMajorMatrix::new(vec![challenges[0]; main.height()], 1), vec![])
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        let main = builder.main();
-        let (local, next) = (main.current_slice().to_vec(), main.next_slice().to_vec());
-        let periodic = builder.periodic_values().to_vec();
-
-        let x: AB::Expr = local[0].into();
-        let x_power: AB::Expr = match self.power {
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        let x = frame.main.current[0].dup();
+        let x_power = match self.power {
             3 => x.clone().exp_power_of_2(1) * x,
             5 => x.clone().exp_power_of_2(2) * x,
             _ => unreachable!("periodic test uses power in {{3, 5}}"),
         };
-        builder.when_transition().assert_eq(next[0].into(), x_power);
+        builder.when(frame.transition()).assert_eq(frame.main.next[0].dup(), x_power);
 
         // Periodic column starts at 1 on the first trace row.
-        let p: AB::Expr = periodic[0].into();
-        builder.when_first_row().assert_one(p);
+        builder.when(frame.first_row()).assert_one(frame.periodic[0].dup());
 
-        // Trivial aux: aux_local == challenge.
-        let aux = builder.permutation();
-        let aux_local = aux.current_slice().to_vec();
-        let challenge = builder.permutation_randomness()[0];
-        let aux_expr: AB::ExprEF = aux_local[0].into();
-        let challenge_expr: AB::ExprEF = challenge.into();
-        builder.assert_eq_ext(aux_expr, challenge_expr);
+        // Trivial aux: aux_local == challenge (extension-field identity, degree 1).
+        builder.assert_eq_ext(frame.aux.current[0].dup(), inputs.challenge(0));
     }
 }
 
-// ---------------------------------------------------------------------------
-// MultiAir: trivial constant-challenge aux column for each trace.
-// ---------------------------------------------------------------------------
+impl air::ProverAir<QuadFelt> for PeriodicPowerAir {
+    type Error = Infallible;
 
-struct TwoTraceMultiAir<A> {
-    airs: Vec<A>,
-}
-
-impl<A> TwoTraceMultiAir<A> {
-    fn new(airs: Vec<A>) -> Self {
-        Self { airs }
-    }
-}
-
-impl<A> MultiAir<Felt, QuadFelt> for TwoTraceMultiAir<A>
-where
-    A: LiftedAir<Felt, QuadFelt>,
-{
-    type Air = A;
-
-    fn airs(&self) -> &[Self::Air] {
-        &self.airs
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        Ok(air::AuxTrace {
+            columns: RowMajorMatrix::new(vec![inputs.challenges[0]; inputs.main.height()], 1),
+            exports: vec![],
+        })
     }
 }
 
@@ -201,17 +158,11 @@ fn generate_pow_trace(power: u64, start: Felt, height: usize) -> RowMajorMatrix<
 // ---------------------------------------------------------------------------
 
 #[test]
-fn quadratic_air_uses_one_quotient_chunk() {
-    assert_eq!(log_quotient_degree::<Felt, QuadFelt, _>(&PowerAir { power: 2 }), 0);
-}
-
-#[test]
 fn one_chunk_quadratic_quotient_proves() {
-    let air = PowerAir { power: 2 };
+    let kernel = air::DirectKernel::new(PowerAir { power: 2 }).unwrap();
+    assert_eq!(log_quotient_degree(&kernel).unwrap(), 0);
     let trace = generate_pow_trace(2, Felt::from_u64(7), 16);
-
-    let statement =
-        Statement::new(TwoTraceMultiAir::new(vec![air]), Vec::new(), Vec::new()).unwrap();
+    let statement = Statement::new(TestMultiAir::new(vec![kernel]), vec![], vec![]).unwrap();
     let prover_statement = ProverStatement::new(statement, vec![trace]).unwrap();
     prove_and_verify_statement(prover_statement);
 }
@@ -223,25 +174,24 @@ fn run_upsample_case(low_power: u64, low_height: usize, high_power: u64, high_he
     let t_low = generate_pow_trace(low_power, Felt::from_u64(7), low_height);
     let t_high = generate_pow_trace(high_power, Felt::from_u64(11), high_height);
 
-    let statement =
-        Statement::new(TwoTraceMultiAir::new(vec![low, high]), Vec::new(), Vec::new()).unwrap();
+    let statement = Statement::new(
+        TestMultiAir::new(vec![
+            air::DirectKernel::new(low).unwrap(),
+            air::DirectKernel::new(high).unwrap(),
+        ]),
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
     let prover_statement = ProverStatement::new(statement, vec![t_low, t_high]).unwrap();
     prove_and_verify_statement(prover_statement);
 }
 
 #[test]
-fn upsample_fires_on_d5_under_d9() {
-    run_upsample_case(5, 16, 9, 16);
-}
-
-#[test]
-fn upsample_fires_low_degree_on_taller_trace() {
-    run_upsample_case(2, 64, 9, 16);
-}
-
-#[test]
-fn upsample_fires_high_degree_on_taller_trace() {
-    run_upsample_case(2, 16, 9, 64);
+fn quotient_upsampling_handles_mixed_degrees_and_heights() {
+    for (low_power, low_height, high_height) in [(5, 16, 16), (2, 64, 16), (2, 16, 64)] {
+        run_upsample_case(low_power, low_height, 9, high_height);
+    }
 }
 
 #[test]
@@ -252,8 +202,15 @@ fn upsample_fires_with_periodic_columns() {
     let t_low = generate_pow_trace(3, Felt::from_u64(7), 16);
     let t_high = generate_pow_trace(5, Felt::from_u64(11), 16);
 
-    let statement =
-        Statement::new(TwoTraceMultiAir::new(vec![low, high]), Vec::new(), Vec::new()).unwrap();
+    let statement = Statement::new(
+        TestMultiAir::new(vec![
+            air::DirectKernel::new(low).unwrap(),
+            air::DirectKernel::new(high).unwrap(),
+        ]),
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
     let prover_statement = ProverStatement::new(statement, vec![t_low, t_high]).unwrap();
     prove_and_verify_statement(prover_statement);
 }

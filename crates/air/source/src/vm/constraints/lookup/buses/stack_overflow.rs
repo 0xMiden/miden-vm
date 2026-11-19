@@ -16,7 +16,7 @@ use p3_field::Dup;
 
 use super::super::operations::merkle;
 use crate::vm::constraints::lookup::{
-    main_air::{MainBusContext, MainLookupBuilder},
+    main_air::{MainBusContext, NativeMainLookupBuilder},
     messages::StackOverflowMsg,
 };
 
@@ -29,20 +29,20 @@ pub(in crate::vm::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 3
 /// Emit the stack overflow table bus.
 pub(in crate::vm::constraints::lookup) fn emit_stack_overflow<LB>(
     builder: &mut LB,
-    ctx: &MainBusContext<LB>,
+    ctx: &MainBusContext<'_, LB::Expr>,
 ) where
-    LB: MainLookupBuilder,
+    LB: NativeMainLookupBuilder,
 {
     let local = ctx.local;
     let next = ctx.next;
     let op_flags = &ctx.op_flags;
 
-    let clk = local.system.clk;
+    let clk = local.system.clk.dup();
     let s15 = local.stack.get(15);
     let s15_next = next.stack.get(15);
-    let b1 = local.stack.b1;
-    let b1_next = next.stack.b1;
-    let h5 = local.decoder.hasher_state[5];
+    let b1 = local.stack.b1.dup();
+    let b1_next = next.stack.b1.dup();
+    let h5 = local.decoder.hasher_state[5].dup();
 
     // `op_flags.overflow() = (b0 - 16) * h0`, degree 2. Aliased once so each removal can cheaply
     // duplicate the expression.
@@ -60,9 +60,9 @@ pub(in crate::vm::constraints::lookup) fn emit_stack_overflow<LB>(
                         "right_shift",
                         op_flags.right_shift(),
                         || StackOverflowMsg {
-                            clk: clk.into(),
-                            val: s15.into(),
-                            prev: b1.into(),
+                            clk: clk.dup(),
+                            val: s15.dup(),
+                            prev: b1.dup(),
                         },
                         Deg { v: 6, u: 7 },
                     );
@@ -72,9 +72,9 @@ pub(in crate::vm::constraints::lookup) fn emit_stack_overflow<LB>(
                         "left_shift",
                         f_left_shift_overflow,
                         || StackOverflowMsg {
-                            clk: b1.into(),
-                            val: s15_next.into(),
-                            prev: b1_next.into(),
+                            clk: b1.dup(),
+                            val: s15_next.dup(),
+                            prev: b1_next.dup(),
                         },
                         Deg { v: 7, u: 8 },
                     );
@@ -86,9 +86,9 @@ pub(in crate::vm::constraints::lookup) fn emit_stack_overflow<LB>(
                         "dyncall",
                         f_dyncall_overflow,
                         || StackOverflowMsg {
-                            clk: b1.into(),
-                            val: s15_next.into(),
-                            prev: h5.into(),
+                            clk: b1.dup(),
+                            val: s15_next.dup(),
+                            prev: h5.dup(),
                         },
                         Deg { v: 7, u: 8 },
                     );

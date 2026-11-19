@@ -12,17 +12,14 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_stark::{
-    air::{BaseAir, ConstraintDegrees, LiftedAir},
-    lookup::{
-        LookupAir, LookupMessage, ProverLookupBuilder,
-        debug::{ValidateLayout, ValidateLookupAir},
-    },
+    air::{ConstraintDegrees, LiftedAir},
+    lookup::{LookupAir, LookupMessage, ProverLookupBuilder},
 };
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::prover::{
     ec::{EcPointMsg, add::EcGroupAddMsg},
-    logup::{Challenges, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
+    logup::{Challenges, NUM_PUBLIC_VALUES},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::Session,
     tests::{
@@ -209,33 +206,19 @@ const TYPED_RELATION_COL: usize = 3;
 fn shape_and_degree_match_design() {
     let air = TranscriptEvalAir;
 
-    assert_eq!(air.width(), 38);
-    assert_eq!(air.aux_width(), 8);
+    assert_eq!(air.spec().main_width, 38);
+    assert_eq!(air.spec().aux_width, 8);
     assert_eq!(
         <TranscriptEvalAir as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::column_shape(
             &air
         ),
         &[2, 2, 2, 1, 1, 1, 2, 2]
     );
-    assert_eq!(
-        ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
-        ConstraintDegrees { base: 3, ext: 3 }
-    );
+    assert_eq!(crate::prover::tests::raw_degrees(&air), ConstraintDegrees { base: 3, ext: 3 });
     assert_eq!(crate::prover::tests::log_quotient_degree(&air), 1);
 
-    ValidateLookupAir::validate(
-        &air,
-        ValidateLayout {
-            preprocessed_width: air.preprocessed_width(),
-            trace_width: air.width(),
-            num_public_values: NUM_PUBLIC_VALUES,
-            num_periodic_columns: air.periodic_columns().len(),
-            permutation_width: air.aux_width(),
-            num_permutation_challenges: NUM_RANDOMNESS,
-            num_permutation_values: NUM_LOGUP_VALUES,
-        },
-    )
-    .unwrap_or_else(|err| panic!("TranscriptEvalAir lookup validation failed: {err}"));
+    miden_stark::lookup::validate_native(&air, &miden_stark::air::LiftedAir::spec(&air))
+        .unwrap_or_else(|err| panic!("TranscriptEvalAir lookup validation failed: {err}"));
 }
 
 fn typed_relation_fold(row: Vec<Felt>, challenges: &Challenges<QuadFelt>) -> (QuadFelt, QuadFelt) {

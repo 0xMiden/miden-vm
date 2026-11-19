@@ -8,7 +8,7 @@ use miden_core::{
     crypto::hash::Eidos,
     field::{BasedVectorSpace, QuadFelt},
 };
-use miden_stark::air::{BaseAir, LiftedAir};
+use miden_stark::air::AirKernel;
 
 use super::vm_sigma_scatter::{heights_for_order, permutations};
 use crate::helpers::{read_memory_felt, stark_constant};
@@ -68,17 +68,24 @@ impl RowGeometry {
         let mut main = Vec::with_capacity(MIDEN_AIR_COUNT);
         let mut aux = Vec::with_capacity(MIDEN_AIR_COUNT);
         for air in AIRS.iter() {
-            preprocessed
-                .push(BaseAir::<Felt>::preprocessed_width(air).next_multiple_of(LMCS_ALIGNMENT));
-            main.push(BaseAir::<Felt>::width(air).next_multiple_of(LMCS_ALIGNMENT));
-            aux.push(
-                (LiftedAir::<Felt, QuadFelt>::aux_width(air) * EXT_DEGREE)
+            preprocessed.push(
+                air.descriptor()
+                    .spec()
+                    .preprocessed
+                    .map_or(0, |shape| shape.width)
                     .next_multiple_of(LMCS_ALIGNMENT),
+            );
+            main.push(air.descriptor().spec().main_width.next_multiple_of(LMCS_ALIGNMENT));
+            aux.push(
+                (air.descriptor().spec().aux_width * EXT_DEGREE).next_multiple_of(LMCS_ALIGNMENT),
             );
         }
         let max_log_quotient_degree = AIRS
             .iter()
-            .map(miden_stark::log_quotient_degree::<Felt, QuadFelt, _>)
+            .map(|air| {
+                miden_stark::log_quotient_degree(air)
+                    .expect("canonical quotient allocation is valid")
+            })
             .max()
             .expect("the Miden AIR set is non-empty");
         let quotient = (1usize << max_log_quotient_degree) * EXT_DEGREE;

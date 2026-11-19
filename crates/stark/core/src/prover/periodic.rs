@@ -5,14 +5,25 @@
 //! column with period `p` only needs `p * blowup` LDE values (not `trace_height * blowup`),
 //! which are accessed via modular indexing.
 
+use alloc::vec::Vec;
+
 use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
-use p3_field::{PackedValue, TwoAdicField};
+use p3_field::{Field, PackedValue, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
     air::log2_strict_u8,
     domain::{Coset, EvaluationDomain},
 };
+
+/// Repeat validated periodic definitions to their common period in row-major order.
+pub(crate) fn periodic_matrix<F: Field>(columns: &[Vec<F>]) -> Option<RowMajorMatrix<F>> {
+    let height = columns.iter().map(Vec::len).max()?;
+    let values = (0..height)
+        .flat_map(|row| columns.iter().map(move |col| col[row % col.len()]))
+        .collect();
+    Some(RowMajorMatrix::new(values, columns.len()))
+}
 
 /// Prover-side periodic LDE values for constraint evaluation.
 ///
@@ -35,7 +46,7 @@ pub(super) struct PeriodicLde<F: TwoAdicField> {
 impl<F: TwoAdicField> PeriodicLde<F> {
     /// Build periodic LDEs from a periodic column matrix.
     ///
-    /// Takes the output of [`crate::air::BaseAir::periodic_columns_matrix`], where
+    /// Takes the output of [`crate::air::LiftedAir::spec`], where
     /// columns with smaller periods have been repeated cyclically to the maximum period.
     ///
     /// # Arguments

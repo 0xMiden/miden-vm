@@ -45,16 +45,20 @@ fn io_index(block: usize, lane: usize, column: usize) -> usize {
 
 #[test]
 fn sha256_trace_meets_per_block_memory_budget() {
-    use miden_stark::air::LiftedAir;
+    use miden_stark::air::{AuxTraceInputs, ProverAir};
 
     let (compression, io) = requirements(&[55]);
     let main = generate_trace(compression, io, &mut BytePairLutRequires::new());
-    let (aux, _) = Sha256Air.build_aux_trace(
-        &main,
-        &[],
-        &[],
-        &[QuadFelt::from_u64(17), QuadFelt::from_u64(31)],
-    );
+    let aux = Sha256Air
+        .build_aux_trace(AuxTraceInputs {
+            main: &main,
+            preprocessed: None,
+            public_values: &[],
+            statement: &[],
+            challenges: &[QuadFelt::from_u64(17), QuadFelt::from_u64(31)],
+        })
+        .expect("SHA-256 witness inputs are valid")
+        .columns;
     // Each commitment row is padded independently to eight base-field elements.
     // IO must fit within a 40-main + 8-aux aligned footprint per compression row.
     let committed_cells = main.height() * main.width.next_multiple_of(8)

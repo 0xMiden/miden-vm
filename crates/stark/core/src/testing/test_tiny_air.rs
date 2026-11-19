@@ -2,16 +2,14 @@
 //! single-column AIR with periodic columns and auxiliary traces.
 
 use alloc::{borrow::Cow, vec, vec::Vec};
+use core::convert::Infallible;
 
-use p3_field::{Algebra, PrimeCharacteristicRing};
+use p3_field::{Dup, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    ProverInstance, VerifierError, VerifierInstance,
-    air::{
-        AirBuilder, BaseAir, ExtensionBuilder, InstanceError, LiftedAir, LiftedAirBuilder,
-        ProverStatement, Statement, WindowAccess,
-    },
+    ProverInstance, VerifierError, VerifierInstance, air,
+    air::{InstanceError, LiftedAirBuilder as _, ProverStatement, Statement},
     domain::DomainError,
     order::{ShapeError, TraceOrder},
     proof::{TranscriptData, TranscriptError},
@@ -56,87 +54,63 @@ impl TinyAir {
     }
 }
 
-impl BaseAir<Felt> for TinyAir {
-    fn width(&self) -> usize {
-        1
+impl air::LiftedAir for TinyAir {
+    type F = Felt;
+
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
+            main_width: 1,
+            aux_width: 1,
+            num_public_values: self.num_public_values,
+            num_challenges: 1,
+            num_exports: 1,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(&self.periodic_cols),
+        }
     }
 
-    fn num_public_values(&self) -> usize {
-        self.num_public_values
-    }
+    fn eval<B: air::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &air::Frame<'_, B>,
+        inputs: air::Inputs<'_, B>,
+        sink: &mut B,
+    ) {
+        let local = frame.main.current;
+        let next = frame.main.next;
+        let public_sum =
+            inputs.public_values.iter().fold(B::Expr::ZERO, |sum, value| sum + value.dup());
 
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Owned(self.periodic_cols.clone())
+        // Preserve both expression construction and global assertion order.
+        sink.when(frame.first_row()).assert_eq(local[0].dup(), public_sum.dup());
+        sink.when(frame.transition())
+            .assert_eq(next[0].dup(), local[0].dup().exp_power_of_2(2));
+        for periodic in frame.periodic {
+            sink.when(frame.first_row()).assert_one(periodic.dup());
+            sink.when(frame.last_row()).assert_one(periodic.dup());
+        }
+
+        let aux = frame.aux.current[0].dup();
+        sink.when(frame.first_row())
+            .assert_eq_ext(aux.dup(), inputs.challenges[0].dup() + B::ExtExpr::from(public_sum));
+        sink.when(frame.transition())
+            .assert_eq_ext(frame.aux.next[0].dup(), aux.exp_power_of_2(2));
     }
 }
 
-impl LiftedAir<Felt, QuadFelt> for TinyAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        1
-    }
-
-    fn aux_width(&self) -> usize {
-        1
-    }
-
-    fn num_aux_values(&self) -> usize {
-        1
-    }
+impl air::ProverAir<QuadFelt> for TinyAir {
+    type Error = Infallible;
 
     fn build_aux_trace(
         &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
         let (mut trace, values) = tiny_aux(
-            main,
-            challenges[0] + QuadFelt::from(air_inputs.iter().copied().sum::<Felt>()),
+            inputs.main,
+            inputs.challenges[0]
+                + QuadFelt::from(inputs.public_values.iter().copied().sum::<Felt>()),
         );
         trace.values[0] += QuadFelt::from(self.aux_offset);
-        (trace, values)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        let main = builder.main();
-        let public_sum = builder
-            .public_values()
-            .iter()
-            .fold(AB::Expr::ZERO, |sum, &value| sum + Into::<AB::Expr>::into(value));
-        let periodic = builder.periodic_values().to_vec();
-        let (local, next) = (main.current_slice(), main.next_slice());
-
-        // First row: main[0] is the sum of this AIR's public values.
-        builder.when_first_row().assert_eq(local[0], public_sum.clone());
-
-        // Transition: main_next = main^4
-        let main_pow4: AB::Expr = local[0].into().exp_power_of_2(2);
-        builder.when_transition().assert_eq(next[0], main_pow4);
-
-        // Periodic column constraints: first and last row see 1
-        for p in &periodic {
-            let p_expr: AB::Expr = (*p).into();
-            builder.when_first_row().assert_one(p_expr.clone());
-            builder.when_last_row().assert_one(p_expr);
-        }
-
-        // Aux trace constraints
-        let aux = builder.permutation();
-        let aux_local = aux.current_slice();
-        let aux_next = aux.next_slice();
-        let challenge: AB::ExprEF = builder.permutation_randomness()[0].into();
-
-        let aux_local_ef: AB::ExprEF = aux_local[0].into();
-        let public_sum_ext: AB::ExprEF = public_sum.into();
-        builder
-            .when_first_row()
-            .assert_eq_ext(aux_local_ef.clone(), challenge + public_sum_ext);
-
-        let aux_pow4: AB::ExprEF = aux_local_ef.exp_power_of_2(2);
-        builder.when_transition().assert_eq_ext(aux_next[0].into(), aux_pow4);
+        Ok(air::AuxTrace { columns: trace, exports: values })
     }
 }
 
@@ -159,6 +133,14 @@ fn tiny_aux(
     (aux_trace, aux_values)
 }
 
+fn tiny_multi_air(airs: Vec<TinyAir>) -> TestMultiAir<air::DirectKernel<TinyAir>> {
+    TestMultiAir::new(
+        airs.into_iter()
+            .map(|air| air::DirectKernel::new(air).expect("valid TinyAir source"))
+            .collect(),
+    )
+}
+
 /// Build a [`ProverStatement`] for tests.
 ///
 /// Returns `Err` if validation fails (so callers can exercise error paths).
@@ -166,8 +148,9 @@ fn tiny_prover_statement(
     airs: Vec<TinyAir>,
     traces: Vec<RowMajorMatrix<Felt>>,
     air_inputs: Vec<(usize, Vec<Felt>)>,
-) -> Result<ProverStatement<Felt, QuadFelt, TestMultiAir<TinyAir>>, InstanceError> {
-    let statement = Statement::new(TestMultiAir::new(airs), air_inputs, Vec::new())?;
+) -> Result<ProverStatement<Felt, QuadFelt, TestMultiAir<air::DirectKernel<TinyAir>>>, InstanceError>
+{
+    let statement = Statement::new(tiny_multi_air(airs), air_inputs, Vec::new())?;
     ProverStatement::new(statement, traces)
 }
 
@@ -202,8 +185,7 @@ fn statement_inputs_are_indexed_and_required() {
             .map(|(i, values)| (i, values.into_iter().map(Felt::from_u64).collect()))
             .collect();
         let statement =
-            Statement::<Felt, QuadFelt, _>::new(TestMultiAir::new(airs), entries, Vec::new())
-                .unwrap();
+            Statement::<Felt, QuadFelt, _>::new(tiny_multi_air(airs), entries, Vec::new()).unwrap();
         crate::air::debug::assert_multi_air_valid(statement.multi_air());
         let expected: Vec<Vec<_>> = expected
             .into_iter()
@@ -214,7 +196,7 @@ fn statement_inputs_are_indexed_and_required() {
 
     let statement = |entries| {
         Statement::<Felt, QuadFelt, _>::new(
-            TestMultiAir::new(vec![
+            tiny_multi_air(vec![
                 TinyAir { num_public_values: 2, ..TinyAir::new([]) },
                 TinyAir { num_public_values: 0, ..TinyAir::new([]) },
             ]),
@@ -303,6 +285,25 @@ fn malformed_transcript_is_rejected() {
 }
 
 #[test]
+fn prover_instance_rejects_insufficient_blowup_without_fixed_data() {
+    let mut config = test_config();
+    config.pcs = crate::pcs::params::PcsParams::new(1, 2, 2, 0, 0, 2, 0).unwrap();
+    let prover_statement = tiny_prover_statement(
+        vec![TinyAir::new([])],
+        vec![trace_of_height(4)],
+        vec![(0, vec![Felt::from_u64(START)])],
+    )
+    .unwrap();
+
+    assert!(matches!(
+        ProverInstance::new(&config, prover_statement, None),
+        Err(crate::ProverError::Plan(crate::PlanError::Domain(
+            DomainError::ConstraintDegreeTooHigh { log_blowup: 1, .. }
+        )))
+    ));
+}
+
+#[test]
 fn malformed_log_trace_heights_is_rejected() {
     let config = test_config();
     let prover_statement = tiny_prover_statement(
@@ -331,7 +332,10 @@ fn malformed_log_trace_heights_is_rejected() {
         .expect_err("oversized log trace height should fail verification");
     assert!(matches!(
         err,
-        VerifierError::Shape(ShapeError::LogTraceHeightTooLarge { log_h: 200, .. })
+        VerifierError::Plan(crate::PlanError::Shape(ShapeError::LogTraceHeightTooLarge {
+            log_h: 200,
+            ..
+        }))
     ));
 
     // log_h = 30 with log_blowup = 3 and Felt::TWO_ADICITY = 32 overflows the LDE
@@ -341,69 +345,34 @@ fn malformed_log_trace_heights_is_rejected() {
     let err = stark_statement
         .verify(&bad_proof, test_challenger())
         .expect_err("log_h + log_blowup exceeding two-adicity should fail verification");
-    assert!(matches!(err, VerifierError::Domain(DomainError::LdeOrderTooLarge { .. })));
-}
-
-// ---------------------------------------------------------------------------
-// Multi-trace tests
-// ---------------------------------------------------------------------------
-
-#[test]
-fn two_traces_same_height() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![]), &pv, &[trace_of_height(8), trace_of_height(8)]);
+    assert!(matches!(
+        err,
+        VerifierError::Plan(crate::PlanError::Domain(DomainError::LdeOrderTooLarge { .. }))
+    ));
 }
 
 #[test]
-fn two_traces_different_heights() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![]), &pv, &[trace_of_height(4), trace_of_height(8)]);
-}
-
-#[test]
-fn three_traces_ascending_heights() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(
-        &TinyAir::new(vec![]),
-        &pv,
-        &[trace_of_height(4), trace_of_height(8), trace_of_height(16)],
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Unordered multi-trace tests (instances not in ascending height order)
-// ---------------------------------------------------------------------------
-
-#[test]
-fn two_traces_reversed_order() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![]), &pv, &[trace_of_height(8), trace_of_height(4)]);
-}
-
-#[test]
-fn three_traces_descending_heights() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(
-        &TinyAir::new(vec![]),
-        &pv,
-        &[trace_of_height(16), trace_of_height(8), trace_of_height(4)],
-    );
-}
-
-#[test]
-fn three_traces_shuffled_order() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(
-        &TinyAir::new(vec![]),
-        &pv,
-        &[trace_of_height(8), trace_of_height(16), trace_of_height(4)],
-    );
-}
-
-#[test]
-fn periodic_columns_reversed_order() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![2, 4]), &pv, &[trace_of_height(8), trace_of_height(4)]);
+fn proof_roundtrips_across_trace_heights_and_periodic_columns() {
+    let cases: &[(&[usize], &[usize])] = &[
+        (&[], &[8, 8]),
+        (&[], &[4, 8]),
+        (&[], &[4, 8, 16]),
+        (&[], &[8, 4]),
+        (&[], &[16, 8, 4]),
+        (&[], &[8, 16, 4]),
+        (&[2], &[8]),
+        (&[4], &[8]),
+        (&[2, 4], &[8]),
+        (&[2], &[8, 8]),
+        (&[2, 4], &[4, 8]),
+        (&[2, 4], &[8, 4]),
+        (&[2, 4], &[4, 8, 16]),
+    ];
+    for &(periods, heights) in cases {
+        let air = TinyAir::new(periods.iter().copied());
+        let traces: Vec<_> = heights.iter().copied().map(trace_of_height).collect();
+        prove_and_verify(&air, &[Felt::from_u64(START)], &traces);
+    }
 }
 
 #[test]
@@ -419,7 +388,7 @@ fn constraint_checker_rejects_invalid_aux_trace() {
         vec![(0, vec![Felt::from_u64(START)])],
     )
     .unwrap();
-    crate::debug::check_constraints(&prover_statement, test_challenger());
+    crate::debug::check_constraints(&prover_statement, None, test_challenger());
 }
 
 #[test]
@@ -438,7 +407,7 @@ fn air_order_reflects_caller_order() {
     let traces = [(7, 16), (0, 8), (11, 4)]
         .map(|(start, height)| generate_pow4_trace(Felt::from_u64(start), height));
     let prover_statement = tiny_prover_statement(airs.clone(), traces.to_vec(), inputs).unwrap();
-    crate::debug::check_constraints(&prover_statement, test_challenger());
+    crate::debug::check_constraints(&prover_statement, None, test_challenger());
     let (output, statement) = ProverInstance::new(&config, prover_statement, None)
         .unwrap()
         .prove(test_challenger())
@@ -450,7 +419,7 @@ fn air_order_reflects_caller_order() {
     assert_eq!(digest, output.digest);
     let explicit_inputs = statement.air_inputs().iter().cloned().enumerate().collect();
     let explicit_statement =
-        Statement::new(TestMultiAir::new(airs.clone()), explicit_inputs, Vec::new()).unwrap();
+        Statement::new(tiny_multi_air(airs.clone()), explicit_inputs, Vec::new()).unwrap();
     assert_eq!(
         VerifierInstance::new(&config, &explicit_statement, None)
             .unwrap()
@@ -459,11 +428,9 @@ fn air_order_reflects_caller_order() {
         digest
     );
     assert_eq!(output.proof.log_trace_heights.as_slice(), &[4, 3, 2]);
-    let trace_order = TraceOrder::from_log_heights::<Felt, QuadFelt, _>(
-        statement.airs(),
-        output.proof.log_trace_heights.clone(),
-    )
-    .unwrap();
+    let trace_order =
+        TraceOrder::from_log_heights(statement.airs(), output.proof.log_trace_heights.clone())
+            .unwrap();
     assert_eq!(trace_order.instance_indices(), &[2, 1, 0]);
     for bad_inputs in [
         vec![
@@ -478,7 +445,7 @@ fn air_order_reflects_caller_order() {
         ],
     ] {
         let statement =
-            Statement::new(TestMultiAir::new(airs.clone()), bad_inputs, Vec::new()).unwrap();
+            Statement::new(tiny_multi_air(airs.clone()), bad_inputs, Vec::new()).unwrap();
         assert!(
             VerifierInstance::new(&config, &statement, None)
                 .unwrap()
@@ -486,50 +453,6 @@ fn air_order_reflects_caller_order() {
                 .is_err()
         );
     }
-}
-
-// ---------------------------------------------------------------------------
-// Periodic column tests
-// ---------------------------------------------------------------------------
-
-#[test]
-fn single_periodic_column() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![2]), &pv, &[trace_of_height(8)]);
-}
-
-#[test]
-fn periodic_column_period_4() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![4]), &pv, &[trace_of_height(8)]);
-}
-
-#[test]
-fn multiple_periodic_columns() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![2, 4]), &pv, &[trace_of_height(8)]);
-}
-
-#[test]
-fn periodic_columns_multi_trace_same_height() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![2]), &pv, &[trace_of_height(8), trace_of_height(8)]);
-}
-
-#[test]
-fn periodic_columns_multi_trace_different_heights() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![2, 4]), &pv, &[trace_of_height(4), trace_of_height(8)]);
-}
-
-#[test]
-fn periodic_columns_three_traces() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(
-        &TinyAir::new(vec![2, 4]),
-        &pv,
-        &[trace_of_height(4), trace_of_height(8), trace_of_height(16)],
-    );
 }
 
 #[test]
@@ -560,4 +483,26 @@ fn block_hashing_preserves_proof_transcript() {
         .verify(&blocks.proof, test_challenger())
         .unwrap();
     assert_eq!(digest, blocks.digest);
+}
+
+#[test]
+fn direct_kernel_preserves_symbolic_constraints() {
+    use crate::air::AirKernel;
+
+    let source = TinyAir {
+        num_public_values: 2,
+        ..TinyAir::new([2, 4])
+    };
+    let kernel = air::DirectKernel::new(source).unwrap();
+    let descriptor = kernel.descriptor();
+    let observed = air::capture_from_spec::<Felt, QuadFelt>(
+        descriptor.spec().as_borrowed(),
+        |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
+    )
+    .unwrap();
+    let layout = descriptor.analysis().layout();
+    assert_eq!(layout.base_indices(), &[0, 1, 2, 3, 4, 5]);
+    assert_eq!(layout.ext_indices(), &[6, 7]);
+    assert_eq!(observed.descriptor.fingerprint(), descriptor.fingerprint());
+    assert_eq!(observed.descriptor.analysis(), descriptor.analysis());
 }

@@ -8,49 +8,87 @@
 //! passing a failed check selected before sampling. Each AIR's correctness argument establishes
 //! which identities enforce its arithmetic.
 
-use miden_air::vm::security;
 use miden_air_definitions::{
-    compiler::vm::derive_air_shape,
+    compiler::vm::derive_air_shape as derive_vm_shape,
+    precompiles::{ChipletAir, geometry::derive_air_shape as derive_pvm_shape},
     vm::{AIRS, MidenAir},
 };
-use miden_constraint_compiler::ir::{GraphBuilder, auxiliary, capture_into, capture_into_with};
+use miden_constraint_compiler::ir::{
+    GraphBuilder, auxiliary, capture_native_into, capture_native_into_with,
+};
 use miden_core::{Felt, field::QuadFelt};
 use miden_stark::{
-    air::{BaseAir, LiftedAir},
-    lookup::{ConstraintLookupBuilder, LookupAir},
+    air::{self, LiftedAir},
+    lookup,
 };
 
+type Symbolic = air::SymbolicSink<Felt, QuadFelt>;
+
+fn lookup_coefficient(shape: miden_stark::security::LookupShape) -> u64 {
+    (u64::from(shape.max_message_width) + 2) * u64::from(shape.fractions_per_row)
+}
+
+fn check_degree<A>(air: &A, label: impl core::fmt::Debug, expected: usize, lookup_coefficient: u64)
+where
+    A: LiftedAir<F = Felt>
+        + for<'r, 's> lookup::LookupAir<lookup::ConstraintLookupBuilder<'r, 's, Symbolic>>,
+{
+    let mut builder = GraphBuilder::new();
+    let (full, _) = capture_native_into(air, &mut builder).unwrap();
+    let (lookup, _) = capture_native_into_with(air, &mut builder, |frame, inputs, sink| {
+        lookup::eval_lookup(air, frame, inputs, sink);
+    })
+    .unwrap();
+    let spec = air.spec();
+    let degree = auxiliary::beta_degree_bound(
+        &builder.freeze(),
+        &full.ext_roots,
+        &lookup.ext_roots,
+        spec.aux_width,
+        &spec.periodic_columns,
+    )
+    .unwrap_or_else(|error| panic!("{label:?}: {error}"));
+    assert_eq!(degree, expected, "{label:?}: auxiliary challenge degree changed");
+    assert!(
+        degree as u64 <= lookup_coefficient,
+        "{label:?}: degree coefficient {degree} exceeds lookup coefficient {lookup_coefficient}"
+    );
+}
+
 #[test]
-fn auxiliary_identities_fit_the_lookup_budget() {
-    let shape = derive_air_shape();
-    assert_eq!(shape, security::AIR_SHAPE);
-    let lookup_shape = shape.lookup.unwrap();
-    let lookup_coefficient =
-        (u64::from(lookup_shape.max_message_width) + 2) * u64::from(lookup_shape.fractions_per_row);
+fn vm_auxiliary_identities_fit_the_lookup_budget() {
+    let shape = derive_vm_shape().unwrap();
+    assert_eq!(shape, miden_air::vm::security::AIR_SHAPE);
+    let lookup_coefficient = lookup_coefficient(shape.lookup.unwrap());
     for air in AIRS {
-        let mut builder = GraphBuilder::new();
-        let full = capture_into(&air, &mut builder);
-        let lookup = capture_into_with(&air, &mut builder, |b| {
-            let mut lb = ConstraintLookupBuilder::new(b, &air);
-            LookupAir::eval(&air, &mut lb);
-            lb.finish();
-        });
-        let degree = auxiliary::beta_degree_bound(
-            &builder.freeze(),
-            &full.ext_roots,
-            &lookup.ext_roots,
-            LiftedAir::<Felt, QuadFelt>::aux_width(&air),
-            &air.periodic_columns(),
-        )
-        .unwrap_or_else(|error| panic!("{air:?}: {error}"));
-        let expected_degree = match air {
+        let expected = match air {
             MidenAir::EidosCompression => 119,
             MidenAir::Core | MidenAir::Chiplets | MidenAir::And8Lookup => 0,
         };
-        assert_eq!(degree, expected_degree, "{air:?}: auxiliary challenge degree changed");
-        assert!(
-            degree as u64 <= lookup_coefficient,
-            "{air:?}: degree coefficient {degree} exceeds lookup coefficient {lookup_coefficient}"
-        );
+        check_degree(&air, air, expected, lookup_coefficient);
+    }
+}
+
+#[test]
+fn pvm_auxiliary_identities_fit_the_lookup_budget() {
+    let shape = derive_pvm_shape().unwrap();
+    assert_eq!(shape, miden_air::precompiles::protocol::PROTOCOL.air_shape);
+    let lookup_coefficient = lookup_coefficient(shape.lookup.unwrap());
+    for air in ChipletAir::all() {
+        let expected = match air {
+            ChipletAir::EidosCompression => 119,
+            ChipletAir::UintStoreMul => 31,
+            ChipletAir::UintAdd => 7,
+            ChipletAir::ChunkNodeSponge
+            | ChipletAir::KeccakRound
+            | ChipletAir::BytePairLut
+            | ChipletAir::TranscriptEval
+            | ChipletAir::EcPointStoreGroups
+            | ChipletAir::EcGroupAdd
+            | ChipletAir::EcMsm
+            | ChipletAir::Sha512
+            | ChipletAir::Sha256 => 0,
+        };
+        check_degree(&air, air, expected, lookup_coefficient);
     }
 }

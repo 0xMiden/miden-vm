@@ -11,8 +11,8 @@ use miden_core::{
 };
 use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
-    PreprocessedValidationError, StarkConfig, VerifierInstance,
-    air::Statement,
+    PreprocessedValidationError, SetupIdentity, StarkConfig, VerifierInstance,
+    air::{InstanceError, Statement},
     config::{blake3_256_config, keccak_config, observe_protocol_params},
     lmcs::Lmcs,
     proof::StarkProofData,
@@ -141,11 +141,18 @@ where
         MidenMultiAir::new(),
         vec![(0, public_values.to_vec())],
         aux_inputs.to_vec(),
-    )
-    .map_err(|error| VerificationError::Verifier(VerifierError::from(error)))?;
+    )?;
 
-    VerifierInstance::new(config, &statement, Some(preprocessed_commitment))?
-        .verify(&proof, challenger)?;
+    VerifierInstance::new(
+        config,
+        &statement,
+        Some(SetupIdentity::new::<QuadFelt, _, _>(
+            preprocessed_commitment,
+            statement.airs(),
+            config,
+        )),
+    )?
+    .verify(&proof, challenger)?;
 
     let log_max_height = u32::from(proof.log_trace_heights().iter().copied().max().unwrap_or(0));
     Ok((log_max_height, config.lmcs().alignment()))
@@ -158,6 +165,8 @@ pub enum VerificationError {
     Deserialization(#[from] wincode::error::ReadError),
     #[error("STARK proof is too large: {size} bytes exceeds the {max} byte limit")]
     ProofTooLarge { size: usize, max: usize },
+    #[error(transparent)]
+    Statement(#[from] InstanceError),
     #[error(transparent)]
     Verifier(#[from] VerifierError),
     #[error(transparent)]

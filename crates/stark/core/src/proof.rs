@@ -25,11 +25,12 @@ use serde::{Deserialize, Serialize};
 pub use crate::transcript::{TranscriptChallenger, TranscriptData, TranscriptError};
 use crate::{
     StarkConfig,
-    air::{BaseAir, LiftedAir, MultiAir},
-    domain::{Coset, DomainError, LiftedDomain, log_quotient_degree},
+    air::{AirKernel, MultiAir},
+    domain::Coset,
     lmcs::Lmcs,
     order::TraceOrder,
     pcs::{proof::PcsProof, verifier::CommitmentGroup},
+    plan::ExecutionPlan,
     transcript::{Channel, VerifierChannel, VerifierTranscript},
     util::align::aligned_len,
     verifier::{VerifierError, VerifierInstance},
@@ -241,13 +242,15 @@ where
 
         // Validate proof heights against host bounds, periodic lengths, and fixed preprocessing
         // heights before deriving the table-to-AIR mapping or parsing openings.
-        let trace_order = TraceOrder::from_log_heights::<L::F, EF, _>(
+        let plan = ExecutionPlan::new(
             statement.airs(),
             data.log_trace_heights.clone(),
+            config.pcs().log_blowup(),
         )?;
+        let trace_order = &plan.order;
 
         let preprocessed_trace_to_air = if preprocessed_commitment.is_some() {
-            trace_order.preprocessed_air_for_trace_index::<L::F, EF, _>(statement.airs())
+            trace_order.preprocessed_air_for_trace_index(statement.airs())
         } else {
             Vec::new()
         };
@@ -257,7 +260,7 @@ where
 
         let log_blowup = config.pcs().log_blowup();
         let log_max_trace_height = trace_order.max_log_height();
-        let max_lde_domain = LiftedDomain::<L::F>::try_canonical(log_max_trace_height, log_blowup)?;
+        let max_lde_domain = plan.max_lde_domain;
 
         // The preprocessed commitment is a trusted statement input and must be bound
         // before the rest of the instance data, matching the prover/verifier transcript.
@@ -274,27 +277,18 @@ where
 
         let alignment = config.lmcs().alignment();
 
-        // Infer quotient degree from symbolic AIR analysis (max across all AIRs)
-        let max_log_quotient_degree = proof_ordered_airs
-            .iter()
-            .map(|&air| log_quotient_degree::<L::F, EF, _>(air))
-            .max()
-            .expect("TraceOrder construction rejects empty AIR sets");
-        if max_log_quotient_degree > log_blowup {
-            return Err(DomainError::ConstraintDegreeTooHigh {
-                log_quotient: max_log_quotient_degree,
-                log_blowup,
-            }
-            .into());
-        }
+        let max_log_quotient_degree = plan.max_log_quotient_degree;
         let quotient_degree = 1usize << max_log_quotient_degree as usize;
 
         // 1. Receive main trace commitment
         let main_commit = channel.receive_commitment()?.clone();
 
         // 2. Sample randomness for aux traces
-        let max_num_randomness =
-            proof_ordered_airs.iter().map(|air| air.num_randomness()).max().unwrap_or(0);
+        let max_num_randomness = proof_ordered_airs
+            .iter()
+            .map(|air| air.descriptor().spec().num_challenges)
+            .max()
+            .unwrap_or(0);
 
         let randomness: Vec<EF> = (0..max_num_randomness)
             .map(|_| channel.sample_algebra_element::<EF>())
@@ -307,7 +301,7 @@ where
         let all_aux_values: Vec<Vec<EF>> = proof_ordered_airs
             .iter()
             .map(|air| {
-                let count = air.num_aux_values();
+                let count = air.descriptor().spec().num_exports;
                 (0..count)
                     .map(|_| channel.receive_algebra_element::<EF>())
                     .collect::<Result<Vec<_>, _>>()
@@ -333,13 +327,13 @@ where
         // depth for virtually lifted preprocessed traces.
         let main_widths: Vec<usize> = proof_ordered_airs
             .iter()
-            .map(|air| aligned_len(air.width(), alignment))
+            .map(|air| aligned_len(air.descriptor().spec().main_width, alignment))
             .collect();
         let quotient_width = aligned_len(quotient_degree * EF::DIMENSION, alignment);
 
         let aux_widths: Vec<usize> = proof_ordered_airs
             .iter()
-            .map(|air| aligned_len(air.aux_width() * EF::DIMENSION, alignment))
+            .map(|air| aligned_len(air.descriptor().spec().aux_width * EF::DIMENSION, alignment))
             .collect();
 
         let full_log_height = log_max_trace_height + log_blowup;
@@ -348,7 +342,10 @@ where
             let preprocessed_widths: Vec<usize> = preprocessed_trace_to_air
                 .iter()
                 .map(|&air_idx| {
-                    aligned_len(statement.airs()[air_idx as usize].preprocessed_width(), alignment)
+                    aligned_len(
+                        statement.airs()[air_idx as usize].descriptor().spec().preprocessed_width(),
+                        alignment,
+                    )
                 })
                 .collect();
             let preprocessed_log_height = preprocessed_trace_to_air
@@ -394,7 +391,7 @@ where
 
         Ok((
             Self {
-                trace_order,
+                trace_order: plan.order,
                 main_commit,
                 randomness,
                 aux_commit,

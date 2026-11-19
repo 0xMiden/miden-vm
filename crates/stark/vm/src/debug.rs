@@ -1,10 +1,10 @@
 //! Constraint diagnostics using the production VM evaluators.
-use alloc::vec;
+use alloc::{vec, vec::Vec};
 
 use miden_air::vm::{MidenMultiAir, config};
 use miden_air_definitions::vm::VmTrace;
 use miden_core::{Felt, field::QuadFelt};
-use miden_stark::air::{ProverStatement, Statement};
+use miden_stark::air::{LiftedAir, ProverStatement, Statement};
 
 /// Checks every constraint, panicking on the first violation with AIR and row diagnostics.
 pub fn check_constraints(trace: &VmTrace) {
@@ -17,5 +17,11 @@ pub fn check_constraints(trace: &VmTrace) {
         .expect("prover statement construction failed");
     use miden_stark::StarkConfig;
     let config = crate::setup::config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
-    miden_stark::debug::check_constraints(&statement, config.challenger());
+    let raw_setup: Vec<_> = statement
+        .statement()
+        .airs()
+        .iter()
+        .map(LiftedAir::build_preprocessed_trace)
+        .collect();
+    miden_stark::debug::check_constraints(&statement, Some(&raw_setup), config.challenger());
 }

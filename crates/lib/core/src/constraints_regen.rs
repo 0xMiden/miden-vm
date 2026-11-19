@@ -111,7 +111,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     )?;
     let captured = AIRS
         .iter()
-        .map(CapturedAir::new)
+        .map(CapturedAir::new_native)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
     let airs: Vec<_> = captured.iter().collect();

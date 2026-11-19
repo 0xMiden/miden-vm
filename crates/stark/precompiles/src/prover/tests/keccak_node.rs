@@ -15,10 +15,7 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_precompiles::Keccak256Precompile;
-use miden_stark::{
-    air::{BaseAir, LiftedAir},
-    lookup::Challenges,
-};
+use miden_stark::{air::LiftedAir, lookup::Challenges};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::prover::{
@@ -172,7 +169,7 @@ pub(super) fn forge_out_of_range_remainder(row: &mut [Felt]) -> [Felt; 3] {
 // ================================================================================================
 
 #[test]
-fn main_column_layout_partitions_32_indices() {
+fn keccak_node_layout_and_degree_match_design() {
     use crate::prover::hash::keccak::node::COL_OUT_MULT;
     assert_eq!(COL_ACT, 0);
     assert_eq!(COL_SPONGE_SEQ_ID_HEAD, 1);
@@ -191,28 +188,18 @@ fn main_column_layout_partitions_32_indices() {
     assert_eq!(COL_LAST_CHUNK_REM, 30);
     assert_eq!(COL_N_CHUNKS_INV, 31);
     assert_eq!(NUM_MAIN_COLS, 32);
-    assert_eq!(<KeccakNodeAir as BaseAir<Felt>>::width(&KeccakNodeAir), NUM_MAIN_COLS,);
-}
 
-#[test]
-fn lifted_air_validates_and_layout_matches_spec() {
     let air = KeccakNodeAir;
-    let layout = <KeccakNodeAir as LiftedAir<Felt, QuadFelt>>::air_layout(&air);
-    assert_eq!(layout.preprocessed_width, 0);
+    let layout = air.spec();
+    assert_eq!(layout.preprocessed_width(), 0);
     assert_eq!(layout.main_width, NUM_MAIN_COLS);
     assert_eq!(layout.num_public_values, 0);
-    assert_eq!(layout.permutation_width, NUM_AUX_COLS);
-    assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
-    assert_eq!(layout.num_permutation_values, NUM_LOGUP_VALUES);
-    assert_eq!(layout.num_periodic_columns, 0);
-}
+    assert_eq!(layout.aux_width, NUM_AUX_COLS);
+    assert_eq!(layout.num_challenges, NUM_RANDOMNESS);
+    assert_eq!(layout.num_exports, NUM_LOGUP_VALUES);
+    assert_eq!(layout.periodic_columns.len(), 0);
 
-#[test]
-fn log_quotient_degree_matches_design_target() {
-    // The full-block range check shares the Eidos output column, keeping at most two linear
-    // fractions per column. The resulting degree-three closing constraints need two quotient
-    // chunks after division by the trace vanishing polynomial: log_quotient_degree = 1.
-    let air = KeccakNodeAir;
+    // The range check shares the Eidos output column, keeping closing constraints at degree three.
     assert_eq!(crate::prover::tests::log_quotient_degree(&air), 1);
 }
 

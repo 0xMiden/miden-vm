@@ -33,8 +33,8 @@ const PVM_NARROW_LOOKUP_CONFIG: NarrowLookupConfig = NarrowLookupConfig {
 /// Emits the shared narrow lookups using the PVM relation namespace.
 pub(in crate::precompiles::transcript::eidos) fn emit_lookup_columns<LB>(
     builder: &mut LB,
-    local: &EidosCompressionCols<LB::Var>,
-    next: &EidosCompressionCols<LB::Var>,
+    local: &EidosCompressionCols<LB::Expr>,
+    next: &EidosCompressionCols<LB::Expr>,
     selectors: &EidosCompressionSelectors<LB::Expr>,
 ) where
     LB: LookupBuilder<F = Felt>,

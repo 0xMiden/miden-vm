@@ -4,6 +4,7 @@ use core::borrow::Borrow;
 
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_stark::lookup::{Deg, LookupBuilder, LookupColumn, LookupGroup};
+use p3_field::Dup;
 
 use super::{
     algebra::{missing_rotation_result, xor_from_and},
@@ -89,8 +90,8 @@ pub enum XorExpression {
 #[doc(hidden)]
 pub fn emit_narrow_lookup_columns<LB>(
     builder: &mut LB,
-    local: &EidosCompressionCols<LB::Var>,
-    next: &EidosCompressionCols<LB::Var>,
+    local: &EidosCompressionCols<LB::Expr>,
+    next: &EidosCompressionCols<LB::Expr>,
     selectors: &EidosCompressionSelectors<LB::Expr>,
     config: NarrowLookupConfig,
 ) where
@@ -164,8 +165,8 @@ where
 
 fn narrow_slot_encoding<LB, G>(
     group: &G,
-    local: &EidosCompressionCols<LB::Var>,
-    next: &EidosCompressionCols<LB::Var>,
+    local: &EidosCompressionCols<LB::Expr>,
+    next: &EidosCompressionCols<LB::Expr>,
     selectors: &EidosCompressionSelectors<LB::Expr>,
     slot: usize,
     config: NarrowLookupConfig,
@@ -226,8 +227,8 @@ where
 }
 
 fn narrow_slot_fields<LB>(
-    local: &EidosCompressionCols<LB::Var>,
-    next: &EidosCompressionCols<LB::Var>,
+    local: &EidosCompressionCols<LB::Expr>,
+    next: &EidosCompressionCols<LB::Expr>,
     slot: usize,
     config: NarrowLookupConfig,
 ) -> [LB::Expr; 3]
@@ -237,9 +238,9 @@ where
     match NARROW_SLOTS[slot].fields {
         NarrowSlotFields::StoredByte(stored_slot) => {
             let base = byte_slot_base(0, stored_slot as usize);
-            let a = LB::Expr::from(local.columns[base]);
-            let b = LB::Expr::from(local.columns[base + 1]);
-            let stored = LB::Expr::from(local.columns[base + 2]);
+            let a = local.columns[base].dup();
+            let b = local.columns[base + 1].dup();
+            let stored = local.columns[base + 2].dup();
             let value = if slot <= 15 {
                 match config.xor_expression {
                     XorExpression::DoubleAnd => xor_from_and(a.clone(), b.clone(), stored),
@@ -253,17 +254,13 @@ where
             [a, b, value]
         },
         NarrowSlotFields::MissingRotation => [
-            LB::Expr::from(
-                local.columns[g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 0)],
-            ),
-            LB::Expr::from(
-                local.columns[g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 1)],
-            ),
+            local.columns[g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 0)].dup(),
+            local.columns[g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 1)].dup(),
             eidos_lookup::normalize(
                 MISSING_ROTATION_BYTE,
                 missing_rotation_result(
-                    |col| LB::Expr::from(local.columns[col]),
-                    |col| LB::Expr::from(next.columns[col]),
+                    |col| local.columns[col].dup(),
+                    |col| next.columns[col].dup(),
                 ),
             ),
         ],

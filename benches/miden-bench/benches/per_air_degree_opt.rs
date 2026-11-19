@@ -1,7 +1,7 @@
 //! Illustrates the per-AIR quotient-degree optimization.
 //!
 //! Compares per-AIR quotient degrees against a common maximum degree using
-//! [`OverrideConstraintDegree`]. The low-degree AIR uses its own quotient domain before its
+//! native execution capacity. The low-degree AIR uses its own quotient domain before its
 //! quotient is lifted to the common commitment domain.
 //!
 //! Runs `prove` with two AIRs:
@@ -9,13 +9,12 @@
 //! - Synthetic Chip AIR: width 72, max constraint degree 5 (so `D = 4`).
 //!
 //! Two variants:
-//! - **Baseline**: both AIRs are forced to `constraint_degree = 9` (so `D = 8`). Chip's constraints
-//!   are evaluated on `chip_height * 8` points (the full target domain) rather than its natural
+//! - **Baseline**: both AIRs allocate eight quotient chunks (`D = 8`). Chip's constraints are
+//!   evaluated on `chip_height * 8` points (the full target domain) rather than its natural
 //!   `chip_height * 4`.
-//! - **Optimized**: Core forced to `constraint_degree = 9` (`D = 8`), Chip to `constraint_degree =
-//!   5` (`D = 4`). Chip evaluates on its native domain (size `chip_height * 4`), divides by the
-//!   native vanishing polynomial, and `upsample_evals` lifts the resulting quotient to the target
-//!   (`chip_height * 8`).
+//! - **Optimized**: Core allocates eight chunks (`D = 8`), Chip four (`D = 4`). Chip evaluates on
+//!   its native domain (size `chip_height * 4`), divides by the native vanishing polynomial, and
+//!   `upsample_evals` lifts the resulting quotient to the target (`chip_height * 8`).
 //!
 //! Run:
 //! ```bash
@@ -25,15 +24,15 @@
 
 #[path = "support/eidos.rs"]
 mod eidos;
-use std::{borrow::Cow, time::Instant};
+use std::{borrow::Cow, convert::Infallible, time::Instant};
 
 use eidos::{Dft, Felt, QuadFelt, test_challenger, test_lmcs};
 use miden_stark::{
-    GenericStarkConfig, ProverInstance,
-    air::{AirBuilder, BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, WindowAccess},
+    GenericStarkConfig, ProverInstance, air,
+    air::LiftedAirBuilder as _,
     testing::{MultiAir, PcsParams, ProverStatement, Statement},
 };
-use p3_field::{Algebra, PrimeCharacteristicRing};
+use p3_field::{Algebra, Dup, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use tracing_subscriber::EnvFilter;
 
@@ -78,137 +77,132 @@ struct BenchAir {
     kind: BenchAirKind,
 }
 
-impl BaseAir<Felt> for BenchAir {
-    fn width(&self) -> usize {
-        WIDTH
-    }
-}
+impl air::LiftedAir for BenchAir {
+    type F = Felt;
 
-impl LiftedAir<Felt, QuadFelt> for BenchAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        1
-    }
-
-    fn aux_width(&self) -> usize {
-        1
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
+            main_width: WIDTH,
+            aux_width: 1,
+            num_public_values: 0,
+            num_challenges: 1,
+            num_exports: 0,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(&[]),
+        }
     }
 
-    fn num_aux_values(&self) -> usize {
-        0
-    }
-
-    fn build_aux_trace(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        // Trivial aux: a single constant-challenge column.
-        (RowMajorMatrix::new(vec![challenges[0]; main.height()], 1), vec![])
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        let main = builder.main();
-        let (local, next) = (main.current_slice().to_vec(), main.next_slice().to_vec());
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        let local = frame.main.current;
+        let next = frame.main.next;
         let log2_hi = self.kind.log2_hi();
 
         // Main recurrence on every column: `next[c] = local[c]^(2^log2_hi + 1)`.
-        // Duplicate the constraint `CONSTRAINTS_PER_COLUMN` times to densify eval work
-        // without changing the trace or the max constraint degree.
+        // Preserve every repeated assertion and its transition selector.
         for _ in 0..CONSTRAINTS_PER_COLUMN {
             for c in 0..WIDTH {
-                let x: AB::Expr = local[c].into();
+                let x: AB::Expr = local[c].dup();
                 let x_hi: AB::Expr = x.exp_power_of_2(log2_hi);
-                builder.when_transition().assert_eq(next[c].into(), x_hi * x);
+                builder.when(frame.transition()).assert_eq(next[c].dup(), x_hi * x);
             }
         }
-
-        // Aux constraint: `aux_local == challenge`, trivial degree-1 identity.
-        let aux = builder.permutation();
-        let aux_local = aux.current_slice().to_vec();
-        let challenge = builder.permutation_randomness()[0];
-        let aux_expr: AB::ExprEF = aux_local[0].into();
-        let challenge_expr: AB::ExprEF = challenge.into();
-        builder.assert_eq_ext(aux_expr, challenge_expr);
+        builder.assert_eq_ext(frame.aux.current[0].dup(), inputs.challenge(0));
     }
 }
 
-/// Test wrapper that forces [`LiftedAir::constraint_degree`] to a chosen value
-/// (quotient chunking — and hence `log_quotient_degree` — is derived from it).
-///
-/// Delegates everything else to the inner AIR. Used by this bench to toggle between
-/// the baseline (force every AIR to the global-max degree) and the optimized path
-/// (each AIR at its natural degree).
-///
-/// Overriding *higher* than the AIR actually needs is safe: the prover/verifier just
-/// use a larger quotient domain than necessary. Overriding *lower* than needed would
-/// produce an invalid proof.
-#[derive(Clone, Copy, Debug)]
-struct OverrideConstraintDegree<A> {
-    inner: A,
-    constraint_degree: usize,
-}
+impl air::ProverAir<QuadFelt> for BenchAir {
+    type Error = Infallible;
 
-/// Constraint degree that yields `log_quotient_degree == l`:
-/// `log2_ceil(((1 << l) + 1) - 1) == log2_ceil(1 << l) == l`.
-fn constraint_degree_for_log_qd(l: usize) -> usize {
-    (1 << l) + 1
-}
-
-impl<A: BaseAir<Felt>> BaseAir<Felt> for OverrideConstraintDegree<A> {
-    fn width(&self) -> usize {
-        self.inner.width()
-    }
-    fn num_public_values(&self) -> usize {
-        self.inner.num_public_values()
-    }
-    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        self.inner.periodic_columns()
-    }
-}
-
-impl<A: LiftedAir<Felt, QuadFelt>> LiftedAir<Felt, QuadFelt> for OverrideConstraintDegree<A> {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = A::EvalData<B, E>;
-
-    fn num_randomness(&self) -> usize {
-        self.inner.num_randomness()
-    }
-    fn aux_width(&self) -> usize {
-        self.inner.aux_width()
-    }
-    fn num_aux_values(&self) -> usize {
-        self.inner.num_aux_values()
-    }
     fn build_aux_trace(
         &self,
-        main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        self.inner.build_aux_trace(main, air_inputs, aux_inputs, challenges)
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        // Benchmark-owned inputs carry the one challenge and a validated main matrix.
+        Ok(air::AuxTrace {
+            columns: RowMajorMatrix::new(vec![inputs.challenges[0]; inputs.main.height()], 1),
+            exports: vec![],
+        })
     }
+}
+
+/// Benchmark execution capacity without modifying the authored relation's diagnostics.
+struct ConservativeKernel {
+    direct: air::DirectKernel<BenchAir>,
+    chunks: usize,
+}
+
+impl ConservativeKernel {
+    fn new(source: BenchAir, chunks: usize) -> Result<Self, air::QuotientAllocationError> {
+        let kernel = Self {
+            direct: air::DirectKernel::new(source).expect("valid benchmark AIR"),
+            chunks,
+        };
+        air::resolve_quotient_chunks(&kernel)?;
+        Ok(kernel)
+    }
+}
+
+impl air::AirKernel for ConservativeKernel {
+    type F = Felt;
+    type Prepared<B: Algebra<Felt>, E: Algebra<B>> =
+        <air::DirectKernel<BenchAir> as air::AirKernel>::Prepared<B, E>;
+
+    fn descriptor(&self) -> &air::AirDescriptor<Felt> {
+        air::AirKernel::descriptor(&self.direct)
+    }
+
+    fn quotient_chunks(&self) -> Option<usize> {
+        Some(self.chunks)
+    }
+
     fn prepare<B: Algebra<Felt>, E: Algebra<B>>(
         &self,
-        inputs: miden_stark::air::EvalInputs<'_, B, E>,
-    ) -> Self::EvalData<B, E> {
-        self.inner.prepare(inputs)
+        inputs: air::UniformInputs<'_, B, E>,
+    ) -> Self::Prepared<B, E> {
+        air::AirKernel::prepare(&self.direct, inputs)
     }
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(
+
+    fn eval_row<S: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        builder: &mut AB,
-        data: &Self::EvalData<AB::Expr, AB::ExprEF>,
+        frame: &air::Frame<'_, S>,
+        inputs: air::Inputs<'_, S>,
+        prepared: &Self::Prepared<S::Expr, S::ExtExpr>,
+        sink: &mut S,
     ) {
-        self.inner.eval(builder, data)
+        air::AirKernel::eval_row(&self.direct, frame, inputs, prepared, sink);
     }
-    fn constraint_degree(&self) -> ConstraintDegrees
-    where
-        Self: Sized,
-    {
-        ConstraintDegrees { base: self.constraint_degree, ext: 0 }
+}
+
+impl air::LiftedAir for ConservativeKernel {
+    type F = Felt;
+
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::LiftedAir::spec(&self.direct)
+    }
+
+    fn eval<S: air::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &air::Frame<'_, S>,
+        inputs: air::Inputs<'_, S>,
+        sink: &mut S,
+    ) {
+        air::LiftedAir::eval(&self.direct, frame, inputs, sink);
+    }
+}
+
+impl air::ProverAir<QuadFelt> for ConservativeKernel {
+    type Error = Infallible;
+
+    fn build_aux_trace(
+        &self,
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        air::ProverAir::build_aux_trace(&self.direct, inputs)
     }
 }
 
@@ -217,11 +211,11 @@ impl<A: LiftedAir<Felt, QuadFelt>> LiftedAir<Felt, QuadFelt> for OverrideConstra
 // -----------------------------------------------------------------------------
 
 struct BenchMultiAir {
-    airs: Vec<OverrideConstraintDegree<BenchAir>>,
+    airs: Vec<ConservativeKernel>,
 }
 
 impl MultiAir<Felt, QuadFelt> for BenchMultiAir {
-    type Air = OverrideConstraintDegree<BenchAir>;
+    type Air = ConservativeKernel;
 
     fn airs(&self) -> &[Self::Air] {
         &self.airs
@@ -280,14 +274,12 @@ fn run_prove(
     let config =
         GenericStarkConfig::new(bench_pcs_params(), test_lmcs(), Dft::default(), test_challenger());
 
-    let core_air = OverrideConstraintDegree {
-        inner: BenchAir { kind: BenchAirKind::Core },
-        constraint_degree: constraint_degree_for_log_qd(core_log_qd),
-    };
-    let chip_air = OverrideConstraintDegree {
-        inner: BenchAir { kind: BenchAirKind::Chip },
-        constraint_degree: constraint_degree_for_log_qd(chip_log_qd),
-    };
+    let core_air =
+        ConservativeKernel::new(BenchAir { kind: BenchAirKind::Core }, 1usize << core_log_qd)
+            .expect("conservative Core capacity");
+    let chip_air =
+        ConservativeKernel::new(BenchAir { kind: BenchAirKind::Chip }, 1usize << chip_log_qd)
+            .expect("conservative Chip capacity");
 
     let core_trace = generate_trace(BenchAirKind::Core.recurrence_power(), core_height);
     let chip_trace = generate_trace(BenchAirKind::Chip.recurrence_power(), chip_height);
@@ -329,7 +321,7 @@ fn main() {
     let core_height = 1 << 14;
     let chip_height = 1 << 16;
 
-    // Baseline: force both AIRs to report log_qd = 3 (global max). Chip loses the
+    // Baseline: allocate log_qd = 3 to both AIRs (global max). Chip loses the
     // optimization and evaluates on chip_height*8 points directly, no upsample.
     run_prove("baseline (no upsample)", 3, 3, core_height, chip_height);
 

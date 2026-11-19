@@ -1,89 +1,33 @@
-//! Drift tests: the generated constraint evaluators must be exactly equivalent
-//! to the hand-written definitions they were derived from.
-//!
-//! The Rust optimizer may reassociate sums and factor products. Independent
-//! captures therefore compare polynomial values on arbitrary field assignments,
-//! with separate checks of each constraint's degree, assertion class and order.
-//! Concrete scalar and packed execution also checks specialized method dispatch.
-//! Baseline emission retains structural golden tests in the compiler crate.
-//!
-//! Evaluators are rebuilt automatically from the handwritten definitions.
+//! Compare authored AIRs with the prepared code generated for CPU execution.
 
-use miden_air::vm::AIRS;
+use miden_air::{precompiles::ChipletAir, vm::AIRS};
 use miden_constraint_compiler::{
-    ir::{Graph, capture, capture_into},
-    testing::{assert_concrete_evaluation, constraint_degrees, eval_graph},
+    ir::{Graph, capture_kernel_native_into, capture_native_into},
+    testing::{
+        assert_concrete_evaluation, constraint_degrees, eval_graph, kernel_constraint_degrees,
+    },
 };
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::Felt;
+use miden_stark::air::{AirKernel, DirectKernel, LiftedAir};
 
 const SEEDS: [u64; 4] =
     [0x243f6a8885a308d3, 0x13198a2e03707344, 0xa4093822299f31d0, 0x082efa98ec4e6c89];
 
-/// Guards `miden-constraint-compiler` crate invariant 1: capture must read the
-/// hand-written definitions. The emitter flips mixed-class commutative
-/// operands, so honest routing yields raw (pre-canonicalization) root ids that
-/// differ from the handwritten capture's for every AIR. If
-/// the authored and generated AIR types ever route to the same evaluator for
-/// even one AIR, both drift oracles silently compare the generated path against
-/// itself for that AIR — and this test fails instead.
 #[test]
-fn handwritten_and_generated_are_distinct_captures() {
+fn production_dispatch_preserves_each_vm_relation() {
     for air in AIRS {
-        let mut builder = Graph::builder();
-        let handwritten = capture_into(&air.0, &mut builder);
-        let generated = capture_into(&air, &mut builder);
-        let _ = builder.freeze();
-        let differs = handwritten.base_roots != generated.base_roots
-            || handwritten.ext_roots != generated.ext_roots;
-        assert!(
-            differs,
-            "{} handwritten and generated evaluators captured identically: the drift \
-             oracles would be comparing the generated evaluator against itself",
-            air.name()
-        );
+        assert_eq!(air.0.build_preprocessed_trace(), air.build_preprocessed_trace());
+        assert_native_registration(&air.0, &air);
     }
 }
 
 #[test]
-fn generated_evaluators_match_handwritten_values() {
-    for air in AIRS {
-        let (hand_graph, hand) = capture(&air.0);
-        let (gen_graph, generated) = capture(&air);
-        assert_eq!(hand.base_global_indices, generated.base_global_indices);
-        assert_eq!(hand.ext_global_indices, generated.ext_global_indices);
-        assert_eq!(
-            constraint_degrees(&air.0),
-            constraint_degrees(&air),
-            "{} constraint degrees",
-            air.name(),
-        );
-
-        for seed in SEEDS {
-            assert_concrete_evaluation(&air, &hand_graph, &hand, seed);
-            let hand_values = eval_graph(&hand_graph, seed);
-            let gen_values = eval_graph(&gen_graph, seed);
-            // (handwritten root, generated root) with its global constraint
-            // index, base constraints then ext.
-            let pairs = hand
-                .base_roots
-                .iter()
-                .zip(&generated.base_roots)
-                .zip(hand.base_global_indices.iter())
-                .chain(
-                    hand.ext_roots.iter().zip(&generated.ext_roots).zip(&hand.ext_global_indices),
-                );
-            for ((h, g), global) in pairs {
-                assert_eq!(
-                    hand_values[h.index()],
-                    gen_values[g.index()],
-                    "constraint {global} differs (seed {seed:#x})"
-                );
-            }
-        }
+fn production_dispatch_preserves_each_pvm_relation() {
+    for air in ChipletAir::all() {
+        assert_native_registration(&air.definition(), &air);
     }
 }
 
-/// Reusable arithmetic-only comparison; run with `--release --ignored --nocapture`.
 #[test]
 #[ignore = "manual evaluator timing; use release mode"]
 fn evaluator_timing() {
@@ -92,26 +36,66 @@ fn evaluator_timing() {
         .unwrap_or(256);
     assert!(iterations > 0);
     for air in AIRS {
-        let handwritten = miden_constraint_compiler::testing::time_evaluation(&air.0, iterations);
-        let generated = miden_constraint_compiler::testing::time_evaluation(&air, iterations);
-        std::eprintln!(
-            "{}: {iterations} evaluations, handwritten scalar={:?} packed={:?}, generated scalar={:?} packed={:?}",
-            air.name(),
-            handwritten[0],
-            handwritten[1],
-            generated[0],
-            generated[1],
-        );
+        time_relation(air.0, &air, air.name(), iterations);
+    }
+    for air in ChipletAir::all() {
+        time_relation(air.definition(), &air, air.definition().file_token(), iterations);
     }
 }
 
-#[test]
-fn generated_degrees_match_handwritten() {
-    use miden_stark::air::{ConstraintDegrees, LiftedAir};
-    for air in AIRS {
-        assert_eq!(
-            <miden_air::vm::MidenAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air),
-            ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air.0)
-        );
+fn time_relation<A, K>(source: A, kernel: &K, label: &str, iterations: usize)
+where
+    A: LiftedAir<F = Felt>,
+    K: AirKernel<F = Felt>,
+{
+    use miden_constraint_compiler::testing::time_evaluation;
+
+    let handwritten = time_evaluation(&DirectKernel::new(source).unwrap(), iterations);
+    let generated = time_evaluation(kernel, iterations);
+    eprintln!(
+        "{label}: {iterations} evaluations, handwritten scalar={:?} packed={:?}, generated scalar={:?} packed={:?}",
+        handwritten[0], handwritten[1], generated[0], generated[1],
+    );
+}
+
+/// Authored equations are expected; actual prepared generated execution is the comparison subject.
+fn assert_native_registration<A, K>(source: &A, kernel: &K)
+where
+    A: LiftedAir<F = Felt>,
+    K: AirKernel<F = Felt>,
+{
+    let mut builder = Graph::builder();
+    let (authored, descriptor) = capture_native_into(source, &mut builder).unwrap();
+    assert_eq!(kernel.descriptor().spec(), descriptor.spec());
+    assert_eq!(kernel.descriptor().analysis(), descriptor.analysis());
+    assert_eq!(kernel.descriptor().fingerprint(), descriptor.fingerprint());
+    let geometry = kernel.geometry();
+    assert_eq!(geometry.main_width, descriptor.spec().main_width);
+    assert_eq!(geometry.aux_width, descriptor.spec().aux_width);
+    assert_eq!(geometry.preprocessed_width, descriptor.spec().preprocessed_width());
+    assert_eq!(geometry.raw_degrees, descriptor.analysis().raw_degrees());
+
+    // Capturing the wrapper's Source method would evaluate the authored equations again.
+    // Bind its kernel instead, retaining non-Copy symbolic preparation and actual generated eval.
+    let (generated, _) = capture_kernel_native_into(kernel, &mut builder).unwrap();
+    assert_eq!(authored.base_global_indices, generated.base_global_indices);
+    assert_eq!(authored.ext_global_indices, generated.ext_global_indices);
+    assert_eq!(authored.base_roots.len(), generated.base_roots.len());
+    assert_eq!(authored.ext_roots.len(), generated.ext_roots.len());
+    assert_eq!(constraint_degrees(source), kernel_constraint_degrees(kernel));
+    let graph = builder.freeze();
+    let direct = DirectKernel::new(source).unwrap();
+    for seed in SEEDS {
+        assert_concrete_evaluation(&direct, &graph, &authored, seed);
+        assert_concrete_evaluation(kernel, &graph, &authored, seed);
+        let values = eval_graph(&graph, seed);
+        for (source, prepared) in authored
+            .base_roots
+            .iter()
+            .zip(&generated.base_roots)
+            .chain(authored.ext_roots.iter().zip(&generated.ext_roots))
+        {
+            assert_eq!(values[source.index()], values[prepared.index()], "seed {seed:#x}");
+        }
     }
 }

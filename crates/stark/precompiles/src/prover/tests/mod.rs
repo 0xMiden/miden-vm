@@ -37,7 +37,7 @@ mod utils;
 mod vm_admission;
 mod vm_uint;
 
-use std::{string::String, vec, vec::Vec};
+use std::{collections::HashMap, string::String, vec, vec::Vec};
 
 use miden_core::{
     Felt,
@@ -47,7 +47,10 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_stark::{
-    air::{LiftedAir, MultiAir, ProverStatement, ReductionError, Statement},
+    air::{
+        self, AirKernel, DirectKernel, LiftedAir, MultiAir, ProverAir, ProverStatement,
+        ReductionError, Statement,
+    },
     check_constraints,
     lookup::{Challenges, LookupAir, LookupFractions, ProverLookupBuilder, build_lookup_fractions},
 };
@@ -110,7 +113,7 @@ struct LocalAir<A>(Vec<A>);
 
 impl<A> MultiAir<Felt, QuadFelt> for LocalAir<A>
 where
-    A: LiftedAir<Felt, QuadFelt>,
+    A: AirKernel<F = Felt>,
 {
     type Air = A;
 
@@ -133,13 +136,15 @@ where
 /// Check one AIR's local constraints on `main` with its public inputs.
 pub(crate) fn check_local_inputs<A>(air: A, main: &RowMajorMatrix<Felt>, air_inputs: Vec<Felt>)
 where
-    A: LiftedAir<Felt, QuadFelt>,
+    A: ProverAir<QuadFelt, F = Felt>,
 {
-    let statement = Statement::new(LocalAir(vec![air]), vec![(0, air_inputs)], Vec::new())
+    let raw_setup = [air.build_preprocessed_trace()];
+    let kernel = DirectKernel::new(air).expect("local source descriptor is valid");
+    let statement = Statement::new(LocalAir(vec![kernel]), vec![(0, air_inputs)], Vec::new())
         .expect("local check statement inputs are valid");
     let ps = ProverStatement::new(statement, vec![main.clone()])
         .expect("local check trace shape is valid");
-    check_constraints(&ps, test_challenger());
+    check_constraints(&ps, Some(&raw_setup), test_challenger());
 }
 
 /// Check one AIR's local constraints on `main` with dummy public inputs
@@ -148,18 +153,18 @@ where
 /// with its real root.
 pub(crate) fn check_local<A>(air: A, main: &RowMajorMatrix<Felt>)
 where
-    A: LiftedAir<Felt, QuadFelt>,
+    A: ProverAir<QuadFelt, F = Felt>,
 {
-    let n = air.num_public_values();
+    let n = air.spec().num_public_values;
     check_local_inputs(air, main, vec![Felt::ZERO; n]);
 }
 
 /// Assert that this local AIR check fails with a constraint diagnostic.
 pub(crate) fn assert_local_rejects<A>(air: A, main: &RowMajorMatrix<Felt>)
 where
-    A: LiftedAir<Felt, QuadFelt>,
+    A: ProverAir<QuadFelt, F = Felt>,
 {
-    let n = air.num_public_values();
+    let n = air.spec().num_public_values;
     assert_local_rejects_inputs(air, main, vec![Felt::ZERO; n]);
 }
 
@@ -169,7 +174,7 @@ pub(crate) fn assert_local_rejects_inputs<A>(
     main: &RowMajorMatrix<Felt>,
     air_inputs: Vec<Felt>,
 ) where
-    A: LiftedAir<Felt, QuadFelt>,
+    A: ProverAir<QuadFelt, F = Felt>,
 {
     assert_constraint_failure(std::panic::AssertUnwindSafe(|| {
         check_local_inputs(air, main, air_inputs)
@@ -179,9 +184,19 @@ pub(crate) fn assert_local_rejects_inputs<A>(
 /// The per-AIR quotient degree used by the design-target smoke tests.
 pub(crate) fn log_quotient_degree<A>(air: &A) -> u8
 where
-    A: LiftedAir<Felt, QuadFelt>,
+    A: LiftedAir<F = Felt>,
 {
-    miden_stark::log_quotient_degree::<Felt, QuadFelt, A>(air)
+    let kernel = DirectKernel::new(air).expect("source descriptor is valid");
+    miden_stark::log_quotient_degree(&kernel).expect("source quotient allocation is valid")
+}
+
+/// Trace-independent degree diagnostics from the independently authored native source.
+pub(crate) fn raw_degrees<A: LiftedAir<F = Felt>>(air: &A) -> air::ConstraintDegrees {
+    DirectKernel::new(air)
+        .expect("source descriptor is valid")
+        .descriptor()
+        .analysis()
+        .raw_degrees()
 }
 
 /// Return an AIR's LogUp column shape without exposing its private backing constant.
@@ -199,12 +214,29 @@ pub(crate) fn lookup_fractions<A>(
     challenges: &Challenges<QuadFelt>,
 ) -> LookupFractions<Felt, QuadFelt>
 where
-    A: LiftedAir<Felt, QuadFelt> + Sync,
+    A: LiftedAir<F = Felt>,
     for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
-    let periodic = air.periodic_columns();
-    let preprocessed = air.preprocessed_trace();
-    build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, challenges)
+    let spec = air.spec();
+    spec.validate().expect("lookup source metadata is valid");
+    let periodic = spec.periodic_columns.as_ref();
+    let preprocessed = air.build_preprocessed_trace();
+    build_lookup_fractions(air, main, preprocessed.as_ref(), periodic, challenges)
+}
+
+/// Add one AIR's lookup multiplicities to the cross-AIR balance.
+fn fold_multiplicities<A>(
+    air: &A,
+    main: &RowMajorMatrix<Felt>,
+    challenges: &Challenges<QuadFelt>,
+    net: &mut HashMap<QuadFelt, Felt>,
+) where
+    A: LiftedAir<F = Felt>,
+    for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
+{
+    for &(multiplicity, denominator) in lookup_fractions(air, main, challenges).fractions() {
+        *net.entry(denominator).or_insert(Felt::ZERO) += multiplicity;
+    }
 }
 
 /// Fold each row's lookup columns without inverting denominators.

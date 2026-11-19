@@ -28,6 +28,7 @@ fn and8_preprocessed_commitment() -> [Felt; WORD_SIZE] {
     )
     .expect("zero public inputs satisfy the Miden statement shape");
     let commitment: [u64; WORD_SIZE] = Preprocessed::build(&statement, &config)
+        .expect("canonical fixed setup is valid")
         .expect("the Miden relation declares the AND8 preprocessed table")
         .commitment()
         .into();

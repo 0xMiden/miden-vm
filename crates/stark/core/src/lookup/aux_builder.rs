@@ -1,7 +1,8 @@
 //! Generic LogUp aux-trace construction.
 //!
-//! [`build_logup_aux_trace`] builds lookup fractions for an AIR and returns an `n`-row cyclic
-//! auxiliary trace together with the normalized global sum `sigma_prime = sigma / n`.
+//! [`crate::lookup::build_logup_aux_trace`] builds lookup fractions for an AIR and returns an
+//! `n`-row cyclic auxiliary trace together with the normalized global sum `sigma_prime = sigma /
+//! n`.
 //!
 //! ## Aux trace shape
 //!
@@ -22,148 +23,10 @@
 use alloc::{vec, vec::Vec};
 
 use miden_crypto::field::{ExtensionField, Field};
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
-
-use super::{Challenges, LookupAir, ProverLookupBuilder, prover::build_lookup_fraction_chunk};
-use crate::air::LiftedAir;
+use p3_matrix::dense::RowMajorMatrix;
 
 /// Rows per chunk for fraction accumulation and centered scanning.
 pub(crate) const ACCUMULATE_ROWS_PER_CHUNK: usize = 512;
-
-// TOP-LEVEL DRIVER
-// ================================================================================================
-
-/// Build the LogUp auxiliary columns and their normalized sum `sigma_prime = sigma / num_rows`.
-///
-/// The matrix has `main.height()` rows and `air.column_shape().len()` columns.
-/// Returns `(aux_trace, vec![sigma_prime])`. The first two `challenges` are `alpha` and `beta`,
-/// in the same order as the constraint builder. Each task collects and accumulates one row
-/// chunk, releasing its fractions before the global centered prefix scan.
-pub fn build_logup_aux_trace<A, F, EF>(
-    air: &A,
-    main: &RowMajorMatrix<F>,
-    challenges: &[EF],
-) -> (RowMajorMatrix<EF>, Vec<EF>)
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    A: LiftedAir<F, EF>,
-    for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
-{
-    let preprocessed = air.preprocessed_trace();
-    build_logup_aux_trace_with_preprocessed(air, main, preprocessed.as_ref(), challenges)
-}
-
-/// Build a LogUp auxiliary trace from a setup trace already held by the prover.
-///
-/// Returns the auxiliary trace and normalized sum described by [`build_logup_aux_trace`], using
-/// the same challenge ordering.
-/// `preprocessed` must be the trace declared by `air`, or `None` when the AIR
-/// has no preprocessed columns.
-pub fn build_logup_aux_trace_with_preprocessed<A, F, EF>(
-    air: &A,
-    main: &RowMajorMatrix<F>,
-    preprocessed: Option<&RowMajorMatrix<F>>,
-    challenges: &[EF],
-) -> (RowMajorMatrix<EF>, Vec<EF>)
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    A: LiftedAir<F, EF>,
-    for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
-{
-    let aux_width = air.column_shape().len();
-    build_logup_aux_trace_with_width(air, main, preprocessed, challenges, aux_width)
-}
-
-/// Build a LogUp auxiliary trace with the requested final width.
-///
-/// The matrix has `main.height()` rows and `aux_width` columns. LogUp columns occupy the prefix
-/// `0..air.column_shape().len()`. Any trailing columns are zero-filled and excluded from the
-/// LogUp recurrence and its normalized sum. The caller fills any trailing registers, and the
-/// owning AIR supplies their constraints. The return value, setup trace and challenges follow
-/// [`build_logup_aux_trace_with_preprocessed`].
-///
-/// # Panics
-///
-/// Panics if `aux_width` is smaller than `air.column_shape().len()`.
-pub fn build_logup_aux_trace_with_width<A, F, EF>(
-    air: &A,
-    main: &RowMajorMatrix<F>,
-    preprocessed: Option<&RowMajorMatrix<F>>,
-    challenges: &[EF],
-    aux_width: usize,
-) -> (RowMajorMatrix<EF>, Vec<EF>)
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    A: LiftedAir<F, EF>,
-    for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
-{
-    let _span = tracing::trace_span!(target: "miden::vm::prove", "build_aux_trace_logup").entered();
-
-    debug_assert!(
-        challenges.len() >= 2,
-        "build_logup_aux_trace expects at least 2 challenges (alpha, beta), got {}",
-        challenges.len(),
-    );
-    let num_rows = main.height();
-    assert!(num_rows > 0, "LogUp normalization requires a non-empty trace");
-    let preprocessed_width = air.preprocessed_width();
-    assert_eq!(
-        preprocessed.is_some(),
-        preprocessed_width > 0,
-        "LogUp preprocessed presence does not match the AIR declaration",
-    );
-    if let Some(trace) = preprocessed {
-        assert_eq!(trace.width(), preprocessed_width, "LogUp preprocessed width mismatch");
-        assert_eq!(trace.height(), num_rows, "LogUp preprocessed height mismatch");
-    }
-    let num_cols = air.column_shape().len();
-    assert!(num_cols > 0, "LogUp requires at least one accumulator column");
-    assert!(
-        aux_width >= num_cols,
-        "auxiliary trace width must accommodate all LogUp columns",
-    );
-
-    let alpha = challenges[0];
-    let beta = challenges[1];
-    let lookup_challenges =
-        Challenges::<EF>::new(alpha, beta, air.max_message_width(), air.num_bus_ids());
-    let periodic = air.periodic_columns();
-
-    let mut output = EF::zero_vec(num_rows * aux_width);
-    let mut row_totals = EF::zero_vec(num_rows);
-    let chunk_rows = ACCUMULATE_ROWS_PER_CHUNK;
-
-    use miden_crypto::parallel::*;
-    let chunks = output
-        .par_chunks_mut(chunk_rows * aux_width)
-        .zip(row_totals.par_chunks_mut(chunk_rows));
-
-    chunks.enumerate().for_each(|(chunk_idx, (out, totals))| {
-        let row_lo = chunk_idx * chunk_rows;
-        let chunk = build_lookup_fraction_chunk(
-            air,
-            main,
-            preprocessed,
-            &periodic,
-            &lookup_challenges,
-            row_lo..row_lo + totals.len(),
-        );
-        accumulate_fraction_chunk(
-            chunk.fractions(),
-            chunk.counts(),
-            num_cols,
-            aux_width,
-            out,
-            totals,
-        );
-    });
-
-    let sigma_prime = write_centered_accumulator(&row_totals, &mut output, aux_width);
-    (RowMajorMatrix::new(output, aux_width), vec![sigma_prime])
-}
 
 // LOOKUP FRACTIONS
 // ================================================================================================
@@ -314,9 +177,7 @@ where
         for (col, &count) in row_counts.iter().enumerate() {
             let mut sum = EF::ZERO;
             for &(m, d) in &flat_fractions[cursor..cursor + count] {
-                let d_inv = d
-                    .try_inverse()
-                    .expect("LogUp denominator must be non-zero for the sampled challenges");
+                let d_inv = d.inverse();
                 sum += d_inv * m;
             }
             per_row_value[col] = sum;
@@ -338,9 +199,7 @@ where
     );
 
     let sigma: EF = row_totals.iter().copied().sum();
-    let n_inv = EF::from_usize(num_rows)
-        .try_inverse()
-        .expect("LogUp trace length must be non-zero in the field");
+    let n_inv = EF::from_usize(num_rows).inverse();
     let sigma_prime = sigma * n_inv;
 
     let mut acc = EF::ZERO;
@@ -452,7 +311,8 @@ where
 }
 
 /// Write fraction columns and row totals into zero-initialized chunk buffers.
-fn accumulate_fraction_chunk<F: Field, EF: ExtensionField<F>>(
+/// All collected denominators are nonzero by the witness construction contract.
+pub(super) fn accumulate_fraction_chunk<F: Field, EF: ExtensionField<F>>(
     fractions: &[(F, EF)],
     counts: &[usize],
     num_cols: usize,
@@ -491,7 +351,8 @@ fn accumulate_fraction_chunk<F: Field, EF: ExtensionField<F>>(
 }
 
 /// Write centered prefix sums to column 0 and return the mean row total.
-fn write_centered_accumulator<EF: Field>(
+/// The trace length is nonzero in the witness field.
+pub(super) fn write_centered_accumulator<EF: Field>(
     row_totals: &[EF],
     output: &mut [EF],
     num_cols: usize,
@@ -500,9 +361,7 @@ fn write_centered_accumulator<EF: Field>(
 
     let num_rows = row_totals.len();
     debug_assert_eq!(output.len(), num_rows * num_cols);
-    let n_inv = EF::from_usize(num_rows)
-        .try_inverse()
-        .expect("LogUp trace length must be non-zero in the field");
+    let n_inv = EF::from_usize(num_rows).inverse();
     let scan_rows = |totals: &[EF], out: &mut [EF], mut acc: EF, mean: EF| {
         for (row, &total) in out.chunks_mut(num_cols).zip(totals) {
             row[0] = acc;
@@ -609,11 +468,7 @@ where
     p3_field::batch_multiplicative_inverse_general(
         &products[..active_lanes],
         &mut inverses[..active_lanes],
-        |product| {
-            product
-                .try_inverse()
-                .expect("LogUp denominator product must be non-zero for the sampled challenges")
-        },
+        |product| product.inverse(),
     );
 
     // In each lane, prefix * inverse is the current denominator's inverse. Removing that
@@ -636,6 +491,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use p3_matrix::Matrix;
     extern crate std;
 
     use miden_crypto::{
@@ -644,7 +500,6 @@ mod tests {
     };
 
     use super::*;
-    use crate::lookup::{LookupAir, LookupBuilder};
 
     type QuadFelt = BinomialExtensionField<Felt, 2>;
 
@@ -726,26 +581,6 @@ mod tests {
         }
     }
 
-    /// Minimal `LookupAir` used to drive `LookupFractions::from_shape` without pulling in the
-    /// real Miden AIR. Only `column_shape()` is relevant; the other methods return sentinel values
-    /// and `eval` is a no-op.
-    struct FakeAir {
-        shape: [usize; 2],
-    }
-
-    impl<LB: LookupBuilder> LookupAir<LB> for FakeAir {
-        fn column_shape(&self) -> &[usize] {
-            &self.shape
-        }
-        fn max_message_width(&self) -> usize {
-            0
-        }
-        fn num_bus_ids(&self) -> usize {
-            0
-        }
-        fn eval(&self, _builder: &mut LB) {}
-    }
-
     fn fixture(shape: [usize; 2], num_rows: usize) -> LookupFractions<Felt, QuadFelt> {
         LookupFractions::from_shape(shape.to_vec(), num_rows)
     }
@@ -786,8 +621,8 @@ mod tests {
         assert_eq!(aux[0].len(), 2);
         assert_eq!(aux[1].len(), 2);
 
-        let d1_inv = d1.try_inverse().unwrap();
-        let d2_inv = d2.try_inverse().unwrap();
+        let d1_inv = d1.inverse();
+        let d2_inv = d2.inverse();
 
         // Row 0: col 0 own = 1/d1 + 2/d2, col 1 own = 0
         // Row 1: col 0 own = 1/d1,         col 1 own = 2/d2
@@ -843,10 +678,10 @@ mod tests {
 
         WrappedCenteredFixture {
             fractions,
-            row0_col0: d1.try_inverse().unwrap(),
-            row0_col1: d2.try_inverse().unwrap() * two,
-            row1_col0: d3.try_inverse().unwrap() * three,
-            row2_col1: d4.try_inverse().unwrap() * four,
+            row0_col0: d1.inverse(),
+            row0_col1: d2.inverse() * two,
+            row1_col0: d3.inverse() * three,
+            row2_col1: d4.inverse() * four,
         }
     }
 
@@ -899,9 +734,7 @@ mod tests {
     /// reallocates in the hot loop). Both start empty.
     #[test]
     fn new_reserves_capacity() {
-        let air = FakeAir { shape: [3, 5] };
-        let fx: LookupFractions<Felt, QuadFelt> =
-            LookupFractions::from_shape(air.shape.to_vec(), 10);
+        let fx: LookupFractions<Felt, QuadFelt> = LookupFractions::from_shape(vec![3, 5], 10);
 
         assert_eq!(fx.num_columns(), 2);
         assert_eq!(fx.num_rows(), 10);
@@ -986,7 +819,7 @@ mod tests {
     fn accumulate_last_row_only_closes_cyclically() {
         const NUM_ROWS: usize = 4;
         let denominator = QuadFelt::from_u32(7);
-        let contribution = denominator.try_inverse().unwrap();
+        let contribution = denominator.inverse();
         let mut fx = fixture([1, 1], NUM_ROWS);
         for row in 0..NUM_ROWS {
             if row == NUM_ROWS - 1 {
@@ -1006,7 +839,7 @@ mod tests {
     #[test]
     fn accumulate_single_row_commits_its_row_total() {
         let denominator = QuadFelt::from_u32(11);
-        let contribution = denominator.try_inverse().unwrap().double();
+        let contribution = denominator.inverse().double();
         let mut fx = LookupFractions::from_shape(vec![1], 1);
         fx.fractions.push((Felt::from_u32(2), denominator));
         fx.counts.push(1);

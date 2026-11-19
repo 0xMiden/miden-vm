@@ -1,26 +1,25 @@
 //! Tests for an extension-field register that shares the auxiliary trace with LogUp columns.
 //!
 //! A beta-dependent accumulator must be committed after the Fiat-Shamir challenge is sampled, so
-//! it belongs in the auxiliary trace. [`ConstraintLookupBuilder`] uses the declared lookup-column
-//! prefix to keep such registers out of the LogUp sum while preserving their AIR constraints.
+//! it belongs in the auxiliary trace. [`lookup::ConstraintLookupBuilder`] uses the declared
+//! lookup-column prefix to keep such registers out of the LogUp sum while preserving their AIR
+//! constraints.
 
-use std::{vec, vec::Vec};
+use std::{borrow::Cow, vec, vec::Vec};
 
+use air::LiftedAirBuilder as _;
 use miden_core::{
     Felt,
-    field::{Algebra, PrimeCharacteristicRing, QuadFelt},
+    field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_stark::air::{BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder};
+use miden_stark::{air, lookup};
+use p3_field::Dup;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::prover::{
-    logup::{
-        ConstraintLookupBuilder, Deg, LookupAir, LookupBuilder, NUM_LOGUP_VALUES, NUM_RANDOMNESS,
-        build_logup_aux_trace,
-    },
+    logup::{Deg, NUM_LOGUP_VALUES, NUM_RANDOMNESS},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    utils::{current_main, next_main},
 };
 
 const COL_X: usize = 0;
@@ -38,78 +37,60 @@ const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [0];
 #[derive(Debug, Default, Clone, Copy)]
 struct AuxRegisterAir;
 
-impl BaseAir<Felt> for AuxRegisterAir {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
+impl air::LiftedAir for AuxRegisterAir {
+    type F = Felt;
+
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
+            main_width: NUM_MAIN_COLS,
+            aux_width: AUX_WIDTH,
+            num_public_values: 0,
+            num_challenges: NUM_RANDOMNESS,
+            num_exports: NUM_LOGUP_VALUES,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(&[]),
+        }
+    }
+
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
+        &self,
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        // The committed Horner suffix precedes the LogUp assertion stream.
+        let x_local = frame.main.current[COL_X].dup();
+        let beta = inputs.challenge(1);
+        let acc = frame.aux.current[REGISTER_COL].dup();
+        let acc_next = frame.aux.next[REGISTER_COL].dup();
+        builder.when(frame.first_row()).assert_zero_ext(acc.dup());
+        builder
+            .when(frame.transition())
+            .assert_zero_ext(acc_next - acc * beta - x_local);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
-impl LiftedAir<Felt, QuadFelt> for AuxRegisterAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        NUM_RANDOMNESS
-    }
-
-    fn aux_width(&self) -> usize {
-        AUX_WIDTH
-    }
-
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
+impl air::ProverAir<QuadFelt> for AuxRegisterAir {
+    type Error = lookup::LookupError;
 
     fn build_aux_trace(
         &self,
-        main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        // Col 0: the centered running sum from the empty LogUp column.
-        let (logup, normalized_sum) = build_logup_aux_trace(&AuxRegisterAir, main, challenges);
-        let n = main.height();
-        let beta = challenges[1];
-
-        // Col 1: the Horner register, interleaved with col 0 into a
-        // 2-wide row-major aux trace. reg[0] = 0; reg[r+1] = reg[r]·β + x[r].
-        let mut data = Vec::with_capacity(AUX_WIDTH * n);
+        inputs: air::AuxTraceInputs<'_, Felt, QuadFelt>,
+    ) -> Result<air::AuxTrace<QuadFelt>, Self::Error> {
+        // The collector allocates both columns but normalizes only the declared empty prefix.
+        let mut auxiliary = lookup::build_logup_aux_trace(self, inputs)?;
+        let beta = inputs.challenges[1];
         let mut reg = QuadFelt::ZERO;
-        for r in 0..n {
-            data.push(logup.values[r]);
-            data.push(reg);
-            reg = reg * beta + QuadFelt::from(main.values[r]);
+        for row in 0..inputs.main.height() {
+            auxiliary.columns.values[row * AUX_WIDTH + REGISTER_COL] = reg;
+            reg = reg * beta + QuadFelt::from(inputs.main.values[row * NUM_MAIN_COLS + COL_X]);
         }
-        (RowMajorMatrix::new(data, AUX_WIDTH), normalized_sum)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        // Phase 1: the extension-field Horner register on aux col 1.
-        //   reg[0] = 0,  reg[r+1] = reg[r]·β + x[r].
-        let x_local: AB::Var = current_main::<_, AB::Var, NUM_MAIN_COLS>(builder.main(), 0)[COL_X];
-        let beta: AB::ExprEF = builder.permutation_randomness()[1].into();
-        let acc: AB::ExprEF =
-            current_main::<_, AB::VarEF, 1>(builder.permutation(), REGISTER_COL)[0].into();
-        let acc_next: AB::ExprEF =
-            next_main::<_, AB::VarEF, 1>(builder.permutation(), REGISTER_COL)[0].into();
-
-        // Boundary: the register seeds at 0.
-        builder.when_first_row().assert_zero_ext(acc.clone());
-        // Transition: acc_next − acc·β − x = 0 (the wrap row is excluded).
-        let x_expr: AB::Expr = x_local.into();
-        builder.when_transition().assert_zero_ext(acc_next - acc * beta - x_expr);
-
-        // Phase 2: LogUp over one empty column, so the normalized sum is zero.
-        let mut lb = ConstraintLookupBuilder::new(builder, self);
-        <Self as LookupAir<_>>::eval(self, &mut lb);
-        lb.finish();
+        Ok(auxiliary)
     }
 }
 
-impl<LB> LookupAir<LB> for AuxRegisterAir
-where
-    LB: LookupBuilder<F = Felt>,
-{
+impl<LB: lookup::LookupBuilder<F = Felt>> lookup::LookupAir<LB> for AuxRegisterAir {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
@@ -122,7 +103,7 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, builder: &mut LB) {
+    fn eval(&self, _frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
         // Auxiliary column 1 follows the declared LogUp prefix and is excluded from its sum.
         builder.next_column(|_col| {}, Deg { v: 1, u: 1 });
     }
@@ -142,8 +123,39 @@ fn ext_register_verifies_and_stays_out_of_the_logup_sum() {
     let challenges: [QuadFelt; NUM_RANDOMNESS] = [rand_qf(&mut rng), rand_qf(&mut rng)];
 
     // The register remains committed and constrained without contributing to the LogUp sum.
-    let (_, normalized_sum) = AuxRegisterAir.build_aux_trace(&main, &[], &[], &challenges);
+    let air::AuxTrace {
+        columns: auxiliary,
+        exports: normalized_sum,
+    } = air::ProverAir::build_aux_trace(
+        &AuxRegisterAir,
+        air::AuxTraceInputs {
+            main: &main,
+            preprocessed: None,
+            public_values: &[],
+            statement: &[],
+            challenges: &challenges,
+        },
+    )
+    .expect("register witness inputs are valid");
     assert_eq!(normalized_sum, vec![QuadFelt::ZERO], "register must not pollute the LogUp sum");
+    assert_eq!(auxiliary.width(), AUX_WIDTH);
+    assert!(auxiliary.values.chunks(AUX_WIDTH).all(|row| row[0] == QuadFelt::ZERO));
+    assert_eq!(auxiliary.values[REGISTER_COL], QuadFelt::ZERO);
+    assert_eq!(auxiliary.values[AUX_WIDTH + REGISTER_COL], QuadFelt::from(main.values[COL_X]));
+
+    // Inspect the same native body with non-Copy expressions and a real direct binding.
+    use air::AirKernel;
+    let expected = air::capture_with::<_, QuadFelt>(&AuxRegisterAir).unwrap();
+    assert!(expected.descriptor.analysis().layout().base_indices().is_empty());
+    assert_eq!(expected.descriptor.analysis().layout().ext_indices(), &[0, 1, 2, 3]);
+    let kernel = air::DirectKernel::new(AuxRegisterAir).unwrap();
+    let observed = air::capture_from_spec::<Felt, QuadFelt>(
+        kernel.descriptor().spec().as_borrowed(),
+        |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
+    )
+    .unwrap();
+    assert_eq!(observed.descriptor.fingerprint(), expected.descriptor.fingerprint());
+    assert_eq!(observed.descriptor.analysis(), expected.descriptor.analysis());
 
     // The Horner and centered LogUp recurrences both hold on the trace.
     crate::prover::tests::check_local(AuxRegisterAir, &main);

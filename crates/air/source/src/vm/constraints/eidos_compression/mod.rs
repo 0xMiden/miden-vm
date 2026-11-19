@@ -69,32 +69,30 @@ mod views_tests;
 #[doc(hidden)]
 pub mod testing {
     use miden_core::Felt;
-    use miden_stark::air::LiftedAirBuilder;
+    use miden_stark::air::{Frame, LiftedAirBuilder};
 
     pub use super::{periodic::get_periodic_column_values, selectors::EidosCompressionSelectors};
 
     pub const MVM_MODE_COL: usize = super::layout::F_MODE_COL;
 
-    pub fn enforce_fused_rows<AB>(
-        builder: &mut AB,
-        local: &[AB::Var],
-        next: &[AB::Var],
-        selectors: &EidosCompressionSelectors<AB::Expr>,
-    ) where
-        AB: LiftedAirBuilder<F = Felt>,
-    {
-        super::constraints::enforce_fused_rows(builder, local, next, selectors);
+    pub fn enforce_fused_rows<B: LiftedAirBuilder<F = Felt>>(
+        frame: &Frame<'_, B>,
+        sink: &mut B,
+        local: &[B::Expr],
+        next: &[B::Expr],
+        selectors: &EidosCompressionSelectors<B::Expr>,
+    ) {
+        super::constraints::enforce_fused_rows(frame, sink, local, next, selectors);
     }
 
-    pub fn enforce_common_footer_rows<AB>(
-        builder: &mut AB,
-        local: &[AB::Var],
-        next: &[AB::Var],
-        selectors: &EidosCompressionSelectors<AB::Expr>,
-    ) where
-        AB: LiftedAirBuilder<F = Felt>,
-    {
-        super::constraints::enforce_common_footer_rows(builder, local, next, selectors);
+    pub fn enforce_common_footer_rows<B: LiftedAirBuilder<F = Felt>>(
+        frame: &Frame<'_, B>,
+        sink: &mut B,
+        local: &[B::Expr],
+        next: &[B::Expr],
+        selectors: &EidosCompressionSelectors<B::Expr>,
+    ) {
+        super::constraints::enforce_common_footer_rows(frame, sink, local, next, selectors);
     }
 }
 

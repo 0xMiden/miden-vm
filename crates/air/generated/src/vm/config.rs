@@ -97,7 +97,7 @@ mod tests {
     use alloc::{format, vec::Vec};
 
     use miden_air_definitions::compiler::vm::build_recursive_verifier_ace_circuit;
-    use miden_core::{Felt, field::QuadFelt};
+    use miden_core::Felt;
 
     const UPDATE_HINT: &str = "an intentional relation change must update the pinned constants \
                                in crates/air/generated/src/vm/config.rs and update \
@@ -107,13 +107,11 @@ mod tests {
     #[test]
     fn handwritten_degrees_fit_the_pcs_policy() {
         for air in miden_air_definitions::vm::AIRS {
-            assert!(
-                miden_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air) <= super::LOG_BLOWUP
-            );
-            assert!(
-                air.column_shape().len()
-                    <= miden_stark::air::LiftedAir::<Felt, QuadFelt>::aux_width(&air)
-            );
+            use miden_stark::air::AirKernel;
+            let lookup_columns = air.column_shape().len();
+            let kernel = miden_stark::air::DirectKernel::new(air).unwrap();
+            assert!(miden_stark::log_quotient_degree(&kernel).unwrap() <= super::LOG_BLOWUP);
+            assert!(lookup_columns <= kernel.descriptor().spec().aux_width);
         }
     }
 
@@ -136,21 +134,10 @@ mod tests {
 
         let actual: Vec<u64> = super::RELATION_DIGEST.iter().map(Felt::as_canonical_u64).collect();
         assert_eq!(actual, expected, "RELATION_DIGEST is stale; {UPDATE_HINT}");
-    }
 
-    /// The pinned circuit digest must equal the commitment of the canonical circuit the recursive
-    /// verifier evaluates: it binds the transcript to that circuit, so any drift between them
-    /// would let a proof be verified against a circuit the protocol constant never committed to.
-    #[test]
-    fn ace_circuit_digest_matches_canonical_circuit() {
-        let expected: Vec<u64> = build_recursive_verifier_ace_circuit()
-            .expect("recursive-verifier ACE circuit")
-            .commitment
-            .iter()
-            .map(Felt::as_canonical_u64)
-            .collect();
-        let actual: Vec<u64> =
+        // The recursive verifier transcript must bind the exact circuit that it evaluates.
+        let pinned_circuit: Vec<u64> =
             super::ACE_CIRCUIT_DIGEST.iter().map(Felt::as_canonical_u64).collect();
-        assert_eq!(actual, expected, "ACE_CIRCUIT_DIGEST is stale; {UPDATE_HINT}");
+        assert_eq!(pinned_circuit, commitment, "ACE_CIRCUIT_DIGEST is stale; {UPDATE_HINT}");
     }
 }
