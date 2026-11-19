@@ -1566,9 +1566,13 @@ fn user_doc_assembly_cycle_fixtures_match_documentation() {
             let marker = case.marker.as_deref().expect("measured fixtures declare marker");
             let content = std::fs::read_to_string(root.join(doc))
                 .unwrap_or_else(|err| panic!("failed to read {doc}: {err}"));
-            let actual = extract_cycle_cell_from_marked_row(&content, marker).unwrap_or_else(|| {
-                panic!("{doc}: marker {marker:?} row has no cycle cell matching {}", case.expected_text)
-            });
+            let actual =
+                extract_cycle_cell_from_marked_row(&content, marker).unwrap_or_else(|| {
+                    panic!(
+                        "{doc}: marker {marker:?} row has no cycle cell matching {}",
+                        case.expected_text
+                    )
+                });
             assert!(
                 fixture_expected_matches_cycles(&case.expected_text, &actual),
                 "{doc}: marker {:?} cycle cell is {actual:?}, expected {:?}",
@@ -1682,14 +1686,9 @@ fn extract_cycle_cell_from_marked_row(content: &str, marker: &str) -> Option<Str
             }
             return Some(text.to_lowercase());
         }
-        let instruction_idx = header_cells
-            .iter()
-            .position(|name| name.contains("instruction"))
-            .unwrap_or(0);
-        return cells
-            .get(instruction_idx)
-            .copied()
-            .and_then(embedded_cycles_in_instruction);
+        let instruction_idx =
+            header_cells.iter().position(|name| name.contains("instruction")).unwrap_or(0);
+        return cells.get(instruction_idx).copied().and_then(embedded_cycles_in_instruction);
     }
 
     embedded_cycles_in_instruction(cells.first().copied().unwrap_or(""))
