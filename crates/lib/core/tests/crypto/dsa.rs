@@ -18,8 +18,7 @@ use miden_precompiles_stark::{
     verifier::verify_deferred,
 };
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, MemoryError,
-    ProcessorState, StackInputs,
+    DefaultHost, ExecutionError, ExecutionOutput, ExecutionRequest, MemoryError, ProcessorState,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
     event::{EventError, EventHandler},
 };
@@ -669,14 +668,12 @@ fn run_core_program(
 
     let mut advice_stack = AdviceStack::new();
     advice_stack.append_elements(advice.iter().copied());
-    let processor = FastProcessor::new_with_options(
-        StackInputs::default(),
-        AdviceInputs::default().with_stack(advice_stack),
-        ExecutionOptions::default(),
-    )
-    .expect("processor construction");
-
-    let output = processor.execute_sync(&program, &mut host);
+    let output = ExecutionRequest::new(&program)
+        .with_advice(AdviceInputs::default().with_stack(advice_stack))
+        .execute()
+        .prepare()
+        .expect("processor construction")
+        .run_sync(&mut host);
     if let Ok(output) = &output {
         assert!(output.advice.stack().is_empty(), "core ECDSA wrapper must consume advice");
     }

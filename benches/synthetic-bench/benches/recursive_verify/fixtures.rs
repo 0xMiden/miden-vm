@@ -18,11 +18,11 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_precompiles_stark::recursive::PvmRecursiveVerifierInputs;
-use miden_processor::{ExecutionOptions, FastProcessor};
+use miden_processor::ExecutionRequest;
 use miden_verifier::Verifier;
 use miden_vm::{
-    Assembler, ExecutionProof, PrecompileWitness, ProgramInfo, Prover, StackInputs, StackOutputs,
-    prove_sync, trace::build_trace,
+    Assembler, ExecutionProof, PrecompileWitness, Processor, ProgramInfo, Prover, ProvingOutput,
+    StackInputs, StackOutputs,
 };
 use miden_vm_precompiles_bench::{PrecompileFixture, PrecompileWorkload};
 use miden_vm_stark::recursive::RecursiveVerifierInputs;
@@ -295,19 +295,17 @@ fn hex_prefix(bytes: &[u8]) -> String {
 }
 
 fn print_tx_fixture_shape(program: &miden_vm::Program, stack_inputs: StackInputs, scenario: &str) {
-    let processor = FastProcessor::new_with_options(
-        stack_inputs,
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    )
-    .expect("transaction fixture advice should fit provider limits");
     let mut host = recursive_host();
-    let witness = processor
-        .execute_for_proving_sync(program, &mut host)
-        .expect("execute transaction fixture");
-    let (vm_witness, _) = witness.into_parts();
-    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
-        .expect("build transaction fixture trace");
+    let witness = ExecutionRequest::new(program)
+        .with_stack_inputs(stack_inputs)
+        .record_witness()
+        .run_sync(&mut host)
+        .expect("execute transaction fixture")
+        .witness;
+    let trace = witness
+        .build_trace(miden_vm_stark::memory::default_budget())
+        .expect("build transaction fixture trace")
+        .into_vm_trace();
     let summary = trace.trace_len_summary();
     let record = format!("BENCH_TX_SHAPE scenario={scenario}");
     let shape = trace_shape_summary_for(summary);
@@ -356,24 +354,18 @@ pub(super) fn load_tx_fixtures(
                 (stack_outputs, proof, "hit")
             } else {
                 let mut host = recursive_host();
-                let (stack_outputs, proof) = prove_sync(
-                    &Prover::new().with_hash_fn(INNER_PROOF_HASH),
-                    &program,
-                    stack_inputs,
-                    advice_inputs,
-                    &mut host,
-                    ExecutionOptions::default(),
-                )
-                .expect("prove transaction fixture");
+                let ProvingOutput { claim, proof, .. } = Processor::new(&program)
+                    .with_stack_inputs(stack_inputs)
+                    .with_advice(advice_inputs)
+                    .prove_complete(&Prover::new().with_hash_fn(INNER_PROOF_HASH))
+                    .run_sync(&mut host)
+                    .expect("prove transaction fixture");
+                let stack_outputs = *claim.stack_outputs();
+                let proof = proof.into_inner();
                 assert!(
                     matches!(proof.precompile(), PrecompileStatus::Empty),
                     "recursive_verify fixture at proof index {proof_index} emits deferred proof data; \
                      this benchmark expects precompile-free fixtures"
-                );
-                let claim = ExecutionClaim::from_program_info(
-                    program_info.clone(),
-                    stack_inputs,
-                    stack_outputs,
                 );
                 assert!(
                     Verifier::new()

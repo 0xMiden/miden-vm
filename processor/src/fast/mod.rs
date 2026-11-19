@@ -15,10 +15,7 @@ use miden_core::{
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
-use miden_mast_package::{
-    Package,
-    debug_info::{DebugSourceNodeId, PackageDebugInfo},
-};
+use miden_mast_package::Package;
 
 use crate::{
     AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, LoadedMastForest,
@@ -41,8 +38,8 @@ mod step;
 pub use basic_block::SystemEventError;
 pub use debug::{DebugCallFrame, DebugCallFrameResolver, DebugFrameOrigin};
 pub use memory::Memory;
-pub(crate) use step::BreakReason;
 pub use step::ResumeContext;
+pub(crate) use step::{BreakReason, ResumeOutcome};
 
 #[cfg(test)]
 mod tests;
@@ -166,18 +163,15 @@ pub struct FastProcessor {
 
     /// Eager deferred evaluation state retained only while execution is running.
     deferred_state: DeferredState,
-
-    /// Package debug information configured through [`ProgramExecutor`](crate::ProgramExecutor).
-    pub(crate) package_debug_info: Option<PackageDebugInfo>,
-
-    /// Entrypoint source node configured through [`ProgramExecutor`](crate::ProgramExecutor).
-    pub(crate) entrypoint_source_node: Option<DebugSourceNodeId>,
 }
 
 impl FastProcessor {
     /// Packages the processor state after successful execution into a public result type.
     #[inline(always)]
-    fn into_execution_output(self, stack: StackOutputs) -> Result<ExecutionOutput, ExecutionError> {
+    pub(crate) fn into_execution_output(
+        self,
+        stack: StackOutputs,
+    ) -> Result<ExecutionOutput, ExecutionError> {
         let precompile_root = self.deferred_state.root();
         let precompile_witness = self
             .deferred_state
@@ -201,23 +195,6 @@ impl FastProcessor {
     ) -> Result<ExecutionOutput, ExecutionError> {
         match flow {
             ControlFlow::Continue(stack_outputs) => processor.into_execution_output(stack_outputs),
-            ControlFlow::Break(break_reason) => match break_reason {
-                BreakReason::Err(err) => Err(err),
-                BreakReason::Stopped(_) => {
-                    unreachable!("Execution never stops prematurely with NeverStopper")
-                },
-            },
-        }
-    }
-
-    /// Converts a testing-only execution result into stack outputs.
-    #[cfg(any(test, feature = "testing"))]
-    #[inline(always)]
-    fn stack_result_from_flow(
-        flow: ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>,
-    ) -> Result<StackOutputs, ExecutionError> {
-        match flow {
-            ControlFlow::Continue(stack_outputs) => Ok(stack_outputs),
             ControlFlow::Break(break_reason) => match break_reason {
                 BreakReason::Err(err) => Err(err),
                 BreakReason::Stopped(_) => {
@@ -319,8 +296,6 @@ impl FastProcessor {
                 options.execution_precompile_limits().clone(),
             )
             .map_err(AdviceError::DeferredStateConfigurationFailed)?,
-            package_debug_info: None,
-            entrypoint_source_node: None,
             options,
         })
     }
@@ -359,17 +334,12 @@ impl FastProcessor {
         &mut self,
         program: &Program,
     ) -> Result<ResumeContext, ExecutionError> {
-        self.advice
-            .extend_map(program.mast_forest().advice_map())
-            .map_exec_err_no_ctx()?;
+        self.start_context(program, None)
+    }
 
-        Ok(ResumeContext {
-            current_forest: program.mast_forest().clone(),
-            continuation_stack: ContinuationStack::new(program),
-            kernel: program.kernel().clone(),
-            package_debug_info: None,
-            inline_call_contexts: Vec::new(),
-        })
+    #[cfg(feature = "std")]
+    pub(crate) fn overlapped_trace_build(&self) -> bool {
+        self.options.overlapped_trace_build()
     }
 
     // ACCESSORS

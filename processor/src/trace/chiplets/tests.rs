@@ -25,8 +25,9 @@ use miden_core::{
 
 use super::{AEAD_STREAM_CYCLE_LEN, Chiplets};
 use crate::{
-    AdviceInputs, ContextId, DefaultHost, ExecutionOptions, FastProcessor, KernelDescriptor,
-    RowIndex, operation::Operation, trace::trace_state::AeadStreamReplayEntry,
+    ContextId, DefaultHost, ExecutionOptions, ExecutionRequest, KernelDescriptor, RowIndex,
+    operation::Operation,
+    trace::{tests::build_trace_from_program_with_stack, trace_state::AeadStreamReplayEntry},
 };
 
 type ChipletsTrace = [Vec<Felt>; CHIPLETS_WIDTH];
@@ -233,9 +234,6 @@ fn stacked_chiplet_trace() {
 
 #[test]
 fn regression_trace_build_does_not_panic_when_first_memory_access_clk_is_zero() {
-    let processor = FastProcessor::new(StackInputs::default());
-    let mut host = DefaultHost::default();
-
     // A CALL entrypoint records the callee frame pointer write before the processor clock is
     // incremented, so the first memory access is captured at clk = 0.
     let program = {
@@ -252,11 +250,11 @@ fn regression_trace_build_does_not_panic_when_first_memory_access_clk_is_zero() 
         Program::with_kernel(forest.into(), entry, KernelDescriptor::default())
     };
 
-    let execution_witness = processor.execute_for_proving_sync(&program, &mut host).unwrap();
-    let (vm_witness, _) = execution_witness.into_parts();
-
-    let _trace =
-        crate::trace::build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
+    ExecutionRequest::new(&program)
+        .with_options(ExecutionOptions::default().with_overlapped_trace_build(false))
+        .build_trace(miden_vm_stark::memory::default_budget())
+        .run_sync(&mut DefaultHost::default())
+        .unwrap();
 }
 
 // HELPER FUNCTIONS
@@ -274,14 +272,6 @@ fn build_trace(
     kernel: KernelDescriptor,
 ) -> (ChipletsTrace, usize) {
     let stack_inputs: Vec<Felt> = stack_inputs.iter().map(|v| Felt::new_unchecked(*v)).collect();
-    let processor = FastProcessor::new_with_options(
-        StackInputs::new(&stack_inputs).unwrap(),
-        AdviceInputs::default(),
-        ExecutionOptions::default().with_core_trace_fragment_size(1 << 10).unwrap(),
-    )
-    .expect("processor advice inputs should fit advice map limits");
-
-    let mut host = DefaultHost::default();
     let program = {
         let mut mast_forest = MastForest::new();
         let basic_block_id =
@@ -290,10 +280,8 @@ fn build_trace(
         Program::with_kernel(mast_forest.into(), basic_block_id, kernel)
     };
 
-    let execution_witness = processor.execute_for_proving_sync(&program, &mut host).unwrap();
-    let (vm_witness, _) = execution_witness.into_parts();
     let trace =
-        crate::trace::build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
+        build_trace_from_program_with_stack(&program, StackInputs::new(&stack_inputs).unwrap());
 
     let trace_len = trace.get_trace_len();
     (

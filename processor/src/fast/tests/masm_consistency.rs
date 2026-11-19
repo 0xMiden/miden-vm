@@ -267,15 +267,10 @@ fn test_masm_consistency(
         host.load_library(kernel_lib.mast_forest()).unwrap();
     }
 
-    // fast processor
-    let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-    let fast_stack_outputs = processor.execute_sync(&program, &mut host).unwrap().stack;
-
-    // fast processor by step
-    let stepped_stack_outputs = {
-        let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-        processor.execute_by_step_sync(&program, &mut host).unwrap()
-    };
+    let stack_inputs = StackInputs::new(&stack_inputs).unwrap();
+    let execute = || ExecutionRequest::new(&program).with_stack_inputs(stack_inputs).execute();
+    let fast_stack_outputs = execute().run_sync(&mut host).unwrap().stack;
+    let stepped_stack_outputs = execute_by_steps(execute(), &mut host).unwrap().stack;
 
     assert_eq!(fast_stack_outputs, stepped_stack_outputs);
     insta::assert_debug_snapshot!(testname, fast_stack_outputs);
@@ -353,15 +348,10 @@ fn test_masm_errors_consistency(
         host.load_library(kernel_lib.mast_forest()).unwrap();
     }
 
-    // fast processor
-    let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-    let fast_err = processor.execute_sync(&program, &mut host).unwrap_err();
-
-    // fast processor by step
-    let fast_stepped_err = {
-        let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-        processor.execute_by_step_sync(&program, &mut host).unwrap_err()
-    };
+    let stack_inputs = StackInputs::new(&stack_inputs).unwrap();
+    let execute = || ExecutionRequest::new(&program).with_stack_inputs(stack_inputs).execute();
+    let fast_err = execute().run_sync(&mut host).unwrap_err();
+    let fast_stepped_err = execute_by_steps(execute(), &mut host).unwrap_err();
 
     assert_eq!(fast_err.to_string(), fast_stepped_err.to_string());
     insta::assert_debug_snapshot!(testname, fast_err);
@@ -393,8 +383,11 @@ fn test_log_deferred_correctness() {
     };
 
     let mut host = DefaultHost::default();
-    let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-    let execution_output = processor.execute_sync(&program, &mut host).unwrap();
+    let execution_output = ExecutionRequest::new(&program)
+        .with_stack_inputs(StackInputs::new(&stack_inputs).unwrap())
+        .execute()
+        .run_sync(&mut host)
+        .unwrap();
 
     let actual_state_new = execution_output.stack.get_word(0).unwrap();
 
@@ -425,10 +418,11 @@ fn push_deferred_root_preserves_operands_and_existing_advice() {
         )
         .unwrap()
         .unwrap_program();
-    let output = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap())
+    let output = ExecutionRequest::new(&program)
+        .with_stack_inputs(StackInputs::new(&stack_inputs).unwrap())
         .with_advice(AdviceInputs::default().with_stack(AdviceStack::from(advice_stack.clone())))
-        .unwrap()
-        .execute_sync(&program, &mut DefaultHost::default())
+        .execute()
+        .run_sync(&mut DefaultHost::default())
         .unwrap();
 
     for (offset, expected) in stack_inputs.into_iter().enumerate() {
@@ -460,16 +454,20 @@ fn push_deferred_root_reads_the_global_rolling_commitment() {
     let stack_inputs = [0, 0, 0, 0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map(Felt::from_u32);
     let advice_stack = vec![Felt::from_u32(17), Felt::from_u32(19)];
     let advice_inputs = AdviceInputs::default().with_stack(AdviceStack::from(advice_stack.clone()));
-    let output = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap())
+    let request = || {
+        ExecutionRequest::new(&program).with_stack_inputs(StackInputs::new(&stack_inputs).unwrap())
+    };
+    let output = request()
         .with_advice(advice_inputs.clone())
-        .unwrap()
-        .execute_sync(&program, &mut DefaultHost::default())
+        .execute()
+        .run_sync(&mut DefaultHost::default())
         .unwrap();
-    let stepped = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap())
-        .with_advice(advice_inputs)
-        .unwrap()
-        .execute_by_step_sync(&program, &mut DefaultHost::default())
-        .unwrap();
+    let stepped = execute_by_steps(
+        request().with_advice(advice_inputs).execute(),
+        &mut DefaultHost::default(),
+    )
+    .unwrap()
+    .stack;
 
     // The committed root is nonzero even though evaluating it yields canonical TRUE.
     let expected_root = deferred_and_digest(TRUE_DIGEST, TRUE_DIGEST);
@@ -529,7 +527,10 @@ fn export_deferred_witness_opens_an_unlogged_shared_graph() {
         )
         .unwrap()
         .unwrap_program();
-    let output = processor.execute_sync(&program, &mut DefaultHost::default()).unwrap();
+    let output = Execution::from_processor(processor, &program, Execute)
+        .unwrap()
+        .run_sync(&mut DefaultHost::default())
+        .unwrap();
 
     assert_eq!(output.precompile_root(), logged_root);
     for (offset, expected) in stack_inputs.into_iter().enumerate() {
@@ -588,7 +589,10 @@ fn successive_log_deferred_calls_build_an_ordered_and_chain() {
         deferred_and_digest(deferred_and_digest(TRUE_DIGEST, second_statement), first_statement);
     assert_ne!(expected_root, reversed_root);
 
-    let execution_output = processor.execute_sync(&program, &mut DefaultHost::default()).unwrap();
+    let execution_output = Execution::from_processor(processor, &program, Execute)
+        .unwrap()
+        .run_sync(&mut DefaultHost::default())
+        .unwrap();
 
     assert_eq!(execution_output.stack.get_word(0), Some(expected_root));
     assert_eq!(execution_output.precompile_root(), expected_root);

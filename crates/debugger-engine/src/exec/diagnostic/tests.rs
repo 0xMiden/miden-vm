@@ -1,6 +1,7 @@
 use alloc::string::ToString;
 
 use miden_assembly::{Assembler, DefaultSourceManager};
+use miden_processor::ExecutionRequest;
 
 use super::*;
 use crate::exec::{DebuggerHost, poll_immediately};
@@ -26,7 +27,7 @@ fn trace_handler_errors_preserve_the_registered_name_through_diagnostics() {
     .unwrap();
     let mut wrapper = DiagnosticHostWrapper::new(&mut host);
     let error = poll_immediately(
-        FastProcessor::new(StackInputs::default()).execute(&package.unwrap_program(), &mut wrapper),
+        ExecutionRequest::new(&package.unwrap_program()).execute().run(&mut wrapper),
     )
     .expect_err("the trace handler must reject execution");
     let ExecutionError::EventError { event_id, event_name, error, .. } = error else {
@@ -68,14 +69,10 @@ fn diagnostics_delegate_events_capture_state_and_preserve_execution_results() {
             .is_some()
     );
     assert!(poll_immediately(wrapper.get_mast_forest(&Word::default())).unwrap().is_none());
-    let processor = FastProcessor::new_with_options(
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
+    let output = poll_immediately(
+        ExecutionRequest::new(&package.unwrap_program()).execute().run(&mut wrapper),
     )
     .unwrap();
-    let output =
-        poll_immediately(processor.execute(&package.unwrap_program(), &mut wrapper)).unwrap();
     assert_eq!(output.stack[0], Felt::from(7u32));
     assert_eq!(wrapper.call_depth, 0);
     assert!(wrapper.last_cycle > RowIndex::from(0u32));
@@ -105,4 +102,22 @@ fn diagnostic_executor_returns_success_and_reports_failures() {
             assert_eq!(output.stack[0], Felt::from(9u32));
         }
     }
+}
+
+#[test]
+fn diagnostic_executor_returns_advice_initialization_error() {
+    let program = Assembler::default()
+        .assemble_program("diagnostic-test", "begin push.1 drop end")
+        .unwrap()
+        .unwrap_program();
+    let mut host = miden_processor::DefaultHost::default();
+    let advice = AdviceInputs::default().with_map([(Word::empty(), alloc::vec![Felt::ONE])]);
+    let options = ExecutionOptions::default().with_max_advice_size_bytes(0);
+
+    let result = poll_immediately(
+        DiagnosticExecutor::new(StackInputs::default(), advice, options)
+            .execute_async(&program, &mut host),
+    );
+
+    assert!(matches!(result, Err(ExecutionError::AdviceError { .. })));
 }

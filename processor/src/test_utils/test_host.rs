@@ -214,7 +214,7 @@ mod tests {
     use miden_assembly::Assembler;
 
     use super::TestHost;
-    use crate::{AdviceInputs, ExecutionOptions, FastProcessor, Program, StackInputs};
+    use crate::{ExecutionRequest, Program};
 
     #[test]
     fn test_host_records_trace_and_snapshot() {
@@ -237,14 +237,7 @@ mod tests {
             .unwrap()
             .unwrap_program();
         let mut host = TestHost::default();
-        FastProcessor::new_with_options(
-            StackInputs::default(),
-            AdviceInputs::default(),
-            ExecutionOptions::default(),
-        )
-        .expect("failed to construct FastProcessor")
-        .execute_sync(&program, &mut host)
-        .unwrap();
+        ExecutionRequest::new(&program).execute().run_sync(&mut host).unwrap();
 
         // Each trace id is recorded, in emission order.
         assert_eq!(host.trace_handler, vec![TRACE_ID_1, TRACE_ID_2]);

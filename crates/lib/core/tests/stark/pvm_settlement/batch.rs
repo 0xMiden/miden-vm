@@ -16,7 +16,7 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor, Program, StackInputs, advice::AdviceInputs,
+    DefaultHost, ExecutionRequest, Program, StackInputs, WitnessOutput, advice::AdviceInputs,
 };
 use miden_prover::Prover;
 use miden_verifier::Verifier;
@@ -58,16 +58,16 @@ fn batch_settles_deferred_obligations_with_one_pvm_proof() {
 
     // MASM derives the combined root from verified MVM proofs and checks the staged PVM proof.
     let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
-    let witness =
-        FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
-            .unwrap()
-            .execute_for_proving_sync(&program, &mut host)
-            .expect("batch settlement failed");
+    let WitnessOutput { claim: batch_claim, witness, .. } = ExecutionRequest::new(&program)
+        .with_stack_inputs(stack_inputs)
+        .with_advice(advice_inputs)
+        .record_witness()
+        .run_sync(&mut host)
+        .expect("batch settlement failed");
     assert!(!witness.has_precompiles(), "the batch left precompile work unsettled");
 
     // Prove the batcher itself. Its proof settles both executions, so the recipient needs no
     // separate precompile proof.
-    let batch_claim = witness.claim();
     let batch_proof = Prover::new()
         .with_hash_fn(HashFunction::Eidos)
         .prove(witness)

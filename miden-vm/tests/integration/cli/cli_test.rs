@@ -153,6 +153,26 @@ fn prove_rejects_missing_inferred_inputs_file() {
         .stderr(predicate::str::contains("No such file or directory"));
 }
 
+#[test]
+fn prove_reports_execution_source_location() {
+    let working_dir = TempDir::new().unwrap();
+    let program_path = working_dir.path().join("failing-assertion.masm");
+    fs::write(&program_path, "begin\n    push.0\n    assert.err=\"diagnostic fixture\"\nend\n")
+        .unwrap();
+    fs::write(program_path.with_extension("inputs"), r#"{"operand_stack":[]}"#).unwrap();
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("prove").arg(&program_path);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed to execute program"))
+        .stderr(predicate::str::contains(
+            "assertion failed with error message: diagnostic fixture",
+        ))
+        .stderr(predicate::str::contains("failing-assertion.masm"))
+        .stderr(predicate::str::contains("assert.err="));
+}
+
 /// Builds a working directory holding a program and its inputs, and a `prove` command that runs
 /// inside it against that program. Each test then adds only the paths it is about.
 fn prove_command() -> (TempDir, Command) {

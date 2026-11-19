@@ -9,7 +9,10 @@ use miden_core::{
     },
 };
 
-use crate::{AdviceProvider, ProgramInfo, StackInputs, StackOutputs, fast::ExecutionOutput};
+use crate::{
+    AdviceProvider, ExecutionError, ExecutionTrace, ProgramInfo, StackInputs, StackOutputs,
+    VmTraceBudget, fast::ExecutionOutput,
+};
 
 pub(crate) mod utils;
 use utils::ChipletTraceFragment;
@@ -35,9 +38,8 @@ pub use miden_air_definitions::vm::{
 };
 pub use miden_core::deferred::PrecompileWitness;
 pub use parallel::{CORE_TRACE_WIDTH, build_trace};
-// Re-exported for the streaming trace-build path
-// (`FastProcessor::execute_and_build_trace_sync`), which is std-only; the buffered path
-// uses `build_hasher_chiplet` and `MAX_TRACE_LEN` directly within `parallel`.
+// Re-exported for the streamed `ExecutionRequest::build_trace` path, which is std-only; the
+// buffered path uses `build_hasher_chiplet` and `MAX_TRACE_LEN` directly within `parallel`.
 #[cfg(feature = "std")]
 pub(crate) use parallel::{MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_prebuilt_hasher};
 #[cfg(feature = "std")]
@@ -91,10 +93,23 @@ impl ExecutionWitness {
         self.precompile.is_some()
     }
 
+    /// Materializes the VM trace under `budget` and retains its matching precompile witness.
+    ///
+    /// Imported witnesses may carry malformed precompile graphs or roots that do not match the VM
+    /// replay. This checks their structure and pairing when constructing the [`ExecutionTrace`].
+    /// Precompile admission, semantic validity, and proof validity remain the responsibility of
+    /// proof preparation and verification.
+    pub fn build_trace(self, budget: VmTraceBudget) -> Result<ExecutionTrace, ExecutionError> {
+        let (vm, precompile) = self.into_parts();
+        let trace = build_trace(vm, &budget)?;
+        ExecutionTrace::try_new(trace, precompile)
+    }
+
     /// Consumes this witness and returns its supported low-level proving components.
     ///
-    /// The [`VmWitness`] can be passed to [`build_trace`]. The optional [`PrecompileWitness`] is
-    /// present only when execution authenticated deferred precompile work.
+    /// Use [`Self::build_trace`] to keep the full witness paired during trace construction.
+    /// The [`VmWitness`] can be passed separately to [`crate::trace::build_trace`]. The optional
+    /// [`PrecompileWitness`] is present only when execution authenticated deferred precompile work.
     pub fn into_parts(self) -> (VmWitness, Option<PrecompileWitness>) {
         (self.vm, self.precompile)
     }
@@ -321,7 +336,9 @@ mod wire_tests {
         ExecutionWitness, Serializable, build_trace,
         trace_state::{AeadStreamReplayEntry, BitwiseOp, BitwiseReplayEntry},
     };
-    use crate::{DefaultHost, ExecutionError, FastProcessor, Felt, StackInputs, mast::MastNodeId};
+    use crate::{
+        DefaultHost, ExecutionError, ExecutionRequest, Felt, StackInputs, mast::MastNodeId,
+    };
 
     fn execution_witness(source: &str) -> ExecutionWitness {
         let program = Assembler::default()
@@ -329,8 +346,10 @@ mod wire_tests {
             .expect("program should compile")
             .unwrap_program();
         let mut host = DefaultHost::default();
-        FastProcessor::new(StackInputs::default())
-            .execute_for_proving_sync(&program, &mut host)
+        ExecutionRequest::new(&program)
+            .record_witness()
+            .run_sync(&mut host)
+            .map(|output| output.witness)
             .expect("execution should produce a witness")
     }
 
@@ -340,6 +359,52 @@ mod wire_tests {
 
     fn deferred_witness_bytes() -> alloc::vec::Vec<u8> {
         deferred_witness().to_bytes()
+    }
+
+    #[test]
+    fn detached_witness_builds_a_trace_with_its_precompile_obligation() {
+        for witness in [
+            execution_witness("begin nop end"),
+            execution_witness("begin log_deferred log_deferred end"),
+        ] {
+            let claim = witness.claim();
+            let expected_root = witness.vm.precompile_root;
+            let expected_precompile = witness.precompile.clone();
+            let restored = ExecutionWitness::read_from_bytes(&witness.to_bytes()).unwrap();
+            let (trace, precompile) = restored
+                .build_trace(miden_vm_stark::memory::default_budget())
+                .unwrap()
+                .into_parts();
+
+            assert_eq!(trace.stack_outputs(), claim.stack_outputs());
+            assert_eq!(trace.precompile_root(), expected_root);
+            assert_eq!(precompile, expected_precompile);
+            assert_eq!(precompile.is_some(), expected_root != TRUE_DIGEST);
+        }
+    }
+
+    #[test]
+    fn detached_witness_rejects_imported_malformed_or_mismatched_precompile_graphs() {
+        let original = execution_witness("begin log_deferred log_deferred end").to_bytes();
+        for malformed in [false, true] {
+            let mut witness = ExecutionWitness::read_from_bytes(&original).unwrap();
+            witness.precompile = Some(if malformed {
+                super::PrecompileWitness::from_entries(alloc::vec::Vec::new()).unwrap()
+            } else {
+                deferred_witness().precompile.unwrap()
+            });
+            // Transport decoding checks the option's presence, without graph hashing or pairing.
+            let restored = ExecutionWitness::read_from_bytes(&witness.to_bytes())
+                .expect("portable graph validation remains deferred until preparation");
+            let error = restored
+                .build_trace(miden_vm_stark::memory::default_budget())
+                .expect_err("imported witness components must form a checked execution trace");
+            assert!(matches!(
+                (malformed, error),
+                (true, ExecutionError::InvalidPrecompileWitness(_))
+                    | (false, ExecutionError::PrecompileRootMismatch { .. })
+            ));
+        }
     }
 
     #[test]
@@ -369,8 +434,11 @@ mod wire_tests {
         ]
         .map(Felt::new_unchecked);
         let mut host = DefaultHost::default();
-        FastProcessor::new(StackInputs::new(&stack).unwrap())
-            .execute_for_proving_sync(&program, &mut host)
+        ExecutionRequest::new(&program)
+            .with_stack_inputs(StackInputs::new(&stack).unwrap())
+            .record_witness()
+            .run_sync(&mut host)
+            .map(|output| output.witness)
             .expect("AEAD stream execution should produce a witness")
     }
 
@@ -466,18 +534,20 @@ mod wire_tests {
         let witness = aead_stream_witness();
         let bytes = witness.to_bytes();
         let claim = witness.claim();
-        let (original_vm, original_precompile) = witness.into_parts();
+        let (original_trace, original_precompile) = witness
+            .build_trace(miden_vm_stark::memory::default_budget())
+            .expect("original trace should build")
+            .into_parts();
         assert!(original_precompile.is_none());
-        let original_trace = build_trace(original_vm, &miden_vm_stark::memory::default_budget())
-            .expect("original trace should build");
 
         let restored =
             ExecutionWitness::read_from_bytes(&bytes).expect("witness should round trip");
         assert_eq!(restored.claim(), claim);
-        let (restored_vm, restored_precompile) = restored.into_parts();
+        let (restored_trace, restored_precompile) = restored
+            .build_trace(miden_vm_stark::memory::default_budget())
+            .expect("restored trace should build")
+            .into_parts();
         assert!(restored_precompile.is_none());
-        let restored_trace = build_trace(restored_vm, &miden_vm_stark::memory::default_budget())
-            .expect("restored trace should build");
 
         assert_eq!(restored_trace.public_inputs(), original_trace.public_inputs());
         assert_eq!(restored_trace.trace_len_summary(), original_trace.trace_len_summary());

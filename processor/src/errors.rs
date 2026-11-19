@@ -98,6 +98,18 @@ pub enum ExecutionError {
         "estimated prover memory of {estimated_bytes} bytes exceeds the budget of {budget_bytes} bytes"
     )]
     ProverMemoryExceeded { estimated_bytes: u64, budget_bytes: u64 },
+    /// A reconstructed execution trace omitted its authenticated precompile witness.
+    #[error("VM trace authenticates precompile work but no precompile witness is present")]
+    MissingPrecompileWitness,
+    /// An empty precompile root cannot carry a precompile witness.
+    #[error("VM trace carries a precompile witness for an empty deferred root")]
+    UnexpectedPrecompileWitness,
+    /// A reconstructed execution trace supplied a malformed portable precompile graph.
+    #[error("invalid precompile witness: {0}")]
+    InvalidPrecompileWitness(#[source] miden_core::deferred::IntegrityError),
+    /// A reconstructed trace and witness authenticate different precompile obligations.
+    #[error("precompile witness root {actual} does not match VM trace root {expected}")]
+    PrecompileRootMismatch { expected: Word, actual: Word },
     /// Memory error with source context for diagnostics.
     ///
     /// Use `MemoryResultExt::map_mem_err` to convert `Result<T, MemoryError>` with context.
@@ -143,17 +155,6 @@ pub enum ExecutionError {
     HostError(#[from] HostError),
     #[error(transparent)]
     PackageDebugInfoError(#[from] PackageDebugInfoError),
-}
-
-impl ExecutionError {
-    /// Wraps an advice error without source-location context.
-    pub fn advice_error_no_context(err: AdviceError) -> Self {
-        Self::AdviceError {
-            label: SourceSpan::UNKNOWN,
-            source_file: None,
-            err,
-        }
-    }
 }
 
 impl AsRef<dyn Diagnostic> for ExecutionError {
@@ -502,7 +503,7 @@ impl<'a> PackageSourceDebugContext<'a> {
     }
 
     /// Creates a package debug context when source location metadata may be unavailable.
-    pub(crate) fn new_optional(
+    pub fn new_optional(
         debug_info: &'a PackageDebugInfo,
         source_node_id: Option<DebugSourceNodeId>,
     ) -> Self {

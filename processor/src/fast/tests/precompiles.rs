@@ -33,8 +33,9 @@ fn clear_deferred_rejects_invalid_context_or_root() {
             .assemble_program("program", source)
             .unwrap()
             .unwrap_program();
-        let error = FastProcessor::new(StackInputs::default())
-            .execute_sync(&program, &mut DefaultHost::default())
+        let error = ExecutionRequest::new(&program)
+            .execute()
+            .run_sync(&mut DefaultHost::default())
             .unwrap_err();
         assert_matches!(
             error,

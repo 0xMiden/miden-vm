@@ -18,8 +18,8 @@ use miden_precompiles_stark::recursive::{
     PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
 };
 use miden_processor::{
-    BaseHost, DefaultHost, ExecutionOptions, ExecutionOutput, FastProcessor, FutureMaybeSend, Host,
-    LoadedMastForest, MastForestLoadError, ProcessorState, StackInputs, SyncHost,
+    BaseHost, DefaultHost, ExecutionOutput, ExecutionRequest, FutureMaybeSend, Host,
+    LoadedMastForest, MastForestLoadError, ProcessorState, StackInputs, SyncHost, WitnessOutput,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
     event::EventError,
 };
@@ -96,12 +96,12 @@ fn prove_signature_execution(
     let mut host = DefaultHost::default()
         .with_library(core_lib)
         .expect("core library must load into the host");
-    let witness =
-        FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
-            .expect("signature advice must fit provider limits")
-            .execute_for_proving_sync(&program, &mut host)
-            .expect("signature execution must produce a proving witness");
-    let claim = witness.claim();
+    let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+        .with_stack_inputs(stack_inputs)
+        .with_advice(advice_inputs)
+        .record_witness()
+        .run_sync(&mut host)
+        .expect("signature execution must produce a proving witness");
     // The core library's recursive verifiers accept Eidos proofs.
     let proof = Prover::new()
         .with_hash_fn(HashFunction::Eidos)
@@ -186,11 +186,14 @@ async fn run_settlement_in_masm(
     let mut host =
         PvmSettlementHost::new(core_lib, SettlementWitnesses::Supplied(vec![precompile_witness]));
 
-    let output =
-        FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
-            .expect("failed to construct FastProcessor")
-            .execute(&program, &mut host)
-            .await?;
+    let output = ExecutionRequest::new(&program)
+        .with_stack_inputs(stack_inputs)
+        .with_advice(advice_inputs)
+        .execute()
+        .prepare()
+        .expect("processor construction")
+        .run(&mut host)
+        .await?;
     let precompile_proof = host
         .precompile_proof
         .take()

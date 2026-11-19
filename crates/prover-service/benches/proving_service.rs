@@ -9,7 +9,7 @@ use codspeed_criterion_compat::{
 };
 use miden_assembly::Assembler;
 use miden_core::{proof::ExecutionProof, serde::Serializable};
-use miden_processor::{DefaultHost, ExecutionWitness, FastProcessor, StackInputs};
+use miden_processor::{DefaultHost, ExecutionRequest, ExecutionWitness, WitnessOutput};
 use miden_prover::Prover;
 use miden_prover_service::{
     PROTOCOL_VERSION, ProvingService, ServerConfig,
@@ -26,10 +26,10 @@ fn proving_service(c: &mut Criterion) {
         )
         .unwrap()
         .unwrap_program();
-    let witness = FastProcessor::new(StackInputs::default())
-        .execute_for_proving_sync(&program, &mut DefaultHost::default())
+    let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+        .record_witness()
+        .run_sync(&mut DefaultHost::default())
         .unwrap();
-    let claim = witness.claim();
     let bytes = witness.to_bytes();
     let prover = Prover::new();
     let config = ServerConfig::new(
