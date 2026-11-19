@@ -124,16 +124,6 @@ impl TestContext {
         parser::parse_forms(source)
     }
 
-    /// Parse the given source file into an executable [Module].
-    ///
-    /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
-    /// valid.
-    #[track_caller]
-    #[cfg(all(test, feature = "std"))]
-    pub(crate) fn parse_program(&self, source: Arc<SourceFile>) -> Result<Box<Module>, Report> {
-        source.parse(self.assembler.warnings_as_errors(), self.source_manager())
-    }
-
     /// Parse the given source file into a kernel [Module].
     ///
     /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
