@@ -3,7 +3,7 @@
 This crate proves post-execution witnesses produced by the
 [Miden processor](../processor/) using [Plonky3](https://github.com/0xMiden/Plonky3). The
 synchronous `Prover` does not execute programs: it consumes `ExecutionWitness` values and owned
-batches of portable `PrecompileWitness` values.
+batches of portable `PrecompileWitness` values, or materialized `ExecutionTrace` values.
 
 ## Usage
 
@@ -63,6 +63,19 @@ multiple Miden VM proofs and settles their deferred work with one precompile VM 
 proves the batcher itself, leaving no deferred work for the recipient. The
 [MASM verification guide](../docs/src/user_docs/core_lib/recursive_verification.md#example-batch-n-executions)
 explains the claim list, ordered root fold, and host request.
+
+### Direct trace proving
+
+`Prover::prove_trace(ExecutionTrace)` proves the VM portion and preserves any deferred precompile
+witness. `Prover::prove_full_trace(ExecutionTrace)` proves all work and returns `CompleteProof`, an
+opaque wrapper guaranteeing that no deferred work remains. Its `as_inner()` and `into_inner()`
+methods expose the underlying `ExecutionProof`; verification establishes proof validity.
+
+Use `Prover::trace_budget()` to build traces with this prover's canonical VM model and memory
+limit. `ExecutionWitness::build_trace(prover.trace_budget())` materializes the trace and checks its
+pairing with the portable precompile witness. Proving rechecks the trace against its memory budget.
+`ExecutionTrace::try_new` checks that a separately supplied VM trace and optional precompile witness
+have matching roots and consistent presence before accepting them as proving input.
 
 ### Synchronous execution and proving
 

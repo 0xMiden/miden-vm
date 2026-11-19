@@ -136,15 +136,38 @@ impl PrecompileWitness {
         registry: Arc<PrecompileRegistry>,
         verification_limits: &PrecompileLimits,
     ) -> Result<PreparedWitness, PreparationError> {
-        if self.entries.is_empty() {
+        let mut work = PrecompileWork::default();
+        let (nodes, root) = Self::hydrate_nodes(self.entries.into_iter(), |node| {
+            registry.validate_node(node)?;
+            work.charge_node(node, &registry, verification_limits)?;
+            Ok::<_, PreparationError>(())
+        })?;
+        Ok(PreparedWitness { registry, nodes, root, work })
+    }
+
+    /// Computes the root after checking framework shapes, backward references, duplicate
+    /// commitments, reachability, and canonical child-first order.
+    ///
+    /// This does not apply a registry or admission policy, validate precompile-owned payload
+    /// semantics, or establish assertion truth. Use [`Self::prepare`] before proving or evaluating
+    /// the witness. The portable entries are retained; nodes are hydrated and hashed for this
+    /// check.
+    pub fn compute_root(&self) -> Result<Digest, IntegrityError> {
+        Self::hydrate_nodes(self.entries.iter().cloned(), |_| Ok(())).map(|(_, root)| root)
+    }
+
+    fn hydrate_nodes<E: From<IntegrityError>>(
+        entries: impl ExactSizeIterator<Item = WireEntry>,
+        mut admit: impl FnMut(&Node) -> Result<(), E>,
+    ) -> Result<(Vec<PreparedNode>, Digest), E> {
+        if entries.len() == 0 {
             return Err(IntegrityError::InvalidStructure.into());
         }
         let mut indices = BTreeMap::new();
-        let mut nodes: Vec<PreparedNode> = Vec::with_capacity(self.entries.len());
-        let mut work = PrecompileWork::default();
+        let mut nodes: Vec<PreparedNode> = Vec::with_capacity(entries.len());
         indices.insert(TRUE_DIGEST, 0);
 
-        for entry in self.entries {
+        for entry in entries {
             let child = |index: u32| match index {
                 TRUE_INDEX => Ok(TRUE_DIGEST),
                 index => nodes
@@ -184,8 +207,7 @@ impl PrecompileWitness {
             }
             .map_err(|_| IntegrityError::InvalidStructure)?;
 
-            registry.validate_node(&node)?;
-            work.charge_node(&node, &registry, verification_limits)?;
+            admit(&node)?;
             let prepared = PreparedNode::new(node);
             let digest = prepared.digest();
             if indices.insert(digest, nodes.len() + 1).is_some() {
@@ -200,7 +222,7 @@ impl PrecompileWitness {
             return Err(IntegrityError::InvalidStructure.into());
         }
 
-        Ok(PreparedWitness { registry, nodes, root, work })
+        Ok((nodes, root))
     }
 
     /// Returns the bounded, untrusted wire entries.
@@ -778,11 +800,32 @@ mod tests {
             .unwrap()
             .digest();
         assert_ne!(expected, TRUE_DIGEST);
+        assert_eq!(witness.compute_root().unwrap(), expected);
         assert_eq!(PrecompileWitness::read_from_bytes(&witness.to_bytes()).unwrap(), witness);
         assert!(matches!(
             prepare_framework(witness),
             Err(PreparationError::Precompile(PrecompileError::InvalidNode))
         ));
+    }
+
+    #[test]
+    fn computed_root_matches_prepared_root() {
+        let witness = PrecompileWitness::from_entries(alloc::vec![
+            WireEntry::Join {
+                frame: DEFERRED_AND_FRAME,
+                lhs: 0,
+                rhs: 0
+            },
+            WireEntry::Join {
+                frame: DEFERRED_AND_FRAME,
+                lhs: 1,
+                rhs: 1
+            },
+        ])
+        .unwrap();
+        let computed = witness.compute_root().unwrap();
+        let prepared = prepare_framework(witness).unwrap();
+        assert_eq!(computed, prepared.root());
     }
 
     #[test]
@@ -862,6 +905,7 @@ mod tests {
             let bytes = encoded_entries(&entries);
             let witness = PrecompileWitness::from_entries(entries).unwrap();
             assert_eq!(PrecompileWitness::read_from_bytes(&bytes).unwrap(), witness);
+            assert!(matches!(witness.compute_root(), Err(IntegrityError::InvalidStructure)));
             assert!(matches!(
                 prepare_framework(witness),
                 Err(PreparationError::Integrity(IntegrityError::InvalidStructure))
