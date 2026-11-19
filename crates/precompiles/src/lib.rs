@@ -13,8 +13,8 @@ mod math;
 
 pub use codec::{chunks_to_bytes_exact, n_chunks};
 pub use hash::{
-    HashAssertNode, HashFunction, HashPrecompile, keccak256::Keccak256Precompile,
-    sha256::Sha256Precompile, sha512::Sha512Precompile,
+    HashFunction, HashPrecompile, keccak256::Keccak256Precompile, sha256::Sha256Precompile,
+    sha512::Sha512Precompile,
 };
 pub use math::{
     curve::{
