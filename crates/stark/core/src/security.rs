@@ -1,25 +1,43 @@
 //! Security contracts shared by the VM and precompile relations.
+//!
+//! The estimator consumes compiled relation geometry and parameters returned by verification. It
+//! never captures equations, constructs fixed matrices or builds witnesses. Manually assembled
+//! numeric inputs are estimates; constructing this type alone does not authenticate a proof.
+
+mod budget;
+pub mod fixed;
+mod fri;
+mod proven;
+mod proximity;
+mod report;
+mod shape;
+
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
+
+pub use report::{
+    ErrorBits, ProvenSecurityReport, ProvenSecurityTerm, Regime, RegimeReport, SecurityReport,
+    SecurityTerm,
+};
+pub use shape::{AirShape, InstanceShape, LookupShape};
+
+/// Stable presentation labels for the conjectured and proven security rounds.
+pub mod labels {
+    pub use super::report::{
+        ALI_LABEL, BATCH_LABEL, COLLISION_LABEL, COMPOSITION_LABEL, DEEP_COMPOSITION_LABEL,
+        DEEP_LABEL, FOLDING_LABEL, LDT_COMMIT_LABEL, LDT_LABEL, LDT_QUERY_LABEL, LOOKUP_LABEL,
+        OUT_OF_DOMAIN_LABEL, QUERY_LABEL,
+    };
+}
 
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, PrimeField64, QuadFelt},
     proof::HashFunction,
 };
-/// Proven soundness breakdown in the unique- and list-decoding regimes.
-pub use p3_security::SecurityReport as ProvenSecurityReport;
-pub use p3_security::budget::{
-    AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
-};
-use p3_security::{
-    ErrorBits, GrindingSites, LowDegreeTest, StarkAirParams,
-    budget::report::{COLLISION_LABEL, LOOKUP_LABEL, OUT_OF_DOMAIN_LABEL, QUERY_LABEL},
-    fixed,
-    fri::FriRegime,
-};
 
 use crate::pcs::PcsParams;
 
-/// Base field elements per challenge-field element.
 const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 
 pub const COMMITMENT_ALIGNMENT: usize = miden_crypto::hash::eidos::BLOCK_LEN;
@@ -27,95 +45,119 @@ pub const COLLISION_RESISTANCE: u32 = HashFunction::Eidos.collision_resistance()
 pub const OOD_POW_BITS: u32 = 0;
 pub const LOOKUP_POW_BITS: u32 = 0;
 
-/// Security parameters of a verified Miden STARK proof.
+/// Security inputs of a Miden STARK proof.
 ///
-/// Native MVM and PVM verifiers return these parameters after deriving them from the proof, the
-/// commitment scheme used to verify it, and the AIR relation selected by the verifier. Callers
-/// pass the returned value to a security estimator and apply their own acceptance policy.
-/// Constructing this type directly does not authenticate its contents.
+/// Verifiers construct these only after checking the proof and authenticating its statement.
+/// Applications select an estimator and acceptance policy. Public fields also support planning;
+/// manually constructed or modified parameters do not carry verification provenance.
+/// Unsupported heights, invalid field-size encodings, empty declared rounds, inconsistent lookup
+/// geometry and unrepresentable PCS counts produce zero-security reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProofSecurityParameters {
-    /// Protocol parameters bound by the proof transcript.
-    pub protocol_params: ProtocolParams,
-    /// Log2 of the configured final FRI polynomial degree.
-    pub log_final_degree: u32,
-    /// Instance shape derived from the proof and its commitment scheme.
+    /// The validated PCS configuration used to verify the proof, including its final degree.
+    pub pcs_params: PcsParams,
+    /// Instance geometry derived from the proof and its commitment scheme.
     pub instance_shape: InstanceShape,
-    /// Verified proof-hash configuration, which also selects the Fiat-Shamir challenger.
+    /// Verified commitment hash and Fiat–Shamir challenger configuration.
     pub hash_fn: HashFunction,
-    /// Security-relevant shape of the AIR relation and commitment scheme.
+    /// Compiled relation geometry, resolved for the actual committed allocation/alignment.
     pub air_shape: AirShape,
     /// Number of out-of-domain points opened per committed column.
     pub num_ood_points: u32,
-    /// Number of lookup fractions contributed by the proof's boundary messages.
+    /// Number of lookup fractions contributed by the authenticated boundary messages.
     pub num_lookup_boundary_terms: u32,
 }
 
-/// Conservative Q16 lower bound on the log2 of the challenge-field cardinality.
+/// Conservative Q16 lower bound on the quadratic challenge-field cardinality.
 ///
-/// The challenge field is the quadratic extension of the Goldilocks base field. This value doubles
-/// the rounded-down Q16 value for the base field. Rounding before doubling keeps the result
-/// conservative.
+/// Rounding the base-field value down before doubling keeps this conservative.
 pub const CHALLENGE_FIELD_BITS: u64 = EXTENSION_DEGREE as u64 * fixed::floor_log2(Felt::ORDER_U64);
 
-/// Size of the Eidos quadratic-extension challenge support, in Q16 bits.
+/// Q16 log size of Eidos's challenge support: two uniformly sampled 63-bit coefficients.
 ///
-/// Each basis coefficient is a uniform 63-bit integer under the Eidos pseudorandomness assumption,
-/// so the support has `2^126` elements. Root-counting bounds use this size; the FRI query rate uses
-/// the cardinality of the field in which the polynomials are defined instead.
+/// Root-counting uses this support, FRI queries use the polynomial field itself, and commitment
+/// collisions use the verified hash's collision resistance. Those quantities are distinct.
 pub const EIDOS_CHALLENGE_SAMPLE_BITS: u64 = fixed::from_bits(63 * EXTENSION_DEGREE as u32);
 
-/// Computes conjectured security bounds for the proof's hash and challenger configuration.
-///
-/// Eidos root-counting bounds use its 126-bit sampling support. The FRI query rate still uses
-/// `instance.field_bits`, and the commitment cap uses `instance.collision_resistance`.
-pub fn security_report_with_hash(
-    params: &ProtocolParams,
-    instance: &InstanceShape,
-    air: &AirShape,
-    hash_fn: HashFunction,
-) -> SecurityReport {
-    match hash_fn {
-        HashFunction::Eidos => {},
-        HashFunction::Blake3_256 | HashFunction::Keccak => {
-            return p3_security::budget::security_report(params, instance, air);
-        },
-    }
-    let sampling_instance = InstanceShape {
-        field_bits: EIDOS_CHALLENGE_SAMPLE_BITS,
-        ..*instance
-    };
-    let report = p3_security::budget::security_report(params, &sampling_instance, air);
-    let cap = instance.cap();
-    let query_bits = u64::from(params.num_queries)
-        * fixed::bits_per_query(params.log_blowup, instance.field_bits)
-        + fixed::from_bits(params.query_pow_bits);
-    SecurityReport::new((*report.terms()).map(|term| match term.label {
-        QUERY_LABEL => SecurityTerm::new(QUERY_LABEL, query_bits.min(cap)),
-        COLLISION_LABEL => SecurityTerm::new(COLLISION_LABEL, cap),
-        // OOD rejection removes only base-field points. At most 2^63 of the 2^126 Eidos
-        // candidates are in the base field; one Q16 unit conservatively covers this conditioning.
-        OUT_OF_DOMAIN_LABEL => SecurityTerm::new(OUT_OF_DOMAIN_LABEL, term.bits.saturating_sub(1)),
-        _ => term,
-    }))
+/// A transient numerical projection, shared by real PCS configurations and raw regression cases.
+#[derive(Clone, Copy)]
+pub(super) struct NumericalInputs {
+    pub protocol_params: budget::ProtocolParams,
+    pub log_final_degree: u32,
+    pub instance_shape: InstanceShape,
+    pub hash_fn: HashFunction,
+    pub air_shape: AirShape,
+    pub num_ood_points: u32,
+    pub num_lookup_boundary_terms: u32,
 }
 
-/// Maps PCS parameters onto the protocol parameters the round budget reads.
+/// Project native parameters without narrowing an unrepresentable query/grinding count.
 ///
-/// The transcript observes every field of [`PcsParams`], so computing a proof's security level
-/// under these parameters uses the parameters it was actually produced with.
-pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
-    ProtocolParams {
+/// The round budget's Q16 domain uses u32 counts. An unrepresentable configuration has no
+/// estimate in that domain and reports zero security instead of wrapping to a smaller count.
+fn project_pcs(params: &PcsParams) -> Option<budget::ProtocolParams> {
+    Some(budget::ProtocolParams {
         log_blowup: u32::from(params.log_blowup()),
         log_folding_arity: u32::from(params.log_folding_arity()),
-        num_queries: params.num_queries() as u32,
-        query_pow_bits: params.query_pow_bits() as u32,
+        num_queries: u32::try_from(params.num_queries()).ok()?,
+        query_pow_bits: u32::try_from(params.query_pow_bits()).ok()?,
         ood_pow_bits: OOD_POW_BITS,
-        deep_pow_bits: params.deep_pow_bits() as u32,
-        folding_pow_bits: params.folding_pow_bits() as u32,
-        // The protocol samples the lookup challenges directly after the main-trace commitment,
-        // with no grinding in between.
+        deep_pow_bits: u32::try_from(params.deep_pow_bits()).ok()?,
+        folding_pow_bits: u32::try_from(params.folding_pow_bits()).ok()?,
         lookup_pow_bits: LOOKUP_POW_BITS,
+    })
+}
+
+impl ProofSecurityParameters {
+    fn numerical_inputs(&self) -> Option<NumericalInputs> {
+        // Validate shared arithmetic preconditions before either estimator runs. In particular,
+        // boundary corrections need an existing, nonempty per-row lookup round and a u64 height.
+        if self.instance_shape.cap() == 0
+            || self.instance_shape.log_max_height >= u64::BITS
+            || self.air_shape.num_deep_terms == Some(0)
+        {
+            return None;
+        }
+        match self.air_shape.lookup {
+            Some(LookupShape { fractions_per_row: 0, .. }) => return None,
+            None if self.num_lookup_boundary_terms != 0 => return None,
+            _ => (),
+        }
+        Some(NumericalInputs {
+            protocol_params: project_pcs(&self.pcs_params)?,
+            log_final_degree: u32::from(self.pcs_params.log_final_degree()),
+            instance_shape: self.instance_shape,
+            hash_fn: self.hash_fn,
+            air_shape: self.air_shape,
+            num_ood_points: self.num_ood_points,
+            num_lookup_boundary_terms: self.num_lookup_boundary_terms,
+        })
+    }
+
+    /// Conjectured fixed-point round budget, including hash sampling and boundary corrections.
+    pub fn conjectured_security_report(&self) -> SecurityReport {
+        self.numerical_inputs()
+            .map_or_else(SecurityReport::zero, |inputs| budget::native_report(&inputs))
+    }
+
+    /// Conjectured security in whole bits, rounded down.
+    pub fn conjectured_security_level(&self) -> u32 {
+        self.conjectured_security_report().security_level()
+    }
+
+    /// Proven round-by-round bounds in unique- and list-decoding regimes.
+    ///
+    /// Every admissible list-decoding candidate is graded with its own lookup list-size loss,
+    /// then complete reports are compared. Hash/Fiat–Shamir assumptions still apply.
+    pub fn proven_security_report(&self) -> ProvenSecurityReport {
+        self.numerical_inputs().map_or_else(proven::zero_report, |inputs| {
+            proven::security_report(&inputs, budget::lookup_bits(&inputs))
+        })
+    }
+
+    /// Stronger proven decoding-regime bound in whole bits, rounded down.
+    pub fn proven_security_level(&self) -> u32 {
+        self.proven_security_report().security_bits() as u32
     }
 }
 
@@ -145,187 +187,6 @@ pub fn lookup_boundary_correction(
         .div_ceil(height)
 }
 
-pub fn apply_lookup_correction(report: SecurityReport, correction: u64) -> SecurityReport {
-    let terms = (*report.terms()).map(|term| {
-        if term.label == LOOKUP_LABEL {
-            SecurityTerm::new(term.label, term.bits.saturating_sub(correction))
-        } else {
-            term
-        }
-    });
-    SecurityReport::new(terms)
-}
-
-impl ProofSecurityParameters {
-    /// Computes the conjectured security report for the verified proof.
-    ///
-    /// The same estimator handles MVM and PVM proofs because the parameters include the protocol,
-    /// instance, and AIR shapes. Callers must use parameters returned by the verifier that
-    /// authenticated the proof rather than values assembled independently.
-    pub fn conjectured_security_report(&self) -> SecurityReport {
-        let report = security_report_with_hash(
-            &self.protocol_params,
-            &self.instance_shape,
-            &self.air_shape,
-            self.hash_fn,
-        );
-        let correction = lookup_boundary_correction(
-            self.num_lookup_boundary_terms,
-            self.air_shape.lookup.map_or(0, |lookup| lookup.fractions_per_row),
-            self.instance_shape.log_max_height,
-        );
-        apply_lookup_correction(report, correction)
-    }
-
-    /// Returns the conjectured security level for the verified proof.
-    pub fn conjectured_security_level(&self) -> u32 {
-        self.conjectured_security_report().security_level()
-    }
-
-    /// Computes proven round-by-round security bounds in both decoding regimes.
-    ///
-    /// Plonky3 selects the list-decoding proximity parameter from the complete bound, including
-    /// DEEP column batching, and the report keeps both regimes with their binding terms. Like the
-    /// conjectured estimate, it assumes parameters returned by successful verification and keeps
-    /// the hash and Fiat-Shamir assumptions.
-    ///
-    /// The Eidos sampling support is rounded down to 125 bits, which also covers rejecting
-    /// base-field OOD points. Lookup challenges follow the main-trace commitment, so each
-    /// list-decoding candidate is composed with the lookup term charged its own list size.
-    pub fn proven_security_report(&self) -> ProvenSecurityReport {
-        use p3_security::{
-            proximity::{list_size_ldr_m, list_size_udr},
-            stark::proven_security_report,
-        };
-
-        let ProvenInputs { fri, air, shape, grinding, lookup_bits } = self.proven_inputs();
-        let lookup = |list_size: f64| {
-            // `from_prob(L)` carries `-log2(L)` bits, so this subtracts the list-size loss.
-            let bits = lookup_bits + ErrorBits::from_prob(list_size).bits();
-            [p3_security::SecurityTerm::new(
-                LOOKUP_LABEL,
-                ErrorBits::from_log2(bits.max(0.0)),
-            )]
-        };
-
-        let unique = FriCandidate { fri, ldr: None };
-        let udr =
-            proven_security_report(&unique, &air, &shape, &lookup(list_size_udr()), &grinding).udr;
-        let ldr = p3_security::fri::ldr_candidates(&fri, &air, &shape)
-            .into_iter()
-            .filter_map(|candidate| {
-                let list_size = list_size_ldr_m(fri.log_blowup, candidate.0);
-                let ldt = FriCandidate { fri, ldr: Some(candidate) };
-                proven_security_report(&ldt, &air, &shape, &lookup(list_size), &grinding).ldr
-            })
-            .max_by(|a, b| a.security_bits().total_cmp(&b.security_bits()));
-        ProvenSecurityReport { udr, ldr }
-    }
-
-    /// Returns the stronger proven security bound, in whole bits rounded down.
-    pub fn proven_security_level(&self) -> u32 {
-        self.proven_security_report().security_bits() as u32
-    }
-
-    /// Plonky3 inputs shared by both proven regimes.
-    fn proven_inputs(&self) -> ProvenInputs {
-        let params = &self.protocol_params;
-        let log_height = self.instance_shape.log_max_height as usize;
-        let log_blowup = params.log_blowup as usize;
-        let log_arity = params.log_folding_arity as usize;
-        let num_rounds =
-            log_height.saturating_sub(self.log_final_degree as usize).div_ceil(log_arity);
-        let fri = FriRegime {
-            log_blowup,
-            num_queries: params.num_queries as usize,
-            // Lifted FRI rounds up the number of fixed-arity folds. Use the actual final LDE
-            // size so Plonky3's floor division counts that last fold, including partial rounds.
-            log_final_poly_len: (log_height + log_blowup).saturating_sub(num_rounds * log_arity),
-            max_log_arity: if num_rounds == 0 { 0 } else { log_arity },
-            commit_pow_bits: params.folding_pow_bits as usize,
-            query_pow_bits: params.query_pow_bits as usize,
-        };
-        let sampling_bits = match self.hash_fn {
-            HashFunction::Eidos => fixed::to_bits(EIDOS_CHALLENGE_SAMPLE_BITS) - 1,
-            _ => fixed::to_bits(self.instance_shape.field_bits),
-        };
-        let shape = p3_security::InstanceShape {
-            log_trace_length: log_height,
-            modulus_bits: sampling_bits as usize,
-            collision_resistance: self.instance_shape.collision_resistance as usize,
-            // The stored count includes both column- and opening-point-batching slots. It
-            // conservatively bounds the sum of the two independent challenges' curve degrees.
-            num_batched_functions: self.air_shape.num_deep_terms.unwrap_or(1) as usize,
-        };
-        let air = StarkAirParams {
-            num_constraints: self.air_shape.num_composed_constraints as usize,
-            max_constraint_degree: self.air_shape.max_constraint_degree as usize,
-            num_quotient_chunks: self.air_shape.num_quotient_chunks as usize,
-            max_combo: self.air_shape.max_combo.max(self.num_ood_points) as usize,
-        };
-        // This lookup term is a Schwartz-Zippel bound and does not use the proximity conjecture.
-        let lookup = self
-            .conjectured_security_report()
-            .terms()
-            .iter()
-            .find(|term| term.label == LOOKUP_LABEL)
-            .copied()
-            .expect("the round budget includes the lookup term");
-        let grinding = GrindingSites {
-            out_of_domain: params.ood_pow_bits as usize,
-            batch_combination: params.deep_pow_bits as usize,
-            ..GrindingSites::NONE
-        };
-        ProvenInputs {
-            fri,
-            air,
-            shape,
-            grinding,
-            lookup_bits: lookup.bits as f64 / fixed::ONE as f64,
-        }
-    }
-}
-
-/// Plonky3 inputs for [`ProofSecurityParameters::proven_security_report`].
-struct ProvenInputs {
-    fri: FriRegime,
-    air: StarkAirParams,
-    shape: p3_security::InstanceShape,
-    grinding: GrindingSites,
-    /// Lookup round before any list-size loss, in bits.
-    lookup_bits: f64,
-}
-
-/// FRI restricted to unique decoding or to one list-decoding candidate, so that
-/// [`ProofSecurityParameters::proven_security_report`] can charge each candidate's list size.
-#[derive(Clone, Copy)]
-struct FriCandidate {
-    fri: FriRegime,
-    ldr: Option<(usize, ErrorBits)>,
-}
-
-impl LowDegreeTest for FriCandidate {
-    fn log_blowup(&self) -> usize {
-        self.fri.log_blowup
-    }
-
-    fn proven_error_udr(
-        &self,
-        air: &StarkAirParams,
-        shape: &p3_security::InstanceShape,
-    ) -> ErrorBits {
-        p3_security::fri::proven_error_udr(&self.fri, air, shape)
-    }
-
-    fn best_ldr(
-        &self,
-        _air: &StarkAirParams,
-        _shape: &p3_security::InstanceShape,
-    ) -> Option<(usize, ErrorBits)> {
-        self.ldr
-    }
-
-    fn conjectured_error(&self, shape: &p3_security::InstanceShape) -> ErrorBits {
-        p3_security::fri::conjectured_error(&self.fri, shape)
-    }
-}
+#[cfg(test)]
+#[path = "security/tests/api.rs"]
+mod tests;

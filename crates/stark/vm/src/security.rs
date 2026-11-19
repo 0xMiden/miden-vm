@@ -14,20 +14,22 @@ use miden_air::vm::{
 use miden_air_definitions::compiler::vm::derive_air_shape;
 use miden_air_definitions::shared::geometry::NUM_OOD_POINTS;
 use miden_core::proof::HashFunction;
+use miden_stark::security::CHALLENGE_FIELD_BITS;
 #[cfg(test)]
-use miden_stark::security::security_report_with_hash;
-use miden_stark::security::{CHALLENGE_FIELD_BITS, protocol_params};
+use miden_stark::security::labels::LOOKUP_LABEL;
+#[cfg(test)]
+use miden_stark::security::labels::QUERY_LABEL;
+#[cfg(test)]
+use miden_stark::security::testing::{
+    ProtocolParams, SecurityCase, protocol_params, security_report_with_hash,
+};
 pub use miden_stark::{
     pcs::PcsParams,
     security::{
-        AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams,
-        ProvenSecurityReport, SecurityReport, SecurityTerm,
+        AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProvenSecurityReport,
+        SecurityReport, SecurityTerm,
     },
 };
-#[cfg(test)]
-use p3_security::budget::report::LOOKUP_LABEL;
-#[cfg(test)]
-use p3_security::budget::report::QUERY_LABEL;
 
 #[cfg(test)]
 const fn deployed_instance(log_max_height: u32) -> InstanceShape {
@@ -67,27 +69,8 @@ pub fn proof_security_parameters(
     alignment: usize,
     hash_fn: HashFunction,
 ) -> ProofSecurityParameters {
-    mvm_security_parameters_from_protocol(
-        protocol_params(pcs_params),
-        u32::from(pcs_params.log_final_degree()),
-        log_max_height,
-        num_kernel_procedures,
-        alignment,
-        hash_fn,
-    )
-}
-
-fn mvm_security_parameters_from_protocol(
-    protocol_params: ProtocolParams,
-    log_final_degree: u32,
-    log_max_height: u32,
-    num_kernel_procedures: u32,
-    alignment: usize,
-    hash_fn: HashFunction,
-) -> ProofSecurityParameters {
     ProofSecurityParameters {
-        protocol_params,
-        log_final_degree,
+        pcs_params: *pcs_params,
         instance_shape: InstanceShape {
             log_max_height,
             field_bits: CHALLENGE_FIELD_BITS,
@@ -109,9 +92,26 @@ pub mod testing;
 
 #[cfg(test)]
 mod tests {
-    use p3_security::{ErrorBits, fixed};
+    use miden_stark::security::fixed;
 
     use super::{testing::*, *};
+
+    fn proof_security_parameters(
+        pcs_params: &PcsParams,
+        log_max_height: u32,
+        num_kernel_procedures: u32,
+        alignment: usize,
+        hash_fn: HashFunction,
+    ) -> SecurityCase {
+        super::proof_security_parameters(
+            pcs_params,
+            log_max_height,
+            num_kernel_procedures,
+            alignment,
+            hash_fn,
+        )
+        .into()
+    }
 
     /// The deployed preset has about 57 proven query bits in LDR, versus about 39 in UDR.
     /// Selecting a regime must use the complete bound, including DEEP column batching.
@@ -209,7 +209,7 @@ mod tests {
     /// decoding charges it the selected candidate's list size.
     #[test]
     fn proven_security_includes_lookup_boundary_terms_in_both_regimes() {
-        use p3_security::{Regime, proximity::list_size_ldr_m};
+        use miden_stark::security::{Regime, testing::reference::list_size_ldr_m};
 
         let mut parameters = proof_security_parameters(
             &config::pcs_params(),
@@ -247,7 +247,7 @@ mod tests {
     }
 
     /// Where the lookup round binds in list decoding, charging its list size moves the proximity
-    /// parameter and lowers the level that Plonky3's unscaled composition reports.
+    /// parameter and lowers the level that the unscaled comparison reports.
     #[test]
     fn proven_security_charges_the_list_size_to_the_lookup_round() {
         let mut parameters = proof_security_parameters(
@@ -261,7 +261,7 @@ mod tests {
         parameters.protocol_params.query_pow_bits = 0;
         parameters.protocol_params.deep_pow_bits = 31;
         parameters.protocol_params.folding_pow_bits = 31;
-        let (unscaled, _) = plonky3_proven_report(&parameters);
+        let (unscaled, _) = unscaled_lookup_report(&parameters);
         let report = parameters.proven_security_report();
         assert_eq!(unscaled.security_bits() as u32, 95);
         assert_eq!(unscaled.ldr.as_ref().unwrap().binding().label, LOOKUP_LABEL);
@@ -270,9 +270,9 @@ mod tests {
     }
 
     /// Where the lookup round cannot bind, the per-candidate composition must reproduce
-    /// Plonky3's own report: the same regimes, proximity parameter, and every other term.
+    /// the unscaled comparison: the same regimes, proximity parameter, and every other term.
     #[test]
-    fn proven_security_matches_plonky3_where_the_lookup_round_does_not_bind() {
+    fn proven_security_matches_reference_where_the_lookup_round_does_not_bind() {
         for log_max_height in [6, 8, 20, 29] {
             let parameters = proof_security_parameters(
                 &config::pcs_params(),
@@ -281,7 +281,7 @@ mod tests {
                 COMMITMENT_ALIGNMENT,
                 HashFunction::Eidos,
             );
-            let (expected, lookup_bits) = plonky3_proven_report(&parameters);
+            let (expected, lookup_bits) = unscaled_lookup_report(&parameters);
             let report = parameters.proven_security_report();
             assert_eq!(report.security_bits(), expected.security_bits());
             let regimes = [(&report.udr, &expected.udr)]
@@ -303,56 +303,10 @@ mod tests {
         }
     }
 
-    /// Plonky3's composition with the lookup term applied unchanged in both regimes, and that
-    /// term's bits.
-    fn plonky3_proven_report(parameters: &ProofSecurityParameters) -> (ProvenSecurityReport, f64) {
-        use p3_security::{GrindingSites, StarkAirParams, fri::FriRegime};
-
-        let params = &parameters.protocol_params;
-        let log_height = parameters.instance_shape.log_max_height as usize;
-        let log_arity = params.log_folding_arity as usize;
-        let num_rounds = log_height
-            .saturating_sub(parameters.log_final_degree as usize)
-            .div_ceil(log_arity);
-        let fri = FriRegime {
-            log_blowup: params.log_blowup as usize,
-            num_queries: params.num_queries as usize,
-            log_final_poly_len: (log_height + params.log_blowup as usize)
-                .saturating_sub(num_rounds * log_arity),
-            max_log_arity: if num_rounds == 0 { 0 } else { log_arity },
-            commit_pow_bits: params.folding_pow_bits as usize,
-            query_pow_bits: params.query_pow_bits as usize,
-        };
-        let air = StarkAirParams {
-            num_constraints: parameters.air_shape.num_composed_constraints as usize,
-            max_constraint_degree: parameters.air_shape.max_constraint_degree as usize,
-            num_quotient_chunks: parameters.air_shape.num_quotient_chunks as usize,
-            max_combo: parameters.air_shape.max_combo.max(parameters.num_ood_points) as usize,
-        };
-        let shape = p3_security::InstanceShape {
-            log_trace_length: log_height,
-            modulus_bits: 125,
-            collision_resistance: parameters.instance_shape.collision_resistance as usize,
-            num_batched_functions: parameters.air_shape.num_deep_terms.unwrap_or(1) as usize,
-        };
-        let lookup_bits = parameters
-            .conjectured_security_report()
-            .terms()
-            .iter()
-            .find(|term| term.label == LOOKUP_LABEL)
-            .unwrap()
-            .bits as f64
-            / fixed::ONE as f64;
-        let lookup =
-            [p3_security::SecurityTerm::new(LOOKUP_LABEL, ErrorBits::from_log2(lookup_bits))];
-        let grinding = GrindingSites {
-            out_of_domain: params.ood_pow_bits as usize,
-            batch_combination: params.deep_pow_bits as usize,
-            ..GrindingSites::NONE
-        };
-        let report =
-            p3_security::stark::proven_security_report(&fri, &air, &shape, &lookup, &grinding);
-        (report, lookup_bits)
+    /// Unscaled comparison using the same numerical formulas without candidate-specific
+    /// lookup list-size loss.
+    fn unscaled_lookup_report(parameters: &SecurityCase) -> (ProvenSecurityReport, f64) {
+        miden_stark::security::testing::reference::unscaled_lookup_report(parameters)
     }
 
     /// A trace too short to admit a list-decoding proximity parameter still has a UDR report.
@@ -375,7 +329,7 @@ mod tests {
     /// estimator's logarithm implementation. The collision cap must be applied after sampling.
     #[test]
     fn eidos_root_counts_use_the_sampling_support_before_capping() {
-        use p3_security::budget::report::{COMPOSITION_LABEL, DEEP_COMPOSITION_LABEL};
+        use miden_stark::security::labels::{COMPOSITION_LABEL, DEEP_COMPOSITION_LABEL};
 
         let params = ProtocolParams {
             num_queries: 150,
@@ -423,7 +377,8 @@ mod tests {
             100 * 65_536
         );
 
-        let full_field = p3_security::budget::security_report(&params, &instance, &air);
+        let full_field =
+            miden_stark::security::testing::budget_security_report(&params, &instance, &air);
         assert_eq!(
             report.terms().iter().find(|term| term.label == QUERY_LABEL),
             full_field.terms().iter().find(|term| term.label == QUERY_LABEL),
@@ -443,7 +398,7 @@ mod tests {
             );
             assert_eq!(
                 security_report_with_hash(&params, &parameters.instance_shape, &AIR_SHAPE, hash_fn),
-                p3_security::budget::security_report(
+                miden_stark::security::testing::budget_security_report(
                     &params,
                     &parameters.instance_shape,
                     &AIR_SHAPE
@@ -486,7 +441,7 @@ mod tests {
     fn proof_security_parameters_match_mvm_security_report() {
         let pcs_params = config::pcs_params();
         let expected_protocol_params = protocol_params(&pcs_params);
-        let security_parameters = proof_security_parameters(
+        let security_parameters = super::proof_security_parameters(
             &pcs_params,
             22,
             255,
@@ -498,7 +453,10 @@ mod tests {
             security_parameters.conjectured_security_report(),
             security_report(&expected_protocol_params, 22, HashFunction::Eidos, 255)
         );
-        assert_eq!(security_parameters.log_final_degree, u32::from(pcs_params.log_final_degree()));
+        assert_eq!(
+            security_parameters.pcs_params.log_final_degree(),
+            pcs_params.log_final_degree()
+        );
         assert_eq!(security_parameters.num_ood_points, NUM_OOD_POINTS);
     }
 

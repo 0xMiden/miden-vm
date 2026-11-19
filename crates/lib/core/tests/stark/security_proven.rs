@@ -2,9 +2,10 @@
 
 use miden_air::vm::{config, security::COMMITMENT_ALIGNMENT};
 use miden_core::proof::HashFunction;
+use miden_stark::security::{labels::LOOKUP_LABEL, testing::SecurityCase};
 use miden_vm_stark::security;
 
-fn vm_parameters(height: u32) -> security::ProofSecurityParameters {
+fn vm_parameters(height: u32) -> SecurityCase {
     security::proof_security_parameters(
         &config::pcs_params(),
         height,
@@ -12,9 +13,10 @@ fn vm_parameters(height: u32) -> security::ProofSecurityParameters {
         COMMITMENT_ALIGNMENT,
         HashFunction::Eidos,
     )
+    .into()
 }
 
-fn descriptor(parameters: &security::ProofSecurityParameters) -> [u64; 12] {
+fn descriptor(parameters: &SecurityCase) -> [u64; 12] {
     let protocol = &parameters.protocol_params;
     let air = &parameters.air_shape;
     let lookup = air.lookup.unwrap();
@@ -34,7 +36,7 @@ fn descriptor(parameters: &security::ProofSecurityParameters) -> [u64; 12] {
     ]
 }
 
-fn run_estimator(parameters: &security::ProofSecurityParameters) -> u64 {
+fn run_estimator(parameters: &SecurityCase) -> u64 {
     let source = "
         use miden::core::stark::security
         begin
@@ -56,18 +58,19 @@ fn deployed_preset_selects_the_complete_list_decoding_bound() {
     assert_eq!(run_estimator(&parameters), 57);
 }
 
-fn pvm_parameters(height: u32) -> security::ProofSecurityParameters {
+fn pvm_parameters(height: u32) -> SecurityCase {
     miden_precompiles_stark::setup::security::proof_security_parameters(
         &miden_air::precompiles::policy::precompile_pcs_params(),
         height,
         COMMITMENT_ALIGNMENT,
         HashFunction::Eidos,
     )
+    .into()
 }
 
 /// Batch calls into one execution so the matrix checks arithmetic and search boundaries without
 /// recompiling a separate VM program at every cell. Every descriptor comes from a native builder.
-fn run_estimators(parameters: &[security::ProofSecurityParameters]) -> Vec<u64> {
+fn run_estimators(parameters: &[SecurityCase]) -> Vec<u64> {
     // Limit each program to stay within the assembler's block size. Collect every cycle count
     // before checking the budget so a regression reports the worst case, not the first one.
     let results: Vec<_> = parameters.chunks(256).flat_map(run_estimator_batch).collect();
@@ -81,7 +84,7 @@ fn run_estimators(parameters: &[security::ProofSecurityParameters]) -> Vec<u64> 
     results.into_iter().map(|(level, _)| level).collect()
 }
 
-fn run_estimator_batch(parameters: &[security::ProofSecurityParameters]) -> Vec<(u64, u64)> {
+fn run_estimator_batch(parameters: &[SecurityCase]) -> Vec<(u64, u64)> {
     use std::fmt::Write;
 
     use miden_core::Felt;
@@ -120,7 +123,7 @@ fn run_estimator_batch(parameters: &[security::ProofSecurityParameters]) -> Vec<
 
 /// Independent reference: exact coefficients rounded to Q16, enumerating every permissible m.
 /// It shares none of the MASM's logarithm approximation, query bound, or search.
-fn exhaustive_level(parameters: &security::ProofSecurityParameters) -> u64 {
+fn exhaustive_level(parameters: &SecurityCase) -> u64 {
     const ONE: i64 = 1 << 16;
     let upper_log = |value: f64| (value.log2() * ONE as f64).ceil() as i64;
     let protocol = &parameters.protocol_params;
@@ -143,7 +146,7 @@ fn exhaustive_level(parameters: &security::ProofSecurityParameters) -> u64 {
         .conjectured_security_report()
         .terms()
         .iter()
-        .find(|term| term.label == p3_security::budget::report::LOOKUP_LABEL)
+        .find(|term| term.label == LOOKUP_LABEL)
         .map(|term| term.bits as i64)
         .unwrap();
     let mut best = queries

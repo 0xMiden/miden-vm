@@ -39,7 +39,6 @@ miden-utils-sync.workspace = true
 # External dependencies
 p3-field.workspace = true
 p3-challenger.workspace = true
-p3-security.workspace = true
 
 [dev-dependencies]
 miden-air-definitions = { workspace = true, features = ["compiler", "testing"] }
