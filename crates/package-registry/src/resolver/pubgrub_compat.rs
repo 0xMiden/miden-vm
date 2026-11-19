@@ -10,7 +10,10 @@ use core::{
 
 use pubgrub::{Range, VersionSet};
 
-use crate::semver::{BuildMetadata, Comparator, Op, Prerelease, Version, VersionReq};
+use crate::{
+    SemVer as Version, VersionReq,
+    semver::{BuildMetadata, Comparator, Op, Prerelease},
+};
 
 /// This needs to be bug-for-bug compatible with https://github.com/dtolnay/semver/blob/master/src/eval.rs
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]

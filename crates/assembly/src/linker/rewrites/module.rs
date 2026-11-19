@@ -1,19 +1,19 @@
 use alloc::{collections::BTreeSet, sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
-use miden_assembly_syntax::{
-    ast::constants::eval::CachedConstantValue, diagnostics::RelatedError, module::ItemInfo,
-    sema::ConstEvalVisitor,
-};
+use miden_assembly_syntax::{module::ItemInfo, sema::ConstEvalVisitor};
 use miden_core::{Felt, events::EventId};
 
 use crate::{
-    ModuleIndex, SourceFile, SourceSpan, Span, Spanned,
+    ast,
     ast::{
-        self, InvocationTarget, Invoke, InvokeKind, Procedure, SymbolResolution,
-        constants::ConstEnvironment,
-        visit::{self, VisitMut},
+        InvocationTarget, Invoke, InvokeKind, ModuleIndex, Procedure, SymbolResolution,
+        constants::{ConstEnvironment, eval::CachedConstantValue},
+        visit,
+        visit::VisitMut,
     },
+    debuginfo::{SourceFile, SourceSpan, Span, Spanned},
+    diagnostics::RelatedError,
     linker::{
         LinkerError, Resolver, ResolverCache, SymbolItem, SymbolResolutionContext, SymbolResolver,
     },

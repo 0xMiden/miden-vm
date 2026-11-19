@@ -2,13 +2,13 @@ use alloc::{string::ToString, vec::Vec};
 
 use miden_core::{
     Word,
-    deferred::PrecompileLimits,
+    advice::AdviceInputs,
+    deferred::{PrecompileLimits, PrecompileWitness},
+    program::{Program, StackInputs, StackOutputs},
     proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus, VmProof},
 };
 use miden_processor::{
-    ExecutionError, ExecutionOptions, ExecutionWitness, FastProcessor, PrecompileWitness, Program,
-    StackInputs, StackOutputs, SyncHost, VmWitness,
-    advice::AdviceInputs,
+    ExecutionError, ExecutionOptions, ExecutionWitness, FastProcessor, SyncHost, VmWitness,
     trace::{VmTrace, build_trace},
 };
 

@@ -1,8 +1,10 @@
+use miden_assembly_syntax::debuginfo::{SourceId, Span};
+
 use super::{
     parsing::{MaybeInherit, SetSourceId, Validate},
     *,
 };
-use crate::{SourceId, Span, Uri};
+use crate::Uri;
 
 /// Represents the contents of the `[workspace]` table
 #[derive(Debug, Clone)]

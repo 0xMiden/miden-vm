@@ -52,7 +52,8 @@ mod tests {
     use alloc::vec;
     use std::sync::Arc;
 
-    use miden_air::vm::{NUM_PUBLIC_VALUES, config as air_config};
+    use miden_air::vm::config as air_config;
+    use miden_air_definitions::vm::NUM_PUBLIC_VALUES;
     use miden_stark::pcs::PcsParams;
 
     use super::*;

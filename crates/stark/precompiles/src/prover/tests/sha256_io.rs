@@ -2,10 +2,10 @@ use std::{collections::HashMap, string::String, vec, vec::Vec};
 
 use miden_core::{
     Felt,
+    crypto::hash::Sha256,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_crypto::hash::sha2::Sha256;
 use miden_stark::lookup::Challenges;
 
 use crate::prover::{

@@ -8,9 +8,9 @@ use miden_air_definitions::vm::{
         chiplets::bitwise::{BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH},
     },
 };
-use miden_core::field::PrimeCharacteristicRing;
+use miden_core::{Felt, field::PrimeCharacteristicRing};
 
-use super::{Bitwise, ChipletTraceFragment, Felt};
+use super::{Bitwise, ChipletTraceFragment};
 
 #[test]
 fn bitwise_init() {

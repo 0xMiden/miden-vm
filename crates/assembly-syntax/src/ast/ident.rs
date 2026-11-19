@@ -8,7 +8,8 @@ use core::{
 use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
-use miden_debug_types::{SourceSpan, Span, Spanned};
+
+use crate::debuginfo::{SourceSpan, Span, Spanned};
 
 /// Represents the types of errors that can occur when parsing/validating an [Ident]
 #[derive(Debug, thiserror::Error)]
@@ -243,7 +244,7 @@ impl FromStr for Ident {
     }
 }
 
-impl From<Ident> for miden_utils_diagnostics::miette::SourceSpan {
+impl From<Ident> for crate::diagnostics::miette::SourceSpan {
     fn from(value: Ident) -> Self {
         value.span.into()
     }

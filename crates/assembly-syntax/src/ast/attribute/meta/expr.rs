@@ -3,11 +3,11 @@ use alloc::{string::String, sync::Arc};
 use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
-use miden_debug_types::{SourceSpan, Span, Spanned};
 
 use crate::{
     Felt,
     ast::Ident,
+    debuginfo::{SourceSpan, Span, Spanned},
     parser::{IntValue, WordValue},
     prettier,
 };

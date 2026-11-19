@@ -961,9 +961,9 @@ mod proof_arbitrary {
 
     use super::{
         ExecutionProof, ExecutionProofCompatibility, HashFunction, PrecompileProof,
-        PrecompileStatus, PrecompileWitness, StarkProof, VmProof,
+        PrecompileStatus, StarkProof, VmProof,
     };
-    use crate::{Felt, Word};
+    use crate::{Felt, Word, deferred::PrecompileWitness};
 
     impl Arbitrary for StarkProof {
         type Parameters = ();

@@ -1,12 +1,11 @@
 use alloc::{string::String, sync::Arc};
 use core::assert_matches;
 
-use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
-
 use super::*;
 use crate::{
     MAX_CONTROL_FLOW_NESTING,
     ast::{Form, Immediate, Instruction, MAX_TYPE_EXPR_NESTING, Op, Visibility},
+    debuginfo::{SourceFile, SourceId, SourceLanguage, Uri},
 };
 
 fn test_source_file(source: &str) -> Arc<SourceFile> {
@@ -1370,7 +1369,7 @@ fn parse_package_visibility_on_all_declarations() {
 #[test]
 fn package_visibility_survives_ast_roundtrip() {
     let source = "namespace root\npub(package) mod api\npub(package) use {helper} from self::api\npub(package) const VALUE = 1\npub(package) type Word = felt\npub(package) proc entry nop end\n";
-    let source_manager = Arc::new(miden_debug_types::DefaultSourceManager::default());
+    let source_manager = Arc::new(crate::debuginfo::DefaultSourceManager::default());
     let module = ModuleParser::new(Some(ast::ModuleKind::Library))
         .parse_str(None, source, source_manager.clone())
         .expect("package visibility should parse");

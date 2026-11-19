@@ -5,11 +5,14 @@ use miden_assembly::{
     Assembler, DefaultSourceManager,
     diagnostics::{IntoDiagnostic, Report, Result, WrapErr},
 };
-use miden_mast_package::Package;
-use miden_vm::{
-    ExecutionClaim, KernelDescriptor, PrecompileStatus, ProgramInfo,
-    default_verification_precompile_limits, internal::InputFile,
+use miden_core::{
+    program::{ExecutionClaim, KernelDescriptor, ProgramInfo},
+    proof::PrecompileStatus,
 };
+use miden_mast_package::Package;
+use miden_precompiles::default_verification_precompile_limits;
+use miden_verifier::Verifier;
+use miden_vm::internal::InputFile;
 
 use super::{
     data::{OutputFile, ProgramHash, ProofFile},
@@ -108,7 +111,7 @@ impl VerifyCmd {
         // verify proof
         let stack_outputs = outputs_data.stack_outputs().map_err(Report::msg)?;
         let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
-        let outcome = miden_vm::Verifier::new()
+        let outcome = Verifier::new()
             .with_verification_precompile_limits(verification_limits)
             .verify(&claim, &proof)
             .into_diagnostic()

@@ -4,7 +4,7 @@ mod multi_air;
 mod recursive;
 
 pub use miden_ace::compiler::{CapturedAir, CompiledRelation, LayoutKind};
-use p3_security::budget::{AirShape, LookupShape};
+use miden_stark::security::{AirShape, LookupShape};
 
 pub use self::{
     multi_air::build_canonical_multi_air_ace_circuit,

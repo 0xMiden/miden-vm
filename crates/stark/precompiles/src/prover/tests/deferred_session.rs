@@ -2,13 +2,11 @@ use alloc::{vec, vec::Vec};
 
 use miden_core::{
     Felt,
+    crypto::hash::{Keccak256, Sha256},
     deferred::{DEFERRED_AND_FRAME, Node, PrecompileWitness, TRUE_DIGEST},
     serde::{ByteWriter, Deserializable, Serializable},
 };
-use miden_crypto::hash::{
-    keccak::Keccak256,
-    sha2::{Sha256, Sha512},
-};
+use miden_crypto::hash::sha2::Sha512;
 use miden_precompiles::{
     CurveId, CurvePoint, CurvePrecompile, Keccak256Precompile, MSM_WORK, Sha256Precompile,
     Sha512Precompile, UintDomain, UintPrecompile,

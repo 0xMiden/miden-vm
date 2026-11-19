@@ -4,12 +4,11 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::fmt;
 
-use miden_debug_types::{SourceFile, SourceSpan};
-use miden_utils_diagnostics::{Diagnostic, miette};
-
 use crate::{
     Path,
     ast::{SymbolResolutionError, constants::ConstEvalError},
+    debuginfo::{SourceFile, SourceSpan},
+    diagnostics::{Diagnostic, miette},
 };
 
 /// The high-level error type for all semantic analysis errors.
@@ -85,7 +84,10 @@ pub enum SemanticAnalysisError {
         span: SourceSpan,
     },
     #[error("invalid namespace '{path}': {err}")]
-    InvalidNamespacePath { path: Arc<Path>, err: crate::PathError },
+    InvalidNamespacePath {
+        path: Arc<Path>,
+        err: crate::ast::PathError,
+    },
     #[error("invalid namespace declaration: must be placed before any other item in the module")]
     MisplacedNamespaceDeclaration {
         #[label("make sure this declaration precedes other declarations in this module")]

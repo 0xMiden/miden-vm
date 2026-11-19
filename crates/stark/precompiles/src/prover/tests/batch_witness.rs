@@ -9,6 +9,7 @@ use miden_core::{
         PreparedWitness, TRUE_DIGEST, WorkLimit, fold_deferred_root,
     },
     field::QuadFelt,
+    proof::HashFunction,
 };
 use miden_crypto::hash::eidos::{DomainTag, DomainVersion, EidosFrame, namespace};
 use miden_precompiles::{
@@ -20,9 +21,10 @@ use proptest::prelude::*;
 
 use crate::{
     prover::{
-        HashFunction, PrecompileProvingError, SessionInputError, WitnessLocation,
+        PrecompileProvingError, SessionInputError, WitnessLocation,
         deferred::{
-            capacity::{self, IMPORT_BYTES_PER_NODE, SESSION_BYTES},
+            capacity,
+            capacity::{IMPORT_BYTES_PER_NODE, SESSION_BYTES},
             session::{import_witnesses, import_witnesses_with_roots, session_from_witnesses},
         },
         hash::keccak::sponge::trace::keccak_oracle,

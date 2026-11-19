@@ -12,11 +12,12 @@ pub use miden_assembly::{
     diagnostics,
 };
 pub use miden_core::{
-    Word, ZERO,
+    Word, ZERO, crypto,
     deferred::{
         DeferredRoot, IntegrityError, PrecompileError, PrecompileLimits, PrecompileWitness,
         PrecompileWitnessEntry, PreparationError, WorkClass, WorkLimit,
     },
+    field,
     operations::Operation,
     program::{
         ExecutionClaim, InputError, KernelDescriptor, Program, ProgramInfo, StackInputs,
@@ -26,6 +27,7 @@ pub use miden_core::{
         ExecutionProof, ExecutionProofCompatibility, ExecutionProofCompatibilityError,
         ExecutionProofError, HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof,
     },
+    serde, utils,
 };
 pub use miden_core_lib::{conjectured_security_estimator_root, proven_security_estimator_root};
 pub use miden_precompiles::{
@@ -34,8 +36,8 @@ pub use miden_precompiles::{
 };
 pub use miden_processor::{
     BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionWitness,
-    FastProcessor, FutureMaybeSend, Host, ProgramExecutor, SyncHost, VmWitness, advice, crypto,
-    field, serde, trace, trace::VmTrace, utils,
+    FastProcessor, FutureMaybeSend, Host, ProgramExecutor, SyncHost, VmWitness, advice, trace,
+    trace::VmTrace,
 };
 pub use miden_prover::{PrecompileProvingError, Prover, ProverError, prove_sync};
 pub use miden_verifier::{

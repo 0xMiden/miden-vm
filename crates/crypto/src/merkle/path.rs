@@ -4,8 +4,12 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
-use super::{Eidos, InnerNodeInfo, MerkleError, NodeIndex, Word};
-use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
+use super::{InnerNodeInfo, MerkleError, NodeIndex};
+use crate::{
+    Word,
+    hash::eidos::Eidos,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 // MERKLE PATH
 // ================================================================================================
@@ -320,9 +324,7 @@ mod tests {
     /// These cases cover the length-prefix boundaries explicitly, including the maximum.
     #[test]
     fn serialization_roundtrip_boundary_lengths() {
-        use miden_serde_utils::Deserializable;
-
-        use crate::merkle::MerklePath;
+        use crate::{merkle::MerklePath, utils::Deserializable};
 
         for len in [65usize, 254, 255] {
             let path = MerklePath::new((0..len as u64).map(int_to_node).collect());

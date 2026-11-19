@@ -5,10 +5,13 @@ mod list;
 use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use core::fmt;
 
-use miden_debug_types::{SourceSpan, Span};
-
 pub use self::{expr::MetaExpr, kv::MetaKeyValue, list::MetaList};
-use crate::{Felt, ast::Ident, parser::WordValue};
+use crate::{
+    Felt,
+    ast::Ident,
+    debuginfo::{SourceSpan, Span},
+    parser::WordValue,
+};
 
 /// Represents the metadata provided as arguments to an attribute.
 #[derive(Clone, PartialEq, Eq)]

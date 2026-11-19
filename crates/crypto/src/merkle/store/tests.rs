@@ -3,17 +3,17 @@ use assert_matches::assert_matches;
 use seq_macro::seq;
 #[cfg(feature = "std")]
 use {
-    super::{Deserializable, DeserializationError, Serializable},
+    crate::utils::{Deserializable, DeserializationError, Serializable},
     alloc::boxed::Box,
     std::error::Error,
 };
 
 use super::{
-    Eidos, EmptySubtreeRoots, MerkleError, MerklePath, MerkleStore, NodeIndex, PartialMerkleTree,
-    Word,
+    EmptySubtreeRoots, MerkleError, MerklePath, MerkleStore, NodeIndex, PartialMerkleTree,
 };
 use crate::{
-    Felt, ONE, ZERO,
+    Felt, ONE, Word, ZERO,
+    hash::eidos::Eidos,
     merkle::{
         MerkleTree, int_to_leaf, int_to_node,
         smt::{LeafIndex, SMT_MAX_DEPTH, SimpleSmt},

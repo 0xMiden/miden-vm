@@ -10,7 +10,6 @@ use miden_assembly_syntax_cst::ast::{
     Item as CstItem, Namespace as CstNamespace, Procedure as CstProcedure,
     Submodule as CstSubmodule, TypeDecl as CstTypeDecl,
 };
-use miden_debug_types::{SourceSpan, Span, Spanned};
 
 use super::{
     blocks::lower_required_block,
@@ -20,7 +19,12 @@ use super::{
         lower_function_type_from_signature, lower_type_expr_from_alias_body,
     },
 };
-use crate::{Report, ast, parser::ParsingError};
+use crate::{
+    ast,
+    debuginfo::{SourceSpan, Span, Spanned},
+    diagnostics::Report,
+    parser::ParsingError,
+};
 
 /// Lowers the CST source file into the top-level `Form` sequence expected by the rest of the parser
 /// pipeline.

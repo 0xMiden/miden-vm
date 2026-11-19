@@ -12,8 +12,8 @@ use std::{
 };
 
 use miden_assembly_syntax::{
-    Report,
-    debuginfo::{DefaultSourceManager, SourceManager, Uri},
+    debuginfo::{DefaultSourceManager, SourceManager},
+    diagnostics::Report,
 };
 use miden_core::{
     serde::Deserializable,
@@ -21,11 +21,13 @@ use miden_core::{
 };
 use miden_mast_package::Package as MastPackage;
 use miden_package_registry::{
-    InMemoryPackageRegistry, PackageId, PackageRecord, PackageRegistry, PackageResolver, Version,
+    InMemoryPackageRegistry, PackageId, PackageRecord, PackageRegistry, PackageResolver,
 };
 
 use crate::{
-    Dependency, DependencyVersionScheme, GitRevision, Linkage, Package, SemVer, VersionRequirement,
+    Dependency, DependencyVersionScheme, GitRevision, Linkage, Package, Uri, Version,
+    VersionRequirement,
+    semver::{Version as SemVer, VersionReq},
 };
 
 /// The [ProjectDependencyGraph] represents a materialized dependency graph rooted at a specific
@@ -907,7 +909,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
     fn ensure_version_req_matches(
         &self,
         dependency_name: impl AsRef<str>,
-        requirement: &miden_package_registry::VersionReq,
+        requirement: &VersionReq,
         actual: &SemVer,
     ) -> Result<(), Report> {
         if requirement.matches(actual) {
@@ -1106,12 +1108,12 @@ mod tests {
         debuginfo::{DefaultSourceManager, Span},
     };
     use miden_core::{serde::Serializable, utils::hash_string_to_word};
-    use miden_mast_package::{Package as MastPackage, TargetType};
+    use miden_mast_package::Package as MastPackage;
     use miden_package_registry::{PackageIndex, PackageRecord, PackageRegistry, PackageVersions};
     use tempfile::TempDir;
 
     use super::*;
-    use crate::Target;
+    use crate::{Target, TargetType};
 
     /// A basic in-memory package registry
     #[derive(Default)]

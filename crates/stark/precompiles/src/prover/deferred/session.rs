@@ -164,11 +164,11 @@ pub(crate) fn session_from_witnesses(
 
 pub(crate) fn prove(
     witnesses: Vec<PrecompileWitness>,
-    hash_fn: crate::prover::HashFunction,
+    hash_fn: miden_core::proof::HashFunction,
     verification_limits: &PrecompileLimits,
     expected_roots: Option<&[Digest]>,
     max_prover_memory_bytes: u64,
-) -> Result<crate::prover::PrecompileProof, PrecompileProvingError> {
+) -> Result<miden_core::proof::PrecompileProof, PrecompileProvingError> {
     let imported = {
         let _span = tracing::info_span!("build_session").entered();
         import_witnesses_with_roots(
@@ -199,7 +199,7 @@ pub(crate) fn prove(
         let _span = tracing::info_span!("build_trace").entered();
         imported.session.finish(imported.root)
     };
-    Ok(crate::prover::PrecompileProof {
+    Ok(miden_core::proof::PrecompileProof {
         proof: traces.prove_stark(hash_fn)?,
         roots: imported.roots,
     })
@@ -208,15 +208,19 @@ pub(crate) fn prove(
 /// Phase boundaries for measuring the Eidos precompile prover.
 #[cfg(feature = "testing")]
 pub mod testing {
-    use miden_core::utils::Matrix;
+    use miden_core::{
+        deferred::{PrecompileLimits, PrecompileWitness},
+        field::QuadFelt,
+        proof::{HashFunction, PrecompileProof},
+        utils::Matrix,
+    };
 
     use super::{
-        ChipletMultiAir, Felt, PrecompileLimits, QuadFelt, WitnessSession,
-        import_witnesses_with_roots, memory, precompile_pcs_params,
+        ChipletMultiAir, Felt, WitnessSession, import_witnesses_with_roots, memory,
+        precompile_pcs_params,
     };
     use crate::prover::{
-        DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES, HashFunction, PrecompileProof,
-        PrecompileProvingError, PrecompileWitness, session::SessionTraces,
+        DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES, PrecompileProvingError, session::SessionTraces,
     };
 
     /// Checked and lowered precompile work, before main-trace allocation.

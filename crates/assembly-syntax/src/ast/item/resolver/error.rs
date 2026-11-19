@@ -3,10 +3,9 @@
 
 use alloc::sync::Arc;
 
-use miden_debug_types::{SourceFile, SourceManager, SourceSpan};
-
 use crate::{
     ast::ItemIndex,
+    debuginfo::{SourceFile, SourceManager, SourceSpan},
     diagnostics::{Diagnostic, RelatedLabel, miette},
 };
 

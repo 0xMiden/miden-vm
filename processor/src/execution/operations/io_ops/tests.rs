@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt, Word, ZERO,
-    advice::AdviceStack,
+    advice::{AdviceInputs, AdviceStack},
     program::{MIN_STACK_DEPTH, StackInputs},
 };
 
@@ -11,8 +11,8 @@ use super::{
     op_advpop, op_advpopw, op_mload, op_mloadw, op_mstore, op_mstorew, op_mstream, op_pipe,
 };
 use crate::{
-    AdviceInputs, ContextId,
-    fast::{FastProcessor, NoopTracer},
+    ContextId, FastProcessor,
+    fast::NoopTracer,
     processor::{Processor, StackInterface, SystemInterface},
 };
 

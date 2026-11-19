@@ -23,8 +23,12 @@
 use alloc::vec;
 
 use miden_air_definitions::vm::trace::RowIndex;
-use miden_core::{Felt, Word, operations::opcodes, program::StackOutputs};
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use miden_core::{
+    Felt, Word,
+    operations::opcodes,
+    program::{StackInputs, StackOutputs},
+};
+use miden_processor::{DefaultHost, FastProcessor};
 
 use crate::repro_harness::{ReproTrace, core_row_mut};
 

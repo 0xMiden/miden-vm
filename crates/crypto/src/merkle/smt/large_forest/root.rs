@@ -1,8 +1,5 @@
 //! This module contains utility types for working with roots and trees as part of the forest.
 
-use miden_serde_utils::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-};
 #[cfg(test)]
 use rand::{
     Rng, RngExt,
@@ -12,6 +9,7 @@ use rand::{
 use crate::{
     Word,
     merkle::smt::{LeafIndex, SMT_DEPTH},
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // TYPES

@@ -1,7 +1,7 @@
 use alloc::{vec, vec::Vec};
 
 use miden_air_definitions::vm::trace::{
-    CHIPLETS_WIDTH,
+    CHIPLETS_WIDTH, RowIndex,
     and8_lookup::{BYTE_LOOKUP_COUNT_LEN, BytePairRelation, byte_pair_count_index},
     chiplets::{
         KERNEL_ROM_TRACE_WIDTH, NUM_BITWISE_SELECTORS,
@@ -12,13 +12,11 @@ use miden_air_definitions::vm::trace::{
     },
     eidos_compression::NUM_EIDOS_COMPRESSION_COLS,
 };
-use miden_core::{field::PrimeCharacteristicRing, mast::OpBatch};
+use miden_core::{Felt, ONE, ZERO, field::PrimeCharacteristicRing};
 
 use crate::{
-    Felt, ONE, Word, ZERO,
-    crypto::merkle::MerklePath,
     operation::OperationError,
-    trace::{ChipletTraceFragment, RowIndex, range::RangeChecker},
+    trace::{ChipletTraceFragment, range::RangeChecker},
 };
 
 mod aead_stream;

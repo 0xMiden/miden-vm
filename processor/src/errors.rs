@@ -4,7 +4,13 @@
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_air_definitions::vm::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
-use miden_core::{deferred::PrecompileError, program::MIN_STACK_DEPTH};
+use miden_core::{
+    Felt, Word,
+    deferred::PrecompileError,
+    events::{EventId, EventName},
+    program::MIN_STACK_DEPTH,
+    utils::to_hex,
+};
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_mast_package::{
     PackageDebugInfoError,
@@ -12,13 +18,7 @@ use miden_mast_package::{
 };
 use miden_utils_diagnostics::{Diagnostic, miette};
 
-use crate::{
-    BaseHost, ContextId, Felt, Word,
-    advice::AdviceError,
-    event::{EventError, EventId, EventName},
-    fast::SystemEventError,
-    utils::to_hex,
-};
+use crate::{BaseHost, ContextId, advice::AdviceError, event::EventError, fast::SystemEventError};
 
 // EXECUTION ERROR
 // ================================================================================================

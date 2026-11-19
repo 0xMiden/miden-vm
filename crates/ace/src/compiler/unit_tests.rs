@@ -1,7 +1,9 @@
 //! Unit tests for internal DAG + circuit helpers.
 
-use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::field::{Field, PrimeCharacteristicRing};
+use miden_core::{
+    Felt,
+    field::{Field, PrimeCharacteristicRing, QuadFelt},
+};
 use proptest::prelude::*;
 
 use crate::{

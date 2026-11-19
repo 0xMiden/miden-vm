@@ -1,15 +1,14 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
-use miden_core::Felt;
+#[cfg(test)]
+use miden_core::mast::MastForest;
+use miden_core::{Felt, Word};
 use miden_debug_types::{
     DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
 };
 
-#[cfg(test)]
-use crate::mast::MastForest;
 use crate::{
     BaseHost, LoadedMastForest, MastForestStore, MemMastForestStore, ProcessorState, SyncHost,
-    Word,
     advice::AdviceMutation,
     event::{EventError, TraceError},
 };
@@ -212,9 +211,13 @@ mod tests {
     use alloc::vec::Vec;
 
     use miden_assembly::Assembler;
+    use miden_core::{
+        advice::AdviceInputs,
+        program::{Program, StackInputs},
+    };
 
     use super::TestHost;
-    use crate::{AdviceInputs, ExecutionOptions, FastProcessor, Program, StackInputs};
+    use crate::{ExecutionOptions, FastProcessor};
 
     #[test]
     fn test_host_records_trace_and_snapshot() {

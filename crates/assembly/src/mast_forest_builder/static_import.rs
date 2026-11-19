@@ -5,26 +5,24 @@ use alloc::{
 };
 use core::fmt::Debug;
 
-use miden_core::{
-    Word,
-    mast::{
-        BasicBlockNode, ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId,
-        SubtreeIterator,
-    },
-};
-use miden_mast_package::debug_info::{
-    DebugFunctionIdx, DebugInfoTableRemapping, DebugSourceAsmOp, DebugSourceInlineCall,
-    DebugSourceNodeId, DebugSourceVar, FunctionInfo, PackageDebugInfo,
-};
+use miden_core::Word;
 
 use super::{
     MastForestBuilder, MastNodeRef, MastNodeUse, PendingMastNodeDraft, PendingMastNodeKind,
     SourceNodeRef, remap_inline_ranges,
 };
 use crate::{
-    GlobalItemIndex,
+    ast::GlobalItemIndex,
     diagnostics::{IntoDiagnostic, Report},
     linker::LinkLibrary,
+    mast::{
+        BasicBlockNode, ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId,
+        SubtreeIterator,
+    },
+    package::debug_info::{
+        DebugFunctionIdx, DebugInfoTableRemapping, DebugSourceAsmOp, DebugSourceInlineCall,
+        DebugSourceNodeId, DebugSourceVar, FunctionInfo, PackageDebugInfo,
+    },
 };
 
 #[derive(Clone, Copy)]
@@ -377,7 +375,7 @@ impl MastForestBuilder {
         gid: GlobalItemIndex,
         library_id: Word,
         library: &LinkLibrary,
-        path: &miden_assembly_syntax::Path,
+        path: &crate::Path,
         source_node: Option<DebugSourceNodeId>,
         mast_root: Word,
     ) -> Result<Option<DebugFunctionIdx>, Report> {

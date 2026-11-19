@@ -22,10 +22,10 @@ impl CryptographicPermutation<[PackedFelt; STATE_WIDTH]> for Poseidon2Permutatio
 
 #[cfg(test)]
 mod tests {
-    use miden_field::{PackedValue, PrimeCharacteristicRing};
+    use miden_field::PackedValue;
 
     use super::*;
-    use crate::Felt;
+    use crate::{Felt, field::PrimeCharacteristicRing};
 
     const LANES: usize = PackedFelt::WIDTH;
 

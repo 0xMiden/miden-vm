@@ -9,7 +9,6 @@ use miden_assembly_syntax_cst::{
     ast::{AstNode, Instruction as CstInstruction},
     rowan,
 };
-use miden_debug_types::{SourceSpan, Span};
 
 use super::{
     context::LoweringContext,
@@ -18,6 +17,7 @@ use super::{
 use crate::{
     Felt, Word,
     ast::{self, Immediate, Instruction, SystemEventNode},
+    debuginfo::{SourceSpan, Span},
     parser::{LiteralErrorKind, ParsingError, PushValue},
 };
 

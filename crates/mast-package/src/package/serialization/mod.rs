@@ -45,7 +45,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax::ast::{self, AttributeSet, PathBuf};
+use miden_assembly_syntax::ast::{self, AttributeSet};
 use miden_core::{
     Word,
     mast::{MastForest, MastNodeExt, MastNodeId, UntrustedMastForest},
@@ -60,7 +60,7 @@ use super::{
     TypeExport,
 };
 use crate::{
-    Dependency, ManifestValidationError, Package, PackageExport, PackageManifest, Section,
+    Dependency, ManifestValidationError, Package, PackageExport, PackageManifest, PathBuf, Section,
     debug_info::DebugSourceNodeId,
 };
 

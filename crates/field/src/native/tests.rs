@@ -11,7 +11,8 @@ use p3_field::{
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use rand::{SeedableRng, distr::Distribution, rngs::SmallRng};
 
-use super::{Felt, Goldilocks, arb_felt_canonical, arb_felt_noncanonical};
+use super::{Goldilocks, arb_felt_canonical, arb_felt_noncanonical};
+use crate::Felt;
 
 /// A minimal hasher used to validate that `Felt` hashes identically to `Goldilocks`.
 #[derive(Default)]

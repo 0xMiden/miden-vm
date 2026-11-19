@@ -1,11 +1,13 @@
 use alloc::collections::BTreeSet;
 
 use super::{
-    EMPTY_WORD, EmptySubtreeRoots, InnerNode, InnerNodeInfo, InnerNodes, LeafIndex, MerkleError,
-    MutationSet, NodeIndex, SMT_MAX_DEPTH, SMT_MIN_DEPTH, SparseMerkleTree, SparseMerkleTreeReader,
-    Word,
+    EmptySubtreeRoots, InnerNode, InnerNodeInfo, InnerNodes, LeafIndex, MerkleError, MutationSet,
+    NodeIndex, SMT_MAX_DEPTH, SMT_MIN_DEPTH, SparseMerkleTree, SparseMerkleTreeReader,
 };
-use crate::merkle::{SparseMerklePath, smt::SmtLeafError};
+use crate::{
+    EMPTY_WORD, Word,
+    merkle::{SparseMerklePath, smt::SmtLeafError},
+};
 
 mod proof;
 pub use proof::SimpleSmtProof;

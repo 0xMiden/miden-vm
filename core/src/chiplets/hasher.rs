@@ -2,12 +2,10 @@
 
 use core::ops::Range;
 
-use miden_crypto::{
-    Word as Digest,
-    hash::eidos::{Eidos, EidosDomain, FeltSequence},
-};
+use miden_crypto::hash::eidos::{EidosDomain, FeltSequence};
 
-use super::{Felt, eidos_compression};
+use super::eidos_compression;
+use crate::{Felt, Word as Digest, crypto::hash::Eidos};
 
 /// Number of Felts in the hasher state window.
 pub const STATE_WIDTH: usize = eidos_compression::STATE_WIDTH;

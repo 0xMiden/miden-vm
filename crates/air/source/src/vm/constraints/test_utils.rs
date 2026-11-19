@@ -3,9 +3,9 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
+    utils::RowMajorMatrix,
 };
 use miden_stark::air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
-use p3_matrix::dense::RowMajorMatrix;
 
 use crate::vm::trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH};
 

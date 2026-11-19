@@ -3,20 +3,21 @@
 
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_field::{Felt, Word};
-use miden_serde_utils::{Deserializable, DeserializationError, Serializable};
-
-use crate::merkle::{
-    EmptySubtreeRoots, NodeIndex, SparseMerklePath,
-    smt::{LeafIndex, PartialSmt, SMT_DEPTH, Smt, SmtLeaf, SmtProof, SmtWitness, UniqueNodes},
-    store::MerkleStore,
+use crate::{
+    Felt, Word,
+    merkle::{
+        EmptySubtreeRoots, NodeIndex, SparseMerklePath,
+        smt::{LeafIndex, PartialSmt, SMT_DEPTH, Smt, SmtLeaf, SmtProof, SmtWitness, UniqueNodes},
+        store::MerkleStore,
+    },
+    utils::{Deserializable, DeserializationError, Serializable},
 };
 
 /// Hand-writes a UniqueNodes payload: root, then `levels` as (depth, [(position, value)])
 /// with an explicit depth per level and per-node values, then an empty leaf section and
 /// an empty value-only section.
 fn write_nodes_payload(levels: &[(u8, &[(u64, Word)])], target: &mut Vec<u8>) {
-    use miden_serde_utils::ByteWriter;
+    use crate::utils::ByteWriter;
 
     Word::default().write_into(target); // expected root
     target.write_u64(levels.len() as u64);
@@ -67,7 +68,7 @@ fn levels_in_descending_order_are_rejected() {
 /// A position must identify either a leaf or its hash alone.
 #[test]
 fn position_in_leaves_and_value_only_leaves_is_rejected() {
-    use miden_serde_utils::ByteWriter;
+    use crate::utils::ByteWriter;
 
     let key = Word::new([Felt::new_unchecked(0x6700_0000_0000_0009); 4]);
     let leaf_value = Word::new([Felt::new_unchecked(0x6700_0000_0000_000a); 4]);
@@ -154,7 +155,7 @@ fn unique_nodes_roundtrips() {
 #[test]
 fn unique_nodes_rejects_mismatched_leaf_position() {
     let leaf = SmtLeaf::new_empty(LeafIndex::new_max_depth(7));
-    use miden_serde_utils::ByteWriter;
+    use crate::utils::ByteWriter;
 
     let mut bytes = Vec::new();
     UniqueNodes::empty().root.write_into(&mut bytes);
@@ -260,7 +261,7 @@ fn witness_payload(
     leaves: &[SmtLeaf],
     hashes: &[(u64, Word)],
 ) -> Vec<u8> {
-    use miden_serde_utils::ByteWriter;
+    use crate::utils::ByteWriter;
 
     let mut bytes = Vec::from(*b"SMTWITNS");
     bytes.write_u8(1);
@@ -304,7 +305,7 @@ fn smt_witness_writes_leaf_positions_once_and_bounds_shared_reconstruction() {
 
 #[test]
 fn smt_witness_rejects_invalid_wire_data_and_corrupt_roots() {
-    use miden_serde_utils::ByteWriter;
+    use crate::utils::ByteWriter;
 
     let root = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
     let leaf = SmtLeaf::new_empty(LeafIndex::new_max_depth(7));

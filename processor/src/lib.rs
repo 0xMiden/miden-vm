@@ -27,6 +27,7 @@ mod host;
 mod processor;
 mod tracer;
 
+use miden_air_definitions::vm::trace::RowIndex;
 use miden_core::{
     deferred::{Digest, Node, PrecompileError},
     mast::ExecutableMastForest,
@@ -34,11 +35,10 @@ use miden_core::{
 };
 
 use crate::{
-    advice::{AdviceInputs, AdviceProvider},
+    advice::AdviceProvider,
     continuation_stack::ContinuationStack,
     errors::MapExecErr,
     processor::{Processor, SystemInterface},
-    trace::RowIndex,
 };
 
 #[cfg(any(test, feature = "testing"))]
@@ -72,14 +72,16 @@ pub use host::{
     default::{DefaultHost, HostLibrary},
 };
 pub use miden_core::{
-    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast,
+    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto,
+    deferred::PrecompileWitness,
+    field, mast,
     program::{
         ExecutionClaim, InputError, KernelDescriptor, MIN_STACK_DEPTH, Program, ProgramInfo,
         StackInputs, StackOutputs,
     },
     serde, utils,
 };
-pub use trace::{ExecutionWitness, PrecompileWitness, VmWitness};
+pub use trace::{ExecutionWitness, VmWitness};
 
 pub mod advice {
     pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStack};

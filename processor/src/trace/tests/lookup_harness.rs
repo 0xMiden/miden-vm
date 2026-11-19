@@ -17,16 +17,14 @@
 use alloc::vec::Vec;
 
 use miden_air_definitions::vm::{
-    MidenAir,
+    MidenAir, VmTrace,
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
 };
-use miden_core::{field::QuadFelt, utils::RowMajorMatrix};
+use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 use miden_stark::{
     air::BaseAir,
     lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions},
 };
-
-use super::{Felt, VmTrace};
 
 // INTERACTION LOG
 // ================================================================================================

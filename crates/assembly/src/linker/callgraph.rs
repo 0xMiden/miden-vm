@@ -3,7 +3,7 @@ use alloc::{
     vec::Vec,
 };
 
-use crate::GlobalItemIndex;
+use crate::ast::GlobalItemIndex;
 
 /// Represents the inability to construct a topological ordering of the nodes in a [CallGraph]
 /// due to a cycle in the graph, which can happen due to recursion.
@@ -284,7 +284,7 @@ impl CallGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{GlobalItemIndex, ModuleIndex, ast::ItemIndex};
+    use crate::ast::{GlobalItemIndex, ItemIndex, ModuleIndex};
 
     const A: ModuleIndex = ModuleIndex::const_new(1);
     const B: ModuleIndex = ModuleIndex::const_new(2);

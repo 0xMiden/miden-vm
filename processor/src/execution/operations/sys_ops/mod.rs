@@ -1,5 +1,7 @@
+use miden_core::{Felt, ONE};
+
 use crate::{
-    ExecutionError, Felt, ONE,
+    ExecutionError,
     errors::OperationError,
     processor::{Processor, StackInterface, SystemInterface},
     tracer::OperationHelperRegisters,

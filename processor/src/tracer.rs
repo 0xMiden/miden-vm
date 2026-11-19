@@ -9,8 +9,8 @@ use miden_core::{
 };
 
 use crate::{
-    AceError, ContextId, ExecutionError,
-    continuation_stack::{Continuation, ContinuationStack},
+    AceError, ContextId, Continuation, ExecutionError,
+    continuation_stack::ContinuationStack,
     trace::{chiplets::CircuitEvaluation, utils::split_u32_into_u16},
 };
 

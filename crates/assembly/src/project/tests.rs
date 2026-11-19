@@ -1,24 +1,26 @@
 use std::{path::Path, process::Command, string::String, sync::Arc};
 
-use miden_assembly_syntax::{ast::DebugVarLocation, source_file};
-use miden_core::{
-    mast::{BasicBlockNodeBuilder, MastForest, MastNodeExt, MastNodeId},
-    operations::Operation,
-    serde::{Deserializable, Serializable, SliceReader},
-    utils::{Idx, hash_string_to_word},
-};
-use miden_mast_package::{
-    PackageExport, PackageModule, ProcedureExport, Section, SectionId,
-    debug_info::{
-        DEBUG_INFO_VERSION, DebugSourceAsmOp, DebugSourceNode, DebugSourceNodeId, DebugSourceVar,
-        PackageDebugInfo, PackageDebugInfoBuilder,
-    },
-};
+use miden_assembly_syntax::source_file;
+use miden_core::operations::Operation;
 use miden_package_registry::PackageRegistry;
 use tempfile::TempDir;
 
 use super::*;
-use crate::testing::{TestContext, TestRegistry};
+use crate::{
+    ast::DebugVarLocation,
+    diagnostics::Report,
+    mast::{BasicBlockNodeBuilder, MastForest, MastNodeExt, MastNodeId},
+    package::{
+        PackageExport, PackageModule, ProcedureExport, Section, SectionId,
+        debug_info::{
+            DEBUG_INFO_VERSION, DebugSourceAsmOp, DebugSourceNode, DebugSourceNodeId,
+            DebugSourceVar, PackageDebugInfo, PackageDebugInfoBuilder,
+        },
+    },
+    serde::{Deserializable, Serializable, SliceReader},
+    testing::{TestContext, TestRegistry},
+    utils::{Idx, hash_string_to_word},
+};
 
 #[test]
 fn builds_library_package_from_project_profiles() {
@@ -364,8 +366,7 @@ fn debug_bearing_static_package(
 
     let mut exports = Vec::new();
     let mut module_paths = Vec::new();
-    let export_path =
-        miden_assembly_syntax::ast::PathBuf::new(export).expect("test export path should parse");
+    let export_path = crate::PathBuf::new(export).expect("test export path should parse");
     let export_path = export_path.as_path().to_absolute().unwrap().into_owned();
     let export_path = Arc::from(export_path.into_boxed_path());
     push_export_module_path(&mut module_paths, &export_path);
@@ -375,8 +376,8 @@ fn debug_bearing_static_package(
             .expect("test package marker block should build");
         forest.make_root(marker_root);
         let marker_digest = forest[marker_root].digest();
-        let marker_path = miden_assembly_syntax::ast::PathBuf::new(marker_export)
-            .expect("test marker export path should parse");
+        let marker_path =
+            crate::PathBuf::new(marker_export).expect("test marker export path should parse");
         let marker_path = marker_path.as_path().to_absolute().unwrap().into_owned();
         let marker_path = Arc::from(marker_path.into_boxed_path());
         push_export_module_path(&mut module_paths, &marker_path);
@@ -433,12 +434,11 @@ fn debug_bearing_static_package(
 }
 
 fn push_export_module_path(
-    module_paths: &mut Vec<Arc<miden_assembly_syntax::ast::Path>>,
-    export_path: &Arc<miden_assembly_syntax::ast::Path>,
+    module_paths: &mut Vec<Arc<crate::Path>>,
+    export_path: &Arc<crate::Path>,
 ) {
     let module_path = export_path.parent().expect("export path should have a module path");
-    let module_path: Arc<miden_assembly_syntax::ast::Path> =
-        Arc::from(module_path.to_path_buf().into_boxed_path());
+    let module_path: Arc<crate::Path> = Arc::from(module_path.to_path_buf().into_boxed_path());
     if !module_paths.iter().any(|path| path.as_ref() == module_path.as_ref()) {
         module_paths.push(module_path);
     }
@@ -3006,7 +3006,7 @@ fn preassembled_dependency_must_match_graph_selected_runtime_dependencies() {
         TargetType::Library,
         runtime_v1.mast_forest().clone(),
         runtime_v1.manifest.exports().cloned(),
-        [miden_mast_package::Dependency {
+        [crate::package::Dependency {
             name: PackageId::from("runtime"),
             version: runtime_v1.version.clone(),
             kind: TargetType::Library,
@@ -3048,7 +3048,7 @@ end
         TargetType::Library,
         runtime_v1.mast_forest().clone(),
         runtime_v1.manifest.exports().cloned(),
-        [miden_mast_package::Dependency {
+        [crate::package::Dependency {
             name: PackageId::from("runtime"),
             version: runtime_v2.version.clone(),
             kind: TargetType::Library,
@@ -3080,7 +3080,7 @@ fn preassembled_dependency_must_match_graph_selected_dependency_kinds() {
         TargetType::Library,
         runtime.mast_forest().clone(),
         runtime.manifest.exports().cloned(),
-        [miden_mast_package::Dependency {
+        [crate::package::Dependency {
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Library,
@@ -3122,7 +3122,7 @@ end
         TargetType::Library,
         runtime.mast_forest().clone(),
         runtime.manifest.exports().cloned(),
-        [miden_mast_package::Dependency {
+        [crate::package::Dependency {
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Kernel,
@@ -3154,7 +3154,7 @@ fn preassembled_package_must_match_graph_selected_target_kind() {
         TargetType::Library,
         runtime.mast_forest().clone(),
         runtime.manifest.exports().cloned(),
-        [miden_mast_package::Dependency {
+        [crate::package::Dependency {
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Library,
@@ -3196,7 +3196,7 @@ end
         TargetType::Kernel,
         runtime.mast_forest().clone(),
         runtime.manifest.exports().cloned(),
-        [miden_mast_package::Dependency {
+        [crate::package::Dependency {
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Library,

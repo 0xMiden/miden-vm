@@ -9,12 +9,12 @@ use miden_air_definitions::vm::trace::{
     },
 };
 use miden_core::{
-    ONE, WORD_SIZE, Word, ZERO,
+    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
     field::{Field, PrimeCharacteristicRing},
 };
 
 use super::{
-    EMPTY_WORD, Felt, Memory,
+    Memory,
     segment::{MemoryAccessType, MemoryOperation},
 };
 use crate::{

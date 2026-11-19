@@ -1,12 +1,9 @@
 use alloc::{string::ToString, sync::Arc, vec, vec::Vec};
 use std::{fs, path::Path, println};
 
-use miden_assembly_syntax::{
-    ast::{
-        DebugVarLocation, Path as AstPath, PathBuf,
-        types::{ArrayType, CallConv, EnumType, FunctionType, StructType, Type, TypeRepr, Variant},
-    },
-    semver::Version,
+use miden_assembly_syntax::ast::{
+    DebugVarLocation, Path as AstPath,
+    types::{ArrayType, CallConv, EnumType, FunctionType, StructType, Type, TypeRepr, Variant},
 };
 use miden_core::{
     mast::{BasicBlockNodeBuilder, DenseMastForestBuilder, MastForest, MastNodeExt, MastNodeId},
@@ -18,7 +15,7 @@ use zerocopy::IntoBytes;
 
 use super::{PackageId, TargetType};
 use crate::{
-    Package, PackageExport, ProcedureExport, Section, SectionId,
+    Package, PackageExport, PathBuf, ProcedureExport, Section, SectionId, Version,
     debug_info::{
         DebugSourceAsmOp, DebugSourceNode, DebugSourceVar, DebugTypeInfo,
         MAX_DEBUG_INFO_STRING_ROWS, MAX_DEBUG_INFO_STRING_SIZE, MAX_DEBUG_INFO_TYPE_ROWS,

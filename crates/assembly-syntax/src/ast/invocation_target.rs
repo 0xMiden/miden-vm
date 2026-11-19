@@ -1,9 +1,11 @@
 use alloc::sync::Arc;
 use core::fmt;
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
-
-use crate::{Path, Word, ast::Ident};
+use crate::{
+    Path, Word,
+    ast::Ident,
+    debuginfo::{SourceSpan, Span, Spanned},
+};
 
 // INVOKE
 // ================================================================================================
@@ -105,9 +107,7 @@ impl Spanned for InvocationTarget {
 
 impl crate::prettier::PrettyPrint for InvocationTarget {
     fn render(&self) -> crate::prettier::Document {
-        use miden_core::utils::DisplayHex;
-
-        use crate::prettier::*;
+        use crate::{DisplayHex, prettier::*};
 
         match self {
             Self::MastRoot(digest) => display(DisplayHex(digest.as_bytes().as_slice())),

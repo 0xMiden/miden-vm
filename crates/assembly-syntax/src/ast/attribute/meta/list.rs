@@ -3,10 +3,12 @@ use alloc::vec::Vec;
 use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
-use miden_debug_types::{SourceSpan, Spanned};
 
 use super::MetaExpr;
-use crate::ast::Ident;
+use crate::{
+    ast::Ident,
+    debuginfo::{SourceSpan, Spanned},
+};
 
 /// Represents the metadata of a named list [crate::ast::Attribute], i.e. `@name(item0, .., itemN)`
 #[derive(Debug, Clone)]

@@ -15,7 +15,7 @@ use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
 mod errors;
 pub use errors::AdviceError;
 
-use crate::{ExecutionOptions, host::AdviceMutation, processor::AdviceProviderInterface};
+use crate::{ExecutionOptions, advice::AdviceMutation, processor::AdviceProviderInterface};
 
 // CONSTANTS
 // ================================================================================================
@@ -776,13 +776,15 @@ impl AdviceProviderInterface for AdviceProvider {
 mod tests {
     use alloc::{collections::BTreeMap, vec, vec::Vec};
 
-    use miden_core::WORD_SIZE;
-
-    use super::AdviceProvider;
-    use crate::{
-        AdviceInputs, ExecutionOptions, Felt, Word,
-        advice::{AdviceError, AdviceMap, AdviceMutation, AdviceStack},
+    use miden_core::{
+        Felt, WORD_SIZE, Word,
+        advice::{AdviceInputs, AdviceMap, AdviceStack},
         crypto::merkle::{MerkleStore, MerkleTree},
+    };
+
+    use crate::{
+        ExecutionOptions,
+        advice::{AdviceError, AdviceMutation, AdviceProvider},
     };
 
     fn make_leaf(seed: u64) -> Word {

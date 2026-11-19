@@ -16,15 +16,15 @@ use miden_assembly_syntax_cst::{
     rowan,
 };
 use miden_core::{Felt, field::PrimeField64};
-use miden_debug_types::{SourceSpan, Span, Spanned};
 
 use super::{super::MAX_CONSTANT_EXPR_NESTING, context::LoweringContext};
 use crate::{
-    Path,
+    Path, PathBuf,
     ast::{
-        self, MAX_TYPE_EXPR_NESTING, PathBuf,
+        self, MAX_TYPE_EXPR_NESTING,
         types::{AddressSpace, Type, TypeRepr},
     },
+    debuginfo::{SourceSpan, Span, Spanned},
     parser::{BinErrorKind, HexErrorKind, IntValue, LiteralErrorKind, ParsingError, WordValue},
 };
 
@@ -1532,7 +1532,6 @@ mod tests {
         ast::{AstNode, Item as CstItem, SourceFile as CstSourceFile},
         parse_source_file,
     };
-    use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
     use pretty_assertions::assert_eq;
 
     use super::{
@@ -1541,6 +1540,7 @@ mod tests {
     };
     use crate::{
         Word, ast,
+        debuginfo::{SourceFile, SourceId, SourceLanguage, Uri},
         parser::{ParsingError, cst::context::LoweringContext},
     };
 
@@ -1576,22 +1576,20 @@ end
             ast::FunctionType::new(
                 ast::types::CallConv::Fast,
                 vec![
-                    ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(
+                    ast::TypeExpr::Primitive(crate::debuginfo::Span::unknown(
                         ast::types::Type::Felt
                     )),
                     ast::TypeExpr::Ptr(
                         ast::PointerType::new(ast::TypeExpr::Primitive(
-                            miden_debug_types::Span::unknown(ast::types::Type::U8),
+                            crate::debuginfo::Span::unknown(ast::types::Type::U8),
                         ))
                         .with_address_space(ast::types::AddressSpace::Byte),
                     ),
                 ],
                 vec![
-                    ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(
-                        ast::types::Type::I1
-                    )),
+                    ast::TypeExpr::Primitive(crate::debuginfo::Span::unknown(ast::types::Type::I1)),
                     ast::TypeExpr::Array(ast::ArrayType::new(
-                        ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(
+                        ast::TypeExpr::Primitive(crate::debuginfo::Span::unknown(
                             ast::types::Type::U32
                         )),
                         4,
@@ -1623,11 +1621,11 @@ end
     }
 
     fn variadic() -> ast::TypeExpr {
-        ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(ast::types::Type::Variadic))
+        ast::TypeExpr::Primitive(crate::debuginfo::Span::unknown(ast::types::Type::Variadic))
     }
 
     fn felt() -> ast::TypeExpr {
-        ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(ast::types::Type::Felt))
+        ast::TypeExpr::Primitive(crate::debuginfo::Span::unknown(ast::types::Type::Felt))
     }
 
     #[test]
@@ -1731,18 +1729,18 @@ end
                 None,
                 [
                     ast::StructField {
-                        span: miden_debug_types::SourceSpan::UNKNOWN,
+                        span: crate::debuginfo::SourceSpan::UNKNOWN,
                         name: ast::Ident::new("x").unwrap(),
-                        ty: ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(
+                        ty: ast::TypeExpr::Primitive(crate::debuginfo::Span::unknown(
                             ast::types::Type::U32,
                         )),
                     },
                     ast::StructField {
-                        span: miden_debug_types::SourceSpan::UNKNOWN,
+                        span: crate::debuginfo::SourceSpan::UNKNOWN,
                         name: ast::Ident::new("y").unwrap(),
                         ty: ast::TypeExpr::Ptr(
                             ast::PointerType::new(ast::TypeExpr::Primitive(
-                                miden_debug_types::Span::unknown(ast::types::Type::U8),
+                                crate::debuginfo::Span::unknown(ast::types::Type::U8),
                             ))
                             .with_address_space(ast::types::AddressSpace::Byte),
                         ),
@@ -1854,9 +1852,8 @@ end
     #[test]
     fn mast_root_literal_matches_word_to_hex_byte_order() {
         use miden_core::Felt;
-        use miden_debug_types::SourceSpan;
 
-        use crate::parser::WordValue;
+        use crate::{debuginfo::SourceSpan, parser::WordValue};
 
         // Non-symmetric field elements (issue #3885): every byte position is distinct, so any
         // byte-order/transposition bug in the hex <-> Word conversion flips the resulting root.

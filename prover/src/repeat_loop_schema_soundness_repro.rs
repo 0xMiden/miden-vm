@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use miden_air::vm::MidenAir;
 use miden_air_definitions::vm::{
-    ChipletActiveFlags, ChipletCols, ControllerCols,
+    ChipletActiveFlags, ChipletCols, ControllerCols, VmTrace,
     logup::{BlockHashMsg, BusId, MIDEN_MAX_MESSAGE_WIDTH},
     trace::{
         MIN_TRACE_LEN, RowIndex,
@@ -19,12 +19,11 @@ use miden_core::{
     field::QuadFelt,
     mast::{BasicBlockNodeBuilder, LoopNodeBuilder, MastForest},
     operations::{Operation, opcodes},
-    program::{Program, StackOutputs},
+    program::{Program, StackInputs, StackOutputs},
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_processor::{
-    DefaultHost, FastProcessor, StackInputs,
-    trace::{VmTrace, chiplets::build_external_eidos_compression_traces},
+    DefaultHost, FastProcessor, trace::chiplets::build_external_eidos_compression_traces,
 };
 use miden_stark::{
     air::BaseAir,

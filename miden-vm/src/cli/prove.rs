@@ -6,9 +6,14 @@ use std::{
 
 use clap::Parser;
 use miden_assembly::diagnostics::{Report, WrapErr};
+use miden_core::{
+    deferred::PrecompileLimits,
+    proof::{HashFunction, PrecompileStatus},
+};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor};
-use miden_vm::{HashFunction, PrecompileLimits, PrecompileStatus, Prover, internal::InputFile};
+use miden_prover::Prover;
+use miden_vm::internal::InputFile;
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},
@@ -345,7 +350,8 @@ mod tests {
     use std::{fs, sync::Arc};
 
     use miden_core::deferred::{DeferredState, Node, PrecompileRegistry, TRUE_DIGEST};
-    use miden_vm::{ProverError, default_verification_precompile_limits};
+    use miden_precompiles::default_verification_precompile_limits;
+    use miden_prover::ProverError;
 
     use super::*;
 

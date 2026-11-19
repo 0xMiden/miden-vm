@@ -11,7 +11,7 @@ use miden_air_definitions::vm::{
     ControllerCols, CoreCols,
     logup::{HasherMsg, RangeMsg},
     trace::{
-        MainTrace,
+        MainTrace, RowIndex,
         and8_lookup::{NUM_AND8_LOOKUP_COLS, RANGE_CHECK_LOOKUP_COL},
         chiplets::hasher::{
             CONTROLLER_ROWS_PER_HASHER_OP_FELT, MAX_MERKLE_DEPTH, MERKLE_DEPTH_RANGE_SCALE,
@@ -20,6 +20,7 @@ use miden_air_definitions::vm::{
 };
 use miden_core::{
     Felt, Word, ZERO,
+    advice::AdviceInputs,
     crypto::{
         hash::Eidos,
         merkle::{MerklePath, MerkleStore, SimpleSmt},
@@ -34,7 +35,6 @@ use super::{
     build_trace_from_ops, build_trace_from_ops_with_inputs,
     lookup_harness::{Expectations, InteractionLog},
 };
-use crate::{AdviceInputs, RowIndex};
 
 const CONTROLLER_WIDTH: usize = size_of::<ControllerCols<u8>>();
 // The Eidos controller overlay follows the top-level chiplet selector.
@@ -379,7 +379,11 @@ fn find_op_row(main: &MainTrace, opcode: u8) -> RowIndex {
     panic!("no row with opcode 0x{opcode:02x} in trace");
 }
 
-fn assert_merkle_depth_range_checks(trace: &super::VmTrace, opcode: u8, expected_depth: u16) {
+fn assert_merkle_depth_range_checks(
+    trace: &miden_air_definitions::vm::VmTrace,
+    opcode: u8,
+    expected_depth: u16,
+) {
     let log = InteractionLog::new(trace);
     let main = trace.main_trace();
     let op_row = find_op_row(main, opcode);
@@ -402,7 +406,7 @@ fn assert_merkle_depth_range_checks(trace: &super::VmTrace, opcode: u8, expected
     }
 }
 
-fn assert_merkle_index_range_checks(trace: &super::VmTrace, opcode: u8) {
+fn assert_merkle_index_range_checks(trace: &miden_air_definitions::vm::VmTrace, opcode: u8) {
     let log = InteractionLog::new(trace);
     let main = trace.main_trace();
     let op_row = find_op_row(main, opcode);
@@ -494,7 +498,7 @@ fn reconstruct_u64_limbs(limbs: [Felt; 4]) -> Felt {
         + limbs[3] * Felt::from_u64(1_u64 << 48)
 }
 
-fn build_equal_sibling_mpverify_trace(index: u64) -> super::VmTrace {
+fn build_equal_sibling_mpverify_trace(index: u64) -> miden_air_definitions::vm::VmTrace {
     const DEPTH: usize = MAX_MERKLE_DEPTH as usize;
 
     let value = test_word(7);
@@ -522,7 +526,7 @@ fn build_equal_sibling_mpverify_trace(index: u64) -> super::VmTrace {
     )
 }
 
-fn build_mpverify_trace<const DEPTH: u8>(index: u64) -> super::VmTrace {
+fn build_mpverify_trace<const DEPTH: u8>(index: u64) -> miden_air_definitions::vm::VmTrace {
     let value = test_word(7);
     let tree = SimpleSmt::<DEPTH>::with_leaves([(index, value)]).unwrap();
 
@@ -539,7 +543,7 @@ fn build_mpverify_trace<const DEPTH: u8>(index: u64) -> super::VmTrace {
     )
 }
 
-fn build_mrupdate_trace<const DEPTH: u8>(index: u64) -> super::VmTrace {
+fn build_mrupdate_trace<const DEPTH: u8>(index: u64) -> miden_air_definitions::vm::VmTrace {
     let old_value = test_word(7);
     let new_value = test_word(11);
     let tree = SimpleSmt::<DEPTH>::with_leaves([(index, old_value)]).unwrap();

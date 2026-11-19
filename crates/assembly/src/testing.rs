@@ -2,32 +2,33 @@
 use alloc::vec::Vec;
 use alloc::{boxed::Box, sync::Arc};
 
-#[cfg(all(test, feature = "std"))]
-use miden_assembly_syntax::Word;
+use miden_assembly_syntax::Parse;
 #[cfg(any(test, feature = "testing"))]
 pub use miden_assembly_syntax::parser;
-use miden_assembly_syntax::{
-    Parse, Path,
+pub use miden_assembly_syntax::{
+    assert_diagnostic, assert_diagnostic_lines, parse_module, regex, source_file, testing::Pattern,
+};
+#[cfg(all(test, feature = "std"))]
+use miden_core::Word;
+use miden_core::program::Program;
+#[cfg(feature = "testing")]
+use {crate::ast::Form, crate::debuginfo::SourceFile};
+
+#[cfg(feature = "std")]
+use crate::diagnostics::reporting::set_panic_hook;
+#[cfg(all(test, feature = "std"))]
+use crate::package::TargetType;
+use crate::{
+    Path,
+    assembler::Assembler,
     ast::{Module, ModuleKind},
     debuginfo::{DefaultSourceManager, SourceManager},
     diagnostics::{
         Report,
         reporting::{ReportHandlerOpts, set_hook},
     },
+    package::PackageId,
 };
-pub use miden_assembly_syntax::{
-    assert_diagnostic, assert_diagnostic_lines, parse_module, regex, source_file, testing::Pattern,
-};
-#[cfg(feature = "testing")]
-use miden_assembly_syntax::{ast::Form, debuginfo::SourceFile};
-use miden_core::program::Program;
-use miden_mast_package::PackageId;
-#[cfg(all(test, feature = "std"))]
-use miden_project::TargetType;
-
-use crate::assembler::Assembler;
-#[cfg(feature = "std")]
-use crate::diagnostics::reporting::set_panic_hook;
 
 /// A [TestContext] provides common functionality for all tests which interact with an [Assembler].
 ///
@@ -168,9 +169,9 @@ impl TestContext {
     #[cfg(all(test, feature = "std"))]
     pub(crate) fn add_library(
         &mut self,
-        package: Arc<miden_mast_package::Package>,
+        package: Arc<crate::package::Package>,
     ) -> Result<(), Report> {
-        self.assembler.link_package(package, miden_project::Linkage::Dynamic)
+        self.assembler.link_package(package, crate::Linkage::Dynamic)
     }
 
     /// Compile a [Program] from `source` using the [Assembler] constructed by this context.
@@ -192,7 +193,7 @@ impl TestContext {
         version: Option<&str>,
         root: Box<Module>,
         support: impl IntoIterator<Item = Box<Module>>,
-    ) -> Result<Box<miden_mast_package::Package>, Report> {
+    ) -> Result<Box<crate::package::Package>, Report> {
         let version = version.unwrap_or("0.0.0").parse().unwrap();
         let mut package = self.assembler().assemble_library(name, root, support)?;
         package.version = version;
@@ -211,14 +212,16 @@ mod package_features {
         sync::{Arc, Mutex},
     };
 
-    use miden_mast_package::{Package, PackageId};
     use miden_package_registry::{
         PackageCache, PackageIndex, PackageProvider, PackageRecord, PackageRegistry, PackageStore,
         PackageVersions, Version, VersionRequirement,
     };
 
     use super::*;
-    use crate::ProjectTargetSelector;
+    use crate::{
+        ProjectTargetSelector,
+        package::{Package, PackageId},
+    };
 
     /// A simple in-memory package index/registry
     #[derive(Default)]
@@ -461,7 +464,8 @@ mod package_features {
             use alloc::string::ToString;
 
             use miden_assembly_syntax::source_file;
-            use miden_mast_package::Dependency;
+
+            use crate::package::Dependency;
 
             let export_path = Path::new(export);
             let (export_leaf, export_module) = export_path.split_last().unwrap();

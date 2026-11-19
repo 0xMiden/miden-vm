@@ -1,12 +1,12 @@
 use alloc::{borrow::Cow, string::String};
 use core::fmt::{Display, Formatter};
 
-use miden_crypto::{
+use crate::{
+    Felt,
     field::PrimeField64,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::hash_string_to_word,
 };
-
-use crate::{Felt, utils::hash_string_to_word};
 
 mod sys_events;
 pub use sys_events::SystemEvent;

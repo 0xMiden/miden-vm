@@ -1,14 +1,18 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
+use miden_core::{
+    Word,
+    mast::{ExecutableMastForest, MastNode, MastNodeId},
+    program::KernelDescriptor,
+};
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
-    BaseHost, BreakReason, ContextId, ExecutionError, KernelDescriptor, Stopper, Word,
-    continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
-    errors::PackageSourceDebugContext,
+    BaseHost, BreakReason, ContextId, Continuation, ExecutionError, PackageSourceDebugContext,
+    SourceInlineCallContext, Stopper,
+    continuation_stack::ContinuationStack,
     host::default::NoopHost,
-    mast::{ExecutableMastForest, MastNode, MastNodeId},
     operation::OperationError,
     option_map_break_reason,
     processor::{Processor, SystemInterface},

@@ -146,7 +146,6 @@ x25519-dalek     = { features = ["static_secrets"], workspace = true }
 # Upstream Plonky3 dependencies
 p3-blake3.workspace      = true
 p3-challenger.workspace  = true
-p3-field.workspace       = true
 p3-goldilocks.workspace  = true
 p3-keccak.workspace      = true
 p3-maybe-rayon.workspace = true

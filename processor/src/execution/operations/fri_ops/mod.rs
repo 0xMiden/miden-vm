@@ -1,7 +1,10 @@
-use crate::{
+use miden_core::{
     Felt, ONE, ZERO,
-    errors::OperationError,
     field::{BasedVectorSpace, Field, QuadFelt},
+};
+
+use crate::{
+    errors::OperationError,
     processor::{Processor, StackInterface},
     tracer::OperationHelperRegisters,
 };

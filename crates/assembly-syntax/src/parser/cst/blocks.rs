@@ -9,13 +9,12 @@ use miden_assembly_syntax_cst::{
     },
     rowan,
 };
-use miden_debug_types::SourceSpan;
 
 use super::{
     context::LoweringContext, fragments::lower_u32_immediate_token,
     instructions::try_lower_instruction,
 };
-use crate::{MAX_CONTROL_FLOW_NESTING, ast, parser::ParsingError};
+use crate::{MAX_CONTROL_FLOW_NESTING, ast, debuginfo::SourceSpan, parser::ParsingError};
 
 /// Lowers `block` and rejects source-level empty bodies using `empty_message`.
 ///

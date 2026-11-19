@@ -25,7 +25,7 @@ use alloc::vec::Vec;
 
 use miden_air_definitions::vm::{
     logup::{MemoryMsg, MemoryResponseMsg},
-    trace::MainTrace,
+    trace::{MainTrace, RowIndex},
 };
 use miden_core::{
     Felt, ONE, ZERO,
@@ -37,7 +37,6 @@ use super::super::{
     build_trace_from_ops,
     lookup_harness::{Expectations, InteractionLog},
 };
-use crate::RowIndex;
 
 const FOUR: Felt = Felt::new_unchecked(4);
 const TWO: Felt = Felt::new_unchecked(2);

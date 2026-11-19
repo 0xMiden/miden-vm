@@ -33,7 +33,7 @@ fn controller_len(controller_rows: usize) -> usize {
 #[cfg(feature = "testing")]
 use miden_core::chiplets::eidos_compression;
 use miden_core::{
-    ONE, ZERO,
+    Felt, ONE, Word as Digest, ZERO,
     chiplets::hasher,
     crypto::merkle::{MerkleTree, NodeIndex},
     field::PrimeCharacteristicRing,
@@ -41,9 +41,8 @@ use miden_core::{
 };
 
 use super::{
-    BLOCK_LEN, ChipletTraceFragment, Digest, Felt, Hasher, HasherState, LINEAR_HASH, MP_VERIFY,
-    MR_UPDATE_NEW, MR_UPDATE_OLD, Selectors, absorb_into_state, get_digest, init_state,
-    init_state_from_words,
+    BLOCK_LEN, ChipletTraceFragment, Hasher, HasherState, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW,
+    MR_UPDATE_OLD, Selectors, absorb_into_state, get_digest, init_state, init_state_from_words,
 };
 
 // HASH AND COMPRESSION MODE TESTS

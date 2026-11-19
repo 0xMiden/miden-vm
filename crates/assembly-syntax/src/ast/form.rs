@@ -1,10 +1,12 @@
 use alloc::{string::String, sync::Arc};
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
-
 use super::{
-    AdviceMapEntry, Block, Constant, EnumType, Ident, ImportDecl, Item, Path, Procedure,
-    SubmoduleDecl, TypeAlias, TypeDecl,
+    AdviceMapEntry, Block, Constant, EnumType, Ident, ImportDecl, Item, Procedure, SubmoduleDecl,
+    TypeAlias, TypeDecl,
+};
+use crate::{
+    Path,
+    debuginfo::{SourceSpan, Span, Spanned},
 };
 
 /// This type represents the top-level forms of a Miden Assembly module

@@ -58,17 +58,8 @@ use core::{
     ops::{ControlFlow, Index},
 };
 
-use miden_assembly_syntax::{
-    Report,
-    ast::{
-        self, AttributeSet, GlobalItemIndex, InvocationTarget, ItemIndex, Module, ModuleIndex,
-        Path, SymbolResolution, Visibility, types,
-    },
-    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
-    module::{ItemInfo, ModuleDescriptor},
-};
-use miden_core::{Word, advice::AdviceMap, program::KernelDescriptor};
-use miden_mast_package::Package as MastPackage;
+use miden_assembly_syntax::module::{ItemInfo, ModuleDescriptor};
+use miden_core::{Word, program::KernelDescriptor};
 use smallvec::{SmallVec, smallvec};
 
 pub use self::{
@@ -83,6 +74,16 @@ use self::{
     module::{LinkModule, ModuleSource},
     namespaces::ResolvedImports,
     resolver::*,
+};
+use crate::{
+    Path, ast,
+    ast::{
+        AttributeSet, GlobalItemIndex, InvocationTarget, ItemIndex, Module, ModuleIndex,
+        SymbolResolution, Visibility, types,
+    },
+    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
+    diagnostics::Report,
+    package::Package as MastPackage,
 };
 
 /// Selects how [`Linker::link`] handles a static cycle in the call graph.
@@ -964,7 +965,7 @@ impl Linker {
         module_index: ModuleIndex,
         ty: &ast::FunctionType,
     ) -> Result<Arc<types::FunctionType>, LinkerError> {
-        use miden_assembly_syntax::ast::TypeResolver;
+        use crate::ast::TypeResolver;
 
         let cc = ty.cc.clone();
         let mut args = Vec::with_capacity(ty.args.len());
@@ -1022,7 +1023,7 @@ impl Linker {
         span: SourceSpan,
         gid: GlobalItemIndex,
     ) -> Result<types::Type, LinkerError> {
-        use miden_assembly_syntax::ast::{TypeResolver, constants::ConstEnvironment};
+        use crate::ast::{TypeResolver, constants::ConstEnvironment};
 
         let symbol_resolver = SymbolResolver::new(self);
         let mut cache = ResolverCache::default();
@@ -1123,20 +1124,17 @@ mod tests {
         sync::Arc,
     };
 
-    use miden_assembly_syntax::{
-        ast::{
-            Ident, InvocationTarget, InvokeKind, ItemIndex, Path, SymbolResolutionError,
-            Visibility, types,
-        },
-        debuginfo::{SourceSpan, Span},
-        module::{ItemInfo, TypeInfo},
-    };
-    use miden_core::Felt;
+    use miden_assembly_syntax::module::{ItemInfo, TypeInfo};
+    use miden_core::{Felt, advice::AdviceMap};
 
     use super::*;
     use crate::{
-        Assembler,
-        ast::Module,
+        Assembler, Path,
+        ast::{
+            Ident, InvocationTarget, InvokeKind, ItemIndex, Module, SymbolResolutionError,
+            Visibility, types,
+        },
+        debuginfo::{SourceSpan, Span},
         testing::{TestContext, source_file},
     };
 

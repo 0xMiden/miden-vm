@@ -1,12 +1,12 @@
 //! Operations that log and clear the rolling precompile accumulator.
 
 use miden_core::{
+    Felt, Word, ZERO,
     chiplets::hasher::{BLOCK_HI_RANGE, BLOCK_LO_RANGE, CV_RANGE, STATE_WIDTH},
     deferred::DEFERRED_AND_INIT_CV,
 };
 
 use crate::{
-    Felt, Word, ZERO,
     errors::OperationError,
     processor::{HasherInterface, Processor, StackInterface, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},

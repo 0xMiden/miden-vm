@@ -34,7 +34,6 @@ thiserror.workspace = true
 tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
-miden-crypto.workspace = true
 p3-security.workspace = true
 miden-core = { workspace = true, features = ["testing"] }
 miden-air-definitions = { workspace = true, features = ["compiler"] }

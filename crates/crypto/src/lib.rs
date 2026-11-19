@@ -119,9 +119,7 @@ pub trait SequentialCommit {
 // ================================================================================================
 
 mod batch_inversion {
-    use p3_maybe_rayon::prelude::*;
-
-    use super::{Felt, ONE, ZERO, field::Field};
+    use crate::{Felt, ONE, ZERO, field::Field, parallel::*};
 
     /// Parallel batch inversion using Montgomery's trick, with zeros left unchanged.
     ///

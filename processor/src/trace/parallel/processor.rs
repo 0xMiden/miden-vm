@@ -17,8 +17,8 @@ use super::super::trace_state::{
     MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
 };
 use crate::{
-    BreakReason, ContextId, ExecutionError, Stopper,
-    continuation_stack::{Continuation, ContinuationStack},
+    BreakReason, ContextId, Continuation, ExecutionError, Stopper,
+    continuation_stack::ContinuationStack,
     errors::OperationError,
     execution::{
         InternalBreakReason, execute_impl_noop_host, finish_emit_op_execution,

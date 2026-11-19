@@ -1,12 +1,12 @@
 use alloc::{string::ToString, vec::Vec};
 
-use miden_debug_types::{SourceSpan, Span};
-use miden_utils_diagnostics::Report;
 use pretty_assertions::assert_eq;
 
 use crate::{
     Felt, PathBuf, assert_diagnostic, assert_diagnostic_lines,
     ast::{types::Type, *},
+    debuginfo::{SourceSpan, Span},
+    diagnostics::Report,
     parser::{IntValue, PushValue, WordValue},
     regex, source_file,
     testing::SyntaxTestContext,

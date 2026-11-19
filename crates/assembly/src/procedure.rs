@@ -1,16 +1,16 @@
 use alloc::sync::Arc;
 
-use miden_assembly_syntax::{
-    ast::{Attribute, AttributeSet, MetaExpr, Path, PathBuf, Visibility, types::FunctionType},
-    debuginfo::{SourceManager, SourceSpan, Spanned},
-    diagnostics::Report,
-};
 use miden_core::Word;
 
 use super::{
-    GlobalItemIndex,
     assembler::{MAX_PROC_LOCALS, error::AssemblerError},
     mast_forest_builder::{MastNodeRef, MastNodeUse, SourceNodeRef},
+};
+use crate::{
+    Path, PathBuf,
+    ast::{Attribute, AttributeSet, GlobalItemIndex, MetaExpr, Visibility, types::FunctionType},
+    debuginfo::{SourceManager, SourceSpan, Spanned},
+    diagnostics::Report,
 };
 
 // PROCEDURE CONTEXT
@@ -351,13 +351,12 @@ impl Spanned for Procedure {
 mod tests {
     use alloc::{sync::Arc, vec};
 
-    use miden_assembly_syntax::{
+    use super::*;
+    use crate::{
         PathBuf,
         ast::{Attribute, Ident, MetaExpr},
         debuginfo::{DefaultSourceManager, SourceLanguage, Uri},
     };
-
-    use super::*;
 
     /// Constructs a [Procedure] with `attrs` attached, for testing attribute accessors.
     fn procedure_with_attributes(attrs: vec::IntoIter<Attribute>) -> Procedure {

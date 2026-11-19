@@ -1,17 +1,19 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_core::{FMP_ADDR, FMP_INIT_VALUE};
+use miden_core::{
+    FMP_ADDR, FMP_INIT_VALUE,
+    mast::{ExecutableMastForest, MastNode, MastNodeId},
+};
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
-    BaseHost, BreakReason, ContextId, MapExecErr, Stopper,
-    continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
+    BaseHost, BreakReason, ContextId, Continuation, MapExecErr, SourceInlineCallContext, Stopper,
+    continuation_stack::ContinuationStack,
     execution::{
         ExecutionState, InternalBreakReason, finalize_clock_cycle,
         finalize_clock_cycle_with_continuation, get_next_ctx_id,
     },
-    mast::{ExecutableMastForest, MastNode, MastNodeId},
     option_map_break_reason,
     processor::{MemoryInterface, Processor, StackInterface, SystemInterface},
     tracer::Tracer,

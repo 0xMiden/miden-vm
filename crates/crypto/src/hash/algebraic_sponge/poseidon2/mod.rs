@@ -3,11 +3,11 @@ use p3_goldilocks::Goldilocks;
 use p3_symmetric::Permutation;
 
 use super::{
-    AlgebraicSponge, CAPACITY_RANGE, DIGEST_RANGE, Felt, RATE_RANGE, RATE0_RANGE, RATE1_RANGE,
-    Range, STATE_WIDTH, Word,
+    AlgebraicSponge, CAPACITY_RANGE, DIGEST_RANGE, RATE_RANGE, RATE0_RANGE, RATE1_RANGE, Range,
+    STATE_WIDTH,
 };
 use crate::{
-    ZERO,
+    Felt, Word, ZERO,
     hash::algebraic_sponge::poseidon2::constants::{
         ARK_EXT_INITIAL, ARK_EXT_TERMINAL, ARK_INT, MAT_DIAG,
     },

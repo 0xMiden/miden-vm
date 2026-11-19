@@ -1,10 +1,13 @@
 use core::ops::ControlFlow;
 
-use crate::{
-    BaseHost, BreakReason, MapExecErr, ONE, Stopper, ZERO,
-    continuation_stack::Continuation,
-    execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
+use miden_core::{
+    ONE, ZERO,
     mast::{ExecutableMastForest, MastNodeId, SplitNode},
+};
+
+use crate::{
+    BaseHost, BreakReason, Continuation, MapExecErr, Stopper,
+    execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
     operation::{BinaryValueErrorContext, OperationError},
     processor::{Processor, StackInterface},
     tracer::Tracer,

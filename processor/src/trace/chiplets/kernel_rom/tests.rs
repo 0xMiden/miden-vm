@@ -1,9 +1,10 @@
 use alloc::vec::Vec;
 
-use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
+use miden_core::{
+    Felt, ONE, WORD_SIZE, ZERO, field::PrimeCharacteristicRing, program::KernelDescriptor,
+};
 
-use super::{ChipletTraceFragment, Felt, KERNEL_ROM_TRACE_WIDTH, KernelDescriptor, KernelRom};
-use crate::{ONE, ZERO};
+use super::{ChipletTraceFragment, KERNEL_ROM_TRACE_WIDTH, KernelRom};
 
 // CONSTANTS
 // ================================================================================================

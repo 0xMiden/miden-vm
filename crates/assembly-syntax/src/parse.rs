@@ -1,8 +1,10 @@
 use alloc::{borrow::Cow, boxed::Box, string::String, sync::Arc};
 
-use miden_debug_types::{SourceFile, SourceManager};
-
-use crate::{ast::Module, diagnostics::Report};
+use crate::{
+    ast::Module,
+    debuginfo::{SourceFile, SourceManager},
+    diagnostics::Report,
+};
 
 // PARSE TRAIT
 // ================================================================================================

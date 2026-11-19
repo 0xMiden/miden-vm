@@ -1,10 +1,10 @@
 use alloc::{format, string::ToString, vec::Vec};
 
 use super::{
-    AdviceMap, ForestLayout, MastForest, MastNodeEntry, MastNodeId, basic_block_data_len,
-    reserve_allocation,
+    ForestLayout, MastForest, MastNodeEntry, MastNodeId, basic_block_data_len, reserve_allocation,
 };
 use crate::{
+    advice::AdviceMap,
     chiplets::hasher,
     mast::{
         CallNode, DynNode, JoinNode, LoopNode, MastForestParts, MastNode, SplitNode,

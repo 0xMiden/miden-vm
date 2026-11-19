@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use miden_assembly_syntax::{
+use crate::{
     Path,
     debuginfo::{SourceFile, SourceSpan},
     diagnostics::{Diagnostic, miette},

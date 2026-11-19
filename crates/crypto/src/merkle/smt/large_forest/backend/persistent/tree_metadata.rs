@@ -1,10 +1,10 @@
 //! Contains the metadata definition for each persisted tree in the forest.
 
-use miden_serde_utils::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+use crate::{
+    Word,
+    merkle::smt::VersionId,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-
-use crate::{Word, merkle::smt::VersionId};
 
 /// The basic metadata stored for each tree in the forest.
 #[derive(Clone, Debug, Eq, PartialEq)]

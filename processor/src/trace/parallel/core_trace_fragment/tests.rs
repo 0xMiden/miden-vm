@@ -22,8 +22,10 @@ const GROUP_COUNT_COL_IDX: usize = 17;
 const OP_INDEX_COL_IDX: usize = 18;
 const OP_BATCH_ENCODING_RANGE: core::ops::Range<usize> = 19..19 + NUM_OP_BATCH_ENCODING_COLS;
 const OP_BITS_EXTRA_COLS_RANGE: core::ops::Range<usize> = 21..23;
+use miden_air_definitions::vm::VmTrace;
 use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
+    advice::AdviceInputs,
     events::{EventName, SystemEvent},
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, JoinNodeBuilder, LoopNodeBuilder,
@@ -34,9 +36,9 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, ProcessorState,
+    DefaultHost, ExecutionOptions, FastProcessor, ProcessorState,
     event::{NoopEventHandler, TraceError},
-    trace::{VmTrace, build_trace},
+    trace::build_trace,
 };
 
 // CONSTANTS

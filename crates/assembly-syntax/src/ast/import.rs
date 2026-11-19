@@ -1,8 +1,10 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
-
-use super::{Ident, Path, Visibility};
+use super::{Ident, Visibility};
+use crate::{
+    Path,
+    debuginfo::{SourceSpan, Span, Spanned},
+};
 
 /// The explicit source form used by an import declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

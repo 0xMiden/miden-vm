@@ -1,9 +1,12 @@
 use miden_air_definitions::vm::trace::RowIndex;
-use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
+use miden_core::{
+    Felt,
+    field::{PrimeCharacteristicRing, QuadFelt},
+};
 
 use crate::{
-    ContextId, Felt,
-    errors::{AceError, AceEvalError},
+    AceError, ContextId,
+    errors::AceEvalError,
     processor::{MemoryInterface, Processor, StackInterface, SystemInterface},
     trace::chiplets::{
         CircuitEvaluation, MAX_EVAL_CIRCUIT_WIRES, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM,

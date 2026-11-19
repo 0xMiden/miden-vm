@@ -1,11 +1,6 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-use miden_formatting::{
-    hex::ToHex,
-    prettier::{Document, PrettyPrint, const_text, text},
-};
-
 use super::{
     MastForestContributor, MastNodeContext, MastNodeExt, fingerprint_with_child_fingerprints,
 };
@@ -14,7 +9,8 @@ use crate::{
     chiplets::hasher,
     mast::{MastForest, MastForestError, MastNodeId},
     operations::opcodes,
-    utils::LookupByIdx,
+    prettier::{Document, PrettyPrint, const_text, text},
+    utils::{LookupByIdx, ToHex},
 };
 
 // CALL NODE

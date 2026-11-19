@@ -39,10 +39,10 @@ use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_core::{
     Felt,
+    crypto::hash::Eidos,
     deferred::{DEFERRED_AND_FRAME, Digest, fold_deferred_root},
     utils::RowMajorMatrix,
 };
-use miden_crypto::hash::eidos::Eidos;
 use miden_precompiles::{CurveId, CurvePrecompile, UintDomain, UintPrecompile};
 
 use crate::prover::{

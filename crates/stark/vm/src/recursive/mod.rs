@@ -362,7 +362,7 @@ mod tests {
         let config = eidos_config(config::pcs_params(), config::RELATION_DIGEST);
         let statement = Statement::<Felt, Challenge, _>::new(
             MidenMultiAir::new(),
-            vec![(0, vec![Felt::ZERO; miden_air::vm::NUM_PUBLIC_VALUES])],
+            vec![(0, vec![Felt::ZERO; miden_air_definitions::vm::NUM_PUBLIC_VALUES])],
             vec![],
         )
         .expect("valid Miden statement shape");
@@ -435,8 +435,10 @@ mod tests {
     /// Pins the complete packaged advice from a fixed, independently verified VM proof.
     #[test]
     fn packaged_advice_matches_current_fixture() {
-        use miden_core::serde::{Deserializable, Serializable};
-        use miden_crypto::hash::blake::Blake3_256;
+        use miden_core::{
+            crypto::hash::Blake3_256,
+            serde::{Deserializable, Serializable},
+        };
 
         let vm = VmProof::read_from_bytes(include_bytes!("../../tests/fixtures/vm_eidos_v1_0.bin"))
             .expect("valid VM proof fixture encoding");

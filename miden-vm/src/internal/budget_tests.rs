@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use miden_core::crypto::merkle::{MerkleStore, MerkleTree, PartialMerkleTree, SimpleSmt};
 use miden_processor::{ExecutionOptions, FastProcessor};
 
 use super::*;
-use crate::crypto::merkle::{MerkleStore, MerkleTree, PartialMerkleTree, SimpleSmt};
 
 // Keep an independent full-tree oracle for the streamed construction path.
 fn legacy_advice_inputs(inputs: &InputFile) -> Result<AdviceInputs, String> {
@@ -145,7 +145,7 @@ fn right_edge_depth_64_partition() -> Vec<((u8, u64), String)> {
 
 #[test]
 fn witness_and_legacy_trees_share_the_same_budget() {
-    use crate::{
+    use miden_core::{
         crypto::merkle::{PartialSmt, Smt},
         serde::Serializable,
     };

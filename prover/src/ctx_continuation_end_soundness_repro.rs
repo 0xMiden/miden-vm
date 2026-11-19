@@ -34,9 +34,9 @@ use miden_core::{
     Felt,
     mast::{BasicBlockNodeBuilder, MastForest},
     operations::{Operation, opcodes},
-    program::Program,
+    program::{Program, StackInputs},
 };
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use miden_processor::{DefaultHost, FastProcessor};
 
 use crate::repro_harness::{ReproTrace, core_row_mut};
 

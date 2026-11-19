@@ -1,6 +1,7 @@
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 
 use miden_air_definitions::vm::trace::{
+    RowIndex,
     and8_lookup::{BYTE_LOOKUP_COUNT_LEN, byte_pair_count_index},
     chiplets::hasher::{
         BLOCK_LEN, CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_ABSORB, LINEAR_HASH, MP_VERIFY,
@@ -14,16 +15,16 @@ use miden_air_definitions::vm::trace::{
     },
 };
 use miden_core::{
+    Felt, ONE, Word as Digest, ZERO,
     chiplets::{eidos_compression, hasher::compress_state},
+    crypto::merkle::MerklePath,
+    mast::OpBatch,
     utils::RowMajorMatrix,
 };
 use rayon::prelude::*;
 
-use super::{
-    ChipletTraceFragment, Felt, HasherState, MerklePath, ONE, OpBatch, RangeChecker,
-    Word as Digest, ZERO, build_and8_lookup_trace,
-};
-use crate::{ContextId, RowIndex};
+use super::{ChipletTraceFragment, HasherState, RangeChecker, build_and8_lookup_trace};
+use crate::ContextId;
 
 mod trace;
 use trace::HasherTrace;

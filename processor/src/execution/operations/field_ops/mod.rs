@@ -1,6 +1,6 @@
+use miden_core::{Felt, ONE, ZERO, field::Field};
+
 use crate::{
-    Felt, ONE, ZERO,
-    field::Field,
     operation::{BinaryValueErrorContext, OperationError},
     processor::{Processor, StackInterface},
     tracer::OperationHelperRegisters,

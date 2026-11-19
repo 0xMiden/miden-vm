@@ -5,11 +5,13 @@ use alloc::{
 };
 use core::fmt;
 
-use super::{
-    EMPTY_WORD, Eidos, InnerNodeInfo, MerkleError, MerklePath, MerkleProof, NodeIndex, Word,
-};
-use crate::utils::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, word_to_hex,
+use super::{InnerNodeInfo, MerkleError, MerklePath, MerkleProof, NodeIndex};
+use crate::{
+    EMPTY_WORD, Word,
+    hash::eidos::Eidos,
+    utils::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, word_to_hex,
+    },
 };
 
 #[cfg(test)]

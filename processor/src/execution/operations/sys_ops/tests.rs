@@ -7,8 +7,8 @@ use miden_core::{
 
 use super::{op_assert, op_clk, op_sdepth};
 use crate::{
+    FastProcessor,
     execution::operations::stack_ops::op_push,
-    fast::FastProcessor,
     processor::{Processor, StackInterface, SystemInterface},
 };
 

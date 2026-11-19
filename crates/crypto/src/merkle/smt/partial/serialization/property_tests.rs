@@ -3,13 +3,15 @@
 
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_field::{Felt, Word};
-use miden_serde_utils::{Deserializable, Serializable};
 use proptest::prelude::*;
 
-use crate::merkle::{
-    NodeIndex,
-    smt::{LeafIndex, SmtLeaf, UniqueNodes},
+use crate::{
+    Felt, Word,
+    merkle::{
+        NodeIndex,
+        smt::{LeafIndex, SmtLeaf, UniqueNodes},
+    },
+    utils::{Deserializable, Serializable},
 };
 // GENERATORS
 // ================================================================================================

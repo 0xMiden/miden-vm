@@ -1,16 +1,15 @@
 use core::ops::Range;
 
-use miden_assembly_syntax::{
-    Felt,
+use miden_assembly_syntax::parser::{ParsingError, WordValue};
+use miden_core::{Felt, operations::Operation::*};
+
+use super::{BasicBlockBuilder, mem_ops::local_to_absolute_addr, push_felt};
+use crate::{
+    ProcedureContext,
     ast::Immediate,
     debuginfo::{SourceSpan, Spanned},
     diagnostics::Report,
-    parser::{ParsingError, WordValue},
 };
-use miden_core::operations::Operation::*;
-
-use super::{BasicBlockBuilder, mem_ops::local_to_absolute_addr, push_felt};
-use crate::ProcedureContext;
 
 // CONSTANT INPUTS
 // ================================================================================================

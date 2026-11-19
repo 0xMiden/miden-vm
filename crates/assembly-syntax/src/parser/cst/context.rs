@@ -9,9 +9,12 @@ use miden_assembly_syntax_cst::{
     ast::{AstNode, Path as CstPath, Visibility as CstVisibility},
     rowan,
 };
-use miden_debug_types::{SourceFile, SourceSpan, Span};
 
-use crate::{Path, ast, parser::ParsingError};
+use crate::{
+    Path, ast,
+    debuginfo::{SourceFile, SourceSpan, Span},
+    parser::ParsingError,
+};
 
 /// Shared lowering state for a single CST-to-AST pass.
 ///
@@ -191,7 +194,7 @@ impl<'a> LoweringContext<'a> {
         span: SourceSpan,
         raw: &str,
     ) -> Result<Span<Arc<Path>>, ParsingError> {
-        let path = ast::PathBuf::new(&raw).map_err(|error| ParsingError::InvalidLibraryPath {
+        let path = crate::PathBuf::new(&raw).map_err(|error| ParsingError::InvalidLibraryPath {
             span,
             message: error.to_string(),
         })?;

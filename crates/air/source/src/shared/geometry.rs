@@ -5,7 +5,7 @@ use miden_core::{Felt, field::QuadFelt};
 #[cfg(any(test, feature = "compiler"))]
 use miden_stark::air::{ConstraintCounts, ConstraintDegrees, LiftedAir};
 #[cfg(any(test, feature = "compiler"))]
-use p3_security::budget::{AirShape, LookupShape};
+use miden_stark::security::{AirShape, LookupShape};
 
 #[cfg(any(test, feature = "compiler"))]
 pub(crate) fn derive_air_shape<A: LiftedAir<Felt, QuadFelt>>(

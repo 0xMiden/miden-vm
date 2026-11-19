@@ -4,16 +4,15 @@ mod signing_key {
     use alloc::string::{String, ToString};
 
     use k256::elliptic_curve::sec1::ToSec1Point;
-    use miden_field::{Felt, Word};
-    #[cfg(feature = "std")]
-    use miden_serde_utils::ByteReader;
-    use miden_serde_utils::{Deserializable, Serializable};
 
+    #[cfg(feature = "std")]
+    use crate::utils::ByteReader;
     use crate::{
+        Felt, Word,
         dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey},
         hash::{eidos::Eidos, keccak::Keccak256},
         rand::test_utils::seeded_rng,
-        utils::hex_to_bytes,
+        utils::{Deserializable, Serializable, hex_to_bytes},
     };
 
     #[test]
@@ -303,11 +302,10 @@ mod signing_key {
 }
 
 mod key_exchange_key {
-    use miden_serde_utils::{Deserializable, Serializable};
-
     use crate::{
         dsa::ecdsa_k256_keccak::{KeyExchangeKey, PublicKey},
         rand::test_utils::seeded_rng,
+        utils::{Deserializable, Serializable},
     };
 
     #[test]
@@ -345,11 +343,10 @@ mod key_exchange_key {
 mod signature {
     use alloc::vec::Vec;
 
-    use miden_serde_utils::{DeserializationError, Serializable};
-
     use crate::{
         dsa::ecdsa_k256_keccak::{PublicKey, SecretKey, Signature, SigningKey},
         rand::test_utils::seeded_rng,
+        utils::{DeserializationError, Serializable},
     };
 
     #[test]
@@ -649,9 +646,10 @@ mod signature {
 mod public_key_parsing {
     use alloc::format;
 
-    use miden_serde_utils::Serializable;
-
-    use crate::{dsa::ecdsa_k256_keccak::PublicKey, utils::hex_to_bytes};
+    use crate::{
+        dsa::ecdsa_k256_keccak::PublicKey,
+        utils::{Serializable, hex_to_bytes},
+    };
 
     /// The secp256k1 generator point (even y coordinate) in both SEC1 encodings.
     const GEN_COMPRESSED: &str =

@@ -1,9 +1,11 @@
 use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
-    Report,
-    debuginfo::{SourceFile, SourceId, SourceSpan, Span, Uri},
+    debuginfo::{SourceFile, SourceId, SourceSpan, Span},
+    diagnostics::Report,
 };
+
+use crate::Uri;
 
 /// This type is used to represent package information which may be inherited within a workspace.
 #[derive(Debug, Clone)]
@@ -169,7 +171,7 @@ impl SetSourceId for toml::Value {
     fn set_source_id(&mut self, _source_id: SourceId) {}
 }
 
-impl SetSourceId for crate::SemVer {
+impl SetSourceId for crate::semver::Version {
     #[inline(always)]
     fn set_source_id(&mut self, _source_id: SourceId) {}
 }

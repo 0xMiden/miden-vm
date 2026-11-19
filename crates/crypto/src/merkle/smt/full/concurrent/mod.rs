@@ -2,13 +2,16 @@ use alloc::vec::Vec;
 use core::mem;
 
 use num::Integer;
-use p3_maybe_rayon::prelude::*;
 
 use super::{
     EmptySubtreeRoots, InnerNode, InnerNodes, Leaves, MerkleError, MutationSet, NodeIndex,
-    SMT_DEPTH, Smt, SmtLeaf, SparseMerkleTreeReader, Word,
+    SMT_DEPTH, Smt, SmtLeaf, SparseMerkleTreeReader,
 };
-use crate::merkle::smt::{Map, NodeMutation, NodeMutations, SmtLeafError};
+use crate::{
+    Word,
+    merkle::smt::{Map, NodeMutation, NodeMutations, SmtLeafError},
+    parallel::*,
+};
 
 #[cfg(test)]
 mod tests;

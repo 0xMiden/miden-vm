@@ -5,8 +5,10 @@ use super::*;
 
 #[test]
 fn pointer_address_spaces_survive_package_round_trip() -> TestResult {
-    use miden_assembly_syntax::ast::types::{AddressSpace, PointerType, Type};
-    use miden_mast_package::{Package, PackageExport};
+    use crate::{
+        ast::types::{AddressSpace, PointerType, Type},
+        package::{Package, PackageExport},
+    };
 
     let context = TestContext::new();
     let module = context.parse_module(source_file!(
@@ -58,8 +60,7 @@ fn pointer_address_spaces_survive_package_round_trip() -> TestResult {
 
 #[test]
 fn variadic_procedure_signatures_resolve() -> TestResult {
-    use miden_assembly_syntax::ast::types::Type;
-    use miden_mast_package::PackageExport;
+    use crate::{ast::types::Type, package::PackageExport};
 
     let context = TestContext::new();
     let module = context.parse_module(source_file!(
@@ -110,7 +111,7 @@ fn self_recursive_struct_through_a_pointer_resolves() -> TestResult {
         .assemble_library("lib", None, module, [])
         .expect("a struct recursing through a pointer should resolve");
 
-    use miden_mast_package::PackageExport;
+    use crate::package::PackageExport;
 
     let node = package
         .manifest
@@ -122,14 +123,14 @@ fn self_recursive_struct_through_a_pointer_resolves() -> TestResult {
         .expect("Node should be exported");
 
     // The declaration is recursive, and descending through the backedge comes back to it.
-    let miden_assembly_syntax::ast::types::Type::Struct(node_ref) = &node else {
+    let crate::ast::types::Type::Struct(node_ref) = &node else {
         panic!("expected a struct, got {node:?}");
     };
     assert!(node_ref.is_recursive());
     assert_eq!(node.size_in_bytes(), 8);
 
     let body = node_ref.get();
-    let miden_assembly_syntax::ast::types::Type::Ptr(next) = &body.fields()[1].ty else {
+    let crate::ast::types::Type::Ptr(next) = &body.fields()[1].ty else {
         panic!("expected `next` to be a pointer");
     };
     assert_eq!(next.pointee(), &node);
@@ -138,7 +139,7 @@ fn self_recursive_struct_through_a_pointer_resolves() -> TestResult {
 
 #[test]
 fn a_recursive_type_survives_a_full_package_round_trip() -> TestResult {
-    use miden_mast_package::{Package, PackageExport};
+    use crate::package::{Package, PackageExport};
 
     let context = TestContext::new();
     let module = context.parse_module(source_file!(
@@ -180,12 +181,12 @@ fn a_recursive_type_survives_a_full_package_round_trip() -> TestResult {
     // rebuilt are the same type, backedge and all.
     assert_eq!(recovered, original);
 
-    let miden_assembly_syntax::ast::types::Type::Struct(node_ref) = &recovered else {
+    let crate::ast::types::Type::Struct(node_ref) = &recovered else {
         panic!("expected a struct");
     };
     assert!(node_ref.is_recursive());
     let body = node_ref.get();
-    let miden_assembly_syntax::ast::types::Type::Ptr(next) = &body.fields()[1].ty else {
+    let crate::ast::types::Type::Ptr(next) = &body.fields()[1].ty else {
         panic!("expected a pointer");
     };
     assert_eq!(next.pointee(), &recovered);
@@ -213,7 +214,7 @@ fn mutually_recursive_structs_through_pointers_resolve() -> TestResult {
         .assemble_library("lib", None, module, [])
         .expect("mutually recursive structs should resolve");
 
-    use miden_mast_package::PackageExport;
+    use crate::package::PackageExport;
 
     let find = |suffix: &str| {
         package
@@ -231,20 +232,20 @@ fn mutually_recursive_structs_through_pointers_resolve() -> TestResult {
     let b = find("B");
 
     // A -> b -> B -> a must come back around to A.
-    let miden_assembly_syntax::ast::types::Type::Struct(a_ref) = &a else {
+    let crate::ast::types::Type::Struct(a_ref) = &a else {
         panic!("expected a struct");
     };
     let a_body = a_ref.get();
-    let miden_assembly_syntax::ast::types::Type::Ptr(to_b) = &a_body.fields()[0].ty else {
+    let crate::ast::types::Type::Ptr(to_b) = &a_body.fields()[0].ty else {
         panic!("expected a pointer");
     };
     assert_eq!(to_b.pointee(), &b);
 
-    let miden_assembly_syntax::ast::types::Type::Struct(b_ref) = &b else {
+    let crate::ast::types::Type::Struct(b_ref) = &b else {
         panic!("expected a struct");
     };
     let b_body = b_ref.get();
-    let miden_assembly_syntax::ast::types::Type::Ptr(to_a) = &b_body.fields()[0].ty else {
+    let crate::ast::types::Type::Ptr(to_a) = &b_body.fields()[0].ty else {
         panic!("expected a pointer");
     };
     assert_eq!(to_a.pointee(), &a);
@@ -300,7 +301,7 @@ fn a_finite_cycle_through_an_alias_resolves() -> TestResult {
             .assemble_library("lib", None, module, [])
             .expect("a finite cycle through an alias should resolve");
 
-        use miden_mast_package::PackageExport;
+        use crate::package::PackageExport;
         let b = package
             .manifest
             .exports()
@@ -339,7 +340,7 @@ fn an_alias_used_twice_in_one_aggregate_resolves() -> TestResult {
         .assemble_library("lib", None, module, [])
         .expect("an alias used twice should resolve");
 
-    use miden_mast_package::PackageExport;
+    use crate::package::PackageExport;
     let b = package
         .manifest
         .exports()
@@ -378,7 +379,7 @@ fn recursive_type_alias_cycle_is_diagnosed() -> TestResult {
 
 #[test]
 fn imported_type_bodies_resolve_in_their_defining_module() -> TestResult {
-    use miden_assembly_syntax::ast::types::Type;
+    use crate::ast::types::Type;
 
     let context = TestContext::new();
     let definitions = context.parse_module(source_file!(

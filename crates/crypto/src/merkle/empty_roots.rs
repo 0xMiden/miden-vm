@@ -1,6 +1,7 @@
 use core::slice;
 
-use super::{Felt, Word, smt::InnerNode};
+use super::smt::InnerNode;
+use crate::{Felt, Word};
 
 // EMPTY NODES SUBTREES
 // ================================================================================================
@@ -1590,10 +1591,8 @@ const EMPTY_SUBTREES: [Word; 256] = [
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        super::{EMPTY_WORD, Eidos},
-        EMPTY_SUBTREES, EmptySubtreeRoots,
-    };
+    use super::{EMPTY_SUBTREES, EmptySubtreeRoots};
+    use crate::{EMPTY_WORD, hash::eidos::Eidos};
 
     #[test]
     fn all_depths_opens_to_zero() {

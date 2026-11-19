@@ -4,7 +4,7 @@ use core::{borrow::Borrow, mem::size_of};
 use miden_air_definitions::vm::{
     BitwiseOpCols, ChipletCols,
     trace::{
-        CHIPLETS_WIDTH, TRACE_WIDTH,
+        CHIPLETS_WIDTH, RowIndex, TRACE_WIDTH,
         chiplets::{
             KERNEL_ROM_TRACE_WIDTH, NUM_BITWISE_SELECTORS, NUM_KERNEL_ROM_SELECTORS,
             NUM_MEMORY_SELECTORS,
@@ -19,14 +19,16 @@ use miden_air_definitions::vm::{
 };
 use miden_core::{
     Felt, ONE, Word, ZERO,
+    advice::AdviceInputs,
     mast::{BasicBlockNodeBuilder, CallNodeBuilder, MastForest},
-    program::{Program, StackInputs},
+    operations::Operation,
+    program::{KernelDescriptor, Program, StackInputs},
 };
 
 use super::{AEAD_STREAM_CYCLE_LEN, Chiplets};
 use crate::{
-    AdviceInputs, ContextId, DefaultHost, ExecutionOptions, FastProcessor, KernelDescriptor,
-    RowIndex, operation::Operation, trace::trace_state::AeadStreamReplayEntry,
+    ContextId, DefaultHost, ExecutionOptions, FastProcessor,
+    trace::trace_state::AeadStreamReplayEntry,
 };
 
 type ChipletsTrace = [Vec<Felt>; CHIPLETS_WIDTH];

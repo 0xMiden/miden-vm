@@ -1,7 +1,5 @@
 //! Cryptographic hash functions, including standalone application primitives.
 
-use crate::Felt;
-
 /// Generic digest types for binary hash functions.
 pub(crate) mod digest;
 

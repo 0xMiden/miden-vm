@@ -13,7 +13,7 @@ use miden_core::{
 };
 
 use super::MAX_NUM_ACE_WIRES;
-use crate::{ContextId, errors::AceError};
+use crate::{AceError, ContextId};
 
 /// One row of the ACE chiplet trace in `READ` mode: two memory-loaded wires per row, plus the
 /// pointer of the word that was loaded.
@@ -549,10 +549,11 @@ mod serialization_tests {
 
 #[cfg(any(test, feature = "arbitrary"))]
 mod arbitrary {
+    use miden_air_definitions::vm::trace::RowIndex;
+    use miden_core::{Felt, field::QuadFelt};
     use proptest::prelude::*;
 
-    use super::{CircuitEvaluation, ContextId, EvalNode, Felt, QuadFelt, ReadNode, WireBus};
-    use crate::RowIndex;
+    use super::{CircuitEvaluation, ContextId, EvalNode, ReadNode, WireBus};
 
     fn quad() -> impl Strategy<Value = QuadFelt> {
         (any::<Felt>(), any::<Felt>()).prop_map(|(a, b)| QuadFelt::new([a, b]))

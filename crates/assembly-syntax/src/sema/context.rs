@@ -6,13 +6,15 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
-use miden_utils_diagnostics::{Diagnostic, Severity};
-
 use super::{SemanticAnalysisError, SyntaxError};
-use crate::ast::{
-    constants::{ConstEvalError, eval::CachedConstantValue},
-    *,
+use crate::{
+    PathBuf,
+    ast::{
+        constants::{ConstEvalError, eval::CachedConstantValue},
+        *,
+    },
+    debuginfo::{SourceFile, SourceManager, SourceSpan, Span, Spanned},
+    diagnostics::{Diagnostic, Severity},
 };
 
 /// This maintains the state for semantic analysis of a single [Module].

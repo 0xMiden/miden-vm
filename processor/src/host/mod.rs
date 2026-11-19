@@ -252,7 +252,9 @@ impl<T, O> FutureMaybeSend<O> for T where T: Future<Output = O> + Send {}
 
 #[cfg(test)]
 mod tests {
-    use super::{AdviceMutation, AdviceStack, Felt};
+    use miden_core::{Felt, advice::AdviceStack};
+
+    use crate::advice::AdviceMutation;
 
     /// The iterator helper must be indistinguishable from building the stack by hand, so that a
     /// handler can switch to it without changing what the VM sees.

@@ -241,10 +241,10 @@ use alloc::{sync::Arc, vec::Vec};
 
 use super::{
     EmptySubtreeRoots, InnerNode, InnerNodeInfo, LeafIndex, MerkleError, NodeIndex, NodeMutation,
-    SMT_DEPTH, SmtLeaf, SmtProof, SparseMerkleTree, SparseMerkleTreeReader, Word,
+    SMT_DEPTH, SmtLeaf, SmtProof, SparseMerkleTree, SparseMerkleTreeReader,
 };
 use crate::{
-    EMPTY_WORD,
+    EMPTY_WORD, Word,
     merkle::smt::{Map, full::concurrent::MutatedSubtreeLeaves},
 };
 

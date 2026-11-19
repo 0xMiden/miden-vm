@@ -13,9 +13,8 @@ pub use miden_serde_utils::{
     BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
     SliceReader,
 };
-use p3_maybe_rayon::prelude::*;
 
-use crate::{Felt, Word, field::QuotientMap};
+use crate::{Felt, Word, field::QuotientMap, parallel::*};
 
 // CONSTANTS
 // ================================================================================================

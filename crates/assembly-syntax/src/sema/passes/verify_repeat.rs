@@ -1,10 +1,9 @@
 use core::ops::ControlFlow;
 
-use miden_debug_types::Spanned;
-
 use crate::{
     MAX_REPEAT_COUNT,
     ast::{Immediate, Op, Visit, visit::visit_op},
+    debuginfo::Spanned,
     sema::{AnalysisContext, SemanticAnalysisError},
 };
 

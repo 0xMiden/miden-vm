@@ -11,15 +11,15 @@ use miden_air_definitions::vm::{
         },
     },
 };
+use miden_core::{
+    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, field::batch_inversion_allow_zeros,
+};
 
 use super::{
     super::utils::{split_element_u32_into_u16, split_u32_into_u16},
     ChipletTraceFragment, RangeChecker,
 };
-use crate::{
-    ContextId, EMPTY_WORD, Felt, MemoryError, ONE, WORD_SIZE, Word, ZERO,
-    field::batch_inversion_allow_zeros,
-};
+use crate::{ContextId, MemoryError};
 
 mod segment;
 use segment::{MemoryOperation, MemorySegmentTrace};

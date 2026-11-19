@@ -1,8 +1,8 @@
 use alloc::{boxed::Box, sync::Arc};
 
 use miden_assembly_syntax::{
-    Report,
     ast::types::{EnumRef, RecTypeRef, StructRef},
+    diagnostics::Report,
 };
 use miden_core::mast::MastNodeId;
 use miden_debug_types::{Location, Uri};

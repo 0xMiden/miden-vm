@@ -1,16 +1,15 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
-use miden_debug_types::{DefaultSourceManager, SourceFile, SourceManager};
-use miden_utils_diagnostics::{
-    Report,
-    reporting::{ReportHandlerOpts, set_hook},
-};
-
 #[cfg(feature = "std")]
 use crate::diagnostics::reporting::set_panic_hook;
 use crate::{
     Path,
     ast::{Form, Module, ModuleKind},
+    debuginfo::{DefaultSourceManager, SourceFile, SourceManager},
+    diagnostics::{
+        Report,
+        reporting::{ReportHandlerOpts, set_hook},
+    },
 };
 
 /// A [SyntaxTestContext] provides common functionality for all syntax-related tests

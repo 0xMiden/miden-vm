@@ -4,13 +4,13 @@ use core::{fmt, num::NonZeroU32};
 use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, read_bounded_len,
 };
-use miden_debug_types::Location;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use crate::{
     Felt,
     ast::{TypeExpr, types::Type},
+    debuginfo::Location,
 };
 
 // DEBUG VARIABLE INFO
@@ -672,9 +672,9 @@ mod tests {
     use alloc::{string::ToString, vec::Vec};
 
     use miden_core::serde::{Deserializable, Serializable, SliceReader};
-    use miden_debug_types::{ByteIndex, Uri};
 
     use super::*;
+    use crate::debuginfo::{ByteIndex, Uri};
 
     #[test]
     fn debug_var_info_display_simple() {

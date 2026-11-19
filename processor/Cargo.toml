@@ -42,7 +42,6 @@ miden-debug-types.workspace = true
 miden-mast-package.workspace = true
 miden-precompiles.workspace = true
 miden-utils-diagnostics.workspace = true
-miden-utils-indexing.workspace = true
 
 # External dependencies
 itertools.workspace = true

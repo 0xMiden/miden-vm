@@ -8,7 +8,7 @@ use core::{
 
 use super::{EmptySubtreeRoots, InnerNodeInfo, MerkleError, NodeIndex, SparseMerklePath};
 use crate::{
-    EMPTY_WORD, Map, Set, Word,
+    Map, Set, Word,
     hash::eidos::Eidos,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
@@ -878,7 +878,8 @@ impl<const DEPTH: u8, K: Deserializable + Ord + Eq + Hash, V: Deserializable> De
 mod arbitrary {
     use proptest::prelude::*;
 
-    use super::{InnerNode, NodeMutation, Word};
+    use super::{InnerNode, NodeMutation};
+    use crate::Word;
 
     impl Arbitrary for InnerNode {
         type Parameters = ();

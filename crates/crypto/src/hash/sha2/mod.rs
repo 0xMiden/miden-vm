@@ -5,10 +5,10 @@ use core::mem::size_of;
 use sha2::Digest as Sha2Digest;
 
 use super::{
-    Felt, HasherExt,
+    HasherExt,
     digest::{DIGEST256_BYTES, DIGEST512_BYTES, Digest256, Digest512},
 };
-use crate::field::BasedVectorSpace;
+use crate::{Felt, field::BasedVectorSpace};
 
 #[cfg(test)]
 mod tests;

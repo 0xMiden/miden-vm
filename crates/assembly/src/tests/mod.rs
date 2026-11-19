@@ -7,37 +7,32 @@ use alloc::{
 use core::{assert_matches, fmt::Write, str::FromStr};
 use std::{eprintln, sync::Arc};
 
-use miden_assembly_syntax::{
-    MAX_CONTROL_FLOW_NESTING, MAX_REPEAT_COUNT,
-    ast::{Ident, Path},
-    diagnostics::WrapErr,
-};
+use miden_assembly_syntax::{MAX_CONTROL_FLOW_NESTING, MAX_REPEAT_COUNT};
 use miden_core::{
     Felt, Word,
     events::EventId,
     field::PrimeField64,
-    mast::{MastNode, MastNodeExt},
     operations::{AssemblyOp, Operation},
     program::Program,
-    serde::{Deserializable, Serializable},
-};
-use miden_mast_package::{
-    MastForest, Package, PackageExport, PackageModule, PackageSubmodule, ProcedureExport,
-    TargetType,
 };
 use miden_project::Linkage;
 
 use crate::{
-    Assembler, PathBuf, SourceSpan, Span,
+    Assembler, Path, PathBuf,
     assembler::MAX_PROC_LOCALS,
     ast::{
-        Block, Instruction, Module, Op, Procedure, ProcedureName, QualifiedProcedureName,
+        Block, Ident, Instruction, Module, Op, Procedure, ProcedureName, QualifiedProcedureName,
         Visibility,
     },
-    diagnostics::{IntoDiagnostic, Report},
+    debuginfo::{SourceSpan, Span},
+    diagnostics::{IntoDiagnostic, Report, WrapErr, report},
     fmp::fmp_initialization_sequence,
+    mast::{MastForest, MastNode, MastNodeExt},
     mast_forest_builder::MastForestBuilder,
-    report,
+    package::{
+        Package, PackageExport, PackageModule, PackageSubmodule, ProcedureExport, TargetType,
+    },
+    serde::{Deserializable, Serializable},
     testing::{
         TestContext, assert_diagnostic, assert_diagnostic_lines, parse_module, regex, source_file,
     },

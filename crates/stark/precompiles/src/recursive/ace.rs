@@ -91,8 +91,11 @@ mod tests {
     use miden_ace::InputKey;
     use miden_air::precompiles::policy::precompile_pcs_params;
     use miden_air_definitions::precompiles::ace::LMCS_ALIGNMENT;
-    use miden_core::{Felt, Word, crypto::hash::Eidos, field::QuadFelt};
-    use miden_crypto::field::PrimeCharacteristicRing;
+    use miden_core::{
+        Felt, Word,
+        crypto::hash::Eidos,
+        field::{PrimeCharacteristicRing, QuadFelt},
+    };
 
     use super::*;
     use crate::recursive::ace_constants::{

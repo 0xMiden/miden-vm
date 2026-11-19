@@ -21,7 +21,7 @@ use miden_air_definitions::vm::{
     ControllerCols,
     logup::{HasherMsg, SiblingBit, SiblingMsg},
     trace::{
-        MainTrace,
+        MainTrace, RowIndex,
         chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP_FELT,
         log_deferred::{
             HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_STATE_NEW_RANGE, STACK_STMNT_RANGE,
@@ -30,12 +30,14 @@ use miden_air_definitions::vm::{
 };
 use miden_core::{
     Felt, ONE, Word, ZERO,
+    advice::AdviceInputs,
     chiplets::eidos_compression,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     deferred::DEFERRED_AND_INIT_CV,
     mast::{BasicBlockNodeBuilder, MastForest, SplitNodeBuilder},
     operations::{Operation, opcodes},
     program::Program,
+    utils::ToElements,
 };
 use miden_utils_testing::{stack, stack_inputs_from_ints};
 use rstest::rstest;
@@ -44,7 +46,6 @@ use super::super::{
     build_trace_from_ops_with_inputs, build_trace_from_program,
     lookup_harness::{Expectations, InteractionLog},
 };
-use crate::{AdviceInputs, RowIndex, utils::ToElements};
 
 // RESPONSE-SIDE DISPATCH
 // ================================================================================================

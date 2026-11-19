@@ -6,15 +6,17 @@ mod value;
 
 use alloc::{boxed::Box, collections::BTreeSet, string::ToString, sync::Arc, vec::Vec};
 
-use miden_debug_types::{SourceFile, SourceLanguage, SourceManager, Uri};
-use miden_utils_diagnostics::{IntoDiagnostic, Report};
-
 pub use self::{
     cst::parse_inline_masm,
     error::{BinErrorKind, HexErrorKind, LiteralErrorKind, ParsingError},
     value::{IntValue, PushValue, WordValue},
 };
-use crate::{Path, ast, sema};
+use crate::{
+    Path, ast,
+    debuginfo::{SourceFile, SourceLanguage, SourceManager, Uri},
+    diagnostics::{IntoDiagnostic, Report},
+    sema,
+};
 
 /// Maximum allowed nesting depth of parenthesized constant expressions.
 pub(crate) const MAX_CONSTANT_EXPR_NESTING: usize = 256;
@@ -115,8 +117,10 @@ impl ModuleParser {
     where
         P: AsRef<std::path::Path>,
     {
-        use miden_debug_types::SourceManagerExt;
-        use miden_utils_diagnostics::{IntoDiagnostic, WrapErr};
+        use crate::{
+            debuginfo::SourceManagerExt,
+            diagnostics::{IntoDiagnostic, WrapErr},
+        };
 
         let file_path = file_path.as_ref();
         let source_file =
@@ -133,7 +137,7 @@ impl ModuleParser {
         source: impl ToString,
         source_manager: Arc<dyn SourceManager>,
     ) -> Result<Box<ast::Module>, Report> {
-        use miden_debug_types::SourceContent;
+        use crate::debuginfo::SourceContent;
 
         let source = source.to_string();
         let source_file = match path {
@@ -188,7 +192,7 @@ pub fn read_modules_from_root(
     source_manager: Arc<dyn SourceManager>,
     warnings_as_errors: bool,
 ) -> Result<(Box<ast::Module>, Vec<Box<ast::Module>>), Report> {
-    use miden_utils_diagnostics::report;
+    use crate::diagnostics::report;
 
     let root = root.as_ref();
     let root = Arc::<std::path::Path>::from(
@@ -272,7 +276,7 @@ pub fn walk_module_tree<F>(
 where
     F: FnMut(Box<ast::Module>) -> Result<(), Report>,
 {
-    use miden_debug_types::{Spanned, Uri};
+    use crate::debuginfo::{Spanned, Uri};
 
     struct ModuleEntry {
         pub name: ast::Ident,

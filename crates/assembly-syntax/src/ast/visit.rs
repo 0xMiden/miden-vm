@@ -52,12 +52,11 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_debug_types::Span;
-
 use super::immediate::ErrorMsg;
 use crate::{
     Felt,
     ast::*,
+    debuginfo::Span,
     parser::{PushValue, WordValue},
 };
 

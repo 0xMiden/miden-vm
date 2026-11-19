@@ -16,7 +16,6 @@ use super::falcon512_common::{self, FalconVariant, MODULUS, N, PREVERSIONED_NONC
 use super::falcon512_common::{
     FalconFelt, LOG_N, SIG_NONCE_LEN, SIG_POLY_BYTE_LEN, SIG_SERIALIZED_LEN,
 };
-use crate::{Felt, Word};
 
 mod hash_to_point;
 
@@ -38,8 +37,9 @@ pub type SecretKey = falcon512_common::SecretKey<variant::Variant>;
 pub type Signature = falcon512_common::Signature<variant::Variant>;
 
 pub(super) mod variant {
-    use super::{FalconVariant, Felt, Nonce, Polynomial, Word, hash_to_point};
+    use super::{FalconVariant, Nonce, Polynomial, hash_to_point};
     use crate::{
+        Felt, Word,
         dsa::falcon512_common::FalconFelt,
         hash::eidos::{Eidos, domains::FALCON_PUBLIC_KEY},
     };

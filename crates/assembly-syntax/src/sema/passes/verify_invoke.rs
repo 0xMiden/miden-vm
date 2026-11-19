@@ -6,11 +6,10 @@ use alloc::{
 };
 use core::ops::ControlFlow;
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
-
 use crate::{
     PathBuf,
     ast::*,
+    debuginfo::{SourceSpan, Span, Spanned},
     sema::{AnalysisContext, SemanticAnalysisError},
 };
 

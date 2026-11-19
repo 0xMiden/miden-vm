@@ -1,11 +1,12 @@
-use miden_assembly_syntax::{
-    debuginfo::{SourceSpan, Spanned},
-    diagnostics::{RelatedLabel, Report},
-};
 use miden_core::{Felt, WORD_SIZE, operations::Operation::*};
 
 use super::{BasicBlockBuilder, push_u32_value};
-use crate::{ProcedureContext, fmp::push_offset_fmp_sequence};
+use crate::{
+    ProcedureContext,
+    debuginfo::{SourceSpan, Spanned},
+    diagnostics::{RelatedLabel, Report},
+    fmp::push_offset_fmp_sequence,
+};
 
 // INSTRUCTION PARSERS
 // ================================================================================================

@@ -11,21 +11,19 @@ use miden_core::{
     advice::AdviceMap,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
-use miden_utils_diagnostics::Report;
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 use smallvec::SmallVec;
 
 use super::{
-    Constant, Declaration, DocString, EnumType, FunctionType, Import, Item, ItemIndex, Path,
-    Procedure, ProcedureName, QualifiedProcedureName, SubmoduleDecl, TypeAlias, TypeDecl, Variant,
-    Visibility,
+    Constant, Declaration, DocString, EnumType, FunctionType, Import, Item, ItemIndex, Procedure,
+    ProcedureName, QualifiedProcedureName, SubmoduleDecl, TypeAlias, TypeDecl, Variant, Visibility,
 };
 use crate::{
-    PathBuf,
+    ModuleParser, Path, PathBuf,
     ast::{self, Ident},
-    parser::ModuleParser,
+    debuginfo::{SourceFile, SourceManager, SourceSpan, Span, Spanned},
+    diagnostics::Report,
     sema::{LimitKind, SemanticAnalysisError},
 };
 

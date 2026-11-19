@@ -4,11 +4,11 @@ use assert_matches::assert_matches;
 use proptest::prelude::*;
 
 use super::{
-    super::{MerkleError, SimpleSmt, Word},
+    super::{MerkleError, SimpleSmt},
     NodeIndex,
 };
 use crate::{
-    EMPTY_WORD,
+    EMPTY_WORD, Word,
     hash::eidos::Eidos,
     merkle::{
         EmptySubtreeRoots, InnerNodeInfo, MerklePath, MerkleTree, int_to_leaf, int_to_node,

@@ -20,11 +20,9 @@
 use alloc::boxed::Box;
 use core::iter::Peekable;
 
-use miden_field::Word;
-
 use super::Result;
 use crate::{
-    Set,
+    Set, Word,
     merkle::smt::large_forest::{history::HistoryView, root::TreeEntry},
 };
 

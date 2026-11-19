@@ -10,7 +10,7 @@ use super::{
     op_add, op_and, op_eq, op_eqz, op_expacc, op_ext2mul, op_incr, op_inv, op_mul, op_neg, op_not,
     op_or,
 };
-use crate::fast::FastProcessor;
+use crate::FastProcessor;
 
 // ARITHMETIC OPERATIONS
 // --------------------------------------------------------------------------------------------

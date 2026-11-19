@@ -11,9 +11,10 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceProvider, ContextId, ExecutionError,
+    ContextId, ExecutionError, FastProcessor,
+    advice::AdviceProvider,
     errors::OperationError,
-    fast::{FastProcessor, INITIAL_STACK_TOP_IDX, SystemCallState, memory::Memory},
+    fast::{INITIAL_STACK_TOP_IDX, SystemCallState, memory::Memory},
     processor::{HasherInterface, Processor, StackInterface, SystemInterface},
 };
 

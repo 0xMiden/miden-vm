@@ -1,8 +1,9 @@
 use alloc::{string::ToString, vec::Vec};
 
-use miden_crypto::{Word, hash::eidos::EidosDomain};
+use miden_crypto::hash::eidos::EidosDomain;
 
 use crate::{
+    Word,
     chiplets::hasher,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };

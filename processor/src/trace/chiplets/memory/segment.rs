@@ -3,10 +3,10 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_core::WORD_SIZE;
+use miden_core::{Felt, WORD_SIZE, Word};
 
-use super::{Felt, INIT_MEM_VALUE, MemoryError, Word};
-use crate::ContextId;
+use super::INIT_MEM_VALUE;
+use crate::{ContextId, MemoryError};
 
 // MEMORY SEGMENT TRACE
 // ================================================================================================

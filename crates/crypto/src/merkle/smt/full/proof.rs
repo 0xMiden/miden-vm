@@ -1,7 +1,8 @@
 use alloc::string::ToString;
 
-use super::{SMT_DEPTH, SmtLeaf, SmtProofError, SparseMerklePath, Word};
+use super::{SMT_DEPTH, SmtLeaf, SmtProofError, SparseMerklePath};
 use crate::{
+    EMPTY_WORD, Word,
     merkle::InnerNodeInfo,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
@@ -94,7 +95,7 @@ impl SmtProof {
     /// - [`SmtProofError::ConflictingRoots`] if the computed root doesn't match the expected root.
     /// - [`SmtProofError::ValueMismatch`] if the key has a value in the tree (i.e., is not empty).
     pub fn verify_unset(&self, key: &Word, root: &Word) -> Result<(), SmtProofError> {
-        self.verify_presence(key, &super::EMPTY_WORD, root)
+        self.verify_presence(key, &EMPTY_WORD, root)
     }
 
     /// Verifies that a specific key-value pair is not in the tree.

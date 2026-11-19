@@ -3,8 +3,10 @@
 
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
-use miden_assembly_syntax::{
-    Felt, Path, Word,
+use miden_core::{Felt, Word};
+
+use crate::{
+    Path,
     ast::{ModuleIndex, SymbolResolutionError, constants::ConstEvalError},
     debuginfo::{SourceFile, SourceSpan},
     diagnostics::{Diagnostic, RelatedError, RelatedLabel, miette},

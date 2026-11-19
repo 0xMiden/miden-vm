@@ -5,15 +5,12 @@ use miden_core::events::{EventId, SystemEvent};
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
-    BaseHost, Host, SyncHost,
+    BaseHost, BreakReason, FastProcessor, Host, PackageSourceDebugContext, SyncHost,
     advice::AdviceMutation,
-    errors::{
-        MapExecErrWithOpIdx, PackageSourceDebugContext, advice_error_with_context,
-        advice_error_with_package_source_context, event_error_with_context,
-        event_error_with_package_source_context,
-    },
+    advice_error_with_package_source_context,
+    errors::{MapExecErrWithOpIdx, advice_error_with_context, event_error_with_context},
     event::EventError,
-    fast::{BreakReason, FastProcessor},
+    event_error_with_package_source_context,
     host::handlers::TraceError,
 };
 

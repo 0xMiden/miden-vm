@@ -1,6 +1,7 @@
+use miden_core::Felt;
+
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
-    Felt,
     errors::IoError,
     processor::{
         AdviceProviderInterface, MemoryInterface, Processor, StackInterface, SystemInterface,

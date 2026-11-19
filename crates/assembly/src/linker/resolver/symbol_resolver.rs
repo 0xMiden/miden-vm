@@ -1,14 +1,12 @@
 use alloc::sync::Arc;
 
-use miden_assembly_syntax::{
-    ast::{InvocationTarget, InvokeKind, Path, SymbolResolution},
-    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
-    module::ItemInfo,
-};
+use miden_assembly_syntax::module::ItemInfo;
 use miden_core::Word;
 
 use crate::{
-    GlobalItemIndex, LinkerError, ModuleIndex,
+    LinkerError, Path,
+    ast::{GlobalItemIndex, InvocationTarget, InvokeKind, ModuleIndex, SymbolResolution},
+    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
     linker::{
         Linker, SymbolItem,
         namespaces::{NamespaceGraph, ResolvedImports, ResolvedUse},
@@ -105,10 +103,7 @@ impl<'a> SymbolResolver<'a> {
         }
     }
 
-    fn source_file(
-        &self,
-        span: SourceSpan,
-    ) -> Option<Arc<miden_assembly_syntax::debuginfo::SourceFile>> {
+    fn source_file(&self, span: SourceSpan) -> Option<Arc<crate::debuginfo::SourceFile>> {
         self.source_manager().get(span.source_id()).ok()
     }
 

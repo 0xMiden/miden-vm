@@ -1,9 +1,10 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
-use miden_debug_types::{SourceManager, SourceSpan, Span, Spanned};
-
 use super::{SymbolResolution, SymbolResolutionError};
-use crate::ast::{Ident, Import, ItemIndex};
+use crate::{
+    ast::{Ident, Import, ItemIndex},
+    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
+};
 
 /// This trait abstracts over any type which acts as a symbol table, e.g. a [crate::ast::Module].
 ///
@@ -245,10 +246,8 @@ impl LocalSymbolTable {
 mod tests {
     use alloc::sync::Arc;
 
-    use miden_debug_types::DefaultSourceManager;
-
     use super::*;
-    use crate::Path;
+    use crate::{Path, debuginfo::DefaultSourceManager};
 
     #[test]
     fn checked_symbols_rejects_oversized_module() {
