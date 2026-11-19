@@ -70,9 +70,6 @@ pub struct State {
 pub enum InputMode {
     #[default]
     Normal,
-    #[cfg(all(test, feature = "tui"))]
-    Insert,
-    #[cfg(feature = "tui")]
     Command,
 }
 

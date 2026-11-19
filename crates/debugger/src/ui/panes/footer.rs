@@ -189,8 +189,6 @@ impl Pane for FooterPane {
         frame.render_widget(
             Line::from(vec![match state.input_mode {
                 InputMode::Normal => Span::from("[N]"),
-                #[cfg(test)]
-                InputMode::Insert => Span::from("[I]"),
                 InputMode::Command => Span::from("[C]"),
             }])
             .right_aligned(),
