@@ -354,7 +354,7 @@ jobs:
         run: make run-examples
 
   check-features:
-    name: check all feature combinations
+    name: check features (all targets)
     runs-on: warp-ubuntu-latest-x64-8x
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -374,8 +374,44 @@ jobs:
         with:
           tool: cargo-hack
       - uses: ./.github/actions/setup-protoc
-      - name: Check all feature combinations
-        run: make check-features
+      - name: Check all-target features
+        run: scripts/check-features.sh all-targets
+
+  check-library-features:
+    name: check features (libraries without dev dependencies)
+    runs-on: warp-ubuntu-latest-x64-8x
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-hack
+      - uses: ./.github/actions/setup-protoc
+      - name: Check library features without dev dependencies
+        run: scripts/check-features.sh libraries
+
+  check-features-result:
+    # Branch protection requires this check name.
+    name: check all feature combinations
+    needs: [check-features, check-library-features]
+    if: ${{ always() }}
+    runs-on: ubuntu-slim
+    permissions: {}
+    steps:
+      - name: Require both feature sweeps to pass
+        env:
+          ALL_TARGETS_RESULT: ${{ needs.check-features.result }}
+          LIBRARIES_RESULT: ${{ needs.check-library-features.result }}
+        run: test "$ALL_TARGETS_RESULT" = success && test "$LIBRARIES_RESULT" = success
 
   wasm-handlers-host:
     name: wasm event handlers on a wasm32 host
