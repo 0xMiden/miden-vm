@@ -39,7 +39,6 @@ miden-processor.workspace = true
 
 # External dependencies
 thiserror.workspace = true
-tracing.workspace = true
 
 [dev-dependencies]
 miden-air.workspace = true
