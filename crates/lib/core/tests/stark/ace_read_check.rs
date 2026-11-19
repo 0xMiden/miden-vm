@@ -15,7 +15,10 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_crypto::field::Field;
-use miden_processor::{ContextId, DefaultHost, ExecutionOptions, FastProcessor, StackInputs};
+use miden_processor::{
+    ContextId, DefaultHost, Execute, ExecutionOptions, ExecutionRequest, ExecutionSession,
+    StackInputs,
+};
 use miden_stark::{quotient_recomposition_inputs, testing::canonical_domain};
 use miden_utils_testing::Test;
 use rstest::rstest;
@@ -364,8 +367,9 @@ fn assert_fold_coefficients_match_the_proof_order(
 /// The fixture's trace handlers run as usual, so callers can still observe the verifier's stack
 /// at return.
 pub(super) fn execute_and_check(test: &Test, proof_stream: &[u64], claim: &[u64]) -> Vec<usize> {
-    let (processor, ctx) = execute_verifier(test);
-    let read = |addr| processor.memory().read_element(ctx, Felt::from_u32(addr)).unwrap();
+    let (session, ctx) = execute_verifier(test);
+    let state = session.state();
+    let read = |addr| state.get_mem_value(ctx, addr).unwrap_or(Felt::ZERO);
 
     assert_proof_stream_read_sections(&read, proof_stream, claim);
 
@@ -396,32 +400,34 @@ pub(super) fn execute_and_check(test: &Test, proof_stream: &[u64], claim: &[u64]
     order
 }
 
-/// Runs a fixture with one verifier call and returns the processor and verifier's private context.
-pub(super) fn execute_verifier(test: &Test) -> (FastProcessor, ContextId) {
+/// Runs a fixture with one verifier call and returns the halted session and its verifier context.
+pub(super) fn execute_verifier(test: &Test) -> (ExecutionSession<Execute>, ContextId) {
     let (program, ..) = test.compile().expect("the verifier fixture must assemble");
     let mut host = DefaultHost::default().with_library(&CoreLibrary::default()).unwrap();
     for (event, handler) in &test.trace_handlers {
         host.register_trace_handler(event.clone(), handler.clone()).unwrap();
     }
-    let mut processor = FastProcessor::new_with_options(
-        test.stack_inputs,
-        test.advice_inputs.clone(),
-        ExecutionOptions::default(),
-    )
-    .unwrap();
+    let mut session = ExecutionRequest::new(&program)
+        .with_stack_inputs(test.stack_inputs)
+        .with_advice(test.advice_inputs.clone())
+        .execute()
+        .start()
+        .unwrap();
     let mut verifier_context = None;
-    let mut resume = Some(processor.get_initial_resume_context(&program).unwrap());
-    while let Some(next) = resume {
-        resume = processor.step_sync(&mut host, next).expect("recursive verification failed");
-        let ctx = processor.state().ctx();
+    loop {
+        let status = session.step_sync(&mut host).expect("recursive verification failed");
+        let ctx = session.state().ctx();
         // The verifier is the first child context in these fixtures.
         if !ctx.is_root() {
             verifier_context.get_or_insert(ctx);
         }
+        if status.is_finished() {
+            break;
+        }
     }
 
     let ctx = verifier_context.expect("the verifier must enter an isolated context");
-    (processor, ctx)
+    (session, ctx)
 }
 
 #[rstest]
@@ -563,10 +569,11 @@ fn lifted_selectors_match_native_domains_at_every_supported_height(#[case] full_
             ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
         )
         .unwrap();
-        let output = FastProcessor::new(StackInputs::from(caller.map(Felt::new_unchecked)))
+        let output = ExecutionRequest::new(&program)
+            .with_stack_inputs(StackInputs::from(caller.map(Felt::new_unchecked)))
             .with_options(options)
-            .unwrap()
-            .execute_sync(&program, &mut host)
+            .execute()
+            .run_sync(&mut host)
             .unwrap();
         assert_eq!(output.stack.get_num_elements(16), caller.map(Felt::new_unchecked));
         assert_eq!(read_memory_felt(&output, STARK_VARS_PTR - 1), Felt::from_u32(123));

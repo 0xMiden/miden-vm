@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use miden_processor::{DefaultHost, FastProcessor, StackInputs, trace::build_trace};
+use miden_processor::{DefaultHost, ExecutionRequest};
 use miden_vm::Assembler;
 
 use crate::{
@@ -27,13 +27,15 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
         .unwrap_program();
 
     let mut host = DefaultHost::default();
-    let processor = FastProcessor::new(StackInputs::default());
-    let witness = processor
-        .execute_for_proving_sync(&program, &mut host)
-        .map_err(|e| MeasurementError::Execution(format!("{e}")))?;
-    let (vm_witness, _) = witness.into_parts();
-    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
-        .map_err(|e| MeasurementError::TraceBuild(format!("{e}")))?;
+    let witness = ExecutionRequest::new(&program)
+        .record_witness()
+        .run_sync(&mut host)
+        .map_err(|e| MeasurementError::Execution(format!("{e}")))?
+        .witness;
+    let trace = witness
+        .build_trace(miden_vm_stark::memory::default_budget())
+        .map_err(|e| MeasurementError::TraceBuild(format!("{e}")))?
+        .into_vm_trace();
     let summary = trace.trace_len_summary();
     let chiplets = summary.chiplets();
 

@@ -273,14 +273,14 @@ pub struct ExecutionTracer {
     /// [`Self::into_trace_replay`].
     mast_forest_builders: Vec<SparseMastForestBuilder>,
 
-    /// Maps a source forest's `Arc::as_ptr` identity to its [`MastForestId`] in
+    /// Maps a source forest's allocation address to its [`MastForestId`] in
     /// `mast_forest_builders` (and, by construction, the eventual id in
     /// `TraceReplay::mast_forest_store`).
     ///
-    /// Pointer identity is sound here because the trace-generation flow never crosses a process
-    /// boundary: the tracer builds the store and the replay processor consumes it in the same
-    /// run.
-    mast_forest_ids: BTreeMap<*const MastForest, MastForestId>,
+    /// Every sparse builder retains its source `Arc`, keeping allocation addresses distinct and
+    /// stable until recording finishes. The keys are only identities, never dereferenced; storing
+    /// addresses also lets a suspended recording future move between threads.
+    mast_forest_ids: BTreeMap<usize, MastForestId>,
 
     /// The number of rows per core trace fragment.
     fragment_size: usize,
@@ -346,10 +346,10 @@ impl ExecutionTracer {
     }
 
     /// Returns the [`MastForestId`] of `forest` in [`Self::mast_forest_builders`], creating a new
-    /// builder for it on first encounter. Forests are identified by `Arc::as_ptr`.
+    /// builder for it on first encounter. Forests are identified by their `Arc` allocation address.
     #[inline]
     fn forest_id(&mut self, forest: &Arc<MastForest>) -> MastForestId {
-        let key = Arc::as_ptr(forest);
+        let key = Arc::as_ptr(forest).addr();
         if let Some(&id) = self.mast_forest_ids.get(&key) {
             return id;
         }

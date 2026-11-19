@@ -7,7 +7,7 @@ use std::{
 use miden_core_lib::CoreLibrary;
 use miden_vm::{
     Assembler, DefaultHost, ExecutionOptions, ExecutionOutput, ExecutionProof, ExecutionWitness,
-    FastProcessor, HashFunction, Program, Prover, StackInputs, StackOutputs, Verifier, VmTrace,
+    HashFunction, Program, Prover, StackInputs, StackOutputs, Verifier, VmTrace,
     advice::AdviceInputs,
     assembly::{
         DefaultSourceManager, Path as LibraryPath,
@@ -15,7 +15,7 @@ use miden_vm::{
         package::debug_info::{DebugSourceNodeId, PackageDebugInfo},
     },
     internal::InputFile,
-    trace,
+    processor::{ExecutionRequest, trace},
 };
 use serde::{Deserialize, Serialize};
 use tracing::{Subscriber, span};
@@ -111,44 +111,37 @@ fn host_for_fixture(fixture: &Blake3Fixture) -> DefaultHost<DefaultSourceManager
 
 pub fn execute_for_proving(fixture: &Blake3Fixture) -> ExecutionWitness {
     let mut host = host_for_fixture(fixture);
-    let processor = FastProcessor::new_with_options(
-        fixture.stack_inputs,
-        fixture.advice_inputs.clone(),
-        execution_options(),
-    )
-    .expect("processor advice inputs should fit advice map limits");
-    match (fixture.debug_info.as_ref(), fixture.entrypoint_source_node) {
-        (Some(debug_info), Some(entrypoint_source_node)) => processor
-            .execute_for_proving_with_package_debug_info_at_source_node_sync(
-                &fixture.program,
-                debug_info,
-                entrypoint_source_node,
-                &mut host,
-            )
-            .expect("failed to execute Blake3 benchmark"),
-        (Some(debug_info), None) => processor
-            .execute_for_proving_with_package_debug_info_sync(
-                &fixture.program,
-                debug_info,
-                &mut host,
-            )
-            .expect("failed to execute Blake3 benchmark"),
-        (None, _) => processor
-            .execute_for_proving_sync(&fixture.program, &mut host)
-            .expect("failed to execute Blake3 benchmark"),
-    }
+    let source_context = fixture.debug_info.as_ref().map(|debug_info| {
+        miden_vm::PackageSourceDebugContext::new_optional(
+            debug_info,
+            fixture.entrypoint_source_node,
+        )
+    });
+    let execution = ExecutionRequest::new(&fixture.program)
+        .with_stack_inputs(fixture.stack_inputs)
+        .with_advice(fixture.advice_inputs.clone())
+        .with_options(execution_options())
+        .with_source_context(source_context)
+        .record_witness()
+        .prepare()
+        .expect("processor advice inputs should fit advice map limits");
+    let _span = tracing::trace_span!(target: "miden::bench", "record_witness_sync").entered();
+    execution
+        .run_sync(&mut host)
+        .expect("failed to execute Blake3 benchmark")
+        .witness
 }
 
 pub fn execute_program(fixture: &Blake3Fixture) -> ExecutionOutput {
     let mut host = host_for_fixture(fixture);
-    let processor = FastProcessor::new_with_options(
-        fixture.stack_inputs,
-        fixture.advice_inputs.clone(),
-        execution_options(),
-    )
-    .expect("processor advice inputs should fit advice map limits");
-    processor
-        .execute_sync(&fixture.program, &mut host)
+    ExecutionRequest::new(&fixture.program)
+        .with_stack_inputs(fixture.stack_inputs)
+        .with_advice(fixture.advice_inputs.clone())
+        .with_options(execution_options())
+        .execute()
+        .prepare()
+        .expect("processor advice inputs should fit advice map limits")
+        .run_sync(&mut host)
         .expect("failed to execute Blake3 benchmark")
 }
 

@@ -20,7 +20,7 @@ use crate::{
 /// A trait for tracing the execution of a processor.
 ///
 /// Allows for recording different aspects of the processor's execution. For example, the
-/// [`crate::FastProcessor::execute_for_proving`] execution mode needs to build a
+/// [`crate::ExecutionRequest::record_witness`] execution mode needs to build a
 /// private trace replay which records information necessary to build the trace at each clock
 /// cycle.
 ///

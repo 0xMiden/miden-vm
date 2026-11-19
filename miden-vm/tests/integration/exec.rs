@@ -3,12 +3,8 @@ use core::assert_matches;
 
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{ONE, Word, advice::AdviceMap, program::Program};
-use miden_processor::{
-    ExecutionOptions, FastProcessor, StackInputs,
-    advice::{AdviceError, AdviceInputs},
-    mast::MastForest,
-};
-use miden_vm::DefaultHost;
+use miden_processor::{advice::AdviceError, mast::MastForest};
+use miden_vm::{DefaultHost, Processor};
 
 #[test]
 fn advice_map_loaded_before_execution() {
@@ -25,17 +21,10 @@ fn advice_map_loaded_before_execution() {
         .unwrap()
         .unwrap_program();
 
-    // Test `FastProcessor::execute_sync` fails if no advice map provided with the program
+    // Ordinary execution fails if the program has no required advice map.
     let mut host =
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
-    match FastProcessor::new_with_options(
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    )
-    .expect("failed to construct FastProcessor")
-    .execute_sync(&program_without_advice_map, &mut host)
-    {
+    match Processor::new(&program_without_advice_map).execute().run_sync(&mut host) {
         Ok(_) => panic!("Expected error"),
         Err(e) => {
             assert_matches!(
@@ -48,7 +37,7 @@ fn advice_map_loaded_before_execution() {
         },
     }
 
-    // Test `FastProcessor::execute_sync` works if advice map provided with the program
+    // Ordinary execution succeeds when the program provides its required advice map.
     let mast_forest: MastForest = (**program_without_advice_map.mast_forest()).clone();
 
     let key = Word::new([ONE, ONE, ONE, ONE]);
@@ -59,14 +48,7 @@ fn advice_map_loaded_before_execution() {
         Program::new(mast_forest.into(), program_without_advice_map.entrypoint());
 
     let mut host = DefaultHost::default();
-    FastProcessor::new_with_options(
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    )
-    .expect("failed to construct FastProcessor")
-    .execute_sync(&program_with_advice_map, &mut host)
-    .unwrap();
+    Processor::new(&program_with_advice_map).execute().run_sync(&mut host).unwrap();
 }
 
 #[cfg(feature = "internal")]
@@ -77,7 +59,7 @@ fn canonical_deferred_ecdsa4_keccak100_example_executes() {
     use miden_assembly::Linkage;
     use miden_core::{Felt, Word, crypto::hash::Eidos};
     use miden_core_lib::CoreLibrary;
-    use miden_vm::internal::InputFile;
+    use miden_vm::{StackInputs, internal::InputFile};
 
     let program_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("masm-examples/precompiles/deferred_ecdsa4_keccak100")
@@ -130,8 +112,10 @@ fn canonical_deferred_ecdsa4_keccak100_example_executes() {
         .with_library(&core_lib)
         .expect("core library must load into the host");
 
-    FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
-        .expect("processor initialization must succeed")
-        .execute_sync(&program, &mut host)
+    Processor::new(&program)
+        .with_stack_inputs(stack_inputs)
+        .with_advice(advice_inputs)
+        .execute()
+        .run_sync(&mut host)
         .expect("canonical deferred ECDSA/Keccak example must execute");
 }

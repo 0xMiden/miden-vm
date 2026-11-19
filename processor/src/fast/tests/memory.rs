@@ -12,13 +12,17 @@ fn test_memory_word_access_alignment() {
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
 
         // loadw at address 40 is allowed
-        FastProcessor::new(StackInputs::new(&[Felt::from_u32(40)]).unwrap())
-            .execute_sync(&program, &mut host)
+        ExecutionRequest::new(&program)
+            .with_stack_inputs(StackInputs::new(&[Felt::from_u32(40)]).unwrap())
+            .execute()
+            .run_sync(&mut host)
             .unwrap();
 
         // but loadw at address 43 is not allowed
-        let err = FastProcessor::new(StackInputs::new(&[Felt::from_u32(43)]).unwrap())
-            .execute_sync(&program, &mut host)
+        let err = ExecutionRequest::new(&program)
+            .with_stack_inputs(StackInputs::new(&[Felt::from_u32(43)]).unwrap())
+            .execute()
+            .run_sync(&mut host)
             .unwrap_err();
         assert_eq!(
             err.to_string(),
@@ -31,13 +35,17 @@ fn test_memory_word_access_alignment() {
         let program = simple_program_with_ops(vec![Operation::MStoreW]);
 
         // storew at address 40 is allowed
-        FastProcessor::new(StackInputs::new(&[Felt::from_u32(40)]).unwrap())
-            .execute_sync(&program, &mut host)
+        ExecutionRequest::new(&program)
+            .with_stack_inputs(StackInputs::new(&[Felt::from_u32(40)]).unwrap())
+            .execute()
+            .run_sync(&mut host)
             .unwrap();
 
         // but storew at address 43 is not allowed
-        let err = FastProcessor::new(StackInputs::new(&[Felt::from_u32(43)]).unwrap())
-            .execute_sync(&program, &mut host)
+        let err = ExecutionRequest::new(&program)
+            .with_stack_inputs(StackInputs::new(&[Felt::from_u32(43)]).unwrap())
+            .execute()
+            .run_sync(&mut host)
             .unwrap_err();
         assert_eq!(
             err.to_string(),
@@ -60,7 +68,11 @@ fn test_mloadw_success() {
         processor.memory.write_word(ctx, addr, dummy_clk, word_at_addr.into()).unwrap();
 
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
-        let stack_outputs = processor.execute_mut_sync(&program, &mut host).unwrap();
+        let stack_outputs = Execution::from_processor(processor, &program, Execute)
+            .unwrap()
+            .run_sync(&mut host)
+            .unwrap()
+            .stack;
 
         // Memory word[i] maps to stack position i (word[0] at top)
         assert_eq!(
@@ -75,7 +87,11 @@ fn test_mloadw_success() {
         processor.memory.write_word(ctx, addr, dummy_clk, word_at_addr.into()).unwrap();
 
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
-        let stack_outputs = processor.execute_mut_sync(&program, &mut host).unwrap();
+        let stack_outputs = Execution::from_processor(processor, &program, Execute)
+            .unwrap()
+            .run_sync(&mut host)
+            .unwrap()
+            .stack;
 
         assert_eq!(stack_outputs.get_num_elements(16), &vec![ZERO; 16]);
     }
@@ -92,21 +108,23 @@ fn test_mstorew_success() {
 
     // Store the word at address 40
     // Stack layout: [addr, word[0], word[1], word[2], word[3]] with addr at position 0 (top)
-    let mut processor = FastProcessor::new(
-        StackInputs::new(&[
-            addr,
-            word_to_store[0],
-            word_to_store[1],
-            word_to_store[2],
-            word_to_store[3],
-        ])
-        .unwrap(),
-    );
+    let stack_inputs = StackInputs::new(&[
+        addr,
+        word_to_store[0],
+        word_to_store[1],
+        word_to_store[2],
+        word_to_store[3],
+    ])
+    .unwrap();
     let program = simple_program_with_ops(vec![Operation::MStoreW]);
-    processor.execute_mut_sync(&program, &mut host).unwrap();
+    let output = ExecutionRequest::new(&program)
+        .with_stack_inputs(stack_inputs)
+        .execute()
+        .run_sync(&mut host)
+        .unwrap();
 
     // Ensure that the memory was correctly modified
-    assert_eq!(processor.memory.read_word(ctx, addr, clk).unwrap(), word_to_store);
+    assert_eq!(output.memory.read_word(ctx, addr, clk).unwrap(), word_to_store);
 }
 
 #[rstest]
@@ -121,14 +139,17 @@ fn test_mstore_success(#[case] addr: u32, #[case] value_to_store: u32) {
     let value_to_store = Felt::from_u32(value_to_store);
 
     // Store the value at address - addr at top, value at position 1
-    let mut processor =
-        FastProcessor::new(StackInputs::new(&[Felt::from_u32(addr), value_to_store]).unwrap());
+    let stack_inputs = StackInputs::new(&[Felt::from_u32(addr), value_to_store]).unwrap();
     let program = simple_program_with_ops(vec![Operation::MStore]);
-    processor.execute_mut_sync(&program, &mut host).unwrap();
+    let output = ExecutionRequest::new(&program)
+        .with_stack_inputs(stack_inputs)
+        .execute()
+        .run_sync(&mut host)
+        .unwrap();
 
     // Ensure that the memory was correctly modified
     let word_addr = addr - (addr % WORD_SIZE as u32);
-    let word = processor.memory.read_word(ctx, Felt::from_u32(word_addr), clk).unwrap();
+    let word = output.memory.read_word(ctx, Felt::from_u32(word_addr), clk).unwrap();
     assert_eq!(word[addr as usize % WORD_SIZE], value_to_store);
 }
 
@@ -153,7 +174,11 @@ fn test_mload_success(#[case] addr_to_access: u32) {
         .unwrap();
 
     let program = simple_program_with_ops(vec![Operation::MLoad]);
-    let stack_outputs = processor.execute_mut_sync(&program, &mut host).unwrap();
+    let stack_outputs = Execution::from_processor(processor, &program, Execute)
+        .unwrap()
+        .run_sync(&mut host)
+        .unwrap()
+        .stack;
 
     // Ensure that Operation::MLoad correctly reads the value on the stack
     assert_eq!(
@@ -189,7 +214,11 @@ fn test_mstream() {
         .unwrap();
 
     let program = simple_program_with_ops(vec![Operation::MStream]);
-    let stack_outputs = processor.execute_mut_sync(&program, &mut host).unwrap();
+    let stack_outputs = Execution::from_processor(processor, &program, Execute)
+        .unwrap()
+        .run_sync(&mut host)
+        .unwrap()
+        .stack;
 
     // Word at addr 40 goes to positions 0-3, word at addr 44 goes to positions 4-7
     // word[0] at lowest position (top of stack)
@@ -266,10 +295,11 @@ fn test_memory_element_limit_enforced_during_execution() {
 
     // A limit of 3 words' worth of elements is exceeded by the 4th distinct word write.
     let options = ExecutionOptions::default().with_max_memory_elements(3 * WORD_SIZE);
-    let processor =
-        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
-            .unwrap();
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = ExecutionRequest::new(&program)
+        .with_options(options)
+        .execute()
+        .run_sync(&mut host)
+        .unwrap_err();
     assert_matches!(
         err,
         ExecutionError::MemoryError {
@@ -280,11 +310,12 @@ fn test_memory_element_limit_enforced_during_execution() {
 
     // A limit of 4 words' worth of elements accommodates every distinct word the program writes to.
     let options = ExecutionOptions::default().with_max_memory_elements(4 * WORD_SIZE);
-    let mut processor =
-        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
-            .unwrap();
-    processor.execute_mut_sync(&program, &mut host).unwrap();
-    assert_eq!(processor.memory.num_accessed_words(), 4);
+    let output = ExecutionRequest::new(&program)
+        .with_options(options)
+        .execute()
+        .run_sync(&mut host)
+        .unwrap();
+    assert_eq!(output.memory.num_accessed_words(), 4);
 }
 
 /// Regression test: the memory limit must also be applied when set via the `with_options` builder,
@@ -310,7 +341,10 @@ fn test_memory_element_limit_enforced_via_with_options() {
     // The limit is configured through the `new(...).with_options(...)` builder chain.
     let options = ExecutionOptions::default().with_max_memory_elements(3 * WORD_SIZE);
     let processor = FastProcessor::new(StackInputs::default()).with_options(options).unwrap();
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = Execution::from_processor(processor, &program, Execute)
+        .unwrap()
+        .run_sync(&mut host)
+        .unwrap_err();
     assert_matches!(
         err,
         ExecutionError::MemoryError {

@@ -1,7 +1,7 @@
 use miden_core::{Felt, Word, chiplets::eidos_compression};
 use miden_crypto::hash::eidos::{Eidos, domain::EidosDomain, domains::GenericFeltSequenceDomain};
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, StackInputs, ZERO,
+    DefaultHost, ExecutionError, ExecutionOptions, ExecutionRequest, ZERO,
     operation::OperationError,
 };
 use miden_utils_testing::{build_expected_hash, expect_exec_error_matches};
@@ -18,10 +18,10 @@ fn assert_hash_input_error(source: &str, message: &str) {
     let options =
         ExecutionOptions::new(Some(2_048), 64, ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE)
             .unwrap();
-    let error = FastProcessor::new(StackInputs::default())
+    let error = ExecutionRequest::new(&program)
         .with_options(options)
-        .unwrap()
-        .execute_sync(&program, &mut host)
+        .execute()
+        .run_sync(&mut host)
         .unwrap_err();
     match error {
         ExecutionError::OperationError {

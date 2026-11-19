@@ -1,5 +1,5 @@
 use miden_assembly::Assembler;
-use miden_processor::{DefaultHost, ExecutionError, FastProcessor, StackInputs};
+use miden_processor::{DefaultHost, ExecutionError, ExecutionRequest};
 use miden_prover::{CompleteProof, Prover, ProverError};
 
 #[test]
@@ -9,12 +9,9 @@ fn materialized_trace_proving_rechecks_the_provers_memory_budget() {
         .unwrap()
         .unwrap_program();
     let prover = Prover::new().with_max_prover_memory_bytes(0);
-    let record_witness = || {
-        FastProcessor::new(StackInputs::default())
-            .execute_for_proving_sync(&program, &mut DefaultHost::default())
-            .unwrap()
-    };
-    let capture = record_witness().build_trace(prover.trace_budget());
+    let capture = ExecutionRequest::new(&program)
+        .build_trace(prover.trace_budget())
+        .run_sync(&mut DefaultHost::default());
     assert_eq!(prover.trace_budget().limit_bytes(), 0);
     // A zero budget can reject the trace at the row-allocation guard before the peak check.
     assert!(matches!(
@@ -26,9 +23,11 @@ fn materialized_trace_proving_rechecks_the_provers_memory_budget() {
     // Materialize under a larger budget to check that proving re-applies its own limit.
     let recording_prover = Prover::new();
     for complete in [false, true] {
-        let execution_trace = record_witness()
+        let execution_trace = ExecutionRequest::new(&program)
             .build_trace(recording_prover.trace_budget())
-            .expect("trace capture should fit the normal budget");
+            .run_sync(&mut DefaultHost::default())
+            .expect("trace capture should fit the normal budget")
+            .trace;
         let result = if complete {
             prover.prove_full_trace(execution_trace).map(CompleteProof::into_inner)
         } else {

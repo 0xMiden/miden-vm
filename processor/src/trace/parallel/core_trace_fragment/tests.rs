@@ -34,9 +34,9 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, ProcessorState,
+    DefaultHost, ExecutionOptions, ExecutionRequest, ProcessorState,
     event::{NoopEventHandler, TraceError},
-    trace::{VmTrace, build_trace},
+    trace::VmTrace,
 };
 
 // CONSTANTS
@@ -1615,18 +1615,9 @@ fn u32div_sets_all_user_op_helpers() {
 /// fragments, but still not too large so as to not cause memory allocation issues.
 const MAX_FRAGMENT_SIZE: usize = 1 << 20;
 
-/// Builds the trace using FastProcessor and parallel::build_trace, returning the decoder trace
-/// portion.
+/// Builds the trace and returns the decoder columns and unpadded row count.
 fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
     let stack_inputs: Vec<Felt> = stack_inputs.iter().map(|&v| Felt::new_unchecked(v)).collect();
-    let processor = FastProcessor::new_with_options(
-        StackInputs::new(&stack_inputs).unwrap(),
-        AdviceInputs::default(),
-        ExecutionOptions::default()
-            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
-            .unwrap(),
-    )
-    .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
     host.register_handler(EMIT_EVENT, Arc::new(NoopEventHandler)).unwrap();
     host.register_trace_handler(
@@ -1635,9 +1626,7 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
     )
     .unwrap();
 
-    let execution_witness = processor.execute_for_proving_sync(program, &mut host).unwrap();
-    let (vm_witness, _) = execution_witness.into_parts();
-    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
+    let trace = build_buffered_trace(program, StackInputs::new(&stack_inputs).unwrap(), &mut host);
 
     // `core_rows()` is the actual program row count before padding.
     let trace_len = trace.trace_len_summary().core_rows();
@@ -1648,7 +1637,7 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
     (decoder_trace, trace_len)
 }
 
-/// Builds the trace for DYN operations using FastProcessor and parallel::build_trace.
+/// Builds the trace for DYN operations.
 fn build_dyn_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
     // DYN trace uses the same infrastructure
     build_trace_helper(stack_inputs, program)
@@ -1656,19 +1645,7 @@ fn build_dyn_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTr
 
 /// Builds both system and decoder traces for CALL/SYSCALL operations.
 fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usize) {
-    let processor = FastProcessor::new_with_options(
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default()
-            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
-            .unwrap(),
-    )
-    .expect("processor advice inputs should fit advice map limits");
-    let mut host = DefaultHost::default();
-
-    let execution_witness = processor.execute_for_proving_sync(program, &mut host).unwrap();
-    let (vm_witness, _) = execution_witness.into_parts();
-    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
+    let trace = build_buffered_trace(program, StackInputs::default(), &mut DefaultHost::default());
 
     // `core_rows()` is the actual program row count before padding.
     let trace_len = trace.trace_len_summary().core_rows();
@@ -1677,6 +1654,25 @@ fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usi
     let decoder_trace = extract_decoder_trace(&trace);
 
     (sys_trace, decoder_trace, trace_len)
+}
+
+fn build_buffered_trace(
+    program: &Program,
+    stack_inputs: StackInputs,
+    host: &mut DefaultHost,
+) -> VmTrace {
+    let options = ExecutionOptions::default()
+        .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+        .unwrap()
+        .with_overlapped_trace_build(false);
+    ExecutionRequest::new(program)
+        .with_stack_inputs(stack_inputs)
+        .with_options(options)
+        .build_trace(miden_vm_stark::memory::default_budget())
+        .run_sync(host)
+        .unwrap()
+        .trace
+        .into_vm_trace()
 }
 
 /// Extracts the decoder trace columns from the execution trace.

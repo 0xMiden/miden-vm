@@ -40,10 +40,10 @@ pub(crate) struct Stepped<R> {
 /// Steps a processor one cycle at a time and describes each cycle before it runs.
 ///
 /// Unlike [`DebugExecutor`](crate::DebugExecutor) it owns no host and keeps no state for
-/// inspection: the host is passed to every step, which lets a caller that only borrows one,
-/// such as a [`ProgramExecutor`](miden_processor::ProgramExecutor), drive it, synchronously or
-/// not. Besides the processor's own step it only resolves the cycle to source and tracks the
-/// open source nodes, which makes it the cheap way to observe an execution through the engine.
+/// inspection: the host is passed to every step, so callers can drive synchronous or asynchronous
+/// execution with a borrowed host. Besides the processor's own step it resolves the cycle to source
+/// and tracks the open source nodes, which makes it the cheap way to observe an execution through
+/// the engine.
 #[derive(Debug)]
 pub struct Stepper {
     /// The processor being stepped.

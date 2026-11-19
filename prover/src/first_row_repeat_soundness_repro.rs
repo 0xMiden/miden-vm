@@ -11,7 +11,7 @@ use miden_core::{
     program::{Program, StackOutputs},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use miden_processor::{DefaultHost, ExecutionRequest, StackInputs, TraceOutput};
 
 use crate::repro_harness::{ReproTrace, core_row_mut};
 
@@ -42,9 +42,12 @@ fn build_loop_program(body_ops: Vec<Operation>) -> Program {
 fn execute(program: &Program, stack: &[u64]) -> miden_processor::trace::VmTrace {
     let stack = stack.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
     let mut host = DefaultHost::default();
-    let (trace, precompile_witness) = FastProcessor::new(StackInputs::new(&stack).unwrap())
-        .execute_and_build_trace_sync(program, &mut host, &miden_vm_stark::memory::default_budget())
+    let TraceOutput { trace: execution_trace, .. } = ExecutionRequest::new(program)
+        .with_stack_inputs(StackInputs::new(&stack).unwrap())
+        .build_trace(miden_vm_stark::memory::default_budget())
+        .run_sync(&mut host)
         .unwrap();
+    let (trace, precompile_witness) = execution_trace.into_parts();
     assert!(precompile_witness.is_none());
     trace
 }

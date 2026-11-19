@@ -8,9 +8,9 @@ use miden_core::{
     proof::{ExecutionProof, HashFunction},
 };
 use miden_mast_package::Package;
-use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor, Program, ProgramInfo};
+use miden_processor::{DefaultHost, ExecutionRequest, Program, WitnessOutput};
 use miden_utils_testing::{
-    AdviceInputs, Prover, Test,
+    Prover, Test,
     recursive_verifier::{VerifierData, generate_advice_inputs},
     stack_inputs_from_ints,
 };
@@ -400,21 +400,17 @@ fn generate_recursive_proof(
         }
     };
     let stack_inputs = stack_inputs_from_ints(stack_inputs);
-    let advice_inputs = AdviceInputs::default();
     let mut host = DefaultHost::default();
     if let Some(ref kernel_lib) = kernel_lib {
         host.load_library(kernel_lib.mast_forest()).unwrap();
     }
 
-    let processor =
-        FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
-            .unwrap();
-    let witness = processor.execute_for_proving_sync(&program, &mut host).unwrap();
-    let stack_outputs = *witness.claim().stack_outputs();
+    let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+        .with_stack_inputs(stack_inputs)
+        .record_witness()
+        .run_sync(&mut host)
+        .unwrap();
     let proof = Prover::new().with_hash_fn(HashFunction::Eidos).prove(witness).unwrap();
-
-    let program_info = ProgramInfo::from(program);
-    let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
 
     (proof, claim)
 }

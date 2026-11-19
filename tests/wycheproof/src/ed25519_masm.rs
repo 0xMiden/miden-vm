@@ -8,7 +8,7 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_crypto::hash::eidos::Eidos;
-use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor, StackInputs};
+use miden_processor::{DefaultHost, ExecutionRequest};
 use wycheproof_ng_core::TestResult;
 
 /// Run arbitrary-byte vectors through the public MASM ABI without prevalidating their points or
@@ -73,13 +73,12 @@ end
             advice.append_elements(key);
             advice.append_elements(bytes_to_packed_u32_elements(test.sig.as_ref()));
             let mut host = DefaultHost::default().with_library(&library).unwrap();
-            let result = FastProcessor::new_with_options(
-                StackInputs::default(),
-                AdviceInputs::default().with_stack(advice),
-                ExecutionOptions::default(),
-            )
-            .unwrap()
-            .execute_sync(&program, &mut host);
+            let result = ExecutionRequest::new(&program)
+                .with_advice(AdviceInputs::default().with_stack(advice))
+                .execute()
+                .prepare()
+                .unwrap()
+                .run_sync(&mut host);
 
             match test.result {
                 TestResult::Valid => {

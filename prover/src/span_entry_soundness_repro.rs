@@ -9,7 +9,7 @@ use miden_core::{
     program::StackOutputs,
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use miden_processor::{DefaultHost, ExecutionRequest, StackInputs, TraceOutput};
 
 use crate::repro_harness::{ReproTrace, core_row_mut};
 
@@ -67,13 +67,12 @@ fn build_fixture() -> Fixture {
     let stack_inputs = StackInputs::new(&stack_values).unwrap();
 
     let mut host = DefaultHost::default();
-    let (trace, precompile_witness) = FastProcessor::new(stack_inputs)
-        .execute_and_build_trace_sync(
-            &program,
-            &mut host,
-            &miden_vm_stark::memory::default_budget(),
-        )
+    let TraceOutput { trace: execution_trace, .. } = ExecutionRequest::new(&program)
+        .with_stack_inputs(stack_inputs)
+        .build_trace(miden_vm_stark::memory::default_budget())
+        .run_sync(&mut host)
         .unwrap();
+    let (trace, precompile_witness) = execution_trace.into_parts();
     assert!(precompile_witness.is_none());
 
     let main = trace.main_trace();

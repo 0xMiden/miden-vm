@@ -6,8 +6,8 @@ use std::sync::{
 use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
-    BaseHost, ExecutionError, FastProcessor, FutureMaybeSend, Host, LoadedMastForest,
-    MastForestLoadError, ProcessorState, Program, StackInputs, Word,
+    BaseHost, ExecutionError, ExecutionRequest, FastProcessor, FutureMaybeSend, Host,
+    LoadedMastForest, MastForestLoadError, ProcessorState, Program, StackInputs, Word,
     advice::AdviceMutation,
     event::EventError,
     mast::{DenseMastForestBuilder, ExternalNodeBuilder, JoinNodeBuilder},
@@ -74,10 +74,9 @@ async fn async_lookup_loads_once_and_reuses_the_forest() {
     fn assert_send<T>(future: T) -> T {
         future
     }
-    let output =
-        assert_send(FastProcessor::new(StackInputs::default()).execute(&program, &mut host))
-            .await
-            .unwrap();
+    let output = assert_send(ExecutionRequest::new(&program).execute().run(&mut host))
+        .await
+        .unwrap();
     assert_eq!(output.stack.get_element(0), Some(miden_processor::Felt::from_u32(2)));
     assert_eq!(host.calls.load(Ordering::SeqCst), 1);
 }
@@ -86,8 +85,9 @@ async fn async_lookup_loads_once_and_reuses_the_forest() {
 async fn async_lookup_preserves_storage_errors() {
     let (program, mut host) = fixture();
     host.result = Err(std::io::ErrorKind::PermissionDenied);
-    let error = FastProcessor::new(StackInputs::default())
-        .execute_for_proving(&program, &mut host)
+    let error = ExecutionRequest::new(&program)
+        .record_witness()
+        .run(&mut host)
         .await
         .unwrap_err();
     let ExecutionError::MastForestError { error, .. } = error else {
@@ -103,10 +103,7 @@ async fn async_lookup_preserves_storage_errors() {
 async fn absent_forest_reports_procedure_not_found() {
     let (program, mut host) = fixture();
     host.result = Ok(None);
-    let error = FastProcessor::new(StackInputs::default())
-        .execute(&program, &mut host)
-        .await
-        .unwrap_err();
+    let error = ExecutionRequest::new(&program).execute().run(&mut host).await.unwrap_err();
     assert!(matches!(error, ExecutionError::ProcedureNotFound { .. }));
     assert_eq!(host.calls.load(Ordering::SeqCst), 1);
 }

@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_processor::{
-    DefaultHost, ExecutionError, FastProcessor, ProcessorState, StackInputs,
+    DefaultHost, ExecutionError, ExecutionRequest, ProcessorState,
     event::{EventName, TraceError},
 };
 
@@ -26,8 +26,7 @@ fn trace_handler_errors_preserve_the_registered_name() {
     .unwrap();
     let mut recording = RecordingHost::new(&mut host, None, None);
     let error = poll_immediately(
-        FastProcessor::new(StackInputs::default())
-            .execute(&package.unwrap_program(), &mut recording),
+        ExecutionRequest::new(&package.unwrap_program()).execute().run(&mut recording),
     )
     .expect_err("the trace handler must reject execution");
     let ExecutionError::EventError { event_id, event_name, error, .. } = error else {
@@ -66,8 +65,7 @@ fn trace_callbacks_do_not_add_advice_events() {
     let events = EventMutationRecorder::new();
     let mut recording = RecordingHost::new(&mut host, Some(events.clone()), None);
     poll_immediately(
-        FastProcessor::new(StackInputs::default())
-            .execute(&package.unwrap_program(), &mut recording),
+        ExecutionRequest::new(&package.unwrap_program()).execute().run(&mut recording),
     )
     .unwrap();
     assert_eq!(calls.load(Ordering::Relaxed), 1);
