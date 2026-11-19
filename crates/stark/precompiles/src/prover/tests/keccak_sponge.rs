@@ -113,7 +113,7 @@ fn keccak_sponge_msg_encoding_is_bus_distinct_from_memory64() {
 }
 
 #[test]
-fn main_column_layout_matches_sponge_band() {
+fn sponge_layout_and_degree_match_design() {
     // The 40 main witness columns are partitioned into these half-open ranges:
     // - Structural (5): sponge_seq_id through chunk_ptr, 0..5.
     // - Padding state (9): flags, offset bits and their product, and suffix limbs, 5..14.
@@ -135,12 +135,7 @@ fn main_column_layout_matches_sponge_band() {
     assert_eq!(STATE_NEW_BYTES_RANGE, 32..40);
     // Total matches the spec.
     assert_eq!(NUM_MAIN_COLS, 40);
-    // the native source main width agrees.
-    assert_eq!(KeccakSpongeAir.spec().main_width, NUM_MAIN_COLS);
-}
 
-#[test]
-fn lifted_air_validates_and_layout_matches_spec() {
     let air = KeccakSpongeAir;
     // The source schema is the single source of truth that downstream
     // builders consume. Pin every dimension to a documented constant
@@ -159,26 +154,9 @@ fn lifted_air_validates_and_layout_matches_spec() {
     assert_eq!(crate::prover::tests::raw_degrees(&air), ConstraintDegrees { base: 5, ext: 5 },);
     miden_stark::lookup::validate_native(&air, &miden_stark::air::LiftedAir::spec(&air))
         .unwrap_or_else(|err| panic!("KeccakSpongeAir lookup validation failed: {err}"));
-}
+    assert!(layout.periodic_columns.iter().all(|column| column.len() == SPONGE_PERIOD));
 
-#[test]
-fn periodic_columns_match_program() {
-    // the native source periodic data is plumbed through to the
-    // verifier; ensure it returns exactly what `sponge_program()`
-    // produced (same shape, same values).
-    let air = KeccakSpongeAir;
-    let cols = air.spec().periodic_columns;
-    assert_eq!(cols.len(), NUM_PERIODIC_COLS);
-    for c in cols.iter() {
-        assert_eq!(c.len(), SPONGE_PERIOD);
-    }
-}
-
-#[test]
-fn log_quotient_degree_matches_design_target() {
-    // Four XOR fractions share each byte column. The input-handshake/chunk column also closes
-    // within degree five, preserving log_quotient_degree = 2.
-    let air = KeccakSpongeAir;
+    // Four XOR fractions share each byte column; the closing constraints stay within degree five.
     assert_eq!(crate::prover::tests::log_quotient_degree(&air), 2);
 }
 

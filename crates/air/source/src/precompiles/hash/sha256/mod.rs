@@ -208,81 +208,13 @@ impl<LB: lookup::LookupBuilder<F = Felt>> lookup::LookupAir<LB> for Sha256Air {
 mod tests {
     use alloc::vec::Vec;
 
-    use miden_core::{
-        Felt,
-        field::{PrimeCharacteristicRing, QuadFelt},
-    };
-    use miden_stark::{
-        air::{self, AirKernel},
-        lookup,
-    };
-
-    fn native_geometry<A>(air: A, main_width: usize, periodic_columns: usize, base_count: usize)
-    where
-        A: air::ProverAir<QuadFelt, F = Felt, Error = lookup::LookupError>,
-    {
-        // The expected relation comes from the authored source, instantiated with non-Copy trees.
-        // Direct execution is the comparison subject, rather than a source of expected metadata.
-        let captured = air::capture_with::<_, QuadFelt>(&air).unwrap();
-        let descriptor = &captured.descriptor;
-        let spec = descriptor.spec();
-        assert_eq!((spec.main_width, spec.aux_width), (main_width, 4));
-        assert_eq!((spec.num_public_values, spec.num_challenges, spec.num_exports), (0, 2, 1));
-        assert_eq!(spec.preprocessed, None);
-        assert_eq!(spec.periodic_columns.len(), periodic_columns);
-        assert_eq!(spec.max_periodic_length(), if main_width == 28 { 32 } else { 128 });
-        assert_eq!(
-            descriptor.analysis().counts(),
-            air::ConstraintCounts { base: base_count, ext: 5 }
-        );
-        assert_eq!(
-            descriptor.analysis().layout().base_indices(),
-            &(0..base_count).collect::<Vec<_>>()
-        );
-        assert_eq!(
-            descriptor.analysis().layout().ext_indices(),
-            &(base_count..base_count + 5).collect::<Vec<_>>()
-        );
-        assert!(descriptor.analysis().raw_degrees().max() <= 5);
-
-        let main = miden_core::utils::RowMajorMatrix::new(
-            vec![Felt::ZERO; main_width - 1],
-            main_width - 1,
-        );
-        let challenges = [QuadFelt::from_u8(17), QuadFelt::from_u8(31)];
-        let error = air::ProverAir::build_aux_trace(
-            &air,
-            air::AuxTraceInputs {
-                main: &main,
-                preprocessed: None,
-                public_values: &[],
-                statement: &[],
-                challenges: &challenges,
-            },
-        )
-        .unwrap_err();
-        assert_eq!(
-            error,
-            lookup::LookupError::MainWidth {
-                expected: main_width,
-                actual: main_width - 1,
-            }
-        );
-
-        let kernel = air::DirectKernel::new(air).unwrap();
-        let direct =
-            air::capture_from_spec::<Felt, QuadFelt>(spec.as_borrowed(), |frame, inputs, sink| {
-                kernel.bind(inputs).unwrap().eval(frame, sink)
-            })
-            .unwrap();
-        assert_eq!(direct.descriptor.fingerprint(), descriptor.fingerprint());
-    }
+    use super::super::assert_sha_source;
 
     #[test]
-    fn native_sha256_sources_preserve_shape_and_class_order() {
-        native_geometry(super::compression::Sha256CompressionAir, 39, 115, 48);
-        native_geometry(super::io::Sha256IoAir, 28, 23, 58);
-        native_geometry(super::Sha256Air, 40, 138, 100);
+    fn sha256_sources_preserve_constraint_layout_and_lookup_degrees() {
+        assert_sha_source(super::compression::Sha256CompressionAir, 39, 4, 115, 128, 48);
+        assert_sha_source(super::io::Sha256IoAir, 28, 4, 23, 32, 58);
+        assert_sha_source(super::Sha256Air, 40, 4, 138, 128, 100);
         assert_eq!(super::IO_ROW_START, 4064);
         assert_eq!(super::IO_PERIODIC_OFFSET, 115);
         assert_eq!(super::IO_COLUMNS[super::io::COL_ACT], 39);
@@ -291,66 +223,5 @@ mod tests {
         assert_eq!(super::COLUMN_SHAPE, [2; 4]);
         assert_eq!(super::compression::COLUMN_SHAPE, [2; 4]);
         assert_eq!(super::io::COLUMN_SHAPE, [2; 4]);
-    }
-
-    #[test]
-    fn native_sha256_lookup_degrees_match_annotations() {
-        let compression = super::compression::Sha256CompressionAir;
-        lookup::validate_native(&compression, &air::LiftedAir::spec(&compression)).unwrap();
-        let io = super::io::Sha256IoAir;
-        lookup::validate_native(&io, &air::LiftedAir::spec(&io)).unwrap();
-        let composed = super::Sha256Air;
-        lookup::validate_native(&composed, &air::LiftedAir::spec(&composed)).unwrap();
-    }
-
-    fn validate_degrees<A>(air: A)
-    where
-        A: air::LiftedAir<F = Felt>,
-        for<'a> A: lookup::LookupAir<lookup::NativeValidationBuilder<'a>>,
-    {
-        lookup::validate_native(&air, &air::LiftedAir::spec(&air))
-            .expect("SHA-256 lookup degree annotations must match their symbolic expressions");
-    }
-
-    #[test]
-    fn sha256_compression_lookup_degrees_match_annotations() {
-        validate_degrees(super::compression::Sha256CompressionAir);
-    }
-
-    #[test]
-    fn sha256_io_lookup_degrees_match_annotations() {
-        validate_degrees(super::io::Sha256IoAir);
-    }
-
-    #[test]
-    fn sha256_composite_lookup_degrees_match_annotations() {
-        validate_degrees(super::Sha256Air);
-    }
-
-    #[test]
-    fn sha256_constraints_fit_the_deployed_degree_bound() {
-        // Pin the deployed degree independently of the AIRs being measured.
-        let bound = 5;
-        let degrees = [
-            air::capture(&super::compression::Sha256CompressionAir)
-                .unwrap()
-                .descriptor
-                .analysis()
-                .raw_degrees()
-                .max(),
-            air::capture(&super::io::Sha256IoAir)
-                .unwrap()
-                .descriptor
-                .analysis()
-                .raw_degrees()
-                .max(),
-            air::capture(&super::Sha256Air)
-                .unwrap()
-                .descriptor
-                .analysis()
-                .raw_degrees()
-                .max(),
-        ];
-        assert!(degrees.iter().all(|&degree| degree <= bound), "{degrees:?} exceed {bound}");
     }
 }

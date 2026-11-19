@@ -206,10 +206,10 @@ p3-matrix        = { version = "0.8.0", default-features = false }
 p3-maybe-rayon   = { version = "0.8.0", default-features = false }
 p3-merkle-tree   = { version = "0.8.0", default-features = false }
 p3-mersenne-31   = { version = "0.8.0", default-features = false }
+p3-security      = { version = "0.8.0", default-features = false }
 p3-symmetric     = { version = "0.8.0", default-features = false }
 p3-util          = { version = "0.8.0", default-features = false }
 
-libm = "0.2.16"
 loom = "0.7"
 miette = { package = "miden-miette", version = "8.0", default-features = false }
 pretty_assertions = { version = "1.4", default-features = false }

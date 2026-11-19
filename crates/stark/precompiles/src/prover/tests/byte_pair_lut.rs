@@ -244,6 +244,7 @@ fn trace_rows_carry_the_aggregated_relation_multiplicities() {
 
 #[test]
 fn lookup_degree_annotations_match_the_unified_table_layout() {
+    assert_eq!(BytePairLutAir.spec().num_public_values, 0);
     assert_eq!((NUM_MAIN_COLS, NUM_PREPROCESSED_COLS, NUM_AUX_COLS), (7, 5, 4));
     miden_stark::lookup::validate_native(
         &BytePairLutAir,
@@ -351,9 +352,4 @@ fn committed_logup_value_is_the_centered_full_sum() {
     let inverses = batch_multiplicative_inverse(&encodings);
     let expected_sum: QuadFelt = -inverses.iter().copied().sum::<QuadFelt>();
     assert_eq!(QuadFelt::from_usize(TRACE_HEIGHT) * residue, expected_sum);
-}
-
-#[test]
-fn num_public_values_is_zero() {
-    assert_eq!(BytePairLutAir.spec().num_public_values, 0);
 }

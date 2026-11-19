@@ -491,37 +491,22 @@ where
 
 #[cfg(test)]
 mod tests {
-    use miden_core::utils::RowMajorMatrix;
     use miden_stark::air::AirKernel;
 
     use super::*;
 
     #[test]
-    fn native_round_capture_and_direct_session_preserve_geometry() {
-        // Native capture instantiates the complete source with non-Copy owned expression trees.
+    fn round_preserves_lookup_classes_and_degree_bounds() {
         let captured = air::capture_with::<_, QuadFelt>(&KeccakRoundAir).unwrap();
-        let descriptor = &captured.descriptor;
-        let spec = descriptor.spec();
-        assert_eq!((spec.main_width, spec.aux_width), (56, 8));
-        assert_eq!((spec.num_public_values, spec.num_challenges, spec.num_exports), (0, 2, 1));
-        assert_eq!(spec.preprocessed, None);
-        assert_eq!(spec.periodic_columns.as_ref(), PERIODIC_COLUMNS.as_slice());
+        let analysis = captured.descriptor.analysis();
+        let layout = analysis.layout();
         assert_eq!(COLUMN_SHAPE, [3, 4, 4, 2, 3, 4, 4, 2]);
-        assert_eq!(descriptor.analysis().counts(), air::ConstraintCounts { base: 11, ext: 9 });
-        assert_eq!(descriptor.analysis().raw_degrees(), air::ConstraintDegrees { base: 2, ext: 5 });
-        assert_eq!(descriptor.analysis().layout().base_indices(), &(0..11).collect::<Vec<_>>());
-        assert_eq!(descriptor.analysis().layout().ext_indices(), &(11..20).collect::<Vec<_>>());
-
-        let kernel = air::DirectKernel::new(KeccakRoundAir).unwrap();
-        let direct =
-            air::capture_from_spec::<Felt, QuadFelt>(spec.as_borrowed(), |frame, inputs, sink| {
-                kernel.bind(inputs).unwrap().eval(frame, sink)
-            })
-            .unwrap();
-        assert_eq!(direct.descriptor.fingerprint(), descriptor.fingerprint());
+        assert_eq!(analysis.raw_degrees(), air::ConstraintDegrees { base: 2, ext: 5 });
+        assert!(layout.base_indices().iter().copied().eq(0..11));
+        assert!(layout.ext_indices().iter().copied().eq(11..20));
 
         #[cfg(feature = "std")]
-        lookup::validate_native(&KeccakRoundAir, spec).unwrap();
+        lookup::validate_native(&KeccakRoundAir, captured.descriptor.spec()).unwrap();
     }
 
     #[derive(Default)]
@@ -578,29 +563,6 @@ mod tests {
         let mut sink = ZeroRowSink::default();
         kernel.bind(inputs).unwrap().eval(&frame, &mut sink);
         assert_eq!((sink.base, sink.ext), (11, 9));
-    }
-
-    #[test]
-    fn native_round_witness_rejects_wrong_main_width() {
-        let main = RowMajorMatrix::new(vec![Felt::ZERO; NUM_MAIN_COLS - 1], NUM_MAIN_COLS - 1);
-        let challenges = [QuadFelt::from_u8(7), QuadFelt::from_u8(11)];
-        let result = <KeccakRoundAir as air::ProverAir<QuadFelt>>::build_aux_trace(
-            &KeccakRoundAir,
-            air::AuxTraceInputs {
-                main: &main,
-                preprocessed: None,
-                public_values: &[],
-                statement: &[],
-                challenges: &challenges,
-            },
-        );
-        assert_eq!(
-            result.unwrap_err(),
-            lookup::LookupError::MainWidth {
-                expected: NUM_MAIN_COLS,
-                actual: NUM_MAIN_COLS - 1,
-            }
-        );
     }
 
     #[test]

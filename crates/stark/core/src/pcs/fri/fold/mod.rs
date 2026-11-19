@@ -28,7 +28,7 @@ use p3_maybe_rayon::prelude::*;
 /// FRI folding strategy.
 ///
 /// This struct encapsulates different folding arities (2, 4, 8).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub struct FriFold {
     pub(crate) log_arity: u8,
 }

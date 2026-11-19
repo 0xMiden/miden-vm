@@ -2,12 +2,12 @@
 use miden_air::precompiles::policy::{LOG_BLOWUP, LOG_FOLDING_ARITY};
 use miden_core::proof::HashFunction;
 use miden_stark::security::{
-    CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, EIDOS_CHALLENGE_SAMPLE_BITS, fixed,
-    labels::LOOKUP_LABEL,
-    testing::{ProtocolParams, security_report_with_hash},
+    CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, EIDOS_CHALLENGE_SAMPLE_BITS,
+    security_report_with_hash,
 };
+use p3_security::{budget::report::LOOKUP_LABEL, fixed};
 
-use super::{AIR_SHAPE, InstanceShape, LookupShape, SecurityReport, SecurityTerm};
+use super::{AIR_SHAPE, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm};
 
 /// Lookup shape generated from the authored AIR metadata.
 pub const LOOKUP_SHAPE: LookupShape = match AIR_SHAPE.lookup {

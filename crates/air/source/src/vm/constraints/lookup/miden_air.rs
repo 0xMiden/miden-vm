@@ -105,17 +105,8 @@ mod tests {
     };
 
     use crate::vm::{
-        ChipletsAir, EidosCompressionAir, Felt, MidenAir, NUM_EIDOS_COMPRESSION_COLS,
-        NUM_PUBLIC_VALUES,
-        constraints::{
-            columns::{NUM_CHIPLETS_COLS, NUM_CORE_COLS},
-            eidos_compression::lookup::EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE,
-            lookup::{
-                BusId, MIDEN_MAX_MESSAGE_WIDTH, chiplet_air::CHIPLET_COLUMN_SHAPE,
-                main_air::MAIN_COLUMN_SHAPE,
-            },
-        },
-        trace::AUX_TRACE_RAND_CHALLENGES,
+        Felt, MidenAir,
+        constraints::lookup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     };
 
     /// Pin the `BlockHashMsg::End -> Child` boundary collapse: at the root END row, the
@@ -165,74 +156,12 @@ mod tests {
         );
     }
 
-    /// Lookup-structure validation for `CoreAir`.
     #[test]
-    fn core_air_lookup_validates() {
-        let air = MidenAir::Core;
-        let spec = air.spec();
-        assert_eq!(spec.main_width, NUM_CORE_COLS);
-        assert_eq!(spec.preprocessed_width(), 0);
-        assert_eq!(spec.num_public_values, NUM_PUBLIC_VALUES);
-        assert_eq!(spec.periodic_columns.len(), 0);
-        assert_eq!(spec.num_challenges, AUX_TRACE_RAND_CHALLENGES);
-        assert_eq!(spec.num_exports, 1);
-        assert_eq!(air.column_shape().len(), MAIN_COLUMN_SHAPE.len());
-        validate_native(&air, &spec).expect("lookup declarations match their native expressions");
-    }
-
-    /// Lookup-structure validation for `ChipletsAir`.
-    #[test]
-    fn chiplets_air_lookup_validates() {
-        let air = MidenAir::Chiplets;
-        let spec = air.spec();
-        assert_eq!(spec.main_width, NUM_CHIPLETS_COLS);
-        assert_eq!(spec.preprocessed_width(), 0);
-        assert_eq!(spec.num_public_values, 0);
-        assert_eq!(spec.periodic_columns.len(), ChipletsAir.periodic_columns().len());
-        assert_eq!(spec.num_challenges, AUX_TRACE_RAND_CHALLENGES);
-        assert_eq!(spec.num_exports, 1);
-        assert_eq!(air.column_shape().len(), CHIPLET_COLUMN_SHAPE.len());
-        validate_native(&air, &spec).expect("lookup declarations match their native expressions");
-    }
-    #[test]
-    fn eidos_compression_air_lookup_validates() {
-        let air = MidenAir::EIDOS_COMPRESSION;
-        let spec = air.spec();
-        assert_eq!(spec.main_width, NUM_EIDOS_COMPRESSION_COLS);
-        assert_eq!(spec.preprocessed_width(), 0);
-        assert_eq!(spec.num_public_values, 0);
-        assert_eq!(spec.periodic_columns.len(), EidosCompressionAir.spec().periodic_columns.len());
-        assert_eq!(spec.num_challenges, AUX_TRACE_RAND_CHALLENGES);
-        assert_eq!(spec.num_exports, 1);
-        assert_eq!(air.column_shape().len(), EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len());
-        validate_native(&air, &spec).expect("lookup declarations match their native expressions");
-    }
-
-    #[test]
-    fn and8_lookup_air_lookup_validates() {
-        let air = MidenAir::AND8_LOOKUP;
-        let spec = air.spec();
-        assert_eq!(
-            spec.main_width,
-            crate::vm::constraints::and8_lookup::columns::NUM_AND8_LOOKUP_COLS
-        );
-        assert_eq!(
-            spec.preprocessed_width(),
-            crate::vm::constraints::and8_lookup::columns::NUM_AND8_LOOKUP_PREPROCESSED_COLS
-        );
-        assert_eq!(spec.num_public_values, 0);
-        assert_eq!(spec.periodic_columns.len(), 0);
-        assert_eq!(spec.num_challenges, AUX_TRACE_RAND_CHALLENGES);
-        assert_eq!(spec.num_exports, 1);
-        assert_eq!(
-            air.column_shape().len(),
-            crate::vm::constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE.len()
-        );
-        validate_native(&air, &spec).expect("lookup declarations match their native expressions");
-        assert_eq!(
-            crate::vm::constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE,
-            [1, 2, 2, 2]
-        );
+    fn all_vm_lookup_degrees_match_their_declarations() {
+        for air in crate::vm::AIRS {
+            validate_native(&air, &air.spec())
+                .unwrap_or_else(|err| panic!("{air:?} lookup degree mismatch: {err:?}"));
+        }
     }
 
     #[test]

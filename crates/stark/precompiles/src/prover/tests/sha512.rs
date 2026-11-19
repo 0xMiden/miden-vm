@@ -12,10 +12,7 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_crypto::hash::sha2::Sha512;
-use miden_stark::{
-    air::LiftedAir,
-    lookup::{Challenges, ProverLookupBuilder, build_lookup_fractions},
-};
+use miden_stark::{air::LiftedAir, lookup::Challenges};
 
 use crate::prover::{
     hash::sha512::compression::{
@@ -29,6 +26,7 @@ use crate::prover::{
         generate_trace as bpl_trace,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    tests::fold_multiplicities,
 };
 
 const COL_MULT_CANONICAL_XOR: usize = EidosRelation::CanonicalXor.index();
@@ -452,25 +450,6 @@ fn sha512_activity_cannot_restart_in_padded_tail() {
     crate::prover::tests::check_local(Sha512CompressionAir, &main);
 }
 
-fn fold_lookup_balance<A>(
-    air: &A,
-    main: &RowMajorMatrix<Felt>,
-    challenges: &Challenges<QuadFelt>,
-    net: &mut HashMap<QuadFelt, Felt>,
-) where
-    A: miden_stark::air::LiftedAir<F = Felt>,
-    for<'a> A: miden_stark::lookup::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
-{
-    let spec = miden_stark::air::LiftedAir::spec(air);
-    let periodic = spec.periodic_columns.as_ref();
-    let preprocessed = miden_stark::air::LiftedAir::build_preprocessed_trace(air);
-    for &(multiplicity, denominator) in
-        build_lookup_fractions(air, main, preprocessed.as_ref(), periodic, challenges).fractions()
-    {
-        *net.entry(denominator).or_insert(Felt::ZERO) += multiplicity;
-    }
-}
-
 #[test]
 fn sha512_and_bpl_buses_balance_with_input_and_output_boundaries() {
     let state = [0x0123_4567_89ab_cdef; 8];
@@ -487,8 +466,8 @@ fn sha512_and_bpl_buses_balance_with_input_and_output_boundaries() {
         NUM_BUS_IDS,
     );
     let mut net = HashMap::new();
-    fold_lookup_balance(&Sha512CompressionAir, &sha_main, &challenges, &mut net);
-    fold_lookup_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
+    fold_multiplicities(&Sha512CompressionAir, &sha_main, &challenges, &mut net);
+    fold_multiplicities(&BytePairLutAir, &bpl_main, &challenges, &mut net);
 
     let mut boundary = |addr: u32, value: u64, multiplicity: Felt| {
         let msg = Sha512WordMsg {
@@ -535,8 +514,8 @@ fn two_block_bus_residual(mutator: impl FnOnce(&mut RowMajorMatrix<Felt>)) -> us
         NUM_BUS_IDS,
     );
     let mut net = HashMap::new();
-    fold_lookup_balance(&Sha512CompressionAir, &sha_main, &challenges, &mut net);
-    fold_lookup_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
+    fold_multiplicities(&Sha512CompressionAir, &sha_main, &challenges, &mut net);
+    fold_multiplicities(&BytePairLutAir, &bpl_main, &challenges, &mut net);
     let mut boundary = |block_id: usize, addr: u32, value: u64, multiplicity: Felt| {
         let msg = Sha512WordMsg {
             block_id: Felt::from(block_id as u32),

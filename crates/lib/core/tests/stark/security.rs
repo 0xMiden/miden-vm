@@ -277,14 +277,13 @@ fn native_level(descriptor: &SecurityDescriptor) -> u64 {
     use miden_air::vm::config;
     use miden_vm_stark::security;
 
-    let mut params =
-        miden_stark::security::testing::SecurityCase::from(security::proof_security_parameters(
-            &config::pcs_params(),
-            descriptor.log_max_height as u32,
-            0,
-            vm_metadata::COMMITMENT_ALIGNMENT,
-            miden_core::proof::HashFunction::Eidos,
-        ));
+    let mut params = security::proof_security_parameters(
+        &config::pcs_params(),
+        descriptor.log_max_height as u32,
+        0,
+        vm_metadata::COMMITMENT_ALIGNMENT,
+        miden_core::proof::HashFunction::Eidos,
+    );
     params.protocol_params.num_queries = descriptor.num_queries as u32;
     params.protocol_params.query_pow_bits = descriptor.query_pow_bits as u32;
     params.protocol_params.lookup_pow_bits = descriptor.lookup_pow_bits as u32;
@@ -842,7 +841,7 @@ fn pvm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 5]) {
         for inner in 0..inner_bound {
             let masm = levels[(outer * inner_bound + inner) as usize];
 
-            let mut params = miden_stark::security::testing::protocol_params(&pcs_params);
+            let mut params = miden_stark::security::protocol_params(&pcs_params);
             params.num_queries = axes[0].value(outer, inner);
             params.query_pow_bits = axes[1].value(outer, inner);
             params.deep_pow_bits = axes[2].value(outer, inner);
@@ -1091,14 +1090,14 @@ fn proven_estimator_protocol_assumptions_match_both_verifiers() {
         miden_core::proof::HashFunction::Eidos,
     );
     for parameters in [vm, pvm] {
-        assert_eq!(parameters.pcs_params.log_blowup(), 3);
-        assert_eq!(parameters.pcs_params.log_folding_arity(), 2);
-        assert_eq!(parameters.pcs_params.log_final_degree(), 7);
+        assert_eq!(parameters.protocol_params.log_blowup, 3);
+        assert_eq!(parameters.protocol_params.log_folding_arity, 2);
+        assert_eq!(parameters.log_final_degree, 7);
         assert_eq!(parameters.num_ood_points, 2);
         assert_eq!(parameters.air_shape.max_combo, 2);
         assert!(parameters.air_shape.num_quotient_chunks <= 8);
-        assert_eq!(miden_stark::security::OOD_POW_BITS, 0);
+        assert_eq!(parameters.protocol_params.ood_pow_bits, 0);
     }
     assert_eq!(miden_stark::security::EIDOS_CHALLENGE_SAMPLE_BITS >> 16, 126);
-    assert_eq!(miden_stark::security::testing::reference::LDR_M_CAP, 1000);
+    assert_eq!(p3_security::proximity::LDR_M_CAP, 1000);
 }

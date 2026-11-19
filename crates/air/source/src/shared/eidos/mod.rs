@@ -21,6 +21,8 @@ pub(crate) mod periodic;
 pub mod rotation_lookup;
 pub(crate) mod schedule;
 pub(crate) mod selectors;
+#[cfg(test)]
+pub(crate) mod test_utils;
 #[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
 pub mod testing;

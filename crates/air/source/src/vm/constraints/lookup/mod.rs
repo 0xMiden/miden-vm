@@ -18,5 +18,7 @@ pub mod main_air;
 pub mod messages;
 pub mod miden_air;
 pub(crate) mod operations;
+#[cfg(test)]
+mod tests;
 
 pub use messages::{BusId, MIDEN_MAX_MESSAGE_WIDTH};

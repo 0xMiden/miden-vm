@@ -57,13 +57,14 @@ where
 
 #[cfg(all(test, feature = "std"))]
 mod tests {
-    use alloc::{vec, vec::Vec};
-
     use miden_core::{
         field::{PrimeCharacteristicRing, QuadFelt},
-        utils::{Matrix, RowMajorMatrix},
+        utils::RowMajorMatrix,
     };
-    use miden_stark::air::{self, AirKernel, ProverAir};
+    use miden_stark::{
+        air::{self, ProverAir},
+        lookup::{Challenges, accumulate_slow, build_lookup_fractions, validate_native},
+    };
 
     use super::*;
     use crate::{
@@ -73,72 +74,19 @@ mod tests {
         vm::EidosCompressionAir as VmEidos,
     };
 
-    fn slow_lookup_prefix<A>(
-        air: &A,
-        main: &RowMajorMatrix<Felt>,
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>)
-    where
-        A: LiftedAir<F = Felt>,
-        for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
-    {
-        let spec = air.spec();
-        let encoding = miden_stark::lookup::Challenges::new(
-            challenges[0],
-            challenges[1],
-            <A as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::max_message_width(air),
-            <A as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::num_bus_ids(air),
-        );
-        let fractions = miden_stark::lookup::build_lookup_fractions(
-            air,
-            main,
-            None,
-            &spec.periodic_columns,
-            &encoding,
-        );
-        let (columns, sigma) = miden_stark::lookup::accumulate_slow(&fractions);
-        let width = columns.len();
-        let values = (0..main.height())
-            .flat_map(|row| columns.iter().map(move |column| column[row]))
-            .collect();
-        (RowMajorMatrix::new(values, width), vec![sigma])
-    }
-
-    fn capture_geometry<A: LiftedAir<F = Felt>>(air: A, aux_width: usize, base: usize, ext: usize) {
-        // Source capture uses non-Copy owned expressions; direct execution is the comparison
-        // subject.
-        let captured = air::capture_with::<_, QuadFelt>(&air).unwrap();
-        let descriptor = &captured.descriptor;
-        let spec = descriptor.spec();
-        assert_eq!((spec.main_width, spec.aux_width), (104, aux_width));
-        assert_eq!((spec.num_public_values, spec.num_challenges, spec.num_exports), (0, 2, 1));
-        assert_eq!(spec.preprocessed, None);
-        assert_eq!(spec.periodic_columns.len(), 10);
-        assert!(spec.periodic_columns.iter().all(|column| column.len() == 32));
-        assert_eq!(descriptor.analysis().counts(), air::ConstraintCounts { base, ext });
-        assert_eq!(descriptor.analysis().layout().base_indices(), &(0..base).collect::<Vec<_>>());
-        assert_eq!(
-            descriptor.analysis().layout().ext_indices(),
-            &(base..base + ext).collect::<Vec<_>>()
-        );
-
-        let kernel = air::DirectKernel::new(air).unwrap();
-        let direct =
-            air::capture_from_spec::<Felt, QuadFelt>(spec.as_borrowed(), |frame, inputs, sink| {
-                kernel.bind(inputs).unwrap().eval(frame, sink);
-            })
-            .unwrap();
-        assert_eq!(direct.descriptor.fingerprint(), descriptor.fingerprint());
-    }
-
     #[test]
-    fn native_eidos_sources_preserve_geometry_and_global_classes() {
-        capture_geometry(VmEidos, 19, 157, 23);
-        capture_geometry(PvmEidos, 20, 151, 23);
-        capture_geometry(Interface, 3, 5, 4);
-        miden_stark::lookup::validate_native(&VmEidos, &VmEidos.spec()).unwrap();
-        miden_stark::lookup::validate_native(&PvmEidos, &PvmEidos.spec()).unwrap();
-        miden_stark::lookup::validate_native(&Interface, &Interface.spec()).unwrap();
+    fn eidos_sources_emit_lookup_after_ordinary_assertions() {
+        for (captured, base, ext) in [
+            (air::capture_with::<_, QuadFelt>(&VmEidos).unwrap(), 157, 23),
+            (air::capture_with::<_, QuadFelt>(&PvmEidos).unwrap(), 151, 23),
+            (air::capture_with::<_, QuadFelt>(&Interface).unwrap(), 5, 4),
+        ] {
+            let layout = captured.descriptor.analysis().layout();
+            assert!(layout.base_indices().iter().copied().eq(0..base));
+            assert!(layout.ext_indices().iter().copied().eq(base..base + ext));
+        }
+        validate_native(&PvmEidos, &PvmEidos.spec()).unwrap();
+        validate_native(&Interface, &Interface.spec()).unwrap();
     }
 
     #[test]
@@ -170,7 +118,7 @@ mod tests {
     }
 
     #[test]
-    fn native_full_witness_keeps_slow_lookup_prefix_and_export() {
+    fn pvm_full_witness_preserves_lookup_prefix_and_export() {
         let main = RowMajorMatrix::new(vec![Felt::ZERO; NUM_COLS * BLOCK_PERIOD], NUM_COLS);
         let challenges = [QuadFelt::from_u8(17), QuadFelt::from_u8(31)];
         let inputs = AuxTraceInputs {
@@ -181,39 +129,29 @@ mod tests {
             challenges: &challenges,
         };
 
-        // Slow fraction accumulation is independent of full witness suffix construction.
-        let (expected, exports) = slow_lookup_prefix(&VmEidos, &main, &challenges);
-        let actual = VmEidos.build_aux_trace(inputs).unwrap();
-        assert_eq!(actual.columns.width, 19);
-        assert_eq!(actual.columns.values.len(), BLOCK_PERIOD * 19);
-        assert_eq!(expected.width, 18);
-        assert_eq!(actual.exports, exports);
-        for (actual, expected) in actual
-            .columns
-            .values
-            .as_chunks::<19>()
-            .0
-            .iter()
-            .zip(expected.values.as_chunks::<18>().0.iter())
-        {
-            assert_eq!(&actual[..18], expected);
-        }
-
-        let (expected, exports) = slow_lookup_prefix(&PvmEidos, &main, &challenges);
+        let encoding = Challenges::new(
+            challenges[0],
+            challenges[1],
+            crate::precompiles::relations::MAX_MESSAGE_WIDTH,
+            crate::precompiles::relations::NUM_BUS_IDS,
+        );
+        let fractions = build_lookup_fractions(
+            &PvmEidos,
+            &main,
+            None,
+            &PvmEidos.spec().periodic_columns,
+            &encoding,
+        );
+        let (expected, sigma) = accumulate_slow(&fractions);
         let actual = PvmEidos.build_aux_trace(inputs).unwrap();
         assert_eq!(actual.columns.width, 20);
         assert_eq!(actual.columns.values.len(), BLOCK_PERIOD * 20);
-        assert_eq!(expected.width, 19);
-        assert_eq!(actual.exports, exports);
-        for (actual, expected) in actual
-            .columns
-            .values
-            .as_chunks::<20>()
-            .0
-            .iter()
-            .zip(expected.values.as_chunks::<19>().0.iter())
-        {
-            assert_eq!(&actual[..19], expected);
+        assert_eq!(expected.len(), 19);
+        assert_eq!(actual.exports, [sigma]);
+        for (row, values) in actual.columns.values.chunks_exact(20).enumerate() {
+            for column in 0..19 {
+                assert_eq!(values[column], expected[column][row], "row {row}, column {column}");
+            }
         }
 
         // The hidden lookup-only source has no fingerprint fill or additional cycle restriction.

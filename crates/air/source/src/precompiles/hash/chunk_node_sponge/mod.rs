@@ -145,27 +145,9 @@ mod tests {
             assert!(spec.preprocessed.is_none());
             assert_eq!(spec.periodic_columns.len(), periodic);
             assert!(spec.periodic_columns.iter().all(|column| column.len() == 32));
-            assert_eq!(captured.assertions.len(), base + ext);
             let layout = captured.descriptor.analysis().layout();
-            assert_eq!(layout.base_indices(), (0..base).collect::<Vec<_>>().as_slice());
-            assert_eq!(layout.ext_indices(), (base..base + ext).collect::<Vec<_>>().as_slice());
-            assert!(
-                captured.assertions[..base].iter().all(|a| matches!(a, air::Assertion::Base(_)))
-            );
-            assert!(
-                captured.assertions[base..]
-                    .iter()
-                    .all(|a| matches!(a, air::Assertion::Extension(_)))
-            );
-        }
-        #[cfg(feature = "std")]
-        {
-            use air::LiftedAir as _;
-            use miden_stark::lookup::validate_native;
-            validate_native(&ChunkAir, &ChunkAir.spec()).unwrap();
-            validate_native(&KeccakNodeAir, &KeccakNodeAir.spec()).unwrap();
-            validate_native(&sponge::KeccakSpongeAir, &sponge::KeccakSpongeAir.spec()).unwrap();
-            validate_native(&ChunkNodeSpongeAir, &ChunkNodeSpongeAir.spec()).unwrap();
+            assert!(layout.base_indices().iter().copied().eq(0..base));
+            assert!(layout.ext_indices().iter().copied().eq(base..base + ext));
         }
     }
 

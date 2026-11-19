@@ -13,7 +13,6 @@ use super::{
     layout::*,
     lookup::{FOOTER_INPUT_COLUMN, FOOTER_OUTPUT_COLUMN},
     model::initial_working_state,
-    periodic::get_periodic_column_values,
     schedule::{EIDOS_COMPRESSION_IV, G_IDX_DIAG, fused_step_at},
     selectors::EidosCompressionSelectors,
     test_support::{
@@ -24,87 +23,13 @@ use super::{
         generate_felt_trace_block_with_cycle_id,
     },
 };
-use crate::vm::{Felt, MidenAir, constraints::and8_lookup::eidos::normalize};
+use crate::{
+    shared::eidos::test_utils::EidosRowEvaluator,
+    vm::{Felt, MidenAir, constraints::and8_lookup::eidos::normalize},
+};
 
-impl ConstraintEvalBuilder {
-    fn periodic_values(&self) -> &[Felt] {
-        &self.periodic_values
-    }
-
-    fn eval_with(
-        &mut self,
-        evaluate: impl FnOnce(
-            &air::AirFrame<'_, Felt, QuadFelt>,
-            air::UniformInputs<'_, Felt, QuadFelt>,
-            &mut NumericSink<'_>,
-        ),
-    ) {
-        let width = self.main.width;
-        let aux_width = self.aux.width;
-        let frame = air::AirFrame {
-            main: air::Rows {
-                current: &self.main.values[..width],
-                next: &self.main.values[width..2 * width],
-            },
-            preprocessed: air::Rows { current: &[], next: &[] },
-            aux: air::Rows {
-                current: &self.aux.values[..aux_width],
-                next: &self.aux.values[aux_width..2 * aux_width],
-            },
-            periodic: &self.periodic_values,
-            selectors: air::Selectors {
-                first: self.is_first_row,
-                last: self.is_last_row,
-                transition: Felt::ONE - self.is_last_row,
-            },
-        };
-        let inputs = air::UniformInputs {
-            public_values: &[],
-            challenges: &self.randomness,
-            exports: &self.permutation_values,
-        };
-        let mut sink = NumericSink {
-            base: &mut self.evaluations,
-            extension: &mut self.extension_evaluations,
-        };
-        evaluate(&frame, inputs, &mut sink);
-    }
-}
-
-/// Numerical outputs are separate from the borrowed rows and uniform inputs.
-struct NumericSink<'a> {
-    base: &'a mut Vec<Felt>,
-    extension: &'a mut Vec<QuadFelt>,
-}
-
-impl air::LiftedAirBuilder for NumericSink<'_> {
-    type F = Felt;
-    type Expr = Felt;
-    type ExtExpr = QuadFelt;
-    fn emit_base(&mut self, value: Felt, _: air::ConstraintMeta<'_>) {
-        self.base.push(value);
-    }
-    fn emit_ext(&mut self, value: QuadFelt, _: air::ConstraintMeta<'_>) {
-        self.extension.push(value);
-    }
-}
-
-struct ConstraintEvalBuilder {
-    main: RowMajorMatrix<Felt>,
-    aux: RowMajorMatrix<QuadFelt>,
-    randomness: Vec<QuadFelt>,
-    permutation_values: Vec<QuadFelt>,
-    periodic_values: Vec<Felt>,
-    evaluations: Vec<Felt>,
-    extension_evaluations: Vec<QuadFelt>,
-
-    is_first_row: Felt,
-    is_last_row: Felt,
-}
-
-// Keep the independent scalar test builder while passing its row context to the native bodies.
 fn enforce_fused_rows(
-    builder: &mut ConstraintEvalBuilder,
+    builder: &mut EidosRowEvaluator<'_>,
     local: &[Felt],
     next: &[Felt],
     selectors: &EidosCompressionSelectors<Felt>,
@@ -112,7 +37,7 @@ fn enforce_fused_rows(
     builder.eval_with(|frame, _, sink| native_fused_rows(frame, sink, local, next, selectors));
 }
 fn enforce_footer_rows(
-    builder: &mut ConstraintEvalBuilder,
+    builder: &mut EidosRowEvaluator<'_>,
     local: &[Felt],
     next: &[Felt],
     selectors: &EidosCompressionSelectors<Felt>,
@@ -120,13 +45,13 @@ fn enforce_footer_rows(
     builder.eval_with(|frame, _, sink| native_footer_rows(frame, sink, local, next, selectors));
 }
 fn enforce_inactive_footer_input_aux(
-    builder: &mut ConstraintEvalBuilder,
+    builder: &mut EidosRowEvaluator<'_>,
     selectors: &EidosCompressionSelectors<Felt>,
 ) {
     builder.eval_with(|frame, _, sink| native_inactive_input(frame, sink, selectors));
 }
 fn enforce_inactive_footer_output_aux(
-    builder: &mut ConstraintEvalBuilder,
+    builder: &mut EidosRowEvaluator<'_>,
     local: &[Felt],
     selectors: &EidosCompressionSelectors<Felt>,
 ) {
@@ -221,8 +146,7 @@ fn footer_input_aux_is_pinned_outside_footer_three() {
     let row = [Felt::ZERO; NUM_COLS];
 
     for row_idx in 0..BLOCK_PERIOD {
-        let mut builder =
-            ConstraintEvalBuilder::new(&row, &row, periodic_row(row_idx), row_idx, BLOCK_PERIOD);
+        let mut builder = EidosRowEvaluator::new(&row, &row, row_idx, BLOCK_PERIOD, AUX_COLS);
         builder.aux.values[FOOTER_INPUT_COLUMN] = QuadFelt::ONE;
         let selectors = EidosCompressionSelectors::<Felt>::new(builder.periodic_values(), 0);
 
@@ -244,13 +168,7 @@ fn footer_output_aux_is_pinned_outside_aead_footers() {
         for row_idx in 0..BLOCK_PERIOD {
             let mut row = [Felt::ZERO; NUM_COLS];
             row[F_MODE_COL] = mode;
-            let mut builder = ConstraintEvalBuilder::new(
-                &row,
-                &row,
-                periodic_row(row_idx),
-                row_idx,
-                BLOCK_PERIOD,
-            );
+            let mut builder = EidosRowEvaluator::new(&row, &row, row_idx, BLOCK_PERIOD, AUX_COLS);
             builder.aux.values[FOOTER_OUTPUT_COLUMN] = QuadFelt::ONE;
             let selectors = EidosCompressionSelectors::<Felt>::new(builder.periodic_values(), 0);
 
@@ -270,7 +188,7 @@ fn inactive_footer_aux_pins_close_zero_denominator_rows() {
     // Their zero multiplicities therefore make the generic cross-multiplied constraints vacuous.
     // The handwritten inactive-row pins must still reject nonzero auxiliary cells.
     let row = [Felt::ZERO; NUM_COLS];
-    let mut builder = ConstraintEvalBuilder::new(&row, &row, periodic_row(1), 1, BLOCK_PERIOD);
+    let mut builder = EidosRowEvaluator::new(&row, &row, 1, BLOCK_PERIOD, AUX_COLS);
     builder.aux.values[FOOTER_INPUT_COLUMN] = QuadFelt::ONE;
     builder.aux.values[FOOTER_OUTPUT_COLUMN] = QuadFelt::ONE;
 
@@ -290,41 +208,6 @@ fn inactive_footer_aux_pins_close_zero_denominator_rows() {
         &builder.extension_evaluations[NUM_LOGUP_COLS + 1..],
         &[QuadFelt::ONE, QuadFelt::ONE]
     );
-}
-
-impl ConstraintEvalBuilder {
-    fn new(
-        local: &[Felt; NUM_COLS],
-        next: &[Felt; NUM_COLS],
-        periodic_values: Vec<Felt>,
-        row_idx: usize,
-        trace_len: usize,
-    ) -> Self {
-        let mut main = Felt::zero_vec(2 * NUM_COLS);
-        main[..NUM_COLS].copy_from_slice(local);
-        main[NUM_COLS..].copy_from_slice(next);
-
-        Self {
-            main: RowMajorMatrix::new(main, NUM_COLS),
-            aux: RowMajorMatrix::new(vec![QuadFelt::ZERO; 2 * AUX_COLS], AUX_COLS),
-            randomness: vec![QuadFelt::ZERO; 2],
-            permutation_values: vec![QuadFelt::ZERO],
-            periodic_values,
-            evaluations: Vec::new(),
-            extension_evaluations: Vec::new(),
-
-            is_first_row: Felt::from_bool(row_idx == 0),
-            is_last_row: Felt::from_bool(row_idx + 1 == trace_len),
-        }
-    }
-
-    fn into_base_evaluations(self) -> Vec<Felt> {
-        assert!(
-            self.extension_evaluations.is_empty(),
-            "EidosCompression base-constraint tests must not emit extension-field constraints",
-        );
-        self.evaluations
-    }
 }
 
 fn test_block() -> [u32; 16] {
@@ -369,24 +252,15 @@ fn alternate_test_h() -> [u32; 8] {
     test_h().map(|word| word.wrapping_add(0x0010_0010))
 }
 
-fn periodic_row(row_idx: usize) -> Vec<Felt> {
-    get_periodic_column_values()
-        .iter()
-        .map(|column| column[row_idx % column.len()])
-        .collect()
-}
-
 fn eval_fused_row(local: &[Felt; NUM_COLS], next: &[Felt; NUM_COLS], row_idx: usize) -> Vec<Felt> {
-    let mut builder =
-        ConstraintEvalBuilder::new(local, next, periodic_row(row_idx), row_idx, BLOCK_PERIOD);
+    let mut builder = EidosRowEvaluator::new(local, next, row_idx, BLOCK_PERIOD, AUX_COLS);
     let selectors = EidosCompressionSelectors::<Felt>::new(builder.periodic_values(), 0);
     enforce_fused_rows(&mut builder, local, next, &selectors);
     builder.into_base_evaluations()
 }
 
 fn eval_footer_row(local: &[Felt; NUM_COLS], next: &[Felt; NUM_COLS], row_idx: usize) -> Vec<Felt> {
-    let mut builder =
-        ConstraintEvalBuilder::new(local, next, periodic_row(row_idx), row_idx, BLOCK_PERIOD);
+    let mut builder = EidosRowEvaluator::new(local, next, row_idx, BLOCK_PERIOD, AUX_COLS);
     let selectors = EidosCompressionSelectors::<Felt>::new(builder.periodic_values(), 0);
     enforce_footer_rows(&mut builder, local, next, &selectors);
     builder.into_base_evaluations()
@@ -396,8 +270,7 @@ pub(super) fn eval_main_row(trace: &[EidosCompressionFeltRow], row_idx: usize) -
     let next_idx = (row_idx + 1).min(trace.len() - 1);
     let local = &trace[row_idx];
     let next = &trace[next_idx];
-    let mut builder =
-        ConstraintEvalBuilder::new(local, next, periodic_row(row_idx), row_idx, trace.len());
+    let mut builder = EidosRowEvaluator::new(local, next, row_idx, trace.len(), AUX_COLS);
     let selectors = EidosCompressionSelectors::<Felt>::new(builder.periodic_values(), 0);
     enforce_fused_rows(&mut builder, local, next, &selectors);
     enforce_footer_rows(&mut builder, local, next, &selectors);
@@ -1210,18 +1083,13 @@ pub(super) fn fingerprint_evaluations(
     (0..rows.len())
         .map(|row| {
             let next = (row + 1) % rows.len();
-            let mut builder = ConstraintEvalBuilder::new(
-                &rows[row],
-                &rows[next],
-                periodic_row(row),
-                row,
-                rows.len(),
-            );
+            let mut builder =
+                EidosRowEvaluator::new(&rows[row], &rows[next], row, rows.len(), AUX_COLS);
             builder.aux.values[..AUX_COLS]
                 .copy_from_slice(&aux.values[row * AUX_COLS..(row + 1) * AUX_COLS]);
             builder.aux.values[AUX_COLS..]
                 .copy_from_slice(&aux.values[next * AUX_COLS..(next + 1) * AUX_COLS]);
-            builder.randomness[1] = rho;
+            builder.challenges[1] = rho;
             builder.eval_with(|frame, inputs, sink| {
                 super::fingerprint::enforce_register_constraints(
                     frame,

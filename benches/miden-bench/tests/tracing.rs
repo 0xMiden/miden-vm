@@ -12,7 +12,9 @@ fn run_benchmark(rust_log: Option<&str>) -> Output {
 #[test]
 fn rust_log_overrides_are_validated() {
     let default = run_benchmark(None);
-    assert!(default.status.success(), "{}", String::from_utf8_lossy(&default.stderr));
+    let stderr = String::from_utf8_lossy(&default.stderr);
+    assert!(default.status.success(), "{stderr}");
+    assert!(stderr.contains("2^8 = 256 rows"), "{stderr}");
 
     let invalid = run_benchmark(Some("miden::vm::prove=invalid"));
     assert!(!invalid.status.success());

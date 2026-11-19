@@ -47,7 +47,7 @@ use crate::domain::LiftedDomain;
 /// [`num_rounds`](Self::num_rounds), [`final_poly_degree`](Self::final_poly_degree),
 /// [`FriPolys::new`](prover::FriPolys::new), and
 /// [`FriOracle::new`](verifier::FriOracle::new).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct FriParams {
     /// The FRI folding strategy.
     ///

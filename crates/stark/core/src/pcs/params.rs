@@ -31,7 +31,7 @@ pub enum PcsParamsError {
 ///
 /// Constructed via [`PcsParams::new`], which validates all parameters.
 /// Internal sub-parameters are accessible to crate-internal code only.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub struct PcsParams {
     /// Log₂ of the LDE blowup factor (LDE domain size / trace size).
     ///

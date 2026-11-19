@@ -1029,14 +1029,8 @@ mod tests {
     use super::{COL_ACT, COL_EXPR_PTR, COL_IDX, EcMsmAir, NUM_MAIN_COLS};
 
     #[test]
-    fn native_msm_capture_keeps_complete_shape_and_order() {
-        // The actual twelve-column callbacks are instantiated with non-Copy expressions.
+    fn msm_preserves_lookup_column_shape_and_assertion_order() {
         let captured = air::capture_with::<_, QuadFelt>(&EcMsmAir).unwrap();
-        let spec = captured.descriptor.spec();
-        assert_eq!((spec.main_width, spec.aux_width), (35, 12));
-        assert_eq!((spec.num_public_values, spec.num_challenges, spec.num_exports), (0, 2, 1));
-        assert!(spec.preprocessed.is_none());
-        assert!(spec.periodic_columns.is_empty());
         assert_eq!(
             <EcMsmAir as lookup::LookupAir<
                 lookup::ProverLookupBuilder<'_, Felt, QuadFelt>,
@@ -1044,16 +1038,10 @@ mod tests {
             &[2; 12],
         );
         let layout = captured.descriptor.analysis().layout();
-        assert_eq!(layout.base_indices(), (0..54).collect::<Vec<_>>().as_slice());
-        assert_eq!(layout.ext_indices(), (54..67).collect::<Vec<_>>().as_slice());
-        assert!(captured.assertions[..54].iter().all(|a| matches!(a, air::Assertion::Base(_))));
-        assert!(
-            captured.assertions[54..]
-                .iter()
-                .all(|a| matches!(a, air::Assertion::Extension(_)))
-        );
+        assert!(layout.base_indices().iter().copied().eq(0..54));
+        assert!(layout.ext_indices().iter().copied().eq(54..67));
         #[cfg(feature = "std")]
-        miden_stark::lookup::validate_native(&EcMsmAir, spec).unwrap();
+        lookup::validate_native(&EcMsmAir, captured.descriptor.spec()).unwrap();
     }
 
     #[derive(Default)]

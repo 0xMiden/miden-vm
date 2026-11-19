@@ -227,87 +227,15 @@ impl<LB: lookup::LookupBuilder<F = Felt>> lookup::LookupAir<LB> for Sha512Air {
 mod tests {
     use alloc::vec::Vec;
 
-    use miden_core::{
-        Felt,
-        field::{PrimeCharacteristicRing, QuadFelt},
-    };
-    use miden_stark::{
-        air::{self, AirKernel},
-        lookup::{self, Deg},
-    };
+    use miden_stark::lookup::Deg;
 
-    fn native_geometry<A>(
-        air: A,
-        main_width: usize,
-        aux_width: usize,
-        periodic_columns: usize,
-        max_period: usize,
-        base_count: usize,
-    ) where
-        A: air::ProverAir<QuadFelt, F = Felt, Error = lookup::LookupError>,
-    {
-        // Capture the authored source with owned non-Copy trees before inspecting direct execution.
-        let captured = air::capture_with::<_, QuadFelt>(&air).unwrap();
-        let descriptor = &captured.descriptor;
-        let spec = descriptor.spec();
-        let ext_count = aux_width + 1;
-        assert_eq!((spec.main_width, spec.aux_width), (main_width, aux_width));
-        assert_eq!((spec.num_public_values, spec.num_challenges, spec.num_exports), (0, 2, 1));
-        assert_eq!(spec.preprocessed, None);
-        assert_eq!(spec.periodic_columns.len(), periodic_columns);
-        assert_eq!(spec.max_periodic_length(), max_period);
-        assert_eq!(
-            descriptor.analysis().counts(),
-            air::ConstraintCounts { base: base_count, ext: ext_count }
-        );
-        assert_eq!(
-            descriptor.analysis().layout().base_indices(),
-            &(0..base_count).collect::<Vec<_>>()
-        );
-        assert_eq!(
-            descriptor.analysis().layout().ext_indices(),
-            &(base_count..base_count + ext_count).collect::<Vec<_>>()
-        );
-        assert!(descriptor.analysis().raw_degrees().max() <= 5);
-
-        let main = miden_core::utils::RowMajorMatrix::new(
-            vec![Felt::ZERO; main_width - 1],
-            main_width - 1,
-        );
-        let challenges = [QuadFelt::from_u8(17), QuadFelt::from_u8(31)];
-        let error = air::ProverAir::build_aux_trace(
-            &air,
-            air::AuxTraceInputs {
-                main: &main,
-                preprocessed: None,
-                public_values: &[],
-                statement: &[],
-                challenges: &challenges,
-            },
-        )
-        .unwrap_err();
-        assert_eq!(
-            error,
-            lookup::LookupError::MainWidth {
-                expected: main_width,
-                actual: main_width - 1,
-            }
-        );
-
-        let kernel = air::DirectKernel::new(air).unwrap();
-        let direct =
-            air::capture_from_spec::<Felt, QuadFelt>(spec.as_borrowed(), |frame, inputs, sink| {
-                kernel.bind(inputs).unwrap().eval(frame, sink)
-            })
-            .unwrap();
-        assert_eq!(direct.descriptor.fingerprint(), descriptor.fingerprint());
-    }
+    use super::super::assert_sha_source;
 
     #[test]
-    fn native_sha512_sources_preserve_shape_and_class_order() {
-        native_geometry(super::compression::Sha512CompressionAir, 53, 7, 128, 128, 54);
-        native_geometry(super::io::Sha512IoAir, 37, 6, 23, 64, 68);
-        native_geometry(super::Sha512Air, 54, 7, 151, 128, 116);
+    fn sha512_sources_preserve_constraint_layout_and_lookup_degrees() {
+        assert_sha_source(super::compression::Sha512CompressionAir, 53, 7, 128, 128, 54);
+        assert_sha_source(super::io::Sha512IoAir, 37, 6, 23, 64, 68);
+        assert_sha_source(super::Sha512Air, 54, 7, 151, 128, 116);
         assert_eq!(super::IO_ROW_START, 4032);
         assert_eq!(super::IO_PERIODIC_OFFSET, 128);
         assert_eq!(super::IO_COLUMNS[super::io::COL_ACT], 53);
@@ -318,39 +246,5 @@ mod tests {
         assert_eq!(super::COLUMN_SHAPE, [2, 3, 2, 2, 2, 2, 2]);
         // The seventh shared column carries only compression interactions.
         assert_eq!(super::io::lookup_column_degree(6, true), Deg { v: 0, u: 0 });
-    }
-
-    #[test]
-    fn native_sha512_lookup_degrees_match_annotations() {
-        let compression = super::compression::Sha512CompressionAir;
-        lookup::validate_native(&compression, &air::LiftedAir::spec(&compression)).unwrap();
-        let io = super::io::Sha512IoAir;
-        lookup::validate_native(&io, &air::LiftedAir::spec(&io)).unwrap();
-        let composed = super::Sha512Air;
-        lookup::validate_native(&composed, &air::LiftedAir::spec(&composed)).unwrap();
-    }
-
-    fn validate_degrees<A>(air: A)
-    where
-        A: air::LiftedAir<F = Felt>,
-        for<'a> A: lookup::LookupAir<lookup::NativeValidationBuilder<'a>>,
-    {
-        lookup::validate_native(&air, &air::LiftedAir::spec(&air))
-            .expect("SHA-512 lookup degree annotations must match their symbolic expressions");
-    }
-
-    #[test]
-    fn sha512_compression_lookup_degrees_match_annotations() {
-        validate_degrees(super::compression::Sha512CompressionAir);
-    }
-
-    #[test]
-    fn sha512_io_lookup_degrees_match_annotations() {
-        validate_degrees(super::io::Sha512IoAir);
-    }
-
-    #[test]
-    fn sha512_composite_lookup_degrees_match_annotations() {
-        validate_degrees(super::Sha512Air);
     }
 }

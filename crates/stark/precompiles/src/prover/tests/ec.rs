@@ -14,7 +14,7 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_precompiles::CurveId;
-use miden_stark::lookup::{Challenges, ProverLookupBuilder, build_lookup_fractions};
+use miden_stark::lookup::Challenges;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::prover::{
@@ -30,6 +30,7 @@ use crate::prover::{
     math::{U256, from_hex},
     primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    tests::fold_multiplicities,
     uint::{
         UintRequire, UintStoreAir,
         add::trace::UintAddRequires,
@@ -43,26 +44,6 @@ use crate::prover::{
 
 fn rand_qf(rng: &mut impl Rng) -> QuadFelt {
     QuadFelt::new([Felt::from(rng.random::<u32>()), Felt::from(rng.random::<u32>())])
-}
-
-/// Accumulate one chiplet's net per-denom LogUp multiplicity. Mirrors
-/// `tests::uint::fold_balance`.
-fn fold_balance<A>(
-    air: &A,
-    main: &RowMajorMatrix<Felt>,
-    challenges: &Challenges<QuadFelt>,
-    net: &mut HashMap<QuadFelt, Felt>,
-) where
-    A: miden_stark::air::LiftedAir<F = Felt>,
-    for<'a> A: miden_stark::lookup::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
-{
-    let spec = miden_stark::air::LiftedAir::spec(air);
-    let periodic = spec.periodic_columns.as_ref();
-    let preprocessed = miden_stark::air::LiftedAir::build_preprocessed_trace(air);
-    let fractions = build_lookup_fractions(air, main, preprocessed.as_ref(), periodic, challenges);
-    for &(multiplicity, denom) in fractions.fractions() {
-        *net.entry(denom).or_insert(Felt::ZERO) += multiplicity;
-    }
 }
 
 /// A curve fixture: the uint store holds the modulus + params +
@@ -148,11 +129,11 @@ fn residual(
     let [alpha, beta] = [rand_qf(rng), rand_qf(rng)];
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let mut net: HashMap<QuadFelt, Felt> = HashMap::new();
-    fold_balance(&EcGroupsAir, groups, &challenges, &mut net);
-    fold_balance(&EcPointStoreAir, points, &challenges, &mut net);
-    fold_balance(&UintMulAir, &t.mul, &challenges, &mut net);
-    fold_balance(&UintStoreAir, &t.store, &challenges, &mut net);
-    fold_balance(&BytePairLutAir, &t.bpl, &challenges, &mut net);
+    fold_multiplicities(&EcGroupsAir, groups, &challenges, &mut net);
+    fold_multiplicities(&EcPointStoreAir, points, &challenges, &mut net);
+    fold_multiplicities(&UintMulAir, &t.mul, &challenges, &mut net);
+    fold_multiplicities(&UintStoreAir, &t.store, &challenges, &mut net);
+    fold_multiplicities(&BytePairLutAir, &t.bpl, &challenges, &mut net);
     net.values().filter(|m| **m != Felt::ZERO).count()
 }
 

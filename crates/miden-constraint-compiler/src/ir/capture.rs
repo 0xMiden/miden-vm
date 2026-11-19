@@ -409,23 +409,6 @@ mod tests {
     fn kernel_capture_prepares_and_evaluates_without_source_forwarding() {
         struct Kernel(AirDescriptor<Felt>);
 
-        impl air::LiftedAir for Kernel {
-            type F = Felt;
-
-            fn spec(&self) -> air::AirSpec<'_, Felt> {
-                self.0.spec().as_borrowed()
-            }
-
-            fn eval<S: air::LiftedAirBuilder<F = Felt>>(
-                &self,
-                _frame: &air::Frame<'_, S>,
-                _inputs: air::Inputs<'_, S>,
-                _sink: &mut S,
-            ) {
-                panic!("kernel comparison must not capture the source forwarding method")
-            }
-        }
-
         impl AirKernel for Kernel {
             type F = Felt;
             type Prepared<B: Algebra<Felt>, E: Algebra<B>> = bool;
@@ -453,9 +436,10 @@ mod tests {
             }
         }
 
-        let kernel = Kernel(air::capture_with::<_, EF>(&Source).unwrap().descriptor);
+        // This kernel has no LiftedAir implementation, so recapture must execute the kernel.
         let mut builder = GraphBuilder::new();
         let (source, source_descriptor) = capture_native_into(&Source, &mut builder).unwrap();
+        let kernel = Kernel(source_descriptor.clone());
         let (prepared, observed_descriptor) =
             capture_kernel_native_into(&kernel, &mut builder).unwrap();
         assert_same(&source, &prepared);

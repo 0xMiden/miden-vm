@@ -6,7 +6,6 @@
 
 #### Changes
 
-- [BREAKING] Own Miden security estimation in `miden-stark` and remove the vendored `p3-security` dependency. `ProofSecurityParameters` stores validated `pcs_params` in place of `protocol_params` and `log_final_degree`; report and security-level methods remain available. Synthetic estimator inputs move to `miden_stark::security::testing`.
 - [BREAKING] Separate authored native AIR equations, fallible auxiliary witnesses and prepared execution under `miden_stark::air`. `MultiAir` now groups `AirKernel` values. Fixed setup construction returns `Result<Option<_>>`, and verifiers own an optional trusted `SetupIdentity`. Fixed heights are declared in `AirSpec`; the combined builder/preparation interfaces and legacy generated ABI are retired.
 - Retired the batch-STARK comparison backend, upstream Keccak/Blake3 AIR workloads and upstream Poseidon2 AIR fixture wrapper. Native profiling, retained benchmarks and commitment hash choices remain available; see [profiling entrypoints](benches/miden-bench/README.md).
 

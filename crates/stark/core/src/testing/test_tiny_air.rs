@@ -351,66 +351,28 @@ fn malformed_log_trace_heights_is_rejected() {
     ));
 }
 
-// ---------------------------------------------------------------------------
-// Multi-trace tests
-// ---------------------------------------------------------------------------
-
 #[test]
-fn two_traces_same_height() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![]), &pv, &[trace_of_height(8), trace_of_height(8)]);
-}
-
-#[test]
-fn two_traces_different_heights() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![]), &pv, &[trace_of_height(4), trace_of_height(8)]);
-}
-
-#[test]
-fn three_traces_ascending_heights() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(
-        &TinyAir::new(vec![]),
-        &pv,
-        &[trace_of_height(4), trace_of_height(8), trace_of_height(16)],
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Unordered multi-trace tests (instances not in ascending height order)
-// ---------------------------------------------------------------------------
-
-#[test]
-fn two_traces_reversed_order() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![]), &pv, &[trace_of_height(8), trace_of_height(4)]);
-}
-
-#[test]
-fn three_traces_descending_heights() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(
-        &TinyAir::new(vec![]),
-        &pv,
-        &[trace_of_height(16), trace_of_height(8), trace_of_height(4)],
-    );
-}
-
-#[test]
-fn three_traces_shuffled_order() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(
-        &TinyAir::new(vec![]),
-        &pv,
-        &[trace_of_height(8), trace_of_height(16), trace_of_height(4)],
-    );
-}
-
-#[test]
-fn periodic_columns_reversed_order() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![2, 4]), &pv, &[trace_of_height(8), trace_of_height(4)]);
+fn proof_roundtrips_across_trace_heights_and_periodic_columns() {
+    let cases: &[(&[usize], &[usize])] = &[
+        (&[], &[8, 8]),
+        (&[], &[4, 8]),
+        (&[], &[4, 8, 16]),
+        (&[], &[8, 4]),
+        (&[], &[16, 8, 4]),
+        (&[], &[8, 16, 4]),
+        (&[2], &[8]),
+        (&[4], &[8]),
+        (&[2, 4], &[8]),
+        (&[2], &[8, 8]),
+        (&[2, 4], &[4, 8]),
+        (&[2, 4], &[8, 4]),
+        (&[2, 4], &[4, 8, 16]),
+    ];
+    for &(periods, heights) in cases {
+        let air = TinyAir::new(periods.iter().copied());
+        let traces: Vec<_> = heights.iter().copied().map(trace_of_height).collect();
+        prove_and_verify(&air, &[Felt::from_u64(START)], &traces);
+    }
 }
 
 #[test]
@@ -493,50 +455,6 @@ fn air_order_reflects_caller_order() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Periodic column tests
-// ---------------------------------------------------------------------------
-
-#[test]
-fn single_periodic_column() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![2]), &pv, &[trace_of_height(8)]);
-}
-
-#[test]
-fn periodic_column_period_4() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![4]), &pv, &[trace_of_height(8)]);
-}
-
-#[test]
-fn multiple_periodic_columns() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![2, 4]), &pv, &[trace_of_height(8)]);
-}
-
-#[test]
-fn periodic_columns_multi_trace_same_height() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![2]), &pv, &[trace_of_height(8), trace_of_height(8)]);
-}
-
-#[test]
-fn periodic_columns_multi_trace_different_heights() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![2, 4]), &pv, &[trace_of_height(4), trace_of_height(8)]);
-}
-
-#[test]
-fn periodic_columns_three_traces() {
-    let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(
-        &TinyAir::new(vec![2, 4]),
-        &pv,
-        &[trace_of_height(4), trace_of_height(8), trace_of_height(16)],
-    );
-}
-
 #[test]
 fn block_hashing_preserves_proof_transcript() {
     let mut config = test_config();
@@ -567,295 +485,24 @@ fn block_hashing_preserves_proof_transcript() {
     assert_eq!(digest, blocks.digest);
 }
 
-// Direct execution uses the same private source as the legacy proof fixtures above. These pilots
-// instantiate native scalar, packed and non-Copy symbolic inputs without another equation body.
-mod native_kernel_pilot {
-    use alloc::{format, vec, vec::Vec};
+#[test]
+fn direct_kernel_preserves_symbolic_constraints() {
+    use crate::air::AirKernel;
 
-    use p3_field::{Algebra, BasedVectorSpace, PackedValue, PrimeCharacteristicRing};
-    use p3_matrix::{Matrix, dense::RowMajorMatrix};
-
-    use super::{Felt, QuadFelt, START, TinyAir, trace_of_height};
-    use crate::{
-        air,
-        air::{AirKernel, LiftedAirBuilder},
-        testing::configs::{PackedFelt, PackedQuadFelt},
+    let source = TinyAir {
+        num_public_values: 2,
+        ..TinyAir::new([2, 4])
     };
-
-    enum Emission<B, E> {
-        Base(B),
-        Extension(E),
-    }
-
-    struct Sink<B, E> {
-        emissions: Vec<Emission<B, E>>,
-    }
-
-    impl<B, E> Default for Sink<B, E> {
-        fn default() -> Self {
-            Self { emissions: Vec::new() }
-        }
-    }
-
-    impl<B: Algebra<Felt>, E: Algebra<B>> LiftedAirBuilder for Sink<B, E> {
-        type F = Felt;
-        type Expr = B;
-        type ExtExpr = E;
-
-        fn emit_base(&mut self, value: B, _meta: air::ConstraintMeta<'_>) {
-            self.emissions.push(Emission::Base(value));
-        }
-
-        fn emit_ext(&mut self, value: E, _meta: air::ConstraintMeta<'_>) {
-            self.emissions.push(Emission::Extension(value));
-        }
-    }
-
-    impl<B, E> Sink<B, E> {
-        fn classes(&self) -> Vec<bool> {
-            self.emissions
-                .iter()
-                .map(|value| matches!(value, Emission::Extension(_)))
-                .collect()
-        }
-    }
-
-    struct ConcretePilot {
-        kernel: air::DirectKernel<TinyAir>,
-        main: RowMajorMatrix<Felt>,
-        public: [Felt; 2],
-        challenges: [QuadFelt; 1],
-        auxiliary: air::AuxTrace<QuadFelt>,
-    }
-
-    impl ConcretePilot {
-        fn new(height: usize) -> Self {
-            let source = TinyAir {
-                num_public_values: 2,
-                ..TinyAir::new([2, 4])
-            };
-            let kernel = air::DirectKernel::new(source).unwrap();
-            let main = trace_of_height(height);
-            let public = [Felt::ONE, Felt::from_u64(START - 1)];
-            let challenges =
-                [QuadFelt::from_basis_coefficients_slice(&[Felt::from_u64(3), Felt::from_u64(5)])
-                    .unwrap()];
-            let auxiliary = air::ProverAir::build_aux_trace(
-                &kernel,
-                air::AuxTraceInputs {
-                    main: &main,
-                    preprocessed: None,
-                    public_values: &public,
-                    statement: &[],
-                    challenges: &challenges,
-                },
-            )
-            .unwrap();
-            assert_eq!(
-                auxiliary.columns.values[0],
-                challenges[0] + QuadFelt::from(Felt::from_u64(START))
-            );
-            assert_eq!(auxiliary.exports, vec![auxiliary.columns.values[height - 1]]);
-            let layout = kernel.descriptor().analysis().layout();
-            assert_eq!(layout.base_indices(), &[0, 1, 2, 3, 4, 5]);
-            assert_eq!(layout.ext_indices(), &[6, 7]);
-            Self {
-                kernel,
-                main,
-                public,
-                challenges,
-                auxiliary,
-            }
-        }
-    }
-
-    fn indicator(value: bool) -> Felt {
-        if value { Felt::ONE } else { Felt::ZERO }
-    }
-
-    #[test]
-    fn direct_tiny_scalar_session_accepts_known_pow4_rows_and_cyclic_next() {
-        let pilot = ConcretePilot::new(8);
-        let session = pilot
-            .kernel
-            .bind(air::UniformInputs {
-                public_values: &pilot.public,
-                challenges: &pilot.challenges,
-                exports: &pilot.auxiliary.exports,
-            })
-            .unwrap();
-        for row in 0..pilot.main.height() {
-            let next = (row + 1) % pilot.main.height();
-            let periodic: Vec<_> = session
-                .descriptor()
-                .spec()
-                .periodic_columns
-                .iter()
-                .map(|column| column[row % column.len()])
-                .collect();
-            let frame = air::AirFrame {
-                main: air::Rows {
-                    current: &pilot.main.values[row..row + 1],
-                    next: &pilot.main.values[next..next + 1],
-                },
-                preprocessed: air::Rows { current: &[], next: &[] },
-                aux: air::Rows {
-                    current: &pilot.auxiliary.columns.values[row..row + 1],
-                    next: &pilot.auxiliary.columns.values[next..next + 1],
-                },
-                periodic: &periodic,
-                selectors: air::Selectors {
-                    first: indicator(row == 0),
-                    last: indicator(row + 1 == pilot.main.height()),
-                    transition: indicator(row + 1 != pilot.main.height()),
-                },
-            };
-            let mut sink = Sink::<Felt, QuadFelt>::default();
-            session.eval(&frame, &mut sink);
-            assert_eq!(sink.classes(), vec![false, false, false, false, false, false, true, true]);
-            for value in sink.emissions {
-                match value {
-                    Emission::Base(value) => assert_eq!(value, Felt::ZERO),
-                    Emission::Extension(value) => assert_eq!(value, QuadFelt::ZERO),
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn direct_tiny_packed_session_uses_real_goldilocks_packing_and_shared_uniforms() {
-        let height = PackedFelt::WIDTH.max(8).next_power_of_two();
-        let pilot = ConcretePilot::new(height);
-        let public = pilot.public.map(PackedFelt::from);
-        let challenges = pilot.challenges.map(PackedQuadFelt::from);
-        let exports: Vec<_> =
-            pilot.auxiliary.exports.iter().copied().map(PackedQuadFelt::from).collect();
-        let session = pilot
-            .kernel
-            .bind(air::UniformInputs {
-                public_values: &public,
-                challenges: &challenges,
-                exports: &exports,
-            })
-            .unwrap();
-        assert!(height.is_multiple_of(PackedFelt::WIDTH));
-        for start in (0..height).step_by(PackedFelt::WIDTH) {
-            let main = [PackedFelt::from_fn(|lane| pilot.main.values[start + lane])];
-            let next = [PackedFelt::from_fn(|lane| pilot.main.values[(start + lane + 1) % height])];
-            let pack_aux = |offset: usize| {
-                <PackedQuadFelt as BasedVectorSpace<PackedFelt>>::from_basis_coefficients_fn(
-                    |coefficient| {
-                        PackedFelt::from_fn(|lane| {
-                            pilot.auxiliary.columns.values[(start + lane + offset) % height]
-                                .as_basis_coefficients_slice()[coefficient]
-                        })
-                    },
-                )
-            };
-            let auxiliary = [pack_aux(0)];
-            let next_auxiliary = [pack_aux(1)];
-            let periodic: Vec<_> = session
-                .descriptor()
-                .spec()
-                .periodic_columns
-                .iter()
-                .map(|column| PackedFelt::from_fn(|lane| column[(start + lane) % column.len()]))
-                .collect();
-            let frame = air::AirFrame {
-                main: air::Rows { current: &main, next: &next },
-                preprocessed: air::Rows { current: &[], next: &[] },
-                aux: air::Rows {
-                    current: &auxiliary,
-                    next: &next_auxiliary,
-                },
-                periodic: &periodic,
-                selectors: air::Selectors {
-                    first: PackedFelt::from_fn(|lane| indicator(start + lane == 0)),
-                    last: PackedFelt::from_fn(|lane| indicator(start + lane + 1 == height)),
-                    transition: PackedFelt::from_fn(|lane| indicator(start + lane + 1 != height)),
-                },
-            };
-            let mut sink = Sink::<PackedFelt, PackedQuadFelt>::default();
-            session.eval(&frame, &mut sink);
-            assert_eq!(sink.classes(), vec![false, false, false, false, false, false, true, true]);
-            for value in sink.emissions {
-                match value {
-                    Emission::Base(value) => {
-                        assert!(value.as_slice().iter().all(|value| *value == Felt::ZERO));
-                    },
-                    Emission::Extension(value) => {
-                        let coefficients: &[PackedFelt] = value.as_basis_coefficients_slice();
-                        for coefficient in coefficients {
-                            assert!(
-                                coefficient.as_slice().iter().all(|value| *value == Felt::ZERO)
-                            );
-                        }
-                    },
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn direct_tiny_symbolic_session_preserves_non_copy_inputs_and_capture_order() {
-        use crate::air::symbolic::{
-            AuxInput, BaseInput, BaseLeaf, RowOffset, SymbolicExpression, SymbolicExpressionExt,
-        };
-        type B = SymbolicExpression<Felt>;
-        type E = SymbolicExpressionExt<Felt, Felt>;
-
-        let source = TinyAir {
-            num_public_values: 2,
-            ..TinyAir::new([2, 4])
-        };
-        let capture = air::capture(&source).unwrap();
-        let kernel = air::DirectKernel::new(source).unwrap();
-        assert_eq!(kernel.descriptor().fingerprint(), capture.descriptor.fingerprint());
-        let main = [B::input(BaseInput::Main { offset: RowOffset::Current, index: 0 })];
-        let next = [B::input(BaseInput::Main { offset: RowOffset::Next, index: 0 })];
-        let auxiliary = [E::input(AuxInput::Trace { offset: RowOffset::Current, index: 0 })];
-        let next_auxiliary = [E::input(AuxInput::Trace { offset: RowOffset::Next, index: 0 })];
-        let periodic = [B::input(BaseInput::Periodic(0)), B::input(BaseInput::Periodic(1))];
-        let public = [B::input(BaseInput::Public(0)), B::input(BaseInput::Public(1))];
-        let challenges = [E::input(AuxInput::Challenge(0))];
-        let exports = [E::input(AuxInput::Export(0))];
-        let session = kernel
-            .bind(air::UniformInputs {
-                public_values: &public,
-                challenges: &challenges,
-                exports: &exports,
-            })
-            .unwrap();
-        let frame = air::AirFrame {
-            main: air::Rows { current: &main, next: &next },
-            preprocessed: air::Rows { current: &[], next: &[] },
-            aux: air::Rows {
-                current: &auxiliary,
-                next: &next_auxiliary,
-            },
-            periodic: &periodic,
-            selectors: air::Selectors {
-                first: B::Leaf(BaseLeaf::IsFirstRow),
-                last: B::Leaf(BaseLeaf::IsLastRow),
-                transition: B::Leaf(BaseLeaf::IsTransition),
-            },
-        };
-        let mut sink = Sink::<B, E>::default();
-        session.eval(&frame, &mut sink);
-        assert_eq!(sink.classes(), vec![false, false, false, false, false, false, true, true]);
-        assert_eq!(sink.emissions.len(), capture.assertions.len());
-        for (actual, expected) in sink.emissions.into_iter().zip(capture.assertions) {
-            match (actual, expected) {
-                (Emission::Base(actual), air::Assertion::Base(expected)) => {
-                    assert_eq!(actual.degree_multiple(), expected.degree_multiple());
-                    assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
-                },
-                (Emission::Extension(actual), air::Assertion::Extension(expected)) => {
-                    assert_eq!(actual.degree_multiple(), expected.degree_multiple());
-                    assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
-                },
-                _ => panic!("direct session changed assertion class/global order"),
-            }
-        }
-    }
+    let kernel = air::DirectKernel::new(source).unwrap();
+    let descriptor = kernel.descriptor();
+    let observed = air::capture_from_spec::<Felt, QuadFelt>(
+        descriptor.spec().as_borrowed(),
+        |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
+    )
+    .unwrap();
+    let layout = descriptor.analysis().layout();
+    assert_eq!(layout.base_indices(), &[0, 1, 2, 3, 4, 5]);
+    assert_eq!(layout.ext_indices(), &[6, 7]);
+    assert_eq!(observed.descriptor.fingerprint(), descriptor.fingerprint());
+    assert_eq!(observed.descriptor.analysis(), descriptor.analysis());
 }

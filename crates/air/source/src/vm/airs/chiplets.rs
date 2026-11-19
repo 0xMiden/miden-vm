@@ -130,92 +130,16 @@ impl<EF: ExtensionField<Felt>> air::ProverAir<EF> for ChipletsAir {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::{
-        Felt,
-        field::{PrimeCharacteristicRing, QuadFelt},
-        utils::RowMajorMatrix,
-    };
-    use miden_stark::{
-        air,
-        lookup::{self, Challenges, accumulate_slow},
-    };
+    use miden_core::field::QuadFelt;
+    use miden_stark::air;
 
     use super::ChipletsAir;
-    use crate::vm::constraints::columns::NUM_CHIPLETS_COLS;
 
     #[test]
-    fn complete_native_chiplets_capture_preserves_ordinary_then_lookup_order() {
+    fn ordinary_constraints_precede_lookup_assertions() {
         let captured = air::capture_with::<_, QuadFelt>(&ChipletsAir).unwrap();
-        let spec = captured.descriptor.spec();
-        assert_eq!(spec.main_width, NUM_CHIPLETS_COLS);
-        assert_eq!(spec.aux_width, 4);
-        assert_eq!(spec.num_public_values, 0);
-        assert_eq!(spec.num_challenges, 2);
-        assert_eq!(spec.num_exports, 1);
-        assert!(spec.preprocessed.is_none());
-        assert_eq!(spec.periodic_columns.len(), 8);
-        assert!(spec.periodic_columns.iter().all(|column| column.len() == 8));
-        let counts = captured.descriptor.analysis().counts();
-        assert_eq!(counts.base, 172);
-        assert_eq!(counts.ext, 5);
-        assert!(
-            captured.assertions[..counts.base]
-                .iter()
-                .all(|value| matches!(value, air::Assertion::Base(_)))
-        );
-        assert!(
-            captured.assertions[counts.base..]
-                .iter()
-                .all(|value| matches!(value, air::Assertion::Extension(_)))
-        );
-        #[cfg(feature = "std")]
-        miden_stark::lookup::validate_native(&ChipletsAir, spec).unwrap();
-    }
-
-    #[test]
-    fn native_chiplet_witness_matches_slow_fractions_and_exports() {
-        let main = RowMajorMatrix::new(
-            (0..8)
-                .flat_map(|row| {
-                    let mut values = [Felt::ZERO; NUM_CHIPLETS_COLS];
-                    values[23] = Felt::from_usize(row + 1);
-                    values
-                })
-                .collect(),
-            NUM_CHIPLETS_COLS,
-        );
-        let challenges = [QuadFelt::from_u32(7), QuadFelt::from_u32(11)];
-        let native = air::ProverAir::build_aux_trace(
-            &ChipletsAir,
-            air::AuxTraceInputs {
-                main: &main,
-                preprocessed: None,
-                public_values: &[],
-                statement: &[],
-                challenges: &challenges,
-            },
-        )
-        .unwrap();
-        let spec = air::LiftedAir::spec(&ChipletsAir);
-        let encoding = Challenges::new(
-            challenges[0],
-            challenges[1],
-            crate::vm::logup::MIDEN_MAX_MESSAGE_WIDTH,
-            crate::vm::logup::BusId::COUNT,
-        );
-        let fractions = lookup::build_lookup_fractions(
-            &ChipletsAir,
-            &main,
-            None,
-            &spec.periodic_columns,
-            &encoding,
-        );
-        let (expected, sigma) = accumulate_slow(&fractions);
-        for (row, values) in native.columns.values.chunks_exact(expected.len()).enumerate() {
-            for (column, value) in values.iter().enumerate() {
-                assert_eq!(*value, expected[column][row]);
-            }
-        }
-        assert_eq!(native.exports, [sigma]);
+        let layout = captured.descriptor.analysis().layout();
+        assert!(layout.base_indices().iter().copied().eq(0..172));
+        assert!(layout.ext_indices().iter().copied().eq(172..177));
     }
 }

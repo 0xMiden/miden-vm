@@ -431,23 +431,19 @@ mod tests {
     struct PairedAir {
         main_width: usize,
         challenges: usize,
-        offset: Felt,
         periodic: Vec<Vec<Felt>>,
         spec_reads: AtomicUsize,
         evaluations: AtomicUsize,
-        fixed_builds: AtomicUsize,
     }
 
     impl PairedAir {
-        fn new(challenges: usize, period: usize, offset: u32) -> Self {
+        fn new(challenges: usize) -> Self {
             Self {
                 main_width: 2,
                 challenges,
-                offset: Felt::from_u32(offset),
-                periodic: vec![vec![Felt::ONE, Felt::TWO], vec![Felt::from_u32(offset); period]],
+                periodic: vec![vec![Felt::ONE, Felt::TWO], vec![Felt::from_u32(3); 4]],
                 spec_reads: AtomicUsize::new(0),
                 evaluations: AtomicUsize::new(0),
-                fixed_builds: AtomicUsize::new(0),
             }
         }
     }
@@ -469,8 +465,7 @@ mod tests {
         }
 
         fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
-            self.fixed_builds.fetch_add(1, Ordering::Relaxed);
-            Some(RowMajorMatrix::new(vec![Felt::ONE; 8], 1))
+            panic!("ACE capture must not construct fixed tables")
         }
 
         fn eval<B: air::LiftedAirBuilder<F = Felt>>(
@@ -493,8 +488,7 @@ mod tests {
             sink.when(frame.first_row()).assert_zero(
                 frame.main.current[0].dup()
                     + frame.preprocessed.current[0].dup()
-                    + inputs.public(0)
-                    - self.offset,
+                    + inputs.public(0),
             );
             sink.assert_zero_ext(frame.aux.current[0].dup() + alpha + inputs.export(0));
             sink.when(frame.transition()).assert_zero(
@@ -528,11 +522,10 @@ mod tests {
 
     #[test]
     fn native_capture_owns_checked_metadata_without_building_fixed_data() {
-        let source = PairedAir::new(2, 4, 3);
+        let source = PairedAir::new(2);
         let captured = CapturedAir::new_native(&source).unwrap();
         assert_eq!(source.evaluations.load(Ordering::Relaxed), 1);
         assert_eq!(source.spec_reads.load(Ordering::Relaxed), 1);
-        assert_eq!(source.fixed_builds.load(Ordering::Relaxed), 0);
         assert_eq!(captured.descriptor().analysis().layout().base_indices(), &[0, 2, 4]);
         assert_eq!(captured.descriptor().analysis().layout().ext_indices(), &[1, 3, 5]);
         assert_eq!(captured.constraint_counts(), ConstraintCounts { base: 3, ext: 3 });
@@ -544,20 +537,18 @@ mod tests {
     #[test]
     fn native_constructor_keeps_ace_challenge_policy_and_checked_schema() {
         for challenges in [0, 1, 3] {
-            let source = PairedAir::new(challenges, 4, 3);
+            let source = PairedAir::new(challenges);
             assert!(
                 matches!(CapturedAir::new_native(&source), Err(AceError::InvalidInputLayout { message }) if message.contains("exactly 2 randomness challenges"))
             );
             assert_eq!(source.spec_reads.load(Ordering::Relaxed), 1);
             assert_eq!(source.evaluations.load(Ordering::Relaxed), 1);
-            assert_eq!(source.fixed_builds.load(Ordering::Relaxed), 0);
         }
-        let source = PairedAir { main_width: 0, ..PairedAir::new(2, 4, 3) };
+        let source = PairedAir { main_width: 0, ..PairedAir::new(2) };
         assert!(
             matches!(CapturedAir::new_native(&source), Err(AceError::InvalidInputLayout { message }) if message.contains("at least one main column"))
         );
         assert_eq!(source.spec_reads.load(Ordering::Relaxed), 1);
         assert_eq!(source.evaluations.load(Ordering::Relaxed), 0);
-        assert_eq!(source.fixed_builds.load(Ordering::Relaxed), 0);
     }
 }

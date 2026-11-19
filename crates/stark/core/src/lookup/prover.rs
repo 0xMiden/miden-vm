@@ -1030,54 +1030,35 @@ mod tests {
     }
 
     #[test]
-    fn expression_window_has_real_constraint_witness_and_validation_callers() {
+    fn expression_window_roundtrips_through_proof_folders_and_checker() {
         use crate::{
             air::{ProverStatement, Statement},
             testing::configs::goldilocks_poseidon2::{
-                Felt as TestFelt, QuadFelt as TestQuadFelt, TestMultiAir, prove_and_verify,
-                test_challenger,
+                Felt as TestFelt, TestMultiAir, prove_and_verify_statement, test_challenger,
             },
         };
 
-        let air = WindowAir::<TestFelt>::new();
+        let kernel = air::DirectKernel::new(WindowAir::<TestFelt>::new()).unwrap();
         let trace = RowMajorMatrix::new(vec![TestFelt::ONE; 8], 1);
-        let statement = Statement::new(
-            TestMultiAir::new(vec![air::DirectKernel::new(air.clone()).unwrap()]),
-            vec![],
-            vec![],
-        )
-        .expect("no public inputs");
-        let statement = ProverStatement::new(statement, vec![trace.clone()]).unwrap();
-        crate::check_constraints(&statement, None, test_challenger());
-        // Exercise the same authored source through checked capture and both proof folders.
-        let _degree = air::capture_with::<_, TestQuadFelt>(&air)
-            .unwrap()
-            .descriptor
-            .analysis()
-            .raw_degrees();
-        prove_and_verify(&air, &[], &[trace]);
+        let statement = Statement::new(TestMultiAir::new(vec![kernel]), vec![], vec![]).unwrap();
+        let prover = ProverStatement::new(statement, vec![trace]).unwrap();
+        crate::check_constraints(&prover, None, test_challenger());
+        prove_and_verify_statement(prover);
 
         #[cfg(feature = "std")]
-        crate::lookup::debug::validation::validate_native(
-            &WindowAir::<Felt>::new(),
-            &air::LiftedAir::spec(&WindowAir::<Felt>::new()),
-        )
-        .unwrap();
+        {
+            let source = WindowAir::<Felt>::new();
+            crate::lookup::validate_native(&source, &air::LiftedAir::spec(&source)).unwrap();
+        }
     }
 
-    fn native_window_direct_pilot<F: Field, EF: ExtensionField<F>>() {
-        use crate::air::AirKernel;
-
+    fn check_window_witness<F: Field, EF: ExtensionField<F>>() {
         let source = WindowAir::<F>::new();
-        let expected = air::capture_with::<_, EF>(&source).unwrap();
-        assert!(expected.descriptor.analysis().layout().base_indices().is_empty());
-        assert_eq!(expected.descriptor.analysis().layout().ext_indices(), &[0, 1]);
-        let kernel = air::DirectKernel::new(source).unwrap();
         let main = RowMajorMatrix::new(vec![F::ONE; 8], 1);
         let challenges = [EF::from_u32(7), EF::from_u32(13)];
-        let auxiliary = air::ProverAir::build_aux_trace(
-            &kernel,
-            air::AuxTraceInputs {
+        let auxiliary = build_logup_aux_trace(
+            &source,
+            AuxTraceInputs {
                 main: &main,
                 preprocessed: None,
                 public_values: &[],
@@ -1088,41 +1069,19 @@ mod tests {
         .unwrap();
         assert_eq!(auxiliary.columns.width(), 1);
         assert_eq!(auxiliary.columns.height(), 8);
-        // Independent fraction arithmetic for the constant trace: current+2*next+periodic
-        // alternates between3 and4, so its normalized export is the two-fraction mean.
+        // On a constant trace, current + 2 * next + periodic alternates between 3 and 4.
         let encoding = Challenges::new(challenges[0], challenges[1], 1, 1);
         let fraction = |value| {
             (encoding.bus_prefix[0] + encoding.beta_powers[0] * F::from_u32(value)).inverse()
         };
         let mean = (fraction(3) + fraction(4)) * EF::from_u32(2).inverse();
         assert_eq!(auxiliary.exports, vec![mean]);
-        assert!(air::LiftedAir::build_preprocessed_trace(&kernel).is_none());
-
-        let observed = air::capture_from_spec::<F, EF>(
-            kernel.descriptor().spec().as_borrowed(),
-            |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
-        )
-        .unwrap();
-        assert_eq!(observed.descriptor.fingerprint(), expected.descriptor.fingerprint());
-        assert_eq!(observed.descriptor.analysis(), expected.descriptor.analysis());
     }
 
     #[test]
-    fn native_window_sources_keep_both_actual_field_routes() {
-        native_window_direct_pilot::<Felt, QuadFelt>();
-        native_window_direct_pilot::<
-            crate::testing::configs::Felt,
-            crate::testing::configs::QuadFelt,
-        >();
-
-        #[cfg(feature = "std")]
-        {
-            // The validator intentionally supports the production Felt/QuadFelt pair only.
-            let source = WindowAir::<Felt>::new();
-            let spec = air::LiftedAir::spec(&source);
-            crate::lookup::validate_native(&source, &spec)
-                .expect("native canonical and encoded window descriptions agree");
-        }
+    fn window_witness_matches_the_fraction_mean_in_both_runner_fields() {
+        check_window_witness::<Felt, QuadFelt>();
+        check_window_witness::<crate::testing::configs::Felt, crate::testing::configs::QuadFelt>();
     }
 
     #[test]
@@ -1209,7 +1168,7 @@ mod witness_tests {
 
     use super::*;
     use crate::{
-        air::{AirSpec, Frame, Inputs, LiftedAirBuilder, ProverAir},
+        air::{AirSpec, Frame, Inputs, LiftedAirBuilder},
         lookup::{Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage},
     };
 
@@ -1330,16 +1289,6 @@ mod witness_tests {
         }
     }
 
-    impl ProverAir<QuadFelt> for Fixture {
-        type Error = LookupError;
-        fn build_aux_trace(
-            &self,
-            inputs: AuxTraceInputs<'_, Felt, QuadFelt>,
-        ) -> Result<AuxTrace<QuadFelt>, LookupError> {
-            build_logup_aux_trace(self, inputs)
-        }
-    }
-
     fn inputs<'a>(
         main: &'a RowMajorMatrix<Felt>,
         challenges: &'a [QuadFelt],
@@ -1358,7 +1307,7 @@ mod witness_tests {
         let source = Fixture::new(true);
         let main = RowMajorMatrix::new((0..1025).map(Felt::from_usize).collect(), 1);
         let values = [QuadFelt::from_u64(7), QuadFelt::ZERO];
-        let witness = source.build_aux_trace(inputs(&main, &values)).unwrap();
+        let witness = build_logup_aux_trace(&source, inputs(&main, &values)).unwrap();
         let challenges = Challenges::new(values[0], values[1], 1, 1);
         let fractions = build_lookup_fractions(&source, &main, None, &source.periodic, &challenges);
         let (expected, mean) = crate::lookup::accumulate_slow(&fractions);
@@ -1380,17 +1329,17 @@ mod witness_tests {
         let source = Fixture::new(false);
         let main = RowMajorMatrix::new(vec![Felt::ONE; 4], 1);
         let values = [QuadFelt::from_u64(7), QuadFelt::ZERO];
-        let witness = source.build_aux_trace(inputs(&main, &values)).unwrap();
+        let witness = build_logup_aux_trace(&source, inputs(&main, &values)).unwrap();
         assert!(witness.columns.values.iter().all(Field::is_zero));
         assert_eq!(witness.exports, vec![QuadFelt::ZERO]);
         let undersized = Fixture { aux_width: 1, ..Fixture::new(false) };
         assert_eq!(
-            undersized.build_aux_trace(inputs(&main, &values)).unwrap_err(),
+            build_logup_aux_trace(&undersized, inputs(&main, &values)).unwrap_err(),
             LookupError::AuxiliaryWidth { width: 1, columns: 2 }
         );
         let empty = RowMajorMatrix::new(vec![], 1);
         assert_eq!(
-            source.build_aux_trace(inputs(&empty, &values)).unwrap_err(),
+            build_logup_aux_trace(&source, inputs(&empty, &values)).unwrap_err(),
             LookupError::MainShape
         );
     }

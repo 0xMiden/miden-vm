@@ -3,7 +3,7 @@
 use miden_constraint_compiler::ir::Graph;
 use miden_core::{Felt, field::QuadFelt};
 use miden_stark::air;
-use p3_field::{Algebra, PrimeCharacteristicRing};
+use p3_field::PrimeCharacteristicRing;
 
 #[path = "../build/preparation_fixture.rs"]
 mod source;
@@ -18,62 +18,18 @@ mod native_descriptors {
     include!(concat!(env!("OUT_DIR"), "/native_pilot_descriptors.rs"));
 }
 
-enum Prepared<E> {
-    Cached([E; native_evaluators::CACHED_PREPARED_TERMS]),
-    Uncached([E; native_evaluators::UNCACHED_PREPARED_TERMS]),
-}
-
-struct CompiledFixture {
+fn eval_fixture<S: air::LiftedAirBuilder<F = Felt>>(
     cached: bool,
-    descriptor: air::AirDescriptor<Felt>,
-}
-
-impl CompiledFixture {
-    fn new(cached: bool) -> Self {
-        let descriptor = if cached {
-            native_descriptors::descriptor_cached()
-        } else {
-            native_descriptors::descriptor_uncached()
-        };
-        Self { cached, descriptor }
-    }
-}
-
-impl air::AirKernel for CompiledFixture {
-    type F = Felt;
-    type Prepared<B: Algebra<Felt>, E: Algebra<B>> = Prepared<E>;
-
-    fn descriptor(&self) -> &air::AirDescriptor<Felt> {
-        &self.descriptor
-    }
-
-    fn prepare<B: Algebra<Felt>, E: Algebra<B>>(
-        &self,
-        inputs: air::UniformInputs<'_, B, E>,
-    ) -> Prepared<E> {
-        if self.cached {
-            Prepared::Cached(native_evaluators::precompute_cached(inputs))
-        } else {
-            Prepared::Uncached(native_evaluators::precompute_uncached(inputs))
-        }
-    }
-
-    fn eval_row<B: air::LiftedAirBuilder<F = Felt>>(
-        &self,
-        frame: &air::Frame<'_, B>,
-        inputs: air::Inputs<'_, B>,
-        prepared: &Prepared<B::ExtExpr>,
-        sink: &mut B,
-    ) {
-        match (self.cached, prepared) {
-            (true, Prepared::Cached(terms)) => {
-                native_evaluators::eval_cached(frame, inputs, sink, terms)
-            },
-            (false, Prepared::Uncached(terms)) => {
-                native_evaluators::eval_uncached(frame, inputs, sink, terms)
-            },
-            _ => unreachable!("session retains preparation for the same fixture configuration"),
-        }
+    frame: &air::Frame<'_, S>,
+    inputs: air::Inputs<'_, S>,
+    sink: &mut S,
+) {
+    if cached {
+        let terms = native_evaluators::precompute_cached(inputs);
+        native_evaluators::eval_cached(frame, inputs, sink, &terms);
+    } else {
+        let terms = native_evaluators::precompute_uncached(inputs);
+        native_evaluators::eval_uncached(frame, inputs, sink, &terms);
     }
 }
 
@@ -120,20 +76,27 @@ fn native_pilot_uses_exact_schedule_capacity_without_row_challenge_recomputation
 
 #[test]
 fn compiled_native_descriptor_and_non_copy_symbolic_kernel_match_the_simple_source() {
-    use air::AirKernel;
-    use miden_constraint_compiler::ir::{capture_kernel_native_into, capture_native_into};
+    use miden_constraint_compiler::ir::{capture_native_into, capture_native_into_with};
 
     for cached in [false, true] {
         let source = PreparationFixture(cached);
-        let kernel = CompiledFixture::new(cached);
+        let embedded = if cached {
+            native_descriptors::descriptor_cached()
+        } else {
+            native_descriptors::descriptor_uncached()
+        };
         let mut graph = Graph::builder();
         let (authored, descriptor) = capture_native_into(&source, &mut graph).unwrap();
-        assert_eq!(kernel.descriptor().spec(), descriptor.spec());
-        assert_eq!(kernel.descriptor().analysis(), descriptor.analysis());
-        assert_eq!(kernel.descriptor().fingerprint(), descriptor.fingerprint());
+        assert_eq!(embedded.spec(), descriptor.spec());
+        assert_eq!(embedded.analysis(), descriptor.analysis());
+        assert_eq!(embedded.fingerprint(), descriptor.fingerprint());
         // This simple cache fixture has no reassociation rewrite. General optimized relations
         // require polynomial-value comparisons; fingerprints need not equal their recapture.
-        let (generated, _) = capture_kernel_native_into(&kernel, &mut graph).unwrap();
+        let (generated, _) =
+            capture_native_into_with(&source, &mut graph, |frame, inputs, sink| {
+                eval_fixture(cached, frame, inputs, sink);
+            })
+            .unwrap();
         assert_eq!(authored.base_roots, generated.base_roots);
         assert_eq!(authored.ext_roots, generated.ext_roots);
         assert_eq!(authored.base_global_indices, generated.base_global_indices);
@@ -142,22 +105,18 @@ fn compiled_native_descriptor_and_non_copy_symbolic_kernel_match_the_simple_sour
 }
 
 #[test]
-fn compiled_native_sessions_preserve_known_scalar_values_and_assertion_classes() {
-    use air::AirKernel;
-
+fn compiled_native_evaluators_preserve_known_scalar_values_and_assertion_classes() {
     let challenges = [
         QuadFelt::new([Felt::from_u32(7), Felt::from_u32(11)]),
         QuadFelt::new([Felt::from_u32(3), Felt::from_u32(5)]),
     ];
     for cached in [false, true] {
         let source = PreparationFixture(cached);
-        let kernel = CompiledFixture::new(cached);
         let inputs = air::UniformInputs {
             public_values: &[],
             challenges: &challenges,
             exports: &[],
         };
-        let session = kernel.bind(inputs).unwrap();
         for value in [Felt::ZERO, Felt::from_u32(13)] {
             let main = [value];
             let auxiliary = [QuadFelt::ZERO];
@@ -175,7 +134,7 @@ fn compiled_native_sessions_preserve_known_scalar_values_and_assertion_classes()
             let mut authored = Collector::default();
             air::LiftedAir::eval(&source, &frame, inputs, &mut authored);
             let mut generated = Collector::default();
-            session.eval(&frame, &mut generated);
+            eval_fixture(cached, &frame, inputs, &mut generated);
             let expected = if cached {
                 let square = challenges[1] * challenges[1];
                 vec![

@@ -10,7 +10,7 @@ use miden_core::{
     field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_stark::lookup::{Challenges, ProverLookupBuilder, build_lookup_fractions};
+use miden_stark::lookup::Challenges;
 use proptest::prelude::*;
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
@@ -18,8 +18,9 @@ use crate::prover::{
     math::{U256, from_limbs16, mac_reduce, to_limbs16},
     primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    tests::uint::{
-        arb_modulus, arb_uint_below, fixed_challenges, random_modulus, random_uint_below,
+    tests::{
+        fold_multiplicities,
+        uint::{arb_modulus, arb_uint_below, fixed_challenges, random_modulus, random_uint_below},
     },
     uint::{
         UintStoreAir,
@@ -33,26 +34,6 @@ use crate::prover::{
 
 fn rand_qf(rng: &mut impl Rng) -> QuadFelt {
     QuadFelt::new([Felt::from(rng.random::<u32>()), Felt::from(rng.random::<u32>())])
-}
-
-/// Accumulate one chiplet's net per-denom LogUp multiplicity. Mirrors
-/// `tests::uint::fold_balance`.
-fn fold_balance<A>(
-    air: &A,
-    main: &RowMajorMatrix<Felt>,
-    challenges: &Challenges<QuadFelt>,
-    net: &mut HashMap<QuadFelt, Felt>,
-) where
-    A: miden_stark::air::LiftedAir<F = Felt>,
-    for<'a> A: miden_stark::lookup::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
-{
-    let spec = miden_stark::air::LiftedAir::spec(air);
-    let periodic = spec.periodic_columns.as_ref();
-    let preprocessed = miden_stark::air::LiftedAir::build_preprocessed_trace(air);
-    let fractions = build_lookup_fractions(air, main, preprocessed.as_ref(), periodic, challenges);
-    for &(multiplicity, denom) in fractions.fractions() {
-        *net.entry(denom).or_insert(Felt::ZERO) += multiplicity;
-    }
 }
 
 /// A store with a random modulus pinned at ptr 1 (self-ref) and the
@@ -114,9 +95,9 @@ fn check_and_balance(
     crate::prover::tests::check_local(UintMulAir, &mul_main);
 
     let mut net: HashMap<QuadFelt, Felt> = HashMap::new();
-    fold_balance(&UintMulAir, &mul_main, challenges, &mut net);
-    fold_balance(&UintStoreAir, &store_main, challenges, &mut net);
-    fold_balance(&BytePairLutAir, &bpl_main, challenges, &mut net);
+    fold_multiplicities(&UintMulAir, &mul_main, challenges, &mut net);
+    fold_multiplicities(&UintStoreAir, &store_main, challenges, &mut net);
+    fold_multiplicities(&BytePairLutAir, &bpl_main, challenges, &mut net);
     let residual = net.values().filter(|m| **m != Felt::ZERO).count();
     assert_eq!(
         residual, 0,
@@ -310,9 +291,9 @@ fn mul_q_range_checks_reject_an_oversized_limb() {
     let [alpha, beta] = [rand_qf(&mut rng), rand_qf(&mut rng)];
     let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let mut net: HashMap<QuadFelt, Felt> = HashMap::new();
-    fold_balance(&UintMulAir, &mul_main, &challenges, &mut net);
-    fold_balance(&UintStoreAir, &store_main, &challenges, &mut net);
-    fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
+    fold_multiplicities(&UintMulAir, &mul_main, &challenges, &mut net);
+    fold_multiplicities(&UintStoreAir, &store_main, &challenges, &mut net);
+    fold_multiplicities(&BytePairLutAir, &bpl_main, &challenges, &mut net);
     let residual = net.values().filter(|m| **m != Felt::ZERO).count();
     assert_ne!(residual, 0, "an oversized q limb must unbalance Range16",);
 }

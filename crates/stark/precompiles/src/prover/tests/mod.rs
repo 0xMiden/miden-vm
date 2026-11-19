@@ -37,7 +37,7 @@ mod utils;
 mod vm_admission;
 mod vm_uint;
 
-use std::{string::String, vec, vec::Vec};
+use std::{collections::HashMap, string::String, vec, vec::Vec};
 
 use miden_core::{
     Felt,
@@ -222,6 +222,21 @@ where
     let periodic = spec.periodic_columns.as_ref();
     let preprocessed = air.build_preprocessed_trace();
     build_lookup_fractions(air, main, preprocessed.as_ref(), periodic, challenges)
+}
+
+/// Add one AIR's lookup multiplicities to the cross-AIR balance.
+fn fold_multiplicities<A>(
+    air: &A,
+    main: &RowMajorMatrix<Felt>,
+    challenges: &Challenges<QuadFelt>,
+    net: &mut HashMap<QuadFelt, Felt>,
+) where
+    A: LiftedAir<F = Felt>,
+    for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
+{
+    for &(multiplicity, denominator) in lookup_fractions(air, main, challenges).fractions() {
+        *net.entry(denominator).or_insert(Felt::ZERO) += multiplicity;
+    }
 }
 
 /// Fold each row's lookup columns without inverting denominators.

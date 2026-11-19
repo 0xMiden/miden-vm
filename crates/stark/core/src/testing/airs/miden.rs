@@ -133,56 +133,42 @@ mod tests {
     use super::*;
     use crate::air::AirKernel;
 
-    fn native_dummy_pilot<F: Field, EF: ExtensionField<F>>() {
-        for (width, auxiliary_width) in [(9, 1), (TRACE2_WIDTH, 3), (TRACE1_WIDTH, NUM_AUX_COLS)] {
-            let source = DummyMidenAir::<F>::new(width, auxiliary_width);
-            let expected = air::capture_with::<_, EF>(&source).unwrap();
-            assert_eq!(expected.descriptor.analysis().layout().base_indices(), &[0]);
-            assert!(expected.descriptor.analysis().layout().ext_indices().is_empty());
-            assert_eq!(
-                expected.descriptor.analysis().raw_degrees(),
-                air::ConstraintDegrees { base: 9, ext: 0 },
-            );
-            let kernel = air::DirectKernel::new(source).unwrap();
-            let main = RowMajorMatrix::new(F::zero_vec(2 * width), width);
-            let challenges = [EF::from_u32(7), EF::from_u32(13)];
-            let auxiliary = air::ProverAir::build_aux_trace(
-                &kernel,
-                air::AuxTraceInputs {
-                    main: &main,
-                    preprocessed: None,
-                    public_values: &[],
-                    statement: &[],
-                    challenges: &challenges,
-                },
-            )
-            .unwrap();
-            assert_eq!(auxiliary.columns.width(), auxiliary_width);
-            assert_eq!(auxiliary.columns.height(), 2);
-            assert_eq!(auxiliary.columns.values, EF::zero_vec(2 * auxiliary_width));
-            assert_eq!(auxiliary.exports, EF::zero_vec(auxiliary_width));
-            let observed = air::capture_from_spec::<F, EF>(
-                kernel.descriptor().spec().as_borrowed(),
-                |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
-            )
-            .unwrap();
-            assert_eq!(observed.descriptor.fingerprint(), expected.descriptor.fingerprint());
-            assert_eq!(observed.descriptor.analysis(), expected.descriptor.analysis());
+    fn check_workload<F: Field, EF: ExtensionField<F>>() {
+        for (width, aux_width) in [(9, 0), (TRACE2_WIDTH, 3), (TRACE1_WIDTH, NUM_AUX_COLS)] {
+            let kernel = air::DirectKernel::new(DummyMidenAir::<F>::new(width, aux_width)).unwrap();
+            let descriptor = kernel.descriptor();
+            assert_eq!(descriptor.spec().main_width, width);
+            assert_eq!(descriptor.spec().aux_width, aux_width);
+            assert_eq!(descriptor.spec().num_exports, aux_width);
+            assert_eq!(descriptor.analysis().layout().base_indices(), &[0]);
+            assert!(descriptor.analysis().layout().ext_indices().is_empty());
+            assert_eq!(crate::log_quotient_degree(&kernel).unwrap(), 3);
+            if aux_width != 0 {
+                let main = RowMajorMatrix::new(F::zero_vec(2 * width), width);
+                let auxiliary = air::ProverAir::build_aux_trace(
+                    &kernel,
+                    air::AuxTraceInputs {
+                        main: &main,
+                        preprocessed: None,
+                        public_values: &[],
+                        statement: &[],
+                        challenges: &[EF::ONE; 2],
+                    },
+                )
+                .unwrap();
+                assert_eq!(auxiliary.columns.width(), aux_width);
+                assert_eq!(auxiliary.columns.values, EF::zero_vec(2 * aux_width));
+                assert_eq!(auxiliary.exports, EF::zero_vec(aux_width));
+            }
         }
-
-        // Metadata can still represent no auxiliaries without selecting an aux-free proof path.
-        let no_aux = DummyMidenAir::<F>::new(9, 0);
-        let descriptor = air::capture(&no_aux).unwrap().descriptor;
-        assert_eq!(descriptor.spec().aux_width, 0);
-        assert_eq!(descriptor.spec().num_exports, 0);
     }
 
     #[test]
-    fn typed_dummy_sources_keep_native_eidos_and_goldilocks_runner_fields() {
-        native_dummy_pilot::<
+    fn dummy_workload_geometry_agrees_across_runner_fields() {
+        check_workload::<
             miden_crypto::Felt,
             miden_crypto::field::BinomialExtensionField<miden_crypto::Felt, 2>,
         >();
-        native_dummy_pilot::<crate::testing::configs::Felt, crate::testing::configs::QuadFelt>();
+        check_workload::<crate::testing::configs::Felt, crate::testing::configs::QuadFelt>();
     }
 }

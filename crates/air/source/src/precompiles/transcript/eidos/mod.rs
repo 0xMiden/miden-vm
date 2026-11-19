@@ -454,8 +454,6 @@ impl air::ProverAir<QuadFelt> for EidosCompressionInterfaceAir {
 }
 #[cfg(test)]
 mod tests {
-    use alloc::{vec, vec::Vec};
-
     use miden_core::{
         Felt,
         field::{PrimeCharacteristicRing, QuadFelt},
@@ -473,99 +471,11 @@ mod tests {
             layout::BLOCK_PERIOD, testing::generate_felt_trace_block_with_cycle_id,
             trace::set_cycle_metadata,
         },
-        get_periodic_column_values,
     };
-    use crate::precompiles::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-
-    impl InterfaceConstraintEvalBuilder {
-        fn eval_with(
-            &mut self,
-            evaluate: impl FnOnce(
-                &air::AirFrame<'_, Felt, QuadFelt>,
-                air::UniformInputs<'_, Felt, QuadFelt>,
-                &mut NumericSink<'_>,
-            ),
-        ) {
-            let width = self.main.width;
-            let aux_width = self.aux.width;
-            let frame = air::AirFrame {
-                main: air::Rows {
-                    current: &self.main.values[..width],
-                    next: &self.main.values[width..2 * width],
-                },
-                preprocessed: air::Rows { current: &[], next: &[] },
-                aux: air::Rows {
-                    current: &self.aux.values[..aux_width],
-                    next: &self.aux.values[aux_width..2 * aux_width],
-                },
-                periodic: &self.periodic_values,
-                selectors: air::Selectors {
-                    first: self.is_first_row,
-                    last: self.is_last_row,
-                    transition: Felt::ONE - self.is_last_row,
-                },
-            };
-            let inputs = air::UniformInputs {
-                public_values: &[],
-                challenges: &self.randomness,
-                exports: &self.permutation_values,
-            };
-            let mut sink = NumericSink {
-                base: &mut self.base_evaluations,
-                extension: &mut self.extension_evaluations,
-            };
-            evaluate(&frame, inputs, &mut sink);
-        }
-    }
-
-    /// Numerical outputs are separate from the borrowed rows and uniform inputs.
-    struct NumericSink<'a> {
-        base: &'a mut Vec<Felt>,
-        extension: &'a mut Vec<QuadFelt>,
-    }
-
-    impl air::LiftedAirBuilder for NumericSink<'_> {
-        type F = Felt;
-        type Expr = Felt;
-        type ExtExpr = QuadFelt;
-        fn emit_base(&mut self, value: Felt, _: air::ConstraintMeta<'_>) {
-            self.base.push(value);
-        }
-        fn emit_ext(&mut self, value: QuadFelt, _: air::ConstraintMeta<'_>) {
-            self.extension.push(value);
-        }
-    }
-
-    struct InterfaceConstraintEvalBuilder {
-        main: RowMajorMatrix<Felt>,
-        aux: RowMajorMatrix<QuadFelt>,
-        randomness: Vec<QuadFelt>,
-        permutation_values: Vec<QuadFelt>,
-        periodic_values: Vec<Felt>,
-        base_evaluations: Vec<Felt>,
-        extension_evaluations: Vec<QuadFelt>,
-
-        is_first_row: Felt,
-        is_last_row: Felt,
-    }
-
-    fn builder(row: usize, width: usize) -> InterfaceConstraintEvalBuilder {
-        InterfaceConstraintEvalBuilder {
-            main: RowMajorMatrix::new(vec![Felt::ZERO; 2 * NUM_MAIN_COLS], NUM_MAIN_COLS),
-            aux: RowMajorMatrix::new(vec![QuadFelt::ZERO; 2 * width], width),
-            randomness: vec![QuadFelt::ZERO; 2],
-            permutation_values: vec![QuadFelt::ZERO],
-            periodic_values: get_periodic_column_values()
-                .iter()
-                .map(|column| column[row])
-                .collect(),
-            base_evaluations: Vec::new(),
-            extension_evaluations: Vec::new(),
-
-            is_first_row: Felt::from_bool(row == 0),
-            is_last_row: Felt::from_bool(row == BLOCK_PERIOD - 1),
-        }
-    }
+    use crate::{
+        precompiles::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+        shared::eidos::test_utils::EidosRowEvaluator,
+    };
 
     #[test]
     fn standalone_interface_accepts_nonzero_multiplicities() {
@@ -593,21 +503,22 @@ mod tests {
             },
         )
         .unwrap();
-        assert_ne!(sums[0], QuadFelt::ZERO);
+        let exports: [QuadFelt; 1] = sums.try_into().unwrap();
+        assert_ne!(exports[0], QuadFelt::ZERO);
 
         for row in 0..BLOCK_PERIOD {
             let next = (row + 1) % BLOCK_PERIOD;
-            let mut builder = builder(row, PVM_AUX_COLS);
-            builder.main.values = [rows[row], rows[next]].as_flattened().to_vec();
+            let mut builder =
+                EidosRowEvaluator::new(&rows[row], &rows[next], row, BLOCK_PERIOD, PVM_AUX_COLS);
             builder.aux.values[..PVM_AUX_COLS]
                 .copy_from_slice(&aux.values[row * PVM_AUX_COLS..(row + 1) * PVM_AUX_COLS]);
             builder.aux.values[PVM_AUX_COLS..]
                 .copy_from_slice(&aux.values[next * PVM_AUX_COLS..(next + 1) * PVM_AUX_COLS]);
-            builder.randomness = challenges.to_vec();
-            builder.permutation_values = sums.clone();
+            builder.challenges = challenges;
+            builder.exports = exports;
             builder
                 .eval_with(|frame, inputs, sink| air::LiftedAir::eval(&air, frame, inputs, sink));
-            assert!(builder.base_evaluations.iter().all(|v| *v == Felt::ZERO), "row {row}");
+            assert!(builder.evaluations.iter().all(|v| *v == Felt::ZERO), "row {row}");
             assert!(
                 builder.extension_evaluations.iter().all(|v| *v == QuadFelt::ZERO),
                 "row {row}"
@@ -619,7 +530,8 @@ mod tests {
     fn inactive_interface_columns_are_pinned_even_with_zero_denominators() {
         // At alpha = beta = 0 all message denominators vanish. Both selected columns still have
         // denominator one outside their two active rows; only the block column needs a pin.
-        let mut builder = builder(1, PVM_AUX_COLS);
+        let row = [Felt::ZERO; NUM_MAIN_COLS];
+        let mut builder = EidosRowEvaluator::new(&row, &row, 1, BLOCK_PERIOD, PVM_AUX_COLS);
         builder.aux.values[..PVM_AUX_COLS].fill(QuadFelt::ONE);
         let air = EidosCompressionInterfaceAir;
         builder.eval_with(|frame, inputs, sink| lookup::eval_lookup(&air, frame, inputs, sink));
@@ -628,8 +540,7 @@ mod tests {
             [QuadFelt::ZERO, QuadFelt::ZERO, QuadFelt::ONE, QuadFelt::ONE]
         );
 
-        builder.extension_evaluations.clear();
-        builder.aux = RowMajorMatrix::new(vec![QuadFelt::ZERO; 2 * NUM_AUX_COLS], NUM_AUX_COLS);
+        let mut builder = EidosRowEvaluator::new(&row, &row, 1, BLOCK_PERIOD, NUM_AUX_COLS);
         builder.aux.values[INTERFACE_AUX_BEGIN] = QuadFelt::ONE;
         builder.aux.values[INTERFACE_AUX_BEGIN + 2] = QuadFelt::ONE;
         builder.eval_with(|frame, inputs, sink| {

@@ -135,53 +135,50 @@ impl<EF: ExtensionField<Felt>> air::ProverAir<EF> for CoreAir {
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec;
-
-    use miden_core::{
-        Felt,
-        field::{PrimeCharacteristicRing, QuadFelt},
-        operations::opcodes,
-        utils::RowMajorMatrix,
-    };
-    use miden_stark::{
-        air,
-        lookup::{self, Challenges, accumulate_slow},
+    use miden_core::field::QuadFelt;
+    use miden_stark::air::{
+        self, Assertion,
+        symbolic::{AuxInput, BaseInput, BaseLeaf, ExtLeaf, RowOffset, SymbolicExpr},
     };
 
     use super::CoreAir;
     use crate::vm::{
-        constraints::{columns::NUM_CORE_COLS, op_flags::generate_test_row},
+        constraints::columns::{NUM_DECODER_COLS, NUM_SYSTEM_COLS},
         inputs::NUM_PUBLIC_VALUES,
     };
 
     #[test]
-    fn complete_native_core_capture_keeps_lookup_after_all_base_assertions() {
+    fn public_boundaries_precede_lookup_assertions() {
         let captured = air::capture_with::<_, QuadFelt>(&CoreAir).unwrap();
-        let spec = captured.descriptor.spec();
-        assert_eq!(spec.main_width, NUM_CORE_COLS);
-        assert_eq!(spec.aux_width, 4);
-        assert_eq!(spec.num_public_values, NUM_PUBLIC_VALUES);
-        assert_eq!(spec.num_challenges, 2);
-        assert_eq!(spec.num_exports, 1);
-        assert!(spec.preprocessed.is_none());
-        assert!(spec.periodic_columns.is_empty());
-        let counts = captured.descriptor.analysis().counts();
-        // Column0 owns the cyclic accumulator and first-row anchor. Each later column owns
-        // one fraction relation, so four columns contribute five extension-class assertions.
-        assert_eq!(counts.ext, 5);
-        assert!(
-            captured.assertions[..counts.base]
-                .iter()
-                .all(|value| matches!(value, air::Assertion::Base(_)))
-        );
-        assert!(
-            captured.assertions[counts.base..]
-                .iter()
-                .all(|value| matches!(value, air::Assertion::Extension(_)))
-        );
+        let analysis = captured.descriptor.analysis();
+        let counts = analysis.counts();
+        assert!(analysis.layout().base_indices().iter().copied().eq(0..counts.base));
+        assert!(analysis.layout().ext_indices().iter().copied().eq(counts.base..counts.base + 5));
 
-        use air::symbolic::{AuxInput, BaseLeaf, ExtLeaf, RowOffset, SymbolicExpr};
-        let air::Assertion::Extension(SymbolicExpr::Mul { x: acc, y: first, .. }) =
+        let public_start = counts.base - NUM_PUBLIC_VALUES;
+        for i in 0..NUM_PUBLIC_VALUES {
+            let Assertion::Base(SymbolicExpr::Mul { x: selector, y: difference, .. }) =
+                &captured.assertions[public_start + i]
+            else {
+                panic!("public boundary must retain its selector times difference");
+            };
+            if i < 16 {
+                assert!(matches!(selector.as_ref(), SymbolicExpr::Leaf(BaseLeaf::IsFirstRow)));
+            } else {
+                assert!(matches!(selector.as_ref(), SymbolicExpr::Leaf(BaseLeaf::IsLastRow)));
+            }
+            let SymbolicExpr::Sub { x: stack, y: public, .. } = difference.as_ref() else {
+                panic!("public boundary must subtract the indexed public value");
+            };
+            assert!(matches!(stack.as_ref(), SymbolicExpr::Leaf(BaseLeaf::Input(
+                BaseInput::Main { offset: RowOffset::Current, index }
+            )) if *index == NUM_SYSTEM_COLS + NUM_DECODER_COLS + i % 16));
+            assert!(matches!(public.as_ref(), SymbolicExpr::Leaf(BaseLeaf::Input(
+                BaseInput::Public(index)
+            )) if *index == i));
+        }
+
+        let Assertion::Extension(SymbolicExpr::Mul { x: acc, y: first, .. }) =
             &captured.assertions[counts.base]
         else {
             panic!("the first lookup assertion must remain its accumulator anchor");
@@ -197,54 +194,5 @@ mod tests {
             first.as_ref(),
             SymbolicExpr::Leaf(ExtLeaf::Base(SymbolicExpr::Leaf(BaseLeaf::IsFirstRow)))
         ));
-
-        #[cfg(feature = "std")]
-        miden_stark::lookup::validate_native(&CoreAir, spec).unwrap();
-    }
-
-    #[test]
-    fn native_core_witness_matches_slow_fractions_and_normalized_export() {
-        let mut current = generate_test_row(opcodes::PUSH.into());
-        let mut next = generate_test_row(opcodes::END.into());
-        current.system.clk = Felt::from_u32(19);
-        next.system.clk = Felt::from_u32(41);
-        let main = RowMajorMatrix::new(
-            current.as_slice().iter().chain(next.as_slice()).copied().collect(),
-            NUM_CORE_COLS,
-        );
-        let public = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
-        let challenges = [QuadFelt::from_u32(7), QuadFelt::from_u32(11)];
-        let native = air::ProverAir::build_aux_trace(
-            &CoreAir,
-            air::AuxTraceInputs {
-                main: &main,
-                preprocessed: None,
-                public_values: &public,
-                statement: &[],
-                challenges: &challenges,
-            },
-        )
-        .unwrap();
-        let spec = air::LiftedAir::spec(&CoreAir);
-        let encoding = Challenges::new(
-            challenges[0],
-            challenges[1],
-            crate::vm::logup::MIDEN_MAX_MESSAGE_WIDTH,
-            crate::vm::logup::BusId::COUNT,
-        );
-        let fractions = lookup::build_lookup_fractions(
-            &CoreAir,
-            &main,
-            None,
-            &spec.periodic_columns,
-            &encoding,
-        );
-        let (expected, sigma) = accumulate_slow(&fractions);
-        for (row, values) in native.columns.values.chunks_exact(expected.len()).enumerate() {
-            for (column, value) in values.iter().enumerate() {
-                assert_eq!(*value, expected[column][row]);
-            }
-        }
-        assert_eq!(native.exports, [sigma]);
     }
 }

@@ -66,7 +66,7 @@ use crate::transcript::{TranscriptError, VerifierChannel};
 ///
 /// Controls proof-of-work grinding for DEEP challenge sampling.
 /// Column alignment is handled at the LMCS layer and by padding evaluations.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct DeepParams {
     /// Grinding bits before DEEP challenge sampling.
     pub(crate) deep_pow_bits: usize,

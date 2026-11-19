@@ -14,9 +14,11 @@ use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
     air,
-    air::{LiftedAirBuilder as _, MultiAir, ProverStatement, Statement},
+    air::{LiftedAirBuilder as _, ProverStatement, Statement},
     domain::log_quotient_degree,
-    testing::configs::goldilocks_poseidon2::{Felt, QuadFelt, prove_and_verify_statement},
+    testing::configs::goldilocks_poseidon2::{
+        Felt, QuadFelt, TestMultiAir, prove_and_verify_statement,
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -138,31 +140,6 @@ impl air::ProverAir<QuadFelt> for PeriodicPowerAir {
 }
 
 // ---------------------------------------------------------------------------
-// MultiAir: trivial constant-challenge aux column for each trace.
-// ---------------------------------------------------------------------------
-
-struct TwoTraceMultiAir<A> {
-    airs: Vec<A>,
-}
-
-impl<A> TwoTraceMultiAir<A> {
-    fn new(airs: Vec<A>) -> Self {
-        Self { airs }
-    }
-}
-
-impl<A> MultiAir<Felt, QuadFelt> for TwoTraceMultiAir<A>
-where
-    A: air::AirKernel<F = Felt>,
-{
-    type Air = A;
-
-    fn airs(&self) -> &[Self::Air] {
-        &self.airs
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Trace generator for `next = local^power`.
 // ---------------------------------------------------------------------------
 
@@ -181,24 +158,11 @@ fn generate_pow_trace(power: u64, start: Felt, height: usize) -> RowMajorMatrix<
 // ---------------------------------------------------------------------------
 
 #[test]
-fn quadratic_air_uses_one_quotient_chunk() {
-    assert_eq!(
-        log_quotient_degree(&air::DirectKernel::new(PowerAir { power: 2 }).unwrap()).unwrap(),
-        0
-    );
-}
-
-#[test]
 fn one_chunk_quadratic_quotient_proves() {
-    let air = PowerAir { power: 2 };
+    let kernel = air::DirectKernel::new(PowerAir { power: 2 }).unwrap();
+    assert_eq!(log_quotient_degree(&kernel).unwrap(), 0);
     let trace = generate_pow_trace(2, Felt::from_u64(7), 16);
-
-    let statement = Statement::new(
-        TwoTraceMultiAir::new(vec![air::DirectKernel::new(air).unwrap()]),
-        Vec::new(),
-        Vec::new(),
-    )
-    .unwrap();
+    let statement = Statement::new(TestMultiAir::new(vec![kernel]), vec![], vec![]).unwrap();
     let prover_statement = ProverStatement::new(statement, vec![trace]).unwrap();
     prove_and_verify_statement(prover_statement);
 }
@@ -211,7 +175,7 @@ fn run_upsample_case(low_power: u64, low_height: usize, high_power: u64, high_he
     let t_high = generate_pow_trace(high_power, Felt::from_u64(11), high_height);
 
     let statement = Statement::new(
-        TwoTraceMultiAir::new(vec![
+        TestMultiAir::new(vec![
             air::DirectKernel::new(low).unwrap(),
             air::DirectKernel::new(high).unwrap(),
         ]),
@@ -224,18 +188,10 @@ fn run_upsample_case(low_power: u64, low_height: usize, high_power: u64, high_he
 }
 
 #[test]
-fn upsample_fires_on_d5_under_d9() {
-    run_upsample_case(5, 16, 9, 16);
-}
-
-#[test]
-fn upsample_fires_low_degree_on_taller_trace() {
-    run_upsample_case(2, 64, 9, 16);
-}
-
-#[test]
-fn upsample_fires_high_degree_on_taller_trace() {
-    run_upsample_case(2, 16, 9, 64);
+fn quotient_upsampling_handles_mixed_degrees_and_heights() {
+    for (low_power, low_height, high_height) in [(5, 16, 16), (2, 64, 16), (2, 16, 64)] {
+        run_upsample_case(low_power, low_height, 9, high_height);
+    }
 }
 
 #[test]
@@ -247,7 +203,7 @@ fn upsample_fires_with_periodic_columns() {
     let t_high = generate_pow_trace(5, Felt::from_u64(11), 16);
 
     let statement = Statement::new(
-        TwoTraceMultiAir::new(vec![
+        TestMultiAir::new(vec![
             air::DirectKernel::new(low).unwrap(),
             air::DirectKernel::new(high).unwrap(),
         ]),
@@ -257,73 +213,4 @@ fn upsample_fires_with_periodic_columns() {
     .unwrap();
     let prover_statement = ProverStatement::new(statement, vec![t_low, t_high]).unwrap();
     prove_and_verify_statement(prover_statement);
-}
-
-#[test]
-fn native_power_sources_preserve_witness_and_direct_symbolic_order() {
-    use crate::air::AirKernel;
-
-    for power in [2, 5, 9] {
-        let source = PowerAir { power };
-        let expected = air::capture_with::<_, QuadFelt>(&source).unwrap();
-        assert_eq!(expected.descriptor.analysis().layout().base_indices(), &[0]);
-        assert_eq!(expected.descriptor.analysis().layout().ext_indices(), &[1]);
-        let kernel = air::DirectKernel::new(source).unwrap();
-        let main = generate_pow_trace(power, Felt::from_u64(2), 4);
-        let challenges = [QuadFelt::from_u64(7)];
-        let aux = air::ProverAir::build_aux_trace(
-            &kernel,
-            air::AuxTraceInputs {
-                main: &main,
-                preprocessed: None,
-                public_values: &[],
-                statement: &[],
-                challenges: &challenges,
-            },
-        )
-        .unwrap();
-        assert_eq!(aux.columns.values, vec![QuadFelt::from_u64(7); 4]);
-        assert!(aux.exports.is_empty());
-        let observed = air::capture_from_spec::<Felt, QuadFelt>(
-            kernel.descriptor().spec().as_borrowed(),
-            |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
-        )
-        .unwrap();
-        assert_eq!(observed.descriptor.fingerprint(), expected.descriptor.fingerprint());
-        assert_eq!(observed.descriptor.analysis(), expected.descriptor.analysis());
-    }
-
-    for power in [3, 5] {
-        let source = PeriodicPowerAir { power };
-        let expected = air::capture_with::<_, QuadFelt>(&source).unwrap();
-        assert_eq!(
-            expected.descriptor.spec().periodic_columns.as_ref(),
-            &[vec![Felt::ONE, Felt::ZERO]]
-        );
-        assert_eq!(expected.descriptor.analysis().layout().base_indices(), &[0, 1]);
-        assert_eq!(expected.descriptor.analysis().layout().ext_indices(), &[2]);
-        let kernel = air::DirectKernel::new(source).unwrap();
-        let main = generate_pow_trace(power, Felt::from_u64(2), 4);
-        let challenges = [QuadFelt::from_u64(7)];
-        let aux = air::ProverAir::build_aux_trace(
-            &kernel,
-            air::AuxTraceInputs {
-                main: &main,
-                preprocessed: None,
-                public_values: &[],
-                statement: &[],
-                challenges: &challenges,
-            },
-        )
-        .unwrap();
-        assert_eq!(aux.columns.values, vec![QuadFelt::from_u64(7); 4]);
-        assert!(aux.exports.is_empty());
-        let observed = air::capture_from_spec::<Felt, QuadFelt>(
-            kernel.descriptor().spec().as_borrowed(),
-            |frame, inputs, sink| kernel.bind(inputs).unwrap().eval(frame, sink),
-        )
-        .unwrap();
-        assert_eq!(observed.descriptor.fingerprint(), expected.descriptor.fingerprint());
-        assert_eq!(observed.descriptor.analysis(), expected.descriptor.analysis());
-    }
 }

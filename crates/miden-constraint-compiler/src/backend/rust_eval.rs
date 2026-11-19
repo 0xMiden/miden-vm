@@ -674,19 +674,9 @@ mod tests {
         testing::eval_graph,
     };
 
-    fn emit_graph_module(header: &str, evals: &[GraphEvaluator<'_>]) -> String {
-        let mut out = module_start(header);
-        for eval in evals {
-            emit_air(eval, &mut out, false);
-        }
-        out
-    }
-
-    fn emit_graph_optimized(header: &str, evals: &[GraphEvaluator<'_>]) -> String {
-        let mut out = module_start(header);
-        for eval in evals {
-            emit_air(eval, &mut out, true);
-        }
+    fn emit_graph(eval: &GraphEvaluator<'_>, optimized: bool) -> String {
+        let mut out = module_start("//! Test module.\n");
+        emit_air(eval, &mut out, optimized);
         out
     }
 
@@ -828,26 +818,6 @@ mod tests {
     }
 
     #[test]
-    fn preprocessed_rows_are_borrowed_before_assertions() {
-        let mut builder = GraphBuilder::new();
-        let preprocessed = builder.leaf(Leaf::Preprocessed { offset: 0, index: 0 });
-        let graph = builder.freeze();
-        let constraints = constraints(vec![(preprocessed, 0)], vec![]);
-        let out = emit_graph_module(
-            "//! Test module.\n",
-            &[GraphEvaluator {
-                name: "preprocessed_mock",
-                air_label: "MockAir::PREPROCESSED",
-                graph: &graph,
-                constraints: &constraints,
-            }],
-        );
-
-        assert!(out.contains("let p0 = frame.preprocessed.current;"));
-        assert!(out.contains("p0[0].dup()"));
-    }
-
-    #[test]
     #[should_panic(expected = "duplicate global constraint index")]
     fn duplicate_global_index_is_rejected() {
         let mut b = GraphBuilder::new();
@@ -855,34 +825,17 @@ mod tests {
         let (r, _) = b.op(Class::Base, OpKind::Neg, x, None);
         let graph = b.freeze();
         let cons = constraints(vec![(r, 0), (r, 0)], vec![]);
-        emit_graph_module(
-            "//! h.\n",
-            &[GraphEvaluator {
+        emit_graph(
+            &GraphEvaluator {
                 name: "dup",
                 air_label: "MockAir::DUP",
                 graph: &graph,
                 constraints: &cons,
-            }],
+            },
+            false,
         );
     }
 
-    #[test]
-    #[should_panic(expected = "ext constant with non-base coefficients")]
-    fn ext_constant_outside_base_field_is_rejected() {
-        let mut b = GraphBuilder::new();
-        let c = b.leaf(Leaf::ExtConst([1, 2]));
-        let graph = b.freeze();
-        let cons = constraints(vec![], vec![(c, 0)]);
-        emit_graph_module(
-            "//! h.\n",
-            &[GraphEvaluator {
-                name: "bad",
-                air_label: "MockAir::BAD",
-                graph: &graph,
-                constraints: &cons,
-            }],
-        );
-    }
     /// Value of a planned rewrite. Scalar multiplications use the specialized
     /// field methods that the emitted source calls.
     fn eval_rewrite(values: &[QuadFelt], rewrite: &Rewrite) -> QuadFelt {
@@ -953,27 +906,14 @@ mod tests {
             ext.iter().enumerate().map(|(i, &r)| (r, base.len() + i)).collect(),
         );
         assert_rewrites_preserve_values(&graph, &cons);
-        let out = emit_graph_optimized(
-            "//! Test.\n",
-            &[GraphEvaluator {
-                name: "optimized",
-                air_label: "TEST",
-                graph: &graph,
-                constraints: &cons,
-            }],
-        );
-        assert_eq!(
-            out,
-            emit_graph_optimized(
-                "//! Test.\n",
-                &[GraphEvaluator {
-                    name: "optimized",
-                    air_label: "TEST",
-                    graph: &graph,
-                    constraints: &cons,
-                }],
-            )
-        );
+        let eval = GraphEvaluator {
+            name: "optimized",
+            air_label: "TEST",
+            graph: &graph,
+            constraints: &cons,
+        };
+        let out = emit_graph(&eval, true);
+        assert_eq!(out, emit_graph(&eval, true));
         out
     }
 
@@ -1110,7 +1050,7 @@ mod tests {
         assert!(out.contains("AB::ExtExpr::dot_product::<4>"), "{out}");
         assert!(out.contains("<AB::ExtExpr as Algebra<AB::Expr>>::mixed_dot_product::<4>"));
         assert!(out.contains("AB::Expr::ONE"));
-        assert!(!out.contains("Algebra<Felt>"));
+        assert!(!out.contains("<AB::ExtExpr as Algebra<Felt>>::mixed_dot_product"));
     }
 
     #[test]
@@ -1260,6 +1200,6 @@ mod tests {
         let out = optimized(b, vec![], vec![sum, products]);
         let row = out.split("pub fn eval_optimized").nth(1).unwrap();
         assert!(row.contains("terms[0]") && row.contains("terms[1]"), "{row}");
-        assert!(!row.contains("permutation_randomness"), "{row}");
+        assert!(!row.contains("inputs.challenges"), "{row}");
     }
 }

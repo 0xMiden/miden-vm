@@ -6,7 +6,6 @@ use miden_stark::air::{self, LiftedAir as _, LiftedAirBuilder as _};
 use p3_field::Dup;
 use p3_matrix::dense::RowMajorMatrix;
 
-use super::common::{eval_dag, eval_periodic_values, eval_quotient};
 use crate::{
     InputKey, InputLayout,
     compiler::{
@@ -14,7 +13,7 @@ use crate::{
         circuit::emit_circuit,
         dag::NodeKind,
         pipeline::{build_ace_dag_for_air, build_canonical_multi_air_ace_circuit},
-        testing::eval_native_constraints,
+        testing::{eval_dag, eval_native_constraints, eval_periodic_values, eval_quotient},
     },
 };
 
@@ -523,103 +522,77 @@ fn multi_air_rejects_empty_airs_and_invalid_alignment() {
 }
 
 #[test]
-fn test_preprocessed_entries_lower_to_input_keys() {
-    let air = MockPreprocessedAir;
-    let config = AceConfig {
-        num_quotient_chunks: 1,
-        layout: LayoutKind::Native,
-    };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
+fn preprocessed_inputs_lower_and_affect_dag_and_circuit_eval() {
+    let artifacts = build_ace_dag_for_air(
+        &MockPreprocessedAir,
+        AceConfig {
+            num_quotient_chunks: 1,
+            layout: LayoutKind::Native,
+        },
+    )
+    .unwrap();
+    let layout = artifacts.layout;
+    assert_eq!(layout.counts.preprocessed_width, 1);
 
-    assert_eq!(artifacts.layout.counts.preprocessed_width, 1);
-    assert!(artifacts.layout.index(InputKey::Preprocessed { offset: 0, index: 0 }).is_some());
-    assert!(artifacts.layout.index(InputKey::Preprocessed { offset: 1, index: 0 }).is_some());
-    assert!(artifacts.dag.nodes().iter().any(|node| matches!(
-        node,
-        NodeKind::Input(InputKey::Preprocessed { offset: 0, index: 0 })
-    )));
-    assert!(artifacts.dag.nodes().iter().any(|node| matches!(
-        node,
-        NodeKind::Input(InputKey::Preprocessed { offset: 1, index: 0 })
-    )));
-}
-
-#[test]
-fn test_preprocessed_inputs_affect_dag_and_circuit_eval() {
-    let air = MockPreprocessedAir;
-    let config = AceConfig {
-        num_quotient_chunks: 1,
-        layout: LayoutKind::Native,
-    };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
-    let layout = artifacts.layout.clone();
     let mut inputs = vec![EF::ZERO; layout.total_inputs];
-    inputs[layout.index(InputKey::Preprocessed { offset: 0, index: 0 }).unwrap()] = ef(13);
-    inputs[layout.index(InputKey::Preprocessed { offset: 1, index: 0 }).unwrap()] = ef(17);
-
-    let circuit = emit_circuit(&artifacts.dag, layout.clone()).unwrap();
-    let dag_value = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
-    let circuit_value = circuit.eval(&inputs).expect("circuit eval");
-
+    for (offset, value) in [13, 17].into_iter().enumerate() {
+        let key = InputKey::Preprocessed { offset, index: 0 };
+        assert!(
+            artifacts
+                .dag
+                .nodes()
+                .iter()
+                .any(|node| matches!(node, NodeKind::Input(input) if *input == key))
+        );
+        inputs[layout.index(key).unwrap()] = ef(value);
+    }
+    let dag_value = eval_dag(&artifacts.dag, &inputs, &layout).unwrap();
+    let circuit = emit_circuit(&artifacts.dag, layout).unwrap();
     assert_eq!(dag_value, ef(30));
-    assert_eq!(circuit_value, dag_value);
+    assert_eq!(circuit.eval(&inputs).unwrap(), dag_value);
 }
 
-#[test]
-fn test_verifier_dag_matches_manual_eval() {
-    let air = MockAir;
+fn assert_single_air_circuit_matches_manual_eval(
+    air: &impl air::LiftedAir<F = F>,
+) -> AceCircuit<EF> {
     let config = AceConfig {
         num_quotient_chunks: 2,
         layout: LayoutKind::Native,
     };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
-    let layout = artifacts.layout.clone();
+    let artifacts = build_ace_dag_for_air(air, config).unwrap();
+    let layout = artifacts.layout;
     let inputs = build_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
     let spec = air.spec();
-    let periodic_columns = &spec.periodic_columns;
-    let periodic_values = eval_periodic_values(periodic_columns, z_k);
-
-    let acc = eval_native_constraints(&air, &spec, &inputs, &layout, &periodic_values);
+    let periodic_values = eval_periodic_values(&spec.periodic_columns, z_k);
+    let acc = eval_native_constraints(air, &spec, &inputs, &layout, &periodic_values);
     let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
     let vanishing = z_pow_n - EF::ONE;
-    let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
+    let expected = acc - eval_quotient::<F, EF>(&layout, &inputs) * vanishing;
 
-    let actual = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
+    let actual = eval_dag(&artifacts.dag, &inputs, &layout).unwrap();
     assert_eq!(actual, expected);
+
+    let circuit = emit_circuit(&artifacts.dag, layout).unwrap();
+    assert_eq!(circuit.eval(&inputs).unwrap(), actual);
+    circuit
+}
+
+#[test]
+fn verifier_dag_and_encoded_circuit_match_manual_eval() {
+    let circuit = assert_single_air_circuit_matches_manual_eval(&MockAir);
+    let encoded = circuit.to_ace().unwrap();
+    assert!(encoded.size_in_felt().is_multiple_of(8));
+    assert_eq!(encoded.num_inputs(), circuit.layout().total_inputs);
 }
 
 /// Cross-checks the DAG's periodic-column lowering against the independent
 /// `eval_periodic_values` reference (dense IDFT + Horner) for a column pair chosen
 /// so one column resolves via the sparse Lagrange path (period 128, 3/128 nonzero)
-/// and the other via the dense Horner path (period 8, fully dense) — see
-/// `build_periodic_nodes` in `dag/lower.rs`.
+/// and the other via the dense Horner path (period 8, fully dense).
 #[test]
 fn test_sparse_and_dense_periodic_paths_match_manual_eval() {
-    let air = MockPeriodicAir;
-    let config = AceConfig {
-        num_quotient_chunks: 2,
-        layout: LayoutKind::Native,
-    };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
-    let layout = artifacts.layout.clone();
-    let inputs = build_inputs(&layout);
-    let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
-    let spec = air.spec();
-    let periodic_columns = &spec.periodic_columns;
-    let periodic_values = eval_periodic_values(periodic_columns, z_k);
-
-    let acc = eval_native_constraints(&air, &spec, &inputs, &layout, &periodic_values);
-    let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
-    let vanishing = z_pow_n - EF::ONE;
-    let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
-
-    let actual = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
-    assert_eq!(actual, expected);
-
-    let circuit = emit_circuit(&artifacts.dag, layout).unwrap();
-    let circuit_value = circuit.eval(&inputs).expect("circuit eval");
-    assert_eq!(circuit_value, actual);
+    assert_single_air_circuit_matches_manual_eval(&MockPeriodicAir);
 }
 
 /// The shared-basis lowering must agree with the independent dense reference, and the
@@ -642,29 +615,7 @@ fn test_shared_lagrange_basis_periodic_path_matches_manual_eval() {
     );
     assert!(matches!(columns[SHARED_BASIS_COLUMNS + 2], PeriodicColumn::Sparse { .. }));
 
-    let air = MockSharedBasisAir;
-    let config = AceConfig {
-        num_quotient_chunks: 2,
-        layout: LayoutKind::Native,
-    };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
-    let layout = artifacts.layout.clone();
-    let inputs = build_inputs(&layout);
-    let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
-    let spec = air.spec();
-    let periodic_columns = &spec.periodic_columns;
-    let periodic_values = eval_periodic_values(periodic_columns, z_k);
-
-    let acc = eval_native_constraints(&air, &spec, &inputs, &layout, &periodic_values);
-    let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
-    let vanishing = z_pow_n - EF::ONE;
-    let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
-
-    let actual = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
-    assert_eq!(actual, expected);
-
-    let circuit = emit_circuit(&artifacts.dag, layout).unwrap();
-    assert_eq!(circuit.eval(&inputs).expect("circuit eval"), actual);
+    assert_single_air_circuit_matches_manual_eval(&MockSharedBasisAir);
 }
 
 /// Constant columns and repeats of another column add nothing to the basis savings of their
@@ -693,23 +644,6 @@ fn test_constant_and_repeated_periodic_columns_do_not_count_toward_shared_basis(
 }
 
 #[test]
-fn test_emitted_circuit_matches_dag_eval() {
-    let air = MockAir;
-    let config = AceConfig {
-        num_quotient_chunks: 2,
-        layout: LayoutKind::Native,
-    };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
-    let layout = artifacts.layout.clone();
-    let inputs = build_inputs(&layout);
-
-    let circuit = emit_circuit(&artifacts.dag, layout.clone()).unwrap();
-    let dag_value = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
-    let circuit_value = circuit.eval(&inputs).expect("circuit eval");
-    assert_eq!(circuit_value, dag_value);
-}
-
-#[test]
 fn pipeline_rejects_zero_quotient_chunks() {
     let air = MockAir;
     let config = AceConfig {
@@ -722,22 +656,6 @@ fn pipeline_rejects_zero_quotient_chunks() {
         matches!(err, crate::AceError::InvalidInputLayout { .. }),
         "expected InvalidInputLayout, got {err:?}"
     );
-}
-
-#[test]
-fn test_encoded_circuit_structure() {
-    let air = MockAir;
-    let config = AceConfig {
-        num_quotient_chunks: 2,
-        layout: LayoutKind::Native,
-    };
-    let artifacts = build_ace_dag_for_air(&air, config).unwrap();
-    let layout = artifacts.layout.clone();
-    let circuit = emit_circuit(&artifacts.dag, layout.clone()).unwrap();
-
-    let encoded = circuit.to_ace().unwrap();
-    assert!(encoded.size_in_felt().is_multiple_of(8));
-    assert_eq!(encoded.num_inputs(), layout.total_inputs);
 }
 
 #[test]

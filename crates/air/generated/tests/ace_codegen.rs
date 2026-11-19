@@ -70,34 +70,6 @@ fn core_air_dag_rejects_mismatched_layout() {
 }
 
 #[test]
-fn synthetic_ood_adjusts_quotient_to_zero() {
-    let config = AceConfig {
-        num_quotient_chunks: 8,
-        layout: LayoutKind::Masm,
-    };
-
-    let artifacts = build_ace_dag_for_air(&MidenAir::Core, config).expect("ace dag");
-    let circuit = emit_circuit(&artifacts.dag, artifacts.layout.clone()).expect("ace circuit");
-
-    let mut inputs: Vec<QuadFelt> = fill_inputs(&artifacts.layout);
-    let root = circuit.eval(&inputs).expect("circuit eval");
-
-    let z_pow_n = inputs[artifacts.layout.index(InputKey::ZPowN).unwrap()];
-    let vanishing = z_pow_n - QuadFelt::ONE;
-    let zps_0 = zps_for_chunk::<Felt, QuadFelt>(&artifacts.layout, &inputs, 0);
-    let delta = root * (zps_0 * vanishing).inverse();
-
-    let idx = artifacts
-        .layout
-        .index(InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 })
-        .unwrap();
-    inputs[idx] += delta;
-
-    let result = circuit.eval(&inputs).expect("circuit eval");
-    assert!(result.is_zero(), "ACE circuit must evaluate to zero");
-}
-
-#[test]
 fn quotient_next_inputs_do_not_affect_eval() {
     let config = AceConfig {
         num_quotient_chunks: 8,

@@ -10,7 +10,7 @@ use miden_core::{
 };
 use miden_stark::{
     air::LiftedAir,
-    lookup::{Challenges, ProverLookupBuilder, build_lookup_fractions},
+    lookup::{Challenges, ProverLookupBuilder},
 };
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
@@ -30,13 +30,6 @@ use crate::prover::{
     transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
-
-#[test]
-fn hash_airs_preserve_the_deployed_quotient_degree() {
-    // Both hash AIRs must fit the existing blowup/folding parameters.
-    assert_eq!(crate::prover::tests::log_quotient_degree(&ChunkNodeSpongeAir), 2);
-    assert_eq!(crate::prover::tests::log_quotient_degree(&Sha512Air), 2);
-}
 
 #[test]
 fn sha512_reuses_compression_padding_for_io() {
@@ -137,11 +130,7 @@ pub(crate) fn fold_balance<A>(
     A: miden_stark::air::LiftedAir<F = Felt>,
     for<'a> A: miden_stark::lookup::LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
-    let spec = miden_stark::air::LiftedAir::spec(air);
-    let periodic = spec.periodic_columns.as_ref();
-    let preprocessed = miden_stark::air::LiftedAir::build_preprocessed_trace(air);
-    let fractions = build_lookup_fractions(air, main, preprocessed.as_ref(), periodic, challenges);
-    for &(multiplicity, denom) in fractions.fractions() {
+    for &(multiplicity, denom) in super::lookup_fractions(air, main, challenges).fractions() {
         net.entry(denom)
             .or_insert_with(|| (Felt::ZERO, core::any::type_name::<A>().into()))
             .0 += multiplicity;

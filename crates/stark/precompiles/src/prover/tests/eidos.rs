@@ -158,26 +158,12 @@ fn lookup_challenges() -> Challenges<QuadFelt> {
 }
 
 fn eidos_balance(trace: &RowMajorMatrix<Felt>) -> HashMap<QuadFelt, Felt> {
-    let air = EidosCompressionAir;
-    let fractions = build_lookup_fractions(
-        &air,
-        trace,
-        None,
-        &miden_stark::air::LiftedAir::spec(&air).periodic_columns,
-        &lookup_challenges(),
-    );
+    let fractions = super::lookup_fractions(&EidosCompressionAir, trace, &lookup_challenges());
     lookup_balance(fractions.fractions())
 }
 
 fn continuation_balance(trace: &RowMajorMatrix<Felt>) -> HashMap<QuadFelt, Felt> {
-    let air = EidosCompressionAir;
-    let fractions = build_lookup_fractions(
-        &air,
-        trace,
-        None,
-        &miden_stark::air::LiftedAir::spec(&air).periodic_columns,
-        &lookup_challenges(),
-    );
+    let fractions = super::lookup_fractions(&EidosCompressionAir, trace, &lookup_challenges());
     let mut offset = 0;
     let mut links = Vec::new();
     for (slot, &count) in fractions.counts().iter().enumerate() {

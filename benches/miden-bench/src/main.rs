@@ -248,15 +248,3 @@ pub(crate) fn format_bytes(bytes: usize) -> String {
         format!("{:.2} MiB", bytes as f64 / (1024.0 * 1024.0))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn miden_trace_summary_keeps_power_of_two_rows() {
-        let spec = TraceSpec { log_height: 19, ..TraceSpec::default() };
-
-        assert_eq!(trace_row_summary(&spec, 524_288), "2^19 = 524288 rows");
-    }
-}
