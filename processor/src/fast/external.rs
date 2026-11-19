@@ -10,7 +10,8 @@ use crate::{
 ///
 /// An external reference may have no location or refer to a source file unavailable to the host.
 /// For resolution failures, the pending caller continuation provides a fallback in the same
-/// package.
+/// package. Prefer a source file over a span alone, and prefer the external reference when both
+/// provide the same kind of source information.
 pub(super) fn load_error_with_context<F>(
     err: ProcessorError,
     source_node_id: Option<DebugSourceNodeId>,
@@ -40,7 +41,8 @@ pub(super) fn load_error_with_context<F>(
         if let (Some(debug_info), Some(source_node_id)) = (package_debug_info, caller) {
             let caller_source = PackageSourceDebugContext::new(debug_info, Some(source_node_id))
                 .resolve_source(host, None);
-            if caller_source.1.is_some() {
+            if caller_source.1.is_some() || (source.0.is_unknown() && !caller_source.0.is_unknown())
+            {
                 source = caller_source;
             }
         }

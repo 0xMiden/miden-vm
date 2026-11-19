@@ -2076,6 +2076,7 @@ struct FailingMastForestHost {
     result: Result<Option<LoadedMastForest>, TestMastForestLoadError>,
     lookup_count: Cell<usize>,
     source_manager: Arc<DefaultSourceManager>,
+    provide_source_files: bool,
 }
 
 impl FailingMastForestHost {
@@ -2084,6 +2085,7 @@ impl FailingMastForestHost {
             result: Err(TestMastForestLoadError),
             lookup_count: Cell::new(0),
             source_manager: Arc::default(),
+            provide_source_files: true,
         }
     }
 }
@@ -2093,7 +2095,11 @@ impl BaseHost for FailingMastForestHost {
         &self,
         location: &Location,
     ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        let maybe_file = self.source_manager.get_by_uri(location.uri());
+        let maybe_file = if self.provide_source_files {
+            self.source_manager.get_by_uri(location.uri())
+        } else {
+            None
+        };
         let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
         (span, maybe_file)
     }
@@ -2467,6 +2473,30 @@ async fn external_resolution_errors_use_available_source_context(
             }
         }
     }
+}
+
+#[rstest]
+#[case::caller_span_only(false, "file://pkg/caller.masm", 10..28)]
+#[case::external_span_preferred(true, "file://pkg/external.masm", 0..4)]
+fn external_resolution_error_preserves_span_without_source_file(
+    #[case] external_has_span: bool,
+    #[case] expected_uri: &str,
+    #[case] expected_range: core::ops::Range<u32>,
+) {
+    let (program, debug_info, source_manager) =
+        missing_external_package_source_debug_fixture(true, external_has_span, true);
+    let file = source_manager.get_by_uri(&Uri::new(expected_uri)).unwrap();
+    let expected_span = SourceSpan::new(file.id(), expected_range);
+    let mut host = FailingMastForestHost::new();
+    host.source_manager = source_manager;
+    host.provide_source_files = false;
+
+    let err = FastProcessor::new(StackInputs::default())
+        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+        .unwrap_err();
+
+    assert_eq!(err.source_span(), Some(expected_span));
+    assert!(err.source_file().is_none());
 }
 
 #[test]
