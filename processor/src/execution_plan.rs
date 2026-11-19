@@ -7,6 +7,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_core::{deferred::TRUE_DIGEST, mast::MastForest};
+use tracing::{Instrument, Span};
 
 use crate::{
     AdviceInputs, AdviceProvider, ExecutionClaim, ExecutionError, ExecutionOptions,
@@ -176,6 +177,7 @@ impl<'p, T: ExecutionTask> Execution<'p, T> {
     }
 
     pub fn run_sync(self, host: &mut impl SyncHost) -> Result<T::Output, T::Error> {
+        let _span = self.task.run_span().entered();
         let mode = self.task.mode();
         let processor = self.processor.into_processor()?;
         // Full synchronous execution retains each mode's optimized path, including overlapped
@@ -194,17 +196,22 @@ impl<'p, T: ExecutionTask> Execution<'p, T> {
     ///
     /// A task may perform synchronous CPU work during finalization, such as proof generation.
     pub async fn run(self, host: &mut impl Host) -> Result<T::Output, T::Error> {
-        let mode = self.task.mode();
-        let processor = self.processor.into_processor()?;
-        let output = private::ExecutionModeImpl::run(
-            mode,
-            processor,
-            self.program,
-            self.source_context,
-            host,
-        )
-        .await?;
-        self.task.finish(output)
+        let span = self.task.run_span();
+        async move {
+            let mode = self.task.mode();
+            let processor = self.processor.into_processor()?;
+            let output = private::ExecutionModeImpl::run(
+                mode,
+                processor,
+                self.program,
+                self.source_context,
+                host,
+            )
+            .await?;
+            self.task.finish(output)
+        }
+        .instrument(span)
+        .await
     }
 
     /// Starts a session without invoking the host. The recorder is retained across pauses.
@@ -239,6 +246,12 @@ pub trait ExecutionTask: Sized {
     type Error: From<ExecutionError>;
 
     fn mode(&self) -> Self::Mode;
+
+    /// A span around VM execution, artifact preparation, and finalization in a single run.
+    #[doc(hidden)]
+    fn run_span(&self) -> Span {
+        Span::none()
+    }
 
     fn finish(
         self,
@@ -483,12 +496,16 @@ impl<T: ExecutionTask> ExecutionSession<T> {
 
     /// Runs the remaining execution, prepares its artifact, and finalizes the selected task.
     pub fn run_sync(self, host: &mut impl SyncHost) -> Result<T::Output, T::Error> {
+        let _span = self.task.run_span().entered();
         self.run_to_completion_sync(host)?.finish()
     }
 
     /// Awaits host callbacks, then prepares the artifact and finalizes the task on this thread.
     pub async fn run(self, host: &mut impl Host) -> Result<T::Output, T::Error> {
-        self.run_to_completion(host).await?.finish()
+        let span = self.task.run_span();
+        async move { self.run_to_completion(host).await?.finish() }
+            .instrument(span)
+            .await
     }
 
     /// Runs the remaining VM execution, leaving the session available for inspection or completion.
