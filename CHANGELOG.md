@@ -4,7 +4,7 @@
 
 #### Features
 
-- Added the MASM procedure `seal_and_commit`, which encrypts a message with EcGFp5/Eidos and returns the envelope commitment. Rust callers can compute the same commitment from an envelope with `Envelope::to_commitment`.
+- Added the MASM procedure `seal_and_commit`, which encrypts a message with EcGFp5/Eidos and returns the envelope commitment. Rust callers can compute the same commitment from an envelope with `Envelope::to_commitment` ([#4245](https://github.com/0xMiden/miden-vm/pull/4245)).
 
 #### Changes
 
