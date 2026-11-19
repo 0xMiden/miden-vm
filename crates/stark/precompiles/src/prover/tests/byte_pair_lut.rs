@@ -8,13 +8,10 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt, batch_multiplicative_inverse},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_stark::{
-    air::{BaseAir, LiftedAir},
-    lookup::debug::{ValidateLayout, ValidateLookupAir},
-};
+use miden_stark::air::LiftedAir;
 
 use crate::prover::{
-    logup::{Challenges, LookupMessage, NUM_RANDOMNESS, lookup_challenges_from_slice},
+    logup::{Challenges, LookupMessage, lookup_challenges_from_slice},
     primitives::byte_pair_lut::{
         BytePairLutAir, BytePairLutMsg, BytePairLutRequires, BytePairOp, NUM_AUX_COLS,
         NUM_MAIN_COLS, NUM_PREPROCESSED_COLS, PRE_A, PRE_B, PRE_WRAP7, PRE_WRAP12, PRE_XOR,
@@ -248,17 +245,11 @@ fn trace_rows_carry_the_aggregated_relation_multiplicities() {
 #[test]
 fn lookup_degree_annotations_match_the_unified_table_layout() {
     assert_eq!((NUM_MAIN_COLS, NUM_PREPROCESSED_COLS, NUM_AUX_COLS), (7, 5, 4));
-    BytePairLutAir
-        .validate(ValidateLayout {
-            preprocessed_width: NUM_PREPROCESSED_COLS,
-            trace_width: NUM_MAIN_COLS,
-            num_public_values: 0,
-            num_periodic_columns: 0,
-            permutation_width: NUM_AUX_COLS,
-            num_permutation_challenges: NUM_RANDOMNESS,
-            num_permutation_values: 1,
-        })
-        .unwrap_or_else(|error| panic!("byte-pair lookup validation failed: {error}"));
+    miden_stark::lookup::validate_native(
+        &BytePairLutAir,
+        &miden_stark::air::LiftedAir::spec(&BytePairLutAir),
+    )
+    .unwrap_or_else(|error| panic!("byte-pair lookup validation failed: {error}"));
     assert_eq!(crate::prover::tests::log_quotient_degree(&BytePairLutAir), 1);
 }
 
@@ -352,5 +343,5 @@ fn committed_logup_value_is_the_centered_full_sum() {
 
 #[test]
 fn num_public_values_is_zero() {
-    assert_eq!(BytePairLutAir.num_public_values(), 0);
+    assert_eq!(BytePairLutAir.spec().num_public_values, 0);
 }

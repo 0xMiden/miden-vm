@@ -45,27 +45,24 @@ pub mod groups;
 pub mod msm;
 pub mod point_store_groups;
 
-use alloc::vec::Vec;
+use alloc::borrow::Cow;
 
 use add::EcOnCurveCertMsg;
+use air::LiftedAirBuilder as _;
 use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
-    utils::RowMajorMatrix,
 };
 use miden_stark::{
-    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
-    lookup::{
-        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage,
-    },
+    air,
+    lookup::{self, Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage},
 };
+use p3_field::Dup;
 
 use crate::precompiles::{
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     uint::mul::UintMulMsg,
-    utils::{current_main, next_main},
 };
 
 // MESSAGES
@@ -199,61 +196,55 @@ pub(crate) const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 1];
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EcPointStoreAir;
 
-impl BaseAir<Felt> for EcPointStoreAir {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
-    }
-}
+impl air::LiftedAir for EcPointStoreAir {
+    type F = Felt;
 
-impl LiftedAir<Felt, QuadFelt> for EcPointStoreAir {
-    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        NUM_RANDOMNESS
-    }
-
-    fn aux_width(&self) -> usize {
-        AUX_WIDTH
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
+            main_width: NUM_MAIN_COLS,
+            aux_width: AUX_WIDTH,
+            num_public_values: 0,
+            num_challenges: NUM_RANDOMNESS,
+            num_exports: NUM_LOGUP_VALUES,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(&[]),
+        }
     }
 
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
-
-    fn build_aux_trace(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        miden_stark::lookup::build_logup_aux_trace(&EcPointStoreAir, main, challenges)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        eval_point_store_main(builder, 0);
-
-        // Phase 2: LogUp.
-        let mut lb = ConstraintLookupBuilder::new(builder, self);
-        <Self as LookupAir<_>>::eval(self, &mut lb);
-        lb.finish();
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        eval_point_store_main(frame, builder, 0);
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
 /// Evaluate this component's base constraints in a main-trace column band.
-pub(crate) fn eval_point_store_main<AB>(builder: &mut AB, main_col_offset: usize)
-where
-    AB: LiftedAirBuilder<F = Felt>,
+pub(crate) fn eval_point_store_main<AB>(
+    frame: &air::Frame<'_, AB>,
+    builder: &mut AB,
+    main_col_offset: usize,
+) where
+    AB: air::LiftedAirBuilder<F = Felt>,
 {
-    let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
-    let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), main_col_offset);
+    let local: &[AB::Expr; NUM_MAIN_COLS] = frame.main.current
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("EC store current main row band");
+    let next: &[AB::Expr; NUM_MAIN_COLS] = frame.main.next
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("EC store next main row band");
 
-    let is_pai: AB::Expr = local[COL_IS_PAI].into();
-    let is_cert: AB::Expr = local[COL_IS_CERT].into();
-    let act: AB::Expr = local[COL_ACT].into();
-    let act_next: AB::Expr = next[COL_ACT].into();
-    let ptr: AB::Expr = local[COL_PTR].into();
-    let ptr_next: AB::Expr = next[COL_PTR].into();
+    let is_pai: AB::Expr = local[COL_IS_PAI].dup();
+    let is_cert: AB::Expr = local[COL_IS_CERT].dup();
+    let act: AB::Expr = local[COL_ACT].dup();
+    let act_next: AB::Expr = next[COL_ACT].dup();
+    let ptr: AB::Expr = local[COL_PTR].dup();
+    let ptr_next: AB::Expr = next[COL_PTR].dup();
 
     // Booleanity.
     builder.assert_zero(is_pai.clone() * (AB::Expr::ONE - is_pai.clone()));
@@ -267,40 +258,40 @@ where
     // PAI rows reference no uints: coordinate / transient ptrs are the
     // none-sentinel.
     for col in [COL_X_PTR, COL_Y_PTR, COL_U_PTR, COL_W_PTR] {
-        let cell: AB::Expr = local[col].into();
+        let cell: AB::Expr = local[col].dup();
         builder.assert_zero(is_pai.clone() * cell);
     }
     // Cert rows carry real coordinates but no MAC transients — the trio
     // ptrs are the none-sentinel (the cert discharges membership instead).
     for col in [COL_U_PTR, COL_W_PTR] {
-        let cell: AB::Expr = local[col].into();
+        let cell: AB::Expr = local[col].dup();
         builder.assert_zero(is_cert.clone() * cell);
     }
     // Inactive rows cannot provide phantom EcPoint tuples: their group and
     // membership consumes are act-gated, while the provide self-gates via
     // this multiplicity cell.
-    let point_mult: AB::Expr = local[COL_ECPOINT_MULT].into();
+    let point_mult: AB::Expr = local[COL_ECPOINT_MULT].dup();
     builder.assert_zero((AB::Expr::ONE - act.clone()) * point_mult);
 
     // act is monotone (pads only at the tail; the wrap is dropped so
     // the cyclic last → first edge stays free)…
     builder
-        .when_transition()
+        .when(frame.transition())
         .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
     // …and ptrs are consecutive along the active prefix, starting at 1
     // (an all-pad trace starts at 0).
     builder
-        .when_transition()
+        .when(frame.transition())
         .assert_zero(act_next * (ptr_next - ptr.clone() - AB::Expr::ONE));
-    builder.when_first_row().assert_zero(ptr - act);
+    builder.when(frame.first_row()).assert_zero(ptr - act);
 }
 
 // LOOKUP AIR
 // ================================================================================================
 
-impl<LB> LookupAir<LB> for EcPointStoreAir
+impl<LB> lookup::LookupAir<LB> for EcPointStoreAir
 where
-    LB: LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -314,42 +305,46 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, builder: &mut LB) {
-        eval_point_store_lookups(builder, 0, None);
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        eval_point_store_lookups(frame, builder, 0, None);
     }
 }
 
 /// Evaluate the point lookups, optionally packing a group-table provide with the final MAC.
 pub(crate) fn eval_point_store_lookups<LB>(
+    frame: &lookup::LookupFrame<'_, LB::Expr>,
     builder: &mut LB,
     main_col_offset: usize,
     group_provider: Option<(LB::Expr, EcGroupMsg<LB::Expr>)>,
 ) where
-    LB: LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
-    let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
+    let local: &[LB::Expr; NUM_MAIN_COLS] = frame.main.current
+        [main_col_offset..main_col_offset + NUM_MAIN_COLS]
+        .try_into()
+        .expect("EC store lookup main row band");
 
-    let ptr: LB::Expr = local[COL_PTR].into();
-    let group_ptr: LB::Expr = local[COL_GROUP_PTR].into();
-    let a_ptr: LB::Expr = local[COL_A_PTR].into();
-    let b_ptr: LB::Expr = local[COL_B_PTR].into();
-    let bound_ptr: LB::Expr = local[COL_BOUND_PTR].into();
-    let sbound_ptr: LB::Expr = local[COL_SBOUND_PTR].into();
-    let x_ptr: LB::Expr = local[COL_X_PTR].into();
-    let y_ptr: LB::Expr = local[COL_Y_PTR].into();
-    let u_ptr: LB::Expr = local[COL_U_PTR].into();
-    let w_ptr: LB::Expr = local[COL_W_PTR].into();
-    let is_pai: LB::Expr = local[COL_IS_PAI].into();
-    let is_cert: LB::Expr = local[COL_IS_CERT].into();
-    let act: LB::Expr = local[COL_ACT].into();
-    let beta_ptr: LB::Expr = local[COL_BETA_PTR].into();
-    let lambda_ptr: LB::Expr = local[COL_LAMBDA_PTR].into();
+    let ptr: LB::Expr = local[COL_PTR].dup();
+    let group_ptr: LB::Expr = local[COL_GROUP_PTR].dup();
+    let a_ptr: LB::Expr = local[COL_A_PTR].dup();
+    let b_ptr: LB::Expr = local[COL_B_PTR].dup();
+    let bound_ptr: LB::Expr = local[COL_BOUND_PTR].dup();
+    let sbound_ptr: LB::Expr = local[COL_SBOUND_PTR].dup();
+    let x_ptr: LB::Expr = local[COL_X_PTR].dup();
+    let y_ptr: LB::Expr = local[COL_Y_PTR].dup();
+    let u_ptr: LB::Expr = local[COL_U_PTR].dup();
+    let w_ptr: LB::Expr = local[COL_W_PTR].dup();
+    let is_pai: LB::Expr = local[COL_IS_PAI].dup();
+    let is_cert: LB::Expr = local[COL_IS_CERT].dup();
+    let act: LB::Expr = local[COL_ACT].dup();
+    let beta_ptr: LB::Expr = local[COL_BETA_PTR].dup();
+    let lambda_ptr: LB::Expr = local[COL_LAMBDA_PTR].dup();
 
     // Pads zero the mult cell, so the provide needs no act gate; the
     // consumes do (an all-zero pad row must touch no bus). The trio fires
     // on finite, non-cert rows; the cert consume on finite cert rows —
     // disjoint, partitioning a finite point's one membership obligation.
-    let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_ECPOINT_MULT].into();
+    let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_ECPOINT_MULT].dup();
     let member_flag: LB::Expr = act.clone() - is_pai.clone() - is_cert.clone();
     let cert_flag: LB::Expr = is_cert;
 

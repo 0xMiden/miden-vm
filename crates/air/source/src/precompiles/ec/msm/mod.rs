@@ -28,20 +28,18 @@
 //! — follow the caller's declared term order, not the chiplet's `idx`
 //! storage order.
 
-use alloc::vec::Vec;
+use alloc::borrow::Cow;
 
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
-    utils::RowMajorMatrix,
 };
 use miden_stark::{
-    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
-    lookup::{
-        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage,
-    },
+    air,
+    air::LiftedAirBuilder as _,
+    lookup::{self, Challenges, Deg, LookupBatch, LookupColumn, LookupGroup, LookupMessage},
 };
+use p3_field::Dup;
 
 use crate::precompiles::{
     ec::{
@@ -52,7 +50,6 @@ use crate::precompiles::{
     primitives::byte_pair_lut::Range16Msg,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     uint::{UintValMsg, add::UintAddMsg, mul::UintMulMsg},
-    utils::{current_main, next_main},
 };
 
 // MESSAGES
@@ -326,74 +323,65 @@ const TWO16: u32 = 1 << 16;
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EcMsmAir;
 
-impl BaseAir<Felt> for EcMsmAir {
-    fn width(&self) -> usize {
-        NUM_MAIN_COLS
-    }
-}
+impl air::LiftedAir for EcMsmAir {
+    type F = Felt;
 
-impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
-    type EvalData<B: miden_core::field::Algebra<Felt>, E: miden_core::field::Algebra<B>> = ();
-
-    fn num_randomness(&self) -> usize {
-        NUM_RANDOMNESS
-    }
-
-    fn aux_width(&self) -> usize {
-        AUX_WIDTH
+    fn spec(&self) -> air::AirSpec<'_, Felt> {
+        air::AirSpec {
+            main_width: NUM_MAIN_COLS,
+            aux_width: AUX_WIDTH,
+            num_public_values: 0,
+            num_challenges: NUM_RANDOMNESS,
+            num_exports: NUM_LOGUP_VALUES,
+            preprocessed: None,
+            periodic_columns: Cow::Borrowed(&[]),
+        }
     }
 
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_VALUES
-    }
-
-    fn build_aux_trace(
+    fn eval<AB: air::LiftedAirBuilder<F = Felt>>(
         &self,
-        main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        miden_stark::lookup::build_logup_aux_trace(&EcMsmAir, main, challenges)
-    }
+        frame: &air::Frame<'_, AB>,
+        inputs: air::Inputs<'_, AB>,
+        builder: &mut AB,
+    ) {
+        let local = frame.main.current;
+        let next = frame.main.next;
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
-        let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
-
-        let act: AB::Expr = local[COL_ACT].into();
-        let act_next: AB::Expr = next[COL_ACT].into();
-        let is_boundary: AB::Expr = local[COL_IS_BOUNDARY].into();
-        let is_intro: AB::Expr = local[COL_IS_INTRO].into();
-        let is_combine: AB::Expr = local[COL_IS_COMBINE].into();
-        let is_neg: AB::Expr = local[COL_IS_NEG].into();
-        let is_intro_zero: AB::Expr = local[COL_IS_INTRO_ZERO].into();
+        let act: AB::Expr = local[COL_ACT].dup();
+        let act_next: AB::Expr = next[COL_ACT].dup();
+        let is_boundary: AB::Expr = local[COL_IS_BOUNDARY].dup();
+        let is_intro: AB::Expr = local[COL_IS_INTRO].dup();
+        let is_combine: AB::Expr = local[COL_IS_COMBINE].dup();
+        let is_neg: AB::Expr = local[COL_IS_NEG].dup();
+        let is_intro_zero: AB::Expr = local[COL_IS_INTRO_ZERO].dup();
         let is_intro_endo = act.clone()
             - is_intro.clone()
             - is_combine.clone()
             - is_neg.clone()
             - is_intro_zero.clone();
-        let minted: AB::Expr = local[COL_NEG_MINTED].into();
-        let idx: AB::Expr = local[COL_IDX].into();
+        let minted: AB::Expr = local[COL_NEG_MINTED].dup();
+        let idx: AB::Expr = local[COL_IDX].dup();
 
         // Booleans.
-        builder.assert_bool(local[COL_ACT]);
-        builder.assert_bool(local[COL_IS_BOUNDARY]);
-        builder.assert_bool(local[COL_IS_INTRO]);
-        builder.assert_bool(local[COL_IS_COMBINE]);
-        builder.assert_bool(local[COL_IS_NEG]);
-        builder.assert_bool(local[COL_IS_INTRO_ZERO]);
+        builder.assert_bool(local[COL_ACT].dup());
+        builder.assert_bool(local[COL_IS_BOUNDARY].dup());
+        builder.assert_bool(local[COL_IS_INTRO].dup());
+        builder.assert_bool(local[COL_IS_COMBINE].dup());
+        builder.assert_bool(local[COL_IS_NEG].dup());
+        builder.assert_bool(local[COL_IS_INTRO_ZERO].dup());
         builder.assert_zero(is_intro_endo.clone() * (is_intro_endo.clone() - AB::Expr::ONE));
-        builder.assert_bool(local[COL_NEG_MINTED]);
+        builder.assert_bool(local[COL_NEG_MINTED].dup());
         builder.assert_zero((AB::Expr::ONE - is_neg.clone() - is_intro_endo.clone()) * minted);
         builder.assert_zero(
-            (is_intro_zero.clone() + is_intro_endo.clone()) * local[COL_INTRO_IS_PAI].into(),
+            (is_intro_zero.clone() + is_intro_endo.clone()) * local[COL_INTRO_IS_PAI].dup(),
         );
 
         // Activity is sticky-downward (pads are a tail). The residual's
         // Boolean constraint above makes every active row exactly one op and
         // every pad no op.
-        builder.when_transition().assert_zero((AB::Expr::ONE - act.clone()) * act_next);
+        builder
+            .when(frame.transition())
+            .assert_zero((AB::Expr::ONE - act.clone()) * act_next);
         // A boundary only on active rows; pads carry `is_boundary = 0` so
         // the allocator freezes `expr_ptr` across the tail.
         builder.assert_zero((AB::Expr::ONE - act.clone()) * is_boundary.clone());
@@ -402,27 +390,27 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         // `MsmTerm` provide (`−mult`, otherwise ungated by `act`) and the
         // `MsmExpr` provide both vanish — so a forged pad `mult` can't inject
         // phantom terms, independent of the consumer set.
-        builder.assert_zero((AB::Expr::ONE - act.clone()) * local[COL_MULT].into());
-        builder.assert_zero((AB::Expr::ONE - act) * local[COL_IS_CLAIMED].into());
+        builder.assert_zero((AB::Expr::ONE - act.clone()) * local[COL_MULT].dup());
+        builder.assert_zero((AB::Expr::ONE - act) * local[COL_IS_CLAIMED].dup());
         // At most one claim per expression: each claim run must consume
         // exactly its own expression's claim terms.
-        builder.assert_bool(local[COL_IS_CLAIMED]);
+        builder.assert_bool(local[COL_IS_CLAIMED].dup());
 
         // Allocator: expr_ptr = 1 on the first row, `+1` after each
         // boundary. ptr → (run) is injective by construction.
-        let expr_ptr: AB::Expr = local[COL_EXPR_PTR].into();
-        let expr_ptr_next: AB::Expr = next[COL_EXPR_PTR].into();
-        builder.when_first_row().assert_zero(expr_ptr - AB::Expr::ONE);
+        let expr_ptr: AB::Expr = local[COL_EXPR_PTR].dup();
+        let expr_ptr_next: AB::Expr = next[COL_EXPR_PTR].dup();
+        builder.when(frame.first_row()).assert_zero(expr_ptr - AB::Expr::ONE);
         builder
-            .when_transition()
-            .assert_zero(expr_ptr_next - local[COL_EXPR_PTR].into() - is_boundary.clone());
+            .when(frame.transition())
+            .assert_zero(expr_ptr_next - local[COL_EXPR_PTR].dup() - is_boundary.clone());
 
         // Cursor `idx` resets to 0 after a boundary, else `+1` — so the
         // first row of every run has idx 0 and the boundary's idx is k−1.
-        let idx_next: AB::Expr = next[COL_IDX].into();
-        builder.when_first_row().assert_zero(idx.clone());
+        let idx_next: AB::Expr = next[COL_IDX].dup();
+        builder.when(frame.first_row()).assert_zero(idx.clone());
         builder
-            .when_transition()
+            .when(frame.transition())
             .assert_zero(idx_next - (AB::Expr::ONE - is_boundary.clone()) * (idx + AB::Expr::ONE));
 
         // Expression-level columns remain constant within a run. This is vacuous for one-row intro
@@ -448,17 +436,19 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
             COL_BETA_PTR,
             COL_LAMBDA_PTR,
         ] {
-            let here: AB::Expr = local[col].into();
-            let there: AB::Expr = next[col].into();
-            builder.when_transition().assert_zero(not_boundary.clone() * (there - here));
+            let here: AB::Expr = local[col].dup();
+            let there: AB::Expr = next[col].dup();
+            builder
+                .when(frame.transition())
+                .assert_zero(not_boundary.clone() * (there - here));
         }
 
         // Intro: a 1-row run (boundary), value = base (a ptr equality; the
         // scalar's literal-1 rides the bus). idx = 0 falls out of the
         // cursor reset, so it needs no separate constraint.
         builder.assert_zero(is_intro.clone() * (AB::Expr::ONE - is_boundary.clone()));
-        let base: AB::Expr = local[COL_BASE].into();
-        let val: AB::Expr = local[COL_VAL].into();
+        let base: AB::Expr = local[COL_BASE].dup();
+        let val: AB::Expr = local[COL_VAL].dup();
         builder.assert_zero(is_intro * (val - base));
 
         // intro_endo: also a 1-row run (boundary). The value relation is
@@ -468,8 +458,8 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         // group's λ, never an AIR-known constant (see
         // [`msm::require::intro_endo`](crate::precompiles::ec::msm::require::intro_endo)).
         builder.assert_zero(is_intro_endo.clone() * (AB::Expr::ONE - is_boundary.clone()));
-        let lambda_ptr: AB::Expr = local[COL_LAMBDA_PTR].into();
-        let scalar: AB::Expr = local[COL_SCALAR].into();
+        let lambda_ptr: AB::Expr = local[COL_LAMBDA_PTR].dup();
+        let scalar: AB::Expr = local[COL_SCALAR].dup();
         builder.assert_zero(is_intro_endo.clone() * (scalar - lambda_ptr));
 
         // intro_zero: also a 1-row run (boundary). Neither the scalar (0)
@@ -481,38 +471,38 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
 
         // ---- combine ----------------------------------------------------
         // Per-row take one-hot: each combine row emits one output term.
-        let take_a: AB::Expr = local[COL_TAKE_A].into();
-        let take_b: AB::Expr = local[COL_TAKE_B].into();
+        let take_a: AB::Expr = local[COL_TAKE_A].dup();
+        let take_b: AB::Expr = local[COL_TAKE_B].dup();
         let take_both = is_combine.clone() - take_a.clone() - take_b.clone();
-        builder.assert_bool(local[COL_TAKE_A]);
-        builder.assert_bool(local[COL_TAKE_B]);
+        builder.assert_bool(local[COL_TAKE_A].dup());
+        builder.assert_bool(local[COL_TAKE_B].dup());
         builder.assert_bool(take_both.clone());
 
         // Cursors: 0 at run start, advance by the take on each in-run step
         // (reset to 0 across a boundary). The boundary's i + adv_i is k_a.
-        let i_cur: AB::Expr = local[COL_I].into();
-        let j_cur: AB::Expr = local[COL_J].into();
-        let i_next: AB::Expr = next[COL_I].into();
-        let j_next: AB::Expr = next[COL_J].into();
-        builder.when_first_row().assert_zero(i_cur.clone());
-        builder.when_first_row().assert_zero(j_cur.clone());
+        let i_cur: AB::Expr = local[COL_I].dup();
+        let j_cur: AB::Expr = local[COL_J].dup();
+        let i_next: AB::Expr = next[COL_I].dup();
+        let j_next: AB::Expr = next[COL_J].dup();
+        builder.when(frame.first_row()).assert_zero(i_cur.clone());
+        builder.when(frame.first_row()).assert_zero(j_cur.clone());
         // A neg row takes the next A term every row, so its cursor-i advance
         // is `is_neg` (the take flags are 0 off combine, pinned by the
         // one-hot above); j never advances on a neg.
         let adv_i = take_a.clone() + take_both.clone() + is_neg.clone();
         let adv_j = take_b.clone() + take_both;
         builder
-            .when_transition()
+            .when(frame.transition())
             .assert_zero(i_next - (AB::Expr::ONE - is_boundary.clone()) * (i_cur + adv_i));
         builder
-            .when_transition()
+            .when(frame.transition())
             .assert_zero(j_next - (AB::Expr::ONE - is_boundary.clone()) * (j_cur + adv_j));
 
         // Operand consumes authenticate the output base directly. Single takes copy the
         // scalar; merged and negated scalars are authenticated by their UintAdd messages.
-        let s_a: AB::Expr = local[COL_S_A].into();
-        let s_b: AB::Expr = local[COL_S_B].into();
-        let out_scalar: AB::Expr = local[COL_SCALAR].into();
+        let s_a: AB::Expr = local[COL_S_A].dup();
+        let s_b: AB::Expr = local[COL_S_B].dup();
+        let out_scalar: AB::Expr = local[COL_SCALAR].dup();
         builder.assert_zero(take_a * (out_scalar.clone() - s_a) + take_b * (out_scalar - s_b));
 
         // Strict pointer ordering (boundary): expr − operand − 1 =
@@ -524,13 +514,13 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         let bnd_a = (is_combine.clone() + is_neg) * is_boundary.clone();
         let bnd_b = is_combine * is_boundary;
         let two16 = AB::Expr::from(Felt::from(TWO16));
-        let here_expr: AB::Expr = local[COL_EXPR_PTR].into();
-        let a_expr: AB::Expr = local[COL_A_EXPR].into();
-        let b_expr: AB::Expr = local[COL_B_EXPR].into();
-        let a_lo: AB::Expr = local[COL_A_DIFF_LO].into();
-        let a_hi: AB::Expr = local[COL_A_DIFF_HI].into();
-        let b_lo: AB::Expr = local[COL_B_DIFF_LO].into();
-        let b_hi: AB::Expr = local[COL_B_DIFF_HI].into();
+        let here_expr: AB::Expr = local[COL_EXPR_PTR].dup();
+        let a_expr: AB::Expr = local[COL_A_EXPR].dup();
+        let b_expr: AB::Expr = local[COL_B_EXPR].dup();
+        let a_lo: AB::Expr = local[COL_A_DIFF_LO].dup();
+        let a_hi: AB::Expr = local[COL_A_DIFF_HI].dup();
+        let b_lo: AB::Expr = local[COL_B_DIFF_LO].dup();
+        let b_hi: AB::Expr = local[COL_B_DIFF_HI].dup();
         builder.assert_zero(
             bnd_a * (here_expr.clone() - a_expr - AB::Expr::ONE - a_lo - two16.clone() * a_hi),
         );
@@ -548,32 +538,29 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         // must have the larger point ptr, as for EcGroupAdd's `r > p, q`.
         // Without it a point could certify itself, or a cycle of points each
         // other, with none of them on the curve.
-        let cert_val: AB::Expr = local[COL_VAL].into();
-        let cert_val_a: AB::Expr = local[COL_VAL_A].into();
-        let cert_base: AB::Expr = local[COL_BASE].into();
+        let cert_val: AB::Expr = local[COL_VAL].dup();
+        let cert_val_a: AB::Expr = local[COL_VAL_A].dup();
+        let cert_base: AB::Expr = local[COL_BASE].dup();
         let cert_diff = b_lo + two16 * b_hi;
         // The two families share a mint-flag column; their selectors choose the source point.
-        let neg_mint: AB::Expr =
-            AB::Expr::from(local[COL_NEG_MINTED]) * AB::Expr::from(local[COL_IS_NEG]);
-        let endo_mint: AB::Expr = AB::Expr::from(local[COL_ENDO_MINTED]) * is_intro_endo;
+        let neg_mint: AB::Expr = local[COL_NEG_MINTED].dup() * local[COL_IS_NEG].dup();
+        let endo_mint: AB::Expr = local[COL_ENDO_MINTED].dup() * is_intro_endo;
         builder.assert_zero(
             neg_mint * (cert_val.clone() - cert_val_a - AB::Expr::ONE - cert_diff.clone()),
         );
         builder.assert_zero(endo_mint * (cert_val - cert_base - AB::Expr::ONE - cert_diff));
 
         // Phase 2: LogUp.
-        let mut lb = ConstraintLookupBuilder::new(builder, self);
-        <Self as LookupAir<_>>::eval(self, &mut lb);
-        lb.finish();
+        lookup::eval_lookup(self, frame, inputs, builder);
     }
 }
 
 // LOOKUP AIR
 // ================================================================================================
 
-impl<LB> LookupAir<LB> for EcMsmAir
+impl<LB> lookup::LookupAir<LB> for EcMsmAir
 where
-    LB: LookupBuilder<F = Felt>,
+    LB: lookup::LookupBuilder<F = Felt>,
 {
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
@@ -587,57 +574,57 @@ where
         NUM_BUS_IDS
     }
 
-    fn eval(&self, builder: &mut LB) {
-        let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
+    fn eval(&self, frame: &lookup::LookupFrame<'_, LB::Expr>, builder: &mut LB) {
+        let local = frame.main.current;
 
-        let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_MULT].into();
-        let neg_is_claimed: LB::Expr = LB::Expr::ZERO - local[COL_IS_CLAIMED].into();
-        let act: LB::Expr = local[COL_ACT].into();
-        let is_boundary: LB::Expr = local[COL_IS_BOUNDARY].into();
-        let is_intro: LB::Expr = local[COL_IS_INTRO].into();
-        let is_combine: LB::Expr = local[COL_IS_COMBINE].into();
-        let is_neg: LB::Expr = local[COL_IS_NEG].into();
-        let is_intro_zero: LB::Expr = local[COL_IS_INTRO_ZERO].into();
+        let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_MULT].dup();
+        let neg_is_claimed: LB::Expr = LB::Expr::ZERO - local[COL_IS_CLAIMED].dup();
+        let act: LB::Expr = local[COL_ACT].dup();
+        let is_boundary: LB::Expr = local[COL_IS_BOUNDARY].dup();
+        let is_intro: LB::Expr = local[COL_IS_INTRO].dup();
+        let is_combine: LB::Expr = local[COL_IS_COMBINE].dup();
+        let is_neg: LB::Expr = local[COL_IS_NEG].dup();
+        let is_intro_zero: LB::Expr = local[COL_IS_INTRO_ZERO].dup();
         let is_intro_endo = act.clone()
             - is_intro.clone()
             - is_combine.clone()
             - is_neg.clone()
             - is_intro_zero.clone();
 
-        let expr_ptr: LB::Expr = local[COL_EXPR_PTR].into();
-        let group_ptr: LB::Expr = local[COL_GROUP_PTR].into();
-        let sbound_ptr: LB::Expr = local[COL_SBOUND_PTR].into();
-        let idx: LB::Expr = local[COL_IDX].into();
-        let base: LB::Expr = local[COL_BASE].into();
-        let scalar: LB::Expr = local[COL_SCALAR].into();
-        let val: LB::Expr = local[COL_VAL].into();
+        let expr_ptr: LB::Expr = local[COL_EXPR_PTR].dup();
+        let group_ptr: LB::Expr = local[COL_GROUP_PTR].dup();
+        let sbound_ptr: LB::Expr = local[COL_SBOUND_PTR].dup();
+        let idx: LB::Expr = local[COL_IDX].dup();
+        let base: LB::Expr = local[COL_BASE].dup();
+        let scalar: LB::Expr = local[COL_SCALAR].dup();
+        let val: LB::Expr = local[COL_VAL].dup();
 
-        let a_expr: LB::Expr = local[COL_A_EXPR].into();
-        let b_expr: LB::Expr = local[COL_B_EXPR].into();
-        let i_cur: LB::Expr = local[COL_I].into();
-        let j_cur: LB::Expr = local[COL_J].into();
-        let take_a: LB::Expr = local[COL_TAKE_A].into();
-        let take_b: LB::Expr = local[COL_TAKE_B].into();
+        let a_expr: LB::Expr = local[COL_A_EXPR].dup();
+        let b_expr: LB::Expr = local[COL_B_EXPR].dup();
+        let i_cur: LB::Expr = local[COL_I].dup();
+        let j_cur: LB::Expr = local[COL_J].dup();
+        let take_a: LB::Expr = local[COL_TAKE_A].dup();
+        let take_b: LB::Expr = local[COL_TAKE_B].dup();
         let take_both = is_combine.clone() - take_a.clone() - take_b.clone();
-        let s_a: LB::Expr = local[COL_S_A].into();
-        let s_b: LB::Expr = local[COL_S_B].into();
-        let val_a: LB::Expr = local[COL_VAL_A].into();
-        let val_b: LB::Expr = local[COL_VAL_B].into();
-        let a_ptr: LB::Expr = local[COL_A_PTR].into();
-        let b_ptr: LB::Expr = local[COL_B_PTR].into();
-        let bound_ptr: LB::Expr = local[COL_BOUND_PTR].into();
-        let beta_ptr: LB::Expr = local[COL_BETA_PTR].into();
-        let lambda_ptr: LB::Expr = local[COL_LAMBDA_PTR].into();
-        let a_lo: LB::Expr = local[COL_A_DIFF_LO].into();
-        let a_hi: LB::Expr = local[COL_A_DIFF_HI].into();
-        let b_lo: LB::Expr = local[COL_B_DIFF_LO].into();
-        let b_hi: LB::Expr = local[COL_B_DIFF_HI].into();
+        let s_a: LB::Expr = local[COL_S_A].dup();
+        let s_b: LB::Expr = local[COL_S_B].dup();
+        let val_a: LB::Expr = local[COL_VAL_A].dup();
+        let val_b: LB::Expr = local[COL_VAL_B].dup();
+        let a_ptr: LB::Expr = local[COL_A_PTR].dup();
+        let b_ptr: LB::Expr = local[COL_B_PTR].dup();
+        let bound_ptr: LB::Expr = local[COL_BOUND_PTR].dup();
+        let beta_ptr: LB::Expr = local[COL_BETA_PTR].dup();
+        let lambda_ptr: LB::Expr = local[COL_LAMBDA_PTR].dup();
+        let a_lo: LB::Expr = local[COL_A_DIFF_LO].dup();
+        let a_hi: LB::Expr = local[COL_A_DIFF_HI].dup();
+        let b_lo: LB::Expr = local[COL_B_DIFF_LO].dup();
+        let b_hi: LB::Expr = local[COL_B_DIFF_HI].dup();
         // The neg and intro_endo families reuse these four value-relation
         // cells. Their bus gates assign each cell its family-specific role.
-        let neg_x: LB::Expr = local[COL_NEG_X].into();
-        let neg_ya: LB::Expr = local[COL_NEG_YA].into();
-        let neg_yr: LB::Expr = local[COL_NEG_YR].into();
-        let minted: LB::Expr = local[COL_NEG_MINTED].into();
+        let neg_x: LB::Expr = local[COL_NEG_X].dup();
+        let neg_ya: LB::Expr = local[COL_NEG_YA].dup();
+        let neg_yr: LB::Expr = local[COL_NEG_YR].dup();
+        let minted: LB::Expr = local[COL_NEG_MINTED].dup();
         let endo_base_x = neg_x.clone();
         let endo_y = neg_ya.clone();
         let endo_val_x = neg_yr.clone();
@@ -995,7 +982,7 @@ where
                     group_ptr: group_ptr.clone(),
                     x_ptr: endo_base_x.clone(),
                     y_ptr: endo_y.clone(),
-                    is_pai: local[COL_INTRO_IS_PAI].into(),
+                    is_pai: local[COL_INTRO_IS_PAI].dup(),
                 },
                 two_deg
             ),
@@ -1012,5 +999,112 @@ where
                 two_deg
             ),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use miden_core::{
+        Felt,
+        field::{PrimeCharacteristicRing, QuadFelt},
+    };
+    use miden_stark::{
+        air::{self, AirKernel},
+        lookup,
+    };
+
+    use super::{COL_ACT, COL_EXPR_PTR, COL_IDX, EcMsmAir, NUM_MAIN_COLS};
+
+    #[test]
+    fn native_msm_capture_keeps_complete_shape_and_order() {
+        // The actual twelve-column callbacks are instantiated with non-Copy expressions.
+        let captured = air::capture_with::<_, QuadFelt>(&EcMsmAir).unwrap();
+        let spec = captured.descriptor.spec();
+        assert_eq!((spec.main_width, spec.aux_width), (35, 12));
+        assert_eq!((spec.num_public_values, spec.num_challenges, spec.num_exports), (0, 2, 1));
+        assert!(spec.preprocessed.is_none());
+        assert!(spec.periodic_columns.is_empty());
+        assert_eq!(
+            <EcMsmAir as lookup::LookupAir<
+                lookup::ProverLookupBuilder<'_, Felt, QuadFelt>,
+            >>::column_shape(&EcMsmAir),
+            &[2; 12],
+        );
+        let layout = captured.descriptor.analysis().layout();
+        assert_eq!(layout.base_indices(), (0..54).collect::<Vec<_>>().as_slice());
+        assert_eq!(layout.ext_indices(), (54..67).collect::<Vec<_>>().as_slice());
+        assert!(captured.assertions[..54].iter().all(|a| matches!(a, air::Assertion::Base(_))));
+        assert!(
+            captured.assertions[54..]
+                .iter()
+                .all(|a| matches!(a, air::Assertion::Extension(_)))
+        );
+        #[cfg(feature = "std")]
+        miden_stark::lookup::validate_native(&EcMsmAir, spec).unwrap();
+    }
+
+    #[derive(Default)]
+    struct Values {
+        base: Vec<Felt>,
+        ext: Vec<QuadFelt>,
+    }
+
+    impl air::LiftedAirBuilder for Values {
+        type F = Felt;
+        type Expr = Felt;
+        type ExtExpr = QuadFelt;
+
+        fn emit_base(&mut self, value: Felt, _meta: air::ConstraintMeta<'_>) {
+            self.base.push(value);
+        }
+
+        fn emit_ext(&mut self, value: QuadFelt, _meta: air::ConstraintMeta<'_>) {
+            self.ext.push(value);
+        }
+    }
+
+    #[test]
+    fn native_msm_direct_session_preserves_inactive_row_and_boolean_polarity() {
+        let kernel = air::DirectKernel::new(EcMsmAir).unwrap();
+        let challenges = [QuadFelt::from_u8(7), QuadFelt::from_u8(11)];
+        let exports = [QuadFelt::ZERO];
+        let inputs = air::UniformInputs {
+            public_values: &[],
+            challenges: &challenges,
+            exports: &exports,
+        };
+        for activity in [0, 2] {
+            let mut current = [Felt::ZERO; NUM_MAIN_COLS];
+            current[COL_EXPR_PTR] = Felt::ONE;
+            current[COL_ACT] = Felt::from_u8(activity);
+            let mut next = current;
+            next[COL_IDX] = Felt::ONE;
+            let auxiliary = [QuadFelt::ZERO; 12];
+            let frame = air::AirFrame {
+                main: air::Rows { current: &current, next: &next },
+                preprocessed: air::Rows { current: &[], next: &[] },
+                aux: air::Rows { current: &auxiliary, next: &auxiliary },
+                periodic: &[],
+                selectors: air::Selectors {
+                    first: Felt::ONE,
+                    last: Felt::ZERO,
+                    transition: Felt::ONE,
+                },
+            };
+            let mut values = Values::default();
+            kernel.bind(inputs).unwrap().eval(&frame, &mut values);
+            assert_eq!((values.base.len(), values.ext.len()), (54, 13));
+            if activity == 0 {
+                assert!(values.base.iter().all(|value| *value == Felt::ZERO));
+                assert!(values.ext.iter().all(|value| *value == QuadFelt::ZERO));
+            } else {
+                // With no explicit family flag, activity=2 gives derived intro_endo=2.
+                // Both boolean equations use x*(x-1), hence +2 at their fixed ordinals.
+                assert_eq!(values.base[0], Felt::from_u8(2));
+                assert_eq!(values.base[6], Felt::from_u8(2));
+            }
+        }
     }
 }

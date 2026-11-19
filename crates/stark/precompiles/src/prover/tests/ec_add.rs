@@ -255,7 +255,8 @@ impl EcStackTraces {
         let prover_statement = self.prover_statement();
         // The subset includes BytePairLut, which declares preprocessed
         // columns, so the bundle is `Some`.
-        let preprocessed = Preprocessed::build(prover_statement.statement(), &config);
+        let preprocessed = Preprocessed::build(prover_statement.statement(), &config)
+            .expect("subset setup is valid");
         let (output, statement) =
             ProverInstance::new(&config, prover_statement, preprocessed.as_ref())
                 .expect("preprocessed bundle matches the declared columns")
@@ -265,7 +266,7 @@ impl EcStackTraces {
         let digest = VerifierInstance::new(
             &config,
             &statement,
-            preprocessed.as_ref().map(Preprocessed::commitment),
+            preprocessed.as_ref().map(|setup| setup.identity().clone()),
         )
         .expect("preprocessed commitment matches the declared columns")
         .verify(&output.proof, test_challenger())
@@ -625,8 +626,8 @@ fn inactive_block_cannot_provide_ecgroupadd() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    assert_eq!(miden_stark::air::BaseAir::<Felt>::width(&EcGroupAddAir), 21);
-    assert_eq!(miden_stark::air::LiftedAir::<Felt, QuadFelt>::aux_width(&EcGroupAddAir), 8);
+    assert_eq!(miden_stark::air::LiftedAir::spec(&EcGroupAddAir).main_width, 21);
+    assert_eq!(miden_stark::air::LiftedAir::spec(&EcGroupAddAir).aux_width, 8);
     // Three selector groups and five pairs keep closing constraints at degree three. Dividing by
     // the trace vanishing polynomial leaves two quotient chunks, so log_quotient_degree = 1.
     assert_eq!(crate::prover::tests::log_quotient_degree(&EcGroupAddAir), 1);
