@@ -21,6 +21,7 @@ mod continuation_stack;
 mod errors;
 mod execution;
 mod execution_options;
+mod execution_plan;
 mod executor;
 mod fast;
 mod host;
@@ -59,6 +60,7 @@ pub use errors::{
     procedure_not_found_with_package_source_context,
 };
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
+pub use execution_plan::{ExecutionTrace, VmTraceBudget};
 pub use executor::ProgramExecutor;
 pub(crate) use fast::BreakReason;
 pub use fast::{

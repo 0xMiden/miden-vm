@@ -6,8 +6,8 @@ use miden_core::{
     proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus, VmProof},
 };
 use miden_processor::{
-    ExecutionError, ExecutionOptions, ExecutionWitness, FastProcessor, PrecompileWitness, Program,
-    StackInputs, StackOutputs, SyncHost, VmWitness,
+    ExecutionError, ExecutionOptions, ExecutionTrace, ExecutionWitness, FastProcessor,
+    PrecompileWitness, Program, StackInputs, StackOutputs, SyncHost, VmTraceBudget, VmWitness,
     advice::AdviceInputs,
     trace::{VmTrace, build_trace},
 };
@@ -26,6 +26,38 @@ pub struct Prover {
     max_prover_memory_bytes: u64,
     max_precompile_prover_memory_bytes: u64,
     verification_precompile_limits: PrecompileLimits,
+}
+
+/// An execution proof with no outstanding deferred precompile work.
+///
+/// The wrapper guarantees that the proof carries either no precompile work or a precompile proof.
+/// It does not establish proof validity; the verifier checks the attached proofs and their roots.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompleteProof(ExecutionProof);
+
+impl CompleteProof {
+    /// Returns the underlying execution proof.
+    pub const fn as_inner(&self) -> &ExecutionProof {
+        &self.0
+    }
+
+    /// Consumes the wrapper and returns the underlying execution proof.
+    pub fn into_inner(self) -> ExecutionProof {
+        self.0
+    }
+}
+
+impl TryFrom<ExecutionProof> for CompleteProof {
+    /// Returns the original proof unchanged when it still carries deferred precompile work.
+    type Error = ExecutionProof;
+
+    fn try_from(proof: ExecutionProof) -> Result<Self, Self::Error> {
+        if matches!(proof.precompile(), PrecompileStatus::Deferred(_)) {
+            Err(proof)
+        } else {
+            Ok(Self(proof))
+        }
+    }
 }
 
 impl Prover {
@@ -92,6 +124,15 @@ impl Prover {
         self.max_prover_memory_bytes
     }
 
+    /// Returns the canonical VM trace-building budget for this prover's memory limit.
+    ///
+    /// Use this budget when recording a materialized trace or building one from an execution
+    /// witness separately from proving. This applies the same VM relation model and byte limit as
+    /// this prover; the precompile proving budget is configured independently.
+    pub fn trace_budget(&self) -> VmTraceBudget {
+        miden_vm_stark::memory::canonical_budget(self.max_prover_memory_bytes)
+    }
+
     /// Sets the maximum modelled peak memory, in bytes, for proving a precompile witness.
     #[must_use]
     pub const fn with_max_precompile_prover_memory_bytes(
@@ -137,6 +178,30 @@ impl Prover {
         Ok(ExecutionProof::new(vm, precompile))
     }
 
+    /// Proves the VM portion of a materialized execution trace.
+    ///
+    /// Any authenticated precompile work remains attached as a portable deferred witness. The
+    /// trace's padded shape is checked against this prover's canonical memory budget before proof
+    /// generation. Use [`Self::trace_budget`] when building the trace to apply the same
+    /// limit before materializing it.
+    pub fn prove_trace(&self, input: ExecutionTrace) -> Result<ExecutionProof, ProverError> {
+        let (trace, precompile) = input.into_parts();
+        let vm = self.prove_vm_trace(trace)?;
+        let status = precompile.map_or(PrecompileStatus::Empty, PrecompileStatus::Deferred);
+        Ok(ExecutionProof::new(vm, status))
+    }
+
+    /// Proves a materialized VM trace and all of its authenticated precompile work.
+    ///
+    /// The trace's padded shape is checked against this prover's canonical memory budget before
+    /// proof generation. Use [`Self::trace_budget`] when building the trace to apply the same
+    /// limit before materializing it. The returned wrapper guarantees that no deferred
+    /// precompile witness remains; verification establishes validity.
+    pub fn prove_full_trace(&self, input: ExecutionTrace) -> Result<CompleteProof, ProverError> {
+        let (trace, precompile) = input.into_parts();
+        self.prove_full_trace_parts(trace, precompile).map(CompleteProof)
+    }
+
     /// Proves a VM witness that does not authenticate deferred precompile work.
     ///
     /// The returned execution proof has an empty precompile status. Use [`Self::prove`] or
@@ -152,11 +217,8 @@ impl Prover {
 
     /// Materializes and proves the VM trace represented by `witness`.
     fn prove_vm(&self, witness: VmWitness) -> Result<VmProof, ProverError> {
-        let trace = build_trace(
-            witness,
-            &miden_vm_stark::memory::canonical_budget(self.max_prover_memory_bytes),
-        )
-        .map_err(ProverError::TraceGeneration)?;
+        let trace =
+            build_trace(witness, &self.trace_budget()).map_err(ProverError::TraceGeneration)?;
 
         self.prove_vm_trace(trace)
     }
@@ -200,8 +262,7 @@ impl Prover {
         .map_err(ProverError::PrecompileProofGeneration)
     }
 
-    #[cfg(feature = "std")]
-    fn prove_full_trace(
+    fn prove_full_trace_parts(
         &self,
         trace: VmTrace,
         precompile: Option<PrecompileWitness>,
@@ -223,6 +284,19 @@ impl Prover {
     /// Buffered and overlapped trace construction share this private implementation so STARK
     /// generation and VM proof packaging cannot diverge.
     fn prove_vm_trace(&self, trace: VmTrace) -> Result<VmProof, ProverError> {
+        let budget = self.trace_budget();
+        let estimated_bytes = budget
+            .prover_peak_bytes(trace.trace_len_summary().padded_heights())
+            .ok_or(ProverError::VmProofGeneration(ExecutionError::ProverMemoryExceeded {
+                estimated_bytes: u64::MAX,
+                budget_bytes: self.max_prover_memory_bytes,
+            }))?;
+        if estimated_bytes > self.max_prover_memory_bytes {
+            return Err(ProverError::VmProofGeneration(ExecutionError::ProverMemoryExceeded {
+                estimated_bytes,
+                budget_bytes: self.max_prover_memory_bytes,
+            }));
+        }
         miden_vm_stark::prover::prove(trace, self.hash_fn, self.hash_lde_blocks).map_err(|error| {
             ProverError::VmProofGeneration(ExecutionError::ProvingError(error.to_string()))
         })
@@ -260,7 +334,7 @@ pub fn prove_sync(
         )?;
         let stack_outputs = *trace.stack_outputs();
         let proof = prover
-            .prove_full_trace(trace, precompile)
+            .prove_full_trace_parts(trace, precompile)
             .map_err(ProverError::into_execution_error)?;
         return Ok((stack_outputs, proof));
     }
@@ -339,6 +413,41 @@ mod tests {
 
         let prover = prover.with_max_precompile_prover_memory_bytes(1 << 20);
         assert_eq!(prover.max_precompile_prover_memory_bytes(), 1 << 20);
+    }
+
+    #[test]
+    fn complete_proof_conversion_preserves_artifacts_and_rejects_deferred_work() {
+        use miden_core::{deferred::TRUE_DIGEST, proof::StarkProof};
+
+        let stark = StarkProof::new(alloc::vec![1, 2, 3], HashFunction::Eidos);
+        let vm = VmProof {
+            proof: stark.clone(),
+            precompile_root: TRUE_DIGEST,
+        };
+        for (status, complete) in [
+            (PrecompileStatus::Empty, true),
+            (
+                PrecompileStatus::Proven(PrecompileProof {
+                    proof: stark,
+                    roots: alloc::vec![TRUE_DIGEST],
+                }),
+                true,
+            ),
+            (PrecompileStatus::Deferred(trivial_precompile_witness()), false),
+        ] {
+            let proof = ExecutionProof::new(vm.clone(), status);
+            match CompleteProof::try_from(proof.clone()) {
+                Ok(wrapped) => {
+                    assert!(complete);
+                    assert_eq!(wrapped.as_inner(), &proof);
+                    assert_eq!(wrapped.into_inner(), proof);
+                },
+                Err(original) => {
+                    assert!(!complete);
+                    assert_eq!(original, proof);
+                },
+            }
+        }
     }
 
     /// A minimal non-`TRUE` precompile witness: no keccak/uint/EC ops, just the fixed session
