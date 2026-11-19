@@ -82,7 +82,7 @@ fn sample_add(
         (store.intern_pinned(2, a, fp), store.intern_pinned(3, b, fp))
     };
     let c_ptr = store.intern(c, fp);
-    let mut add = UintAddRequires::new();
+    let mut add = UintAddRequires::default();
     add.record(a_ptr, b_ptr, c_ptr, fp, 0);
     (add, store, k)
 }
@@ -148,7 +148,7 @@ fn add_buses_balance_against_store() {
     let b_ptr = store.intern_pinned(3, b, fp);
     let c_ptr = store.intern(c, fp);
 
-    let mut add = UintAddRequires::new();
+    let mut add = UintAddRequires::default();
     add.record(a_ptr, b_ptr, c_ptr, fp, 0);
 
     // The add's trace pass routes its UintVal demand into the store, so
@@ -191,7 +191,7 @@ fn duplicate_relations_collapse() {
     let b_ptr = store.intern_pinned(3, b, fp);
     let c_ptr = store.intern(add_reduce(a, b, bound), fp);
 
-    let mut add = UintAddRequires::new();
+    let mut add = UintAddRequires::default();
     add.record(a_ptr, b_ptr, c_ptr, fp, 1);
     add.record(a_ptr, b_ptr, c_ptr, fp, 1);
 
@@ -223,7 +223,7 @@ fn sub_as_arrangement() {
     let y_ptr = store.intern_pinned(2, y, fp);
     let z_ptr = store.intern_pinned(3, z, fp);
     let x_ptr = store.intern_pinned(4, x, fp);
-    let mut add = UintAddRequires::new();
+    let mut add = UintAddRequires::default();
     add.record(y_ptr, z_ptr, x_ptr, fp, 0);
     let main = generate_trace(add, &mut store);
 
@@ -243,7 +243,7 @@ fn add_pad_blocks_stay_off_the_bus() {
 
     let mut store = UintStoreRequires::new();
     let fp = store.pin_modulus(1, bound);
-    let mut add = UintAddRequires::new();
+    let mut add = UintAddRequires::default();
     // ops: x0+x1, x1+x2, x0+x0 — sums interned canonically.
     let ptrs: Vec<_> = operands
         .iter()
@@ -287,7 +287,7 @@ fn add_inactive_block_cannot_provide() {
     let operands: Vec<U256> = (0..3).map(|_| random_uint_below(&mut rng, bound)).collect();
     let mut store = UintStoreRequires::new();
     let fp = store.pin_modulus(1, bound);
-    let mut add = UintAddRequires::new();
+    let mut add = UintAddRequires::default();
     let ptrs: Vec<_> = operands
         .iter()
         .enumerate()
@@ -320,7 +320,7 @@ fn negation_holds_and_balances() {
     let fp = store.pin_modulus(1, bound);
     let a_ptr = store.intern_pinned(2, a, fp);
     let neg_ptr = store.intern_pinned(3, a_neg, fp);
-    let mut add = UintAddRequires::new();
+    let mut add = UintAddRequires::default();
     add.record_to_zero(a_ptr, neg_ptr, fp, 0);
     // The trace pass routes the add's UintVal demand: a / a_neg /
     // modulus only (no c), so the buses balance without any stored
@@ -361,7 +361,7 @@ fn equality_certificate_holds_and_balances() {
     let c_ptr = store.intern(a, fp);
     assert_eq!(a_ptr, c_ptr, "equal values intern onto one ptr");
 
-    let mut add = UintAddRequires::new();
+    let mut add = UintAddRequires::default();
     add.record_eq(a_ptr, c_ptr, fp, 0);
     // The trace pass consumes the add and routes its UintVal demand
     // (the `a` operand + modulus; no `b`, the unstored zero).
@@ -404,7 +404,7 @@ fn nz_cert_rejected_on_equality_block() {
     let fp = store.pin_modulus(1, bound);
     let a_ptr = store.intern_pinned(2, a, fp);
 
-    let mut add = UintAddRequires::new();
+    let mut add = UintAddRequires::default();
     add.record_eq(a_ptr, a_ptr, fp, 0);
     let mut main = generate_trace(add, &mut store);
     crate::prover::tests::check_local(UintAddAir, &main);
@@ -452,7 +452,7 @@ fn is_b_zero_rejects_named_operand_ptr() {
     let mut store = UintStoreRequires::new();
     let fp = store.pin_modulus(1, bound);
     let a_ptr = store.intern_pinned(2, a, fp);
-    let mut add = UintAddRequires::new();
+    let mut add = UintAddRequires::default();
     add.record_eq(a_ptr, a_ptr, fp, 0);
     let mut main = generate_trace(add, &mut store);
     // Forge a b_ptr into the flagged block (cycle-constant, all rows).
@@ -478,7 +478,7 @@ fn is_c_zero_rejects_named_result_ptr() {
     let fp = store.pin_modulus(1, bound);
     let a_ptr = store.intern_pinned(2, a, fp);
     let neg_ptr = store.intern_pinned(3, a_neg, fp);
-    let mut add = UintAddRequires::new();
+    let mut add = UintAddRequires::default();
     add.record_to_zero(a_ptr, neg_ptr, fp, 0);
     let mut main = generate_trace(add, &mut store);
     // Forge a c_ptr into the flagged block (cycle-constant, all rows).
@@ -510,7 +510,7 @@ fn nz_cert_holds_and_balances() {
     let b_ptr = store.intern_pinned(3, b, fp);
     let c_ptr = store.intern(c, fp);
 
-    let mut add = UintAddRequires::new();
+    let mut add = UintAddRequires::default();
     add.record_nz(a_ptr, b_ptr, c_ptr, fp, 0);
     let main = generate_trace(add, &mut store);
 
@@ -554,7 +554,7 @@ fn nz_cert_forged_zero_rejected() {
     let b_ptr = store.intern_pinned(3, b, fp);
     let c_ptr = store.intern(c, fp);
 
-    let mut add = UintAddRequires::new();
+    let mut add = UintAddRequires::default();
     add.record_nz(a_ptr, b_ptr, c_ptr, fp, 0);
     let mut main = generate_trace(add, &mut store);
 
@@ -584,7 +584,7 @@ fn nz_cert_wrong_ws_rejected() {
     let b_ptr = store.intern_pinned(3, b, fp);
     let c_ptr = store.intern(c, fp);
 
-    let mut add = UintAddRequires::new();
+    let mut add = UintAddRequires::default();
     add.record_nz(a_ptr, b_ptr, c_ptr, fp, 0);
     let mut main = generate_trace(add, &mut store);
 
@@ -606,7 +606,7 @@ fn reduction_arrangement(bound: U256) -> (UintAddRequires, UintStoreRequires, u3
     let mut store = UintStoreRequires::new();
     let fp = store.pin_modulus(1, bound);
     let c_ptr = store.intern(c, fp);
-    let mut add = UintAddRequires::new();
+    let mut add = UintAddRequires::default();
     add.record(fp, fp, c_ptr, fp, 0);
     (add, store, 1)
 }
@@ -623,7 +623,7 @@ fn arrangement(bound: U256, a: U256, b: U256) -> (UintAddRequires, UintStoreRequ
     // halves — semantically a + a ≡ c).
     let b_ptr = if b == a { a_ptr } else { store.intern_pinned(3, b, fp) };
     let c_ptr = store.intern(c, fp);
-    let mut add = UintAddRequires::new();
+    let mut add = UintAddRequires::default();
     add.record(a_ptr, b_ptr, c_ptr, fp, 0);
     (add, store, k)
 }
@@ -672,7 +672,7 @@ fn sub_to_bound_edge_holds() {
     let y_ptr = store.intern_pinned(2, y, fp);
     let z_ptr = store.intern(z, fp);
     let x_ptr = store.intern(x, fp);
-    let mut add = UintAddRequires::new();
+    let mut add = UintAddRequires::default();
     add.record(y_ptr, z_ptr, x_ptr, fp, 0);
     let main = generate_trace(add, &mut store);
     crate::prover::tests::check_local(UintAddAir, &main);
@@ -691,7 +691,7 @@ fn negation_of_one_edge_holds() {
     let fp = store.pin_modulus(1, bound);
     let a_ptr = store.intern_pinned(2, a, fp);
     let neg_ptr = store.intern(a_neg, fp);
-    let mut add = UintAddRequires::new();
+    let mut add = UintAddRequires::default();
     add.record_to_zero(a_ptr, neg_ptr, fp, 0);
     let main = generate_trace(add, &mut store);
     crate::prover::tests::check_local(UintAddAir, &main);
@@ -728,7 +728,7 @@ proptest! {
         let y_ptr = store.intern_pinned(2, y, fp);
         let z_ptr = store.intern(z, fp);
         let x_ptr = store.intern(x, fp);
-        let mut add = UintAddRequires::new();
+        let mut add = UintAddRequires::default();
         add.record(y_ptr, z_ptr, x_ptr, fp, 0);
         let main = generate_trace(add, &mut store);
         crate::prover::tests::check_local(UintAddAir, &main);
@@ -749,7 +749,7 @@ proptest! {
         let fp = store.pin_modulus(1, bound);
         let a_ptr = store.intern_pinned(2, a, fp);
         let neg_ptr = store.intern(a_neg, fp);
-        let mut add = UintAddRequires::new();
+        let mut add = UintAddRequires::default();
         add.record_to_zero(a_ptr, neg_ptr, fp, 0);
         let main = generate_trace(add, &mut store);
         crate::prover::tests::check_local(UintAddAir, &main);
@@ -768,7 +768,7 @@ proptest! {
         let c_ptr = store.intern(a, fp);
         prop_assert_eq!(a_ptr, c_ptr, "equal values intern onto one ptr");
 
-        let mut add = UintAddRequires::new();
+        let mut add = UintAddRequires::default();
         add.record_eq(a_ptr, c_ptr, fp, 0);
         let main = generate_trace(add, &mut store);
         prop_assert_eq!(main.values[ROW_AB * NUM_MAIN_COLS + CELL_IS_B_ZERO], Felt::ONE);
@@ -788,7 +788,7 @@ proptest! {
         let a_ptr = store.intern_pinned(2, a, fp);
         let b_ptr = store.intern_pinned(3, b, fp);
         let c_ptr = store.intern(add_reduce(a, b, bound), fp);
-        let mut add = UintAddRequires::new();
+        let mut add = UintAddRequires::default();
         add.record_nz(a_ptr, b_ptr, c_ptr, fp, 0);
         let main = generate_trace(add, &mut store);
 
@@ -840,7 +840,7 @@ proptest! {
     ) {
         let mut store = UintStoreRequires::new();
         let fp = store.pin_modulus(1, bound);
-        let mut add = UintAddRequires::new();
+        let mut add = UintAddRequires::default();
         let ptrs: Vec<_> = ops
             .iter()
             .enumerate()

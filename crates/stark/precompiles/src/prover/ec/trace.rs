@@ -173,11 +173,6 @@ impl Default for EcStoreRequires {
 }
 
 impl EcStoreRequires {
-    #[cfg(test)]
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
     pub(crate) fn trace_height(&self) -> Option<usize> {
         Some(self.groups_trace_height()?.max(self.points_trace_height()?))
     }

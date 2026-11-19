@@ -155,7 +155,8 @@ fn uint_store_rejects_pointer_zero() {
 fn production_uint_store_rejects_pointer_zero() {
     let mut rng = StdRng::seed_from_u64(0x0bad_c0de);
     let store = sample_store(&mut rng);
-    let mut main = store_mul_trace(store, UintMulRequires::new(), &mut BytePairLutRequires::new());
+    let mut main =
+        store_mul_trace(store, UintMulRequires::default(), &mut BytePairLutRequires::new());
 
     for row in 0..PERIOD {
         main.values[row * STORE_MUL_NUM_MAIN_COLS + COL_PTR] = Felt::ZERO;
@@ -433,7 +434,7 @@ fn uint_store_mul_lookup_matches_its_standalone_components() {
     let r = mac_reduce(1, a, b, 1, c, bound);
     let r_ptr = store.intern(r, fp);
 
-    let mut mul = UintMulRequires::new();
+    let mut mul = UintMulRequires::default();
     mul.record(1, a_ptr, b_ptr, 1, c_ptr, r_ptr, fp, 1);
 
     let mut bpl = BytePairLutRequires::new();

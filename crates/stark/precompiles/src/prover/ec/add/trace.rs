@@ -116,11 +116,6 @@ pub struct EcAddRequires {
 }
 
 impl EcAddRequires {
-    #[cfg(test)]
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
     pub(crate) fn trace_height(&self) -> Option<usize> {
         self.ops.len().max(1).checked_mul(PERIOD)?.checked_next_power_of_two()
     }
