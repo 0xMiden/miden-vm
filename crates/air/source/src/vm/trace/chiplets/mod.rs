@@ -9,7 +9,7 @@ pub mod memory;
 // ================================================================================================
 
 /// The number of columns in the chiplets which are used as selectors for the bitwise chiplet.
-pub const NUM_BITWISE_SELECTORS: usize = 2;
+pub const NUM_BITWISE_SELECTORS: usize = 3;
 /// The number of columns in the chiplets which are used as selectors for the memory chiplet.
 pub const NUM_MEMORY_SELECTORS: usize = 3;
 /// The number of columns in the chiplets which are used as selectors for the ACE chiplet.

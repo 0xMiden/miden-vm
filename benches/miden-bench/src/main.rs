@@ -51,7 +51,7 @@ use miden_stark::{
 };
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use rand::{RngExt, SeedableRng, rngs::SmallRng};
-use tracing::info_span;
+use tracing::trace_span;
 use tracing_subscriber::{Layer, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::cli::{AirType, Cli, HashFn, Mode, TraceSpec};
@@ -122,7 +122,7 @@ fn generate_traces(specs: &[TraceSpec], rng: &mut SmallRng) -> Vec<RowMajorMatri
     specs
         .iter()
         .map(|spec| {
-            info_span!("generate trace", air = %spec.air_type, log_height = spec.log_height)
+            trace_span!(target: "miden::bench", "generate trace", air = %spec.air_type, log_height = spec.log_height)
                 .in_scope(|| match spec.air_type {
                     AirType::Keccak => {
                         let n = keccak_hash_count(spec.log_height);
@@ -279,15 +279,17 @@ fn main() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 fn init_tracing(verbose: bool) {
-    let default_level = if verbose {
-        tracing_forest::util::LevelFilter::DEBUG
+    let default_filter = if verbose {
+        "debug,miden::vm=trace,miden::bench=trace"
     } else {
-        tracing_forest::util::LevelFilter::WARN
+        "warn"
     };
 
-    let env_filter = tracing_subscriber::EnvFilter::builder()
-        .with_default_directive(default_level.into())
-        .from_env_lossy();
+    let env_filter = match std::env::var("RUST_LOG") {
+        Ok(value) => tracing_subscriber::EnvFilter::try_new(value).expect("invalid RUST_LOG"),
+        Err(std::env::VarError::NotPresent) => tracing_subscriber::EnvFilter::new(default_filter),
+        Err(error) => panic!("invalid RUST_LOG: {error}"),
+    };
 
     Registry::default()
         .with(tracing_forest::ForestLayer::default().with_filter(env_filter))

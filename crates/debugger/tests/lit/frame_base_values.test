@@ -1,0 +1,15 @@
+# Stop inside a live procedure frame and verify both typed frame-base encodings.
+# The fixture contains two debug-variable rows immediately before a final local load.
+#
+# RUN: compile-masm %S/frame_base_values.masm --inject-frame-base-test-vars -o %t.masp
+# RUN: miden-debug --commands %s %t.masp 2>&1 | filecheck %s
+
+break for loc_load.0
+continue
+vars
+delete 0
+continue
+
+# CHECK: Breakpoint 0 set: opcode loc_load.0
+# CHECK: local_frame=42, memory_frame=42
+# CHECK: Program terminated successfully

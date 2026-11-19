@@ -9,7 +9,7 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_stark::{
-    air::{BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder},
+    air::{BaseAir, ConstraintDegrees, EvalInputs, LiftedAir, LiftedAirBuilder},
     lookup,
 };
 
@@ -67,6 +67,12 @@ impl BaseAir<Felt> for MidenAir {
     }
 }
 impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = Vec<E>;
+
+    fn log_preprocessed_height(&self) -> Option<u8> {
+        LiftedAir::<Felt, EF>::log_preprocessed_height(&self.0)
+    }
+
     fn num_randomness(&self) -> usize {
         LiftedAir::<Felt, EF>::num_randomness(&self.0)
     }
@@ -110,10 +116,8 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         generated_degrees(*self)
     }
 
-    fn precompute_challenge_terms<B: Algebra<Felt>, E: Algebra<B>>(
-        &self,
-        challenges: &[E],
-    ) -> Vec<E> {
+    fn prepare<B: Algebra<Felt>, E: Algebra<B>>(&self, inputs: EvalInputs<'_, B, E>) -> Vec<E> {
+        let challenges = inputs.challenges;
         match self.0 {
             source::MidenAir::Core => generated::precompute_core::<B, E>(challenges).into(),
             source::MidenAir::Chiplets => generated::precompute_chiplets::<B, E>(challenges).into(),
@@ -126,31 +130,16 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         }
     }
 
-    fn eval_with_challenge_terms<AB: LiftedAirBuilder<F = Felt>>(
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(
         &self,
         builder: &mut AB,
-        terms: &[AB::ExprEF],
+        terms: &Self::EvalData<AB::Expr, AB::ExprEF>,
     ) {
         match self.0 {
-            source::MidenAir::Core => generated::eval_core_with_challenge_terms(builder, terms),
-            source::MidenAir::Chiplets => {
-                generated::eval_chiplets_with_challenge_terms(builder, terms)
-            },
-            source::MidenAir::EidosCompression => {
-                generated::eval_eidos_compression_with_challenge_terms(builder, terms)
-            },
-            source::MidenAir::And8Lookup => {
-                generated::eval_and8_lookup_with_challenge_terms(builder, terms)
-            },
-        }
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        match self.0 {
-            source::MidenAir::Core => generated::eval_core(builder),
-            source::MidenAir::Chiplets => generated::eval_chiplets(builder),
-            source::MidenAir::EidosCompression => generated::eval_eidos_compression(builder),
-            source::MidenAir::And8Lookup => generated::eval_and8_lookup(builder),
+            source::MidenAir::Core => generated::eval_core(builder, terms),
+            source::MidenAir::Chiplets => generated::eval_chiplets(builder, terms),
+            source::MidenAir::EidosCompression => generated::eval_eidos_compression(builder, terms),
+            source::MidenAir::And8Lookup => generated::eval_and8_lookup(builder, terms),
         }
     }
 }

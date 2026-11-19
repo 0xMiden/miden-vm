@@ -1,0 +1,27 @@
+# Computes 1+2+...+10 = 55 using a while loop, then adds the initial push.10.
+# The final result (65) is left on the stack.
+proc sum_to_n
+    push.0
+    push.1
+    while.true
+        dup
+        push.11
+        neq
+        if.true
+            dup
+            movup.2
+            add
+            swap
+            add.1
+            push.1
+        else
+            push.0
+        end
+    end
+    drop
+end
+begin
+    push.10
+    exec.sum_to_n
+    add
+end

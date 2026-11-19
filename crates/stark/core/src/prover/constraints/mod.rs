@@ -99,6 +99,7 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
     EF: ExtensionField<F>,
     PackedExt<F, EF>: Algebra<EF> + Algebra<PackedVal<F>> + BasedVectorSpace<PackedVal<F>>,
     A: LiftedAir<F, EF>,
+    A::EvalData<PackedVal<F>, PackedExt<F, EF>>: Sync,
 {
     type P<F> = PackedVal<F>;
     type PE<F, EF> = PackedExt<F, EF>;
@@ -145,15 +146,16 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
     // Pack randomness for aux trace
     let packed_randomness: Vec<PE<F, EF>> = randomness.iter().copied().map(Into::into).collect();
 
-    let challenge_terms: Vec<PE<F, EF>> = air
-        .precompute_challenge_terms::<F, EF>(randomness)
-        .into_iter()
-        .map(Into::into)
-        .collect();
-
     // Pack permutation values
     let packed_perm_values: Vec<PE<F, EF>> =
         permutation_values.iter().copied().map(Into::into).collect();
+
+    let packed_public_values: Vec<P<F>> = public_values.iter().copied().map(Into::into).collect();
+    let data = air.prepare(crate::air::EvalInputs {
+        public_values: &packed_public_values,
+        challenges: &packed_randomness,
+        aux_values: &packed_perm_values,
+    });
 
     let main_vals = main_on_gj.inner.values;
     let aux_vals = aux_on_gj.inner.values;
@@ -246,7 +248,7 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
 
             #[cfg(debug_assertions)]
             crate::air::debug::check_builder_shape(air, &folder);
-            air.eval_with_challenge_terms(&mut folder, &challenge_terms);
+            air.eval(&mut folder, &data);
             let folded = folder.finalize_constraints();
 
             // Unpack the folded result, multiply by 1/Z_H (modular indexing since Z_H

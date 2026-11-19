@@ -1,0 +1,16 @@
+# Function breakpoints wait for entry-block variable declarations, even when an earlier
+# instruction already has a source location. The recorded frame bases must be initialized.
+#
+# RUN: compile-masm %S/frame_base_values.masm --inject-frame-base-test-vars -o %t.masp
+# RUN: miden-debug --commands %s %t.masp 2>&1 | filecheck %s
+
+break in *frame_values
+continue
+vars all
+delete 0
+continue
+
+# CHECK: Breakpoint 0 set: call *frame_values
+# CHECK-NOT: Program terminated
+# CHECK: local_frame=42, memory_frame=42
+# CHECK: Program terminated successfully

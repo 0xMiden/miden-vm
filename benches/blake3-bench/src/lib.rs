@@ -153,7 +153,7 @@ pub fn execute_program(fixture: &Blake3Fixture) -> ExecutionOutput {
 }
 
 pub fn prove_program(fixture: &Blake3Fixture) {
-    let _span = tracing::info_span!("prove_program_sync").entered();
+    let _span = tracing::trace_span!(target: "miden::bench", "prove_program_sync").entered();
     prove_trace(execute_for_proving(fixture));
 }
 

@@ -38,3 +38,6 @@ thiserror = { workspace = true }
 miden-core = { workspace = true, features = ["std"] }
 p3-matrix.workspace = true
 proptest.workspace = true
+
+[lints]
+workspace = true

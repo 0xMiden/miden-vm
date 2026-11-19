@@ -10,7 +10,7 @@ use std::{borrow::Cow, vec, vec::Vec};
 
 use miden_core::{
     Felt,
-    field::{PrimeCharacteristicRing, QuadFelt},
+    field::{Algebra, PrimeCharacteristicRing, QuadFelt},
 };
 use miden_crypto::hash::keccak::Keccak256;
 use miden_stark::{
@@ -485,6 +485,8 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
     }
 
     impl LiftedAir<Felt, QuadFelt> for AuxCorruptAir {
+        type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
         fn num_randomness(&self) -> usize {
             <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::num_randomness(&KeccakSpongeAir)
         }
@@ -516,8 +518,8 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
             (aux, normalized_sum)
         }
 
-        fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-            <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::eval(&KeccakSpongeAir, builder);
+        fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
+            <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::eval(&KeccakSpongeAir, builder, &());
         }
     }
 

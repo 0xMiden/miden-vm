@@ -116,7 +116,7 @@ impl OutputFile {
 
     /// Reads output JSON from a regular file of at most [`Self::MAX_FILE_SIZE`] bytes.
     /// Symlinks to regular files are accepted.
-    #[instrument(name = "read_output_file",
+    #[instrument(target = "miden::cli", level = "trace", name = "read_output_file",
         fields(path = %outputs_path.clone().unwrap_or(program_path.with_extension("outputs")).display()), skip_all)]
     pub fn read(outputs_path: &Option<PathBuf>, program_path: &Path) -> Result<Self, String> {
         // If outputs_path has been provided then use this as path.  Alternatively we will
@@ -140,7 +140,7 @@ impl OutputFile {
     }
 
     /// Writes output JSON through a temporary file and atomically replaces the destination.
-    #[instrument(name = "write_data_to_output_file", fields(path = %path.display()), skip_all)]
+    #[instrument(target = "miden::cli", level = "trace", name = "write_data_to_output_file", fields(path = %path.display()), skip_all)]
     pub fn write(stack_outputs: &StackOutputs, path: &Path) -> Result<(), String> {
         write_file_atomically(path, |file| {
             serde_json::to_writer_pretty(file, &Self::new(stack_outputs)).map_err(io::Error::from)
@@ -188,7 +188,7 @@ where
 {
     /// Reads the masm file at the specified path and parses it into a [ProgramFile], using the
     /// provided [miden_assembly::SourceManager] implementation.
-    #[instrument(name = "read_program_file", skip(source_manager), fields(path = %path.as_ref().display()))]
+    #[instrument(target = "miden::cli", level = "trace", name = "read_program_file", skip(source_manager), fields(path = %path.as_ref().display()))]
     pub fn read_with(path: impl AsRef<Path>, source_manager: Arc<S>) -> Result<Self, Report> {
         // parse the program into an AST
         let path = path.as_ref();
@@ -201,7 +201,7 @@ where
     }
 
     /// Compiles this program file into an executable [Package].
-    #[instrument(name = "compile_package", skip_all)]
+    #[instrument(target = "miden::cli", level = "trace", name = "compile_package", skip_all)]
     pub fn compile_package<I>(&self, libraries: I) -> Result<Box<Package>, Report>
     where
         I: IntoIterator<Item = Arc<Package>>,
@@ -223,7 +223,7 @@ where
     }
 
     /// Compiles this program file into a [Program].
-    #[instrument(name = "compile_program", skip_all)]
+    #[instrument(target = "miden::cli", level = "trace", name = "compile_program", skip_all)]
     pub fn compile<I>(&self, libraries: I) -> Result<Program, Report>
     where
         I: IntoIterator<Item = Arc<Package>>,
@@ -249,19 +249,19 @@ pub struct ProofFile;
 
 /// Helper methods to interact with proof file
 impl ProofFile {
+    /// Resolves the proof path from the optional proof and program paths.
+    pub fn resolve_path(proof_path: &Option<PathBuf>, program_path: &Path) -> PathBuf {
+        proof_path.clone().unwrap_or_else(|| program_path.with_extension("proof"))
+    }
+
     /// Read stark proof from file
-    #[instrument(name = "read_proof_file",
-        fields(path = %proof_path.clone().unwrap_or(program_path.with_extension("proof")).display()), skip_all)]
+    #[instrument(target = "miden::cli", level = "trace", name = "read_proof_file",
+        fields(path = %ProofFile::resolve_path(proof_path, program_path).display()), skip_all)]
     pub fn read(
         proof_path: &Option<PathBuf>,
         program_path: &Path,
     ) -> Result<ExecutionProof, String> {
-        // If proof_path has been provided then use this as path.  Alternatively we will
-        // replace the program_path extension with `.proof` and use this as a default.
-        let path = match proof_path {
-            Some(path) => path.clone(),
-            None => program_path.with_extension("proof"),
-        };
+        let path = Self::resolve_path(proof_path, program_path);
 
         // read the file to bytes
         let file = fs::read(&path)
@@ -273,21 +273,16 @@ impl ProofFile {
     }
 
     /// Writes the proof through a temporary file and atomically replaces the destination.
-    #[instrument(name = "write_data_to_proof_file",
+    #[instrument(target = "miden::cli", level = "trace", name = "write_data_to_proof_file",
                  fields(
-                    path = %proof_path.clone().unwrap_or(program_path.with_extension("proof")).display(),
+                    path = %ProofFile::resolve_path(proof_path, program_path).display(),
                     size = Empty), skip_all)]
     pub fn write(
         proof: ExecutionProof,
         proof_path: &Option<PathBuf>,
         program_path: &Path,
     ) -> Result<(), String> {
-        // If proof_path has been provided then use this as path.  Alternatively we will
-        // replace the program_path extension with `.proof` and use this as a default.
-        let path = match proof_path {
-            Some(path) => path.clone(),
-            None => program_path.with_extension("proof"),
-        };
+        let path = Self::resolve_path(proof_path, program_path);
 
         let proof_bytes = proof.to_bytes();
         tracing::Span::current()
@@ -305,7 +300,7 @@ pub struct ProgramHash;
 
 /// Helper method to parse program hash from hex
 impl ProgramHash {
-    #[instrument(name = "read_program_hash", skip_all)]
+    #[instrument(target = "miden::cli", level = "trace", name = "read_program_hash", skip_all)]
     pub fn read(hash_hex_string: &str) -> Result<Word, String> {
         // decode hex to bytes
         let program_hash_bytes = hex::decode(hash_hex_string)
@@ -330,7 +325,7 @@ pub struct Libraries {
 
 impl Libraries {
     /// Creates a new instance of [Libraries] from a list of library paths.
-    #[instrument(name = "read_library_files", skip_all)]
+    #[instrument(target = "miden::cli", level = "trace", name = "read_library_files", skip_all)]
     pub fn new<P, I>(paths: I) -> Result<Self, Report>
     where
         P: AsRef<Path>,

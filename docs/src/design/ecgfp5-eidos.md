@@ -113,34 +113,38 @@ encoded as little-endian u32 values. The key and nonce are derived, so neither i
 Rust callers use `miden_crypto::ies::SealingKey::Ecgfp5Eidos(public_key)` and
 `UnsealingKey::Ecgfp5Eidos(secret_key)` with the common byte or Felt sealing methods.
 Both use ordinary EcGFp5 keys and require no table preparation.
+For an explicit ephemeral scalar, use `miden_crypto::ies::ecgfp5_eidos::seal_with_scalar`.
 
-The `miden_crypto::ies::ecgfp5_eidos` module provides `Envelope` and `seal_with_scalar`
-for callers that supply their own ephemeral scalar. Decode a MASM envelope with
-`Envelope::from_elements`, then decrypt it with `ecgfp5_eidos::open` and the original context.
-An `Envelope` also converts to the common `ies::SealedMessage` with `From`.
+In the VM, call `crypto::ies::ecgfp5_eidos::seal` with the recipient's key commitment,
+plaintext, context, and destination. It requests private agreement advice from the host
+and writes the envelope.
 
-The core-library `crypto::ies::ecgfp5_eidos` module provides two sealing procedures:
-
-| Procedure | Public-key input | Host advice builder |
+| Procedure | Public-key input | Host key for advice generation |
 | --- | --- | --- |
-| `seal` | Commitment to `Q` (four Felts) | `PublicKey::advise` |
-| `seal_preprocessed` | Commitment `I` (four Felts) | `PreparedPublicKey::advise` |
-
-The core library's `ecdh::ecgfp5` Rust module provides `advice_inputs` and
-`preprocessed_advice_inputs` adapters for these builders.
+| `seal` | Commitment to `Q` (four Felts) | `PublicKey` |
+| `seal_preprocessed` | Commitment `I` (four Felts) | `PreparedPublicKey` |
 
 Both procedures produce the same envelope for the same recipient, scalar, plaintext, and context.
 The recipient does not need the preprocessed tables to decrypt it.
 
-`PublicKey::advise` uses a shared generator cache, built on its first call and retained for
-the process lifetime (roughly 4.1 MiB). For `seal_preprocessed`, the host builds the
-recipient-specific tables with `PreparedPublicKey::new` and reuses them to prepare advice.
+Decode a MASM envelope with `miden_crypto::ies::ecgfp5_eidos::Envelope::from_elements`, then call
+`ecgfp5_eidos::open` with the recipient's secret key and original context. `Envelope` also converts
+to the common `ies::SealedMessage`.
 
-Use a fresh random scalar for each sealed envelope.
+The host must handle the sealing events. `Ecgfp5SealHandler` provides this support using a
+cryptographic RNG and registered keys; custom hosts can implement the same contract. See
+`miden_core_lib::handlers::ecgfp5_eidos` for the event payload and advice requirements.
 
-Keep the scalar, plaintext, and execution witness private. Advice generation is
-variable-time and must run in a trusted environment; public proving also requires
-zero-knowledge.
+`PublicKey::advise` builds a shared generator cache on first use (roughly 4.1 MiB), retained for
+the process lifetime. Hosts can cache tables built by `PreparedPublicKey::new` across encryptions;
+the advice provider receives the witnesses and Merkle nodes needed for each call.
+
+To reproduce ciphertext when re-executing a transaction, replay its original sealing advice.
+Building a proof trace from an existing VM execution witness does not call the host again.
+
+Keep the scalar, plaintext, and execution witness private. Advice generation is variable-time
+and must run in a trusted environment. Use zero-knowledge proofs to hide private witness data
+from verifiers.
 
 The application chooses an unambiguous context encoding and enforces the AEAD's
 [message-size and verification limits](./eidos-aead.md#usage-limits).

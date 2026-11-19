@@ -140,6 +140,8 @@ impl BaseAir<Felt> for KeccakRoundAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn max_periodic_length(&self) -> usize {
         ROUND_PERIOD
     }
@@ -166,7 +168,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
         build_logup_aux_trace(self, main, challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         // Phase 1: local row constraints, replicated per lane over its
         // disjoint column band. The periodic program is shared — every lane
         // sits on the same program slot each row.
@@ -211,9 +213,8 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
             // pow2 height ≥ 128), so `p_last = 1` and the constraint is
             // vacuous. The sponge bus forces `act = 1` at row 0 by providing
             // RC[0] to the iota row, whose `act` equals the round's through this constraint.
-            builder.assert_zero(
-                (AB::Expr::ONE - p_last.clone()) * (AB::Expr::from(next_act) - act.clone()),
-            );
+            builder
+                .assert_zero((AB::Expr::ONE - p_last.clone()) * (AB::Expr::from(next_act) - act));
 
             // Active pure-ROL rows range-check both vectors through BytePairLut. Each
             // packed u32 embeds injectively in the field, so two equalities bind all eight
@@ -352,7 +353,7 @@ where
             // Periodic rotation selectors also fire in the inactive tail. Activity gating lets
             // those zero-filled rows omit the masked-byte witnesses.
             let rol_act = act.clone() * is_rol.clone();
-            let dst_mult_act = act.clone() * dst_mult.clone();
+            let dst_mult_act = act * dst_mult.clone();
 
             // The destination denominator has degree two; each source denominator is affine.
             // Packing all three gives denominator degree four and closing-constraint degree five.

@@ -30,10 +30,10 @@
 use miden_core::field::PrimeCharacteristicRing;
 use miden_stark::air::AirBuilder;
 
-use super::selectors::ChipletFlags;
 use crate::vm::{
-    ChipletCols, MidenAirBuilder,
+    MidenAirBuilder,
     constraints::{
+        chiplets::{columns::AceCols, selectors::ChipletSelectors},
         constants::{F_1, F_4},
         ext_field::{QuadFeltAirBuilder, QuadFeltExpr},
         utils::BoolNot,
@@ -46,18 +46,16 @@ use crate::vm::{
 /// Enforce ACE chiplet constraints that apply to all rows.
 pub fn enforce_ace_constraints_all_rows<AB>(
     builder: &mut AB,
-    local: &ChipletCols<AB::Var>,
-    next: &ChipletCols<AB::Var>,
-    flags: &ChipletFlags<AB::Expr>,
+    local: &AceCols<AB::Var>,
+    next: &AceCols<AB::Var>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    let local = local.ace();
-    let next = next.ace();
-
-    let ace_flag = flags.is_active.clone();
-    let ace_transition = flags.is_transition.clone();
-    let ace_last = flags.is_last.clone();
+    let ace_flag = selectors.ace_active.clone();
+    let ace_transition = selectors.ace_transition.clone();
+    let ace_last = selectors.ace_last.clone();
+    let ace_entry_next = selectors.ace_entry_next.clone();
 
     // Derived section flags
     let s_start = local.s_start;
@@ -68,8 +66,9 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // FIRST ROW CONSTRAINTS
     // ==========================================================================
 
-    // First row of ACE must have sstart' = 1
-    builder.when(flags.next_is_first.clone()).assert_one(s_start_next);
+    // The entry gate is active immediately before ACE begins, even when preceding sections are
+    // empty. Initialize the first ACE row with s_start = 1.
+    builder.when(ace_entry_next).assert_one(s_start_next);
 
     // ==========================================================================
     // BINARY CONSTRAINTS
@@ -92,7 +91,7 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // ==========================================================================
     {
         // Last row of ACE chiplet cannot be section start
-        builder.when(ace_last).assert_zero(s_start);
+        builder.when(ace_last.clone()).assert_zero(s_start);
 
         // Prevent consecutive section starts within ACE chiplet
         builder.when(ace_transition.clone()).when(s_start).assert_zero(s_start_next);
@@ -146,7 +145,7 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // Enforce: f_read * (f_read' * n_eval' + f_eval' * id0' - n_eval) = 0
     let selected: AB::Expr = f_read_next * next.read().num_eval + f_eval_next * next.id_0;
     builder
-        .when(ace_transition)
+        .when(ace_transition.clone())
         .when(f_read.clone())
         .assert_eq(selected, local.read().num_eval);
 
@@ -195,7 +194,7 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // At section end: result value and node ID must be zero.
     {
         // f_end fires on the last ACE row or on section boundaries.
-        let f_end = flags.is_last.clone() + flags.is_transition.clone() * s_start_next;
+        let f_end = ace_last + ace_transition * s_start_next;
         let builder = &mut builder.when(f_end);
 
         // Sections must end with EVAL blocks (not READ).

@@ -60,15 +60,9 @@ pub mod log_deferred {
     pub const STACK_STATE_NEW_RANGE: Range<usize> = BLOCK_LO_RANGE;
 }
 
-// Chiplets trace
-// 23 shared chiplet cells + chip_clk = 24.
-// `chip_clk` is the chiplet-trace row counter (value `row_index + 1`); it sources the
-// hasher responder address on the chiplet side.
-pub const CHIPLETS_DATA_WIDTH: usize = 23;
-pub const CHIPLETS_MODE_COL: usize = CHIPLETS_DATA_WIDTH - 1;
-pub const CHIPLETS_STREAM_MODE_COL: usize = CHIPLETS_MODE_COL;
-pub const CHIPLETS_CLK_COL: usize = CHIPLETS_MODE_COL + 1;
-pub const CHIPLETS_WIDTH: usize = CHIPLETS_CLK_COL + 1;
+// Chiplets trace: 24 shared cells, interpreted through each chiplet's row overlay.
+// Controller rows occupy column 0 for the top-level selector and columns 1..24 for their payload.
+pub const CHIPLETS_WIDTH: usize = 24;
 
 pub mod eidos_compression {
     pub use crate::{

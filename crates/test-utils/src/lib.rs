@@ -12,10 +12,14 @@ use alloc::{
     vec,
     vec::Vec,
 };
+#[cfg(not(feature = "std"))]
+pub use core::{assert_eq, assert_eq as assert_str_eq, assert_ne};
 
 pub use miden_air_definitions::vm::VmTrace;
 use miden_air_definitions::vm::{CoreCols, DecoderCols, StackCols, SystemCols};
-use miden_assembly::{Linkage, diagnostics::reporting::PrintDiagnostic};
+use miden_assembly::Linkage;
+#[cfg(not(target_family = "wasm"))]
+use miden_assembly::diagnostics::reporting::PrintDiagnostic;
 pub use miden_assembly::{
     Path,
     debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
@@ -36,15 +40,21 @@ pub use miden_processor::{
     ContextId, ExecutionError, ProcessorState,
     advice::{AdviceInputs, AdviceProvider, AdviceStack},
 };
+#[cfg(not(target_family = "wasm"))]
 use miden_processor::{
-    DefaultHost, ExecutionOptions, ExecutionOutput, ExecutionWitness, FastProcessor, Program,
+    DefaultHost, ExecutionOptions, ExecutionOutput, ExecutionWitness, FastProcessor,
+};
+use miden_processor::{
+    Program,
     event::{EventHandler, TraceHandler},
 };
 pub use miden_prover::Prover;
 pub use miden_verifier::Verifier;
+#[cfg(feature = "std")]
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
 #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 use proptest::prelude::{Arbitrary, Strategy};
+#[cfg(feature = "std")]
 pub use test_case::test_case;
 
 pub mod math {
@@ -504,7 +514,7 @@ impl Test {
         }
 
         // Enable debug tracing to stderr via the MIDEN_LOG environment variable, if present
-        #[cfg(not(target_family = "wasm"))]
+        #[cfg(all(feature = "std", not(target_family = "wasm")))]
         {
             let _ = env_logger::Builder::from_env("MIDEN_LOG").format_timestamp(None).try_init();
         }
@@ -829,12 +839,15 @@ impl Test {
                 ExecutionOptions::default(),
             )
             .expect("test processor should initialize with default precompiles");
+            #[cfg(feature = "std")]
             if let Some(debug_info) = debug_info.as_ref() {
                 fast_process
                     .execute_by_step_with_package_debug_info_sync(&program, debug_info, &mut host)
             } else {
                 fast_process.execute_by_step_sync(&program, &mut host)
             }
+            #[cfg(not(feature = "std"))]
+            fast_process.execute_by_step_sync(&program, &mut host)
         };
 
         compare_results(
@@ -986,6 +999,7 @@ pub fn stack_inputs_from_ints(values: impl IntoIterator<Item = u64>) -> StackInp
     StackInputs::new(&values).expect("stack inputs should fit the VM stack")
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn stack_outputs_as_int_vec(outputs: &StackOutputs) -> Vec<u64> {
     outputs.iter().map(Felt::as_canonical_u64).collect()
 }

@@ -206,6 +206,8 @@ impl BaseAir<Felt> for EcPointStoreAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for EcPointStoreAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -228,7 +230,7 @@ impl LiftedAir<Felt, QuadFelt> for EcPointStoreAir {
         miden_stark::lookup::build_logup_aux_trace(&EcPointStoreAir, main, challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         eval_point_store_main(builder, 0);
 
         // Phase 2: LogUp.

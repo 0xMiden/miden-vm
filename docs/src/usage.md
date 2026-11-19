@@ -101,6 +101,10 @@ MIDEN_LOG=trace ./target/optimized/miden-vm [subcommand] [parameters]
 
 If the level is not specified, `warn` level is set as default.
 
+Routine VM execution and proving spans use `TRACE`. Set
+`MIDEN_LOG=info,miden::vm=trace` to enable them, or
+`MIDEN_LOG=info,miden::vm::prove=trace` for STARK proving only.
+
 #### Debugging procedures
 
 You can inspect VM state by importing the [`miden::core::debug`](./user_docs/assembly/debugging.md) module and calling its print procedures from a MASM program.

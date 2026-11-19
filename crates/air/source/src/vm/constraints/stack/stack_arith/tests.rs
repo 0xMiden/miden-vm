@@ -10,7 +10,7 @@ use super::enforce_main;
 use crate::vm::constraints::{
     columns::CoreCols,
     op_flags::{OpFlags, generate_test_row},
-    stack::test_utils::ConstraintEvalBuilder,
+    test_utils::ConstraintEvalBuilder,
 };
 
 /// Sets the u32 helper registers (hasher_state[2..7]) in the decoder.

@@ -1,0 +1,20 @@
+# Expose both decoded and raw ABI-typed values through Python scripting.
+#
+# RUN: compile-abi-fixture %S/abi_types.masm -o %t.masp
+# RUN: miden-debug-python --no-user-python-init --commands %s %t.masp -- 4294967303 2>&1 | filecheck %s
+
+break for eqz
+continue
+script frame.variables(True)['snapshot'].display_value
+script frame.variables(True)['snapshot'].value
+delete 0
+continue
+script frame.variables(True)
+script frame.variables(False)
+
+# CHECK: '4294967303u64'
+# CHECK-NEXT: 7
+# CHECK: Program terminated successfully
+# CHECK-NEXT: Result: 4294967303u64
+# CHECK-NEXT: {}
+# CHECK-NEXT: {}

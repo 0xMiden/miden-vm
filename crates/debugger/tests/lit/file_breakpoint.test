@@ -1,0 +1,15 @@
+# Break on the first instruction mapped to a source file without specifying a line.
+# RUN: compile-masm %S/breakpoint.masm -o %t.masp
+# RUN: miden-debug --commands %s %t.masp 2>&1 | filecheck %s
+
+break breakpoint.masm
+continue
+where
+continue
+stack
+
+# CHECK: Breakpoint 0 set: **/breakpoint.masm
+# CHECK: at {{.*}}breakpoint.masm:{{[0-9]+}}:{{[0-9]+}}
+# CHECK: breakpoint.masm:{{[0-9]+}}:{{[0-9]+}} in $exec::$main
+# CHECK: Program terminated successfully
+# CHECK: [0] 150

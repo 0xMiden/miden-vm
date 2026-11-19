@@ -33,7 +33,7 @@ use miden_stark::{
     air::{AirBuilder, BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, WindowAccess},
     testing::{MultiAir, PcsParams, ProverStatement, Statement},
 };
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{Algebra, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use tracing_subscriber::EnvFilter;
 
@@ -85,6 +85,8 @@ impl BaseAir<Felt> for BenchAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for BenchAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         1
     }
@@ -108,7 +110,7 @@ impl LiftedAir<Felt, QuadFelt> for BenchAir {
         (RowMajorMatrix::new(vec![challenges[0]; main.height()], 1), vec![])
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         let main = builder.main();
         let (local, next) = (main.current_slice().to_vec(), main.next_slice().to_vec());
         let log2_hi = self.kind.log2_hi();
@@ -119,7 +121,7 @@ impl LiftedAir<Felt, QuadFelt> for BenchAir {
         for _ in 0..CONSTRAINTS_PER_COLUMN {
             for c in 0..WIDTH {
                 let x: AB::Expr = local[c].into();
-                let x_hi: AB::Expr = x.clone().exp_power_of_2(log2_hi);
+                let x_hi: AB::Expr = x.exp_power_of_2(log2_hi);
                 builder.when_transition().assert_eq(next[c].into(), x_hi * x);
             }
         }
@@ -169,6 +171,8 @@ impl<A: BaseAir<Felt>> BaseAir<Felt> for OverrideConstraintDegree<A> {
 }
 
 impl<A: LiftedAir<Felt, QuadFelt>> LiftedAir<Felt, QuadFelt> for OverrideConstraintDegree<A> {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = A::EvalData<B, E>;
+
     fn num_randomness(&self) -> usize {
         self.inner.num_randomness()
     }
@@ -187,8 +191,18 @@ impl<A: LiftedAir<Felt, QuadFelt>> LiftedAir<Felt, QuadFelt> for OverrideConstra
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
         self.inner.build_aux_trace(main, air_inputs, aux_inputs, challenges)
     }
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        self.inner.eval(builder)
+    fn prepare<B: Algebra<Felt>, E: Algebra<B>>(
+        &self,
+        inputs: miden_stark::air::EvalInputs<'_, B, E>,
+    ) -> Self::EvalData<B, E> {
+        self.inner.prepare(inputs)
+    }
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(
+        &self,
+        builder: &mut AB,
+        data: &Self::EvalData<AB::Expr, AB::ExprEF>,
+    ) {
+        self.inner.eval(builder, data)
     }
     fn constraint_degree(&self) -> ConstraintDegrees
     where
@@ -300,10 +314,13 @@ fn run_prove(
 }
 
 fn main() {
+    let env_filter = match std::env::var("RUST_LOG") {
+        Ok(value) => EnvFilter::try_new(value).expect("invalid RUST_LOG"),
+        Err(std::env::VarError::NotPresent) => EnvFilter::new("debug,miden::vm::prove=trace"),
+        Err(error) => panic!("invalid RUST_LOG: {error}"),
+    };
     tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")),
-        )
+        .with_env_filter(env_filter)
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
         .init();
 

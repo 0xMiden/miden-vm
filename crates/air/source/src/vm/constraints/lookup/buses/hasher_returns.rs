@@ -27,14 +27,14 @@ pub(in crate::vm::constraints::lookup) fn emit_hasher_returns<LB>(
     LB: ChipletLookupBuilder,
 {
     let local = ctx.local;
-    let ctrl = local.controller();
+    let ctrl = local.controller_cols();
 
     let controller_flag = ctx.chiplet_active.controller.clone();
-    let merkle_or_padding: LB::Expr = local.controller_merkle_or_padding().into();
-    let op_final: LB::Expr = local.controller_op_final().into();
+    let merkle_or_padding: LB::Expr = ctrl.merkle_or_padding.into();
+    let op_final: LB::Expr = ctrl.op_final.into();
     let hash_return = controller_flag * merkle_or_padding.not() * op_final;
 
-    let addr: LB::Expr = local.chip_clk.into();
+    let addr: LB::Expr = ctrl.addr.into();
     let hash_result = ctrl.hash_cv();
 
     builder.next_column(

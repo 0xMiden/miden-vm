@@ -977,15 +977,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "flume"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e139bc46ca777eb5efaf62df0ab8cc5fd400866427e56c68b22e414e53bd3be"
-dependencies = [
- "spin 0.9.9",
-]
-
-[[package]]
 name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1514,7 +1505,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "miden-ace"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-crypto",
  "thiserror",
@@ -1522,7 +1513,7 @@ dependencies = [
 
 [[package]]
 name = "miden-air-definitions"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-ace",
  "miden-core",
@@ -1541,7 +1532,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "log",
  "miden-assembly-syntax",
@@ -1556,7 +1547,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "log",
  "miden-assembly-syntax-cst",
@@ -1575,7 +1566,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax-cst"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-debug-types",
  "miden-rowan",
@@ -1584,7 +1575,7 @@ dependencies = [
 
 [[package]]
 name = "miden-core"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "derive_more",
  "log",
@@ -1619,7 +1610,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "blake3",
  "cc",
@@ -1627,7 +1618,6 @@ dependencies = [
  "curve25519-dalek",
  "der",
  "ed25519-dalek",
- "flume",
  "hkdf",
  "k256",
  "miden-crypto-derive",
@@ -1657,7 +1647,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "quote",
  "syn 2.0.119",
@@ -1665,7 +1655,7 @@ dependencies = [
 
 [[package]]
 name = "miden-debug-types"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "memchr",
  "miden-crypto",
@@ -1683,14 +1673,14 @@ dependencies = [
 
 [[package]]
 name = "miden-event-handler-abi"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-field",
 ]
 
 [[package]]
 name = "miden-field"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-serde-utils",
  "num-bigint 0.5.1",
@@ -1717,7 +1707,7 @@ dependencies = [
 
 [[package]]
 name = "miden-mast-package"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "hashbrown 0.17.1",
  "miden-assembly-syntax",
@@ -1768,7 +1758,7 @@ dependencies = [
 
 [[package]]
 name = "miden-package-registry"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -1782,7 +1772,7 @@ dependencies = [
 
 [[package]]
 name = "miden-precompiles"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-core",
  "miden-crypto",
@@ -1791,7 +1781,7 @@ dependencies = [
 
 [[package]]
 name = "miden-processor"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "itertools 0.15.0",
  "miden-ace",
@@ -1803,6 +1793,7 @@ dependencies = [
  "miden-stark",
  "miden-utils-diagnostics",
  "miden-utils-indexing",
+ "p3-maybe-rayon",
  "paste",
  "rayon",
  "thiserror",
@@ -1811,7 +1802,7 @@ dependencies = [
 
 [[package]]
 name = "miden-project"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -1836,7 +1827,7 @@ dependencies = [
 
 [[package]]
 name = "miden-serde-utils"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
@@ -1846,7 +1837,7 @@ dependencies = [
 
 [[package]]
 name = "miden-stark"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-core",
  "miden-crypto",
@@ -1869,7 +1860,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-core-derive"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1878,7 +1869,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-diagnostics"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-debug-types",
  "miden-miette",
@@ -1887,7 +1878,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-indexing"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-serde-utils",
  "proptest",
@@ -1896,7 +1887,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-sync"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "lock_api",
  "loom",
@@ -1906,7 +1897,7 @@ dependencies = [
 
 [[package]]
 name = "miden-wasm-event-handlers"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-crypto",
  "miden-event-handler-abi",
@@ -1919,7 +1910,7 @@ dependencies = [
 
 [[package]]
 name = "midenc-hir-type"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "miden-formatting",
  "miden-serde-utils",
@@ -2176,6 +2167,9 @@ name = "p3-maybe-rayon"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe1d83295d958b3d098e11b7868ac35c866c9c0432ce5266b90f7844dad513de"
+dependencies = [
+ "rayon",
+]
 
 [[package]]
 name = "p3-mds"
@@ -2773,9 +2767,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.1.5"
+version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
+checksum = "e5e76742e5294153d4dde1207dbec5bdd81eef6fabdc0d2118babadabfd858aa"
 dependencies = [
  "bitflags 2.13.1",
  "errno",
@@ -3050,9 +3044,6 @@ name = "spin"
 version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e"
-dependencies = [
- "lock_api",
-]
 
 [[package]]
 name = "spin"

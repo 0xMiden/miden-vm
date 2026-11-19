@@ -101,6 +101,8 @@ impl BaseAir<Felt> for Sha512IoAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for Sha512IoAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn max_periodic_length(&self) -> usize {
         IO_PERIOD
     }
@@ -123,7 +125,7 @@ impl LiftedAir<Felt, QuadFelt> for Sha512IoAir {
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
         build_logup_aux_trace(self, main, challenges)
     }
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         eval_main(builder, 0, 0);
         let mut lb = ConstraintLookupBuilder::new(builder, self);
         eval_lookups(&mut lb, 0, 0);

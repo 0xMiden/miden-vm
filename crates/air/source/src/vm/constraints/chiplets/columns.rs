@@ -43,13 +43,10 @@ macro_rules! impl_borrow_for_chiplet_cols {
 // CONTROLLER COLUMNS
 // ================================================================================================
 
-/// Controller chiplet columns (19 columns), viewed from `chiplets[1..20]`.
+/// Controller chiplet columns (23 columns), viewed from `chiplets[1..24]`.
 ///
-/// Logical overlay for controller rows (`s_ctrl = 1`). The `s0/s1/s2` columns select the
-/// controller row kind; see `hasher_control::flags` for the encoding.
-///
-/// `s_ctrl` (= `chiplets[0]`) and the shared mode cell are not part of this overlay. Controller
-/// code reads that shared cell through `ChipletCols::controller_merkle_or_padding()`.
+/// The controller follows the chiplet prefix `0`. The `s0/s1/s2` fields select the controller
+/// row kind. See `hasher_control::flags` for the encoding.
 ///
 /// The controller uses a row-kind-dependent overlay to fit one compression request in one row:
 ///
@@ -63,8 +60,7 @@ macro_rules! impl_borrow_for_chiplet_cols {
 /// ## Layout
 ///
 /// ```text
-/// | s0 s1 s2 | state[12]                                        | row_data[4]   |
-/// |          | block_lo[4]      | block_hi[4] | cv/digest[4]    | row-kind data |
+/// | s0 s1 s2 | state[12] | row_data[4] | op_final | mrupdate_id | merkle_or_padding | addr |
 /// ```
 #[repr(C)]
 #[derive(Clone, Debug)]
@@ -79,6 +75,14 @@ pub struct ControllerCols<T> {
     pub state: [T; STATE_WIDTH],
     /// Row-kind-dependent payload. See the row-kind overlay documented above.
     pub row_data: [T; DIGEST_LEN],
+    /// Final-row marker for a hash or Merkle operation.
+    pub op_final: T,
+    /// Carried MRUPDATE id used to associate the old and new sibling paths.
+    pub mrupdate_id: T,
+    /// Equals `is_merkle + is_padding` on controller rows.
+    pub merkle_or_padding: T,
+    /// Controller row address: starts at one and increments through controller padding rows.
+    pub addr: T,
 }
 
 impl<T: Copy> ControllerCols<T> {
@@ -135,13 +139,13 @@ impl<T: Copy> ControllerCols<T> {
 // BITWISE COLUMNS
 // ================================================================================================
 
-/// Bitwise chiplet columns (13 columns), viewed from `chiplets[2..15]`.
+/// Ordinary bitwise operation payload (13 columns), viewed from `chiplets[3..16]`.
 ///
 /// Normal bitwise rows store one full u32 operation. The byte arrays are little-endian:
 /// `value = b0 + 2^8*b1 + 2^16*b2 + 2^24*b3`.
 #[repr(C)]
 #[derive(Clone, Debug)]
-pub struct BitwiseCols<T> {
+pub struct BitwiseOpCols<T> {
     /// Operation flag: 0 = AND, 1 = XOR.
     pub op_flag: T,
     /// Little-endian bytes of input `a`.
@@ -152,7 +156,10 @@ pub struct BitwiseCols<T> {
     pub and_bytes: [T; NUM_U32_BYTES],
 }
 
-/// AEAD stream overlay (20 columns), viewed from `chiplets[2..22]`.
+// AEAD STREAM COLUMNS
+// ================================================================================================
+
+/// AEAD stream overlay (20 columns), viewed from `chiplets[3..23]`.
 ///
 /// One stream entry spans eight rows. Each row proves one u32 XOR as four AND8 byte lookups;
 /// row-specific overlays define the remaining cells.
@@ -264,7 +271,7 @@ pub struct AeadStreamHighSecondCols<T> {
 // MEMORY COLUMNS
 // ================================================================================================
 
-/// Memory chiplet columns (15 columns), viewed from `chiplets[3..18]`.
+/// Memory chiplet columns (17 columns), viewed from `chiplets[3..20]`.
 ///
 /// When reading from a new word address (first access to a context/addr pair), the
 /// `values` are initialized to zero.
@@ -295,6 +302,10 @@ pub struct MemoryCols<T> {
     pub d_inv: T,
     /// Flag: same context and same word address as previous operation (docs: `f_sca`).
     pub is_same_ctx_and_addr: T,
+    /// Low 16 bits of the word index (`word_addr / 4`), range-checked through the lookup bus.
+    pub word_addr_lo: T,
+    /// High 16 bits of the word index (`word_addr / 4`), range-checked through the lookup bus.
+    pub word_addr_hi: T,
 }
 
 // ACE COLUMNS
@@ -526,8 +537,9 @@ const _: () = {
     assert!(size_of::<PeriodicCols<u8>>() == 8);
     assert!(size_of::<AeadStreamPeriodicCols<u8>>() == 8);
 
-    assert!(size_of::<ControllerCols<u8>>() == 19);
-    assert!(size_of::<BitwiseCols<u8>>() == 13);
+    assert!(size_of::<ControllerCols<u8>>() == 23);
+    assert!(size_of::<BitwiseOpCols<u8>>() == 13);
+    assert!(size_of::<MemoryCols<u8>>() == 17);
     assert!(size_of::<AeadStreamCols<u8>>() == 20);
     assert!(size_of::<AeadStreamReadCols<u8>>() == 20);
     assert!(size_of::<AeadStreamHighFirstCols<u8>>() == 20);
@@ -543,7 +555,7 @@ const _: () = {
 // `crate::vm::constraints::columns` module.
 
 impl_borrow_for_chiplet_cols!(ControllerCols);
-impl_borrow_for_chiplet_cols!(BitwiseCols);
+impl_borrow_for_chiplet_cols!(BitwiseOpCols);
 impl_borrow_for_chiplet_cols!(AeadStreamCols);
 impl_borrow_for_chiplet_cols!(AeadStreamReadCols);
 impl_borrow_for_chiplet_cols!(AeadStreamHighFirstCols);

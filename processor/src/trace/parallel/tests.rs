@@ -6,6 +6,7 @@ use miden_air_definitions::vm::{
 };
 use miden_core::{
     Felt, Word,
+    crypto::merkle::MerklePath,
     field::QuadFelt,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
@@ -414,9 +415,9 @@ fn test_trace_generation_at_fragment_boundaries(
         chip_from_fragments,
         eidos_compression_from_fragments,
         and8_from_fragments,
-    ) = trace_from_fragments.main_trace().clone_air_matrices();
+    ) = trace_from_fragments.main_trace().clone().into_air_matrices();
     let (core_from_single, chip_from_single, eidos_compression_from_single, and8_from_single) =
-        trace_from_single_fragment.main_trace().clone_air_matrices();
+        trace_from_single_fragment.into_air_matrices();
 
     // Compare every committed main-trace cell exactly. The column-oriented check above provides
     // precise diagnostics for the Core and Chiplets matrices; these assertions extend the exact
@@ -1385,6 +1386,46 @@ fn test_build_trace_returns_err_on_inconsistent_continuation(
         matches!(result, Err(ExecutionError::Internal(_))),
         "expected ExecutionError::Internal, got: {result:?}"
     );
+}
+
+fn replayed_merkle_path_op(update: bool, depth: usize, index: u64) -> ResolvedHasherOp<'static> {
+    let path = MerklePath::new(alloc::vec![Word::default(); depth]);
+    let index = Felt::new_unchecked(index);
+    if update {
+        ResolvedHasherOp::UpdateMerkleRoot((Word::default(), Word::default(), path, index))
+    } else {
+        ResolvedHasherOp::BuildMerkleRoot((Word::default(), path, index))
+    }
+}
+
+/// Merkle path requests in the hasher replay come from a deserialized witness, so an empty path
+/// or an index that does not fit in the path's depth must make the hasher chiplet builder return
+/// an error instead of panicking.
+#[rstest]
+#[case::build_root_empty_path(false, 0, 0)]
+#[case::build_root_index_exceeds_depth(false, 3, 8)]
+#[case::update_root_empty_path(true, 0, 0)]
+#[case::update_root_index_exceeds_depth(true, 3, 8)]
+fn test_build_hasher_chiplet_rejects_invalid_replayed_merkle_path(
+    #[case] update: bool,
+    #[case] depth: usize,
+    #[case] index: u64,
+) {
+    let op = replayed_merkle_path_op(update, depth, index);
+    let err = build_hasher_chiplet([Ok(op)], usize::MAX, usize::MAX).err();
+    assert!(
+        matches!(err, Some(ExecutionError::Internal(_))),
+        "expected ExecutionError::Internal, got: {err:?}"
+    );
+}
+
+/// The largest index that fits in the path's depth is still accepted.
+#[rstest]
+#[case::build_root(false)]
+#[case::update_root(true)]
+fn test_build_hasher_chiplet_accepts_replayed_merkle_path_at_max_index(#[case] update: bool) {
+    let op = replayed_merkle_path_op(update, 3, 7);
+    assert!(build_hasher_chiplet([Ok(op)], usize::MAX, usize::MAX).is_ok());
 }
 
 /// Verifies that `build_trace` returns `ExecutionError::Internal` when `core_trace_contexts` is

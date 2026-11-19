@@ -8,6 +8,7 @@ use std::{
     vec::Vec,
 };
 
+use miden_ace::compiler::render_masm_ext2_power;
 use miden_air_definitions::precompiles::{
     fixed::{self, CurveId, FixedEcGroup, FixedUint, FixedUintKind},
     relations::MAX_MESSAGE_WIDTH,
@@ -18,11 +19,6 @@ const UINTVAL: &str = include_str!("masm/fixed_uintval.masm.tpl");
 const ECGROUP: &str = include_str!("masm/fixed_ecgroup.masm.tpl");
 
 pub(crate) fn render_fixed_boundary() -> Result<String, String> {
-    // compute_bus_gamma uses an addition chain for beta^18. Changing the message width requires
-    // updating that chain and this guard together.
-    if MAX_MESSAGE_WIDTH != 18 {
-        return Err("update compute_bus_gamma for the new PVM message width".into());
-    }
     let mut uints: Vec<_> = fixed::fixed_uint_records().collect();
     // Message order does not affect the sum, but it is part of the PVM verifier root.
     // Emit bounds before dependents, each sorted by address.
@@ -38,6 +34,8 @@ pub(crate) fn render_fixed_boundary() -> Result<String, String> {
 }
 
 fn render_messages(uints: &[FixedUint], groups: &[FixedEcGroup]) -> Result<String, String> {
+    let max_message_width =
+        u32::try_from(MAX_MESSAGE_WIDTH).map_err(|_| "LogUp message width exceeds u32")?;
     let mut uintval_messages = String::new();
     for uint in uints {
         let entry = render_uint(UINTVAL, uint)?;
@@ -66,6 +64,11 @@ fn render_messages(uints: &[FixedUint], groups: &[FixedEcGroup]) -> Result<Strin
     render_template(
         MODULE,
         &[
+            ("max_message_width".into(), max_message_width.to_string()),
+            (
+                "gamma_power".into(),
+                render_masm_ext2_power(max_message_width).replace('\n', "\n    "),
+            ),
             ("uintval_messages".into(), uintval_messages.trim_end().into()),
             ("ecgroup_messages".into(), ecgroup_messages.trim_end().into()),
         ],

@@ -185,6 +185,8 @@ fn offset_selectors<E: Algebra<Felt>>([b0, b1, b2]: [E; 3], product: E) -> [E; 8
 // ================================================================================================
 
 impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn max_periodic_length(&self) -> usize {
         SPONGE_PERIOD
     }
@@ -211,7 +213,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
         miden_stark::lookup::build_logup_aux_trace(&KeccakSpongeAir, main, challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         eval_main(builder, 0);
 
         // Phase 2: LogUp.

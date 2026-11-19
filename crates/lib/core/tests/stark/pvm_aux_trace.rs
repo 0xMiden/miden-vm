@@ -1,22 +1,19 @@
-//! Behavioral oracles for the PVM auxiliary-trace verifier hook.
+//! Native-reference checks for shared LogUp staging and the PVM boundary correction.
 
 use std::fmt::Write as _;
 
 use miden_air_definitions::precompiles::relations::MAX_MESSAGE_WIDTH;
 use miden_core::{
-    Felt,
+    Felt, Word,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
+use miden_crypto::hash::eidos::EidosChallenger;
 use miden_precompiles::{CurveId, UintDomain};
+use p3_challenger::{CanObserve, FieldChallenger};
 
 use super::pvm_layout_const;
-use crate::helpers::read_memory_felt;
+use crate::helpers::{read_memory_felt, stark_constant};
 
-const AUX_TRACE_COM_PTR: u32 = 3_223_322_644;
-const RANDOM_COIN_CV_PTR: u32 = 3_223_322_668;
-const RANDOM_COIN_INPUT_LENGTH_PTR: u32 = 3_223_322_767;
-const RANDOM_COIN_OUTPUT_LENGTH_PTR: u32 = 3_223_322_768;
-const RANDOM_COIN_COUNTER_PTR: u32 = 3_223_322_769;
 const INITIAL_CV: [u64; 4] = [19, 20, 21, 22];
 const COMMITMENT: [u64; 4] = [31, 32, 33, 34];
 type LogHeights = [u8; 12];
@@ -32,7 +29,8 @@ const PROOF_ORDER_CASES: [(&str, LogHeights); 3] = [
     ("Eidos before ordinary AIRs", EIDOS_PRECEDES_ORDINARY_HEIGHTS),
     ("BytePairLut before Eidos", BYTE_PAIR_PRECEDES_EIDOS_HEIGHTS),
 ];
-const AUX_VALUE_WIDTHS: [usize; 12] = [1; 12];
+const SAMPLES_PTR: u32 = 1_000;
+const NUM_SAMPLES: usize = 6;
 
 fn random_coin_setup_masm() -> String {
     let cv = INITIAL_CV;
@@ -54,14 +52,6 @@ fn random_coin_setup_masm() -> String {
     )
 }
 
-fn direct_random_coin_setup_masm() -> String {
-    format!(
-        "{}\npush.{} mem_store.AUX_RAND_ELEM_ADDRESS_PTR",
-        random_coin_setup_masm(),
-        pvm_layout_const("AUX_RAND_ELEM_PTR")
-    )
-}
-
 fn setup_masm(log_heights: &LogHeights) -> String {
     let mut heights = String::new();
     for (index, &height) in log_heights.iter().enumerate() {
@@ -79,26 +69,7 @@ fn setup_masm(log_heights: &LogHeights) -> String {
         {random_coin_setup}
         {heights}
         "#,
-        random_coin_setup = direct_random_coin_setup_masm(),
-    )
-}
-
-fn sampler_source(log_heights: &LogHeights) -> String {
-    format!(
-        r#"
-        use {{
-            AUX_RAND_ELEM_ADDRESS_PTR, AUX_TRACE_COM_PTR, LOG_AIR_TRACE_LENGTHS_PTR,
-            RANDOM_COIN_COUNTER_PTR, RANDOM_COIN_CV_PTR, RANDOM_COIN_INPUT_BUF_PTR,
-            RANDOM_COIN_INPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_WORD_PTR
-        }} from miden::core::stark::constants
-        use miden::core::stark::random_coin
-
-        begin
-            {}
-            exec.random_coin::generate_aux_randomness
-        end
-        "#,
-        setup_masm(log_heights)
+        random_coin_setup = random_coin_setup_masm(),
     )
 }
 
@@ -106,10 +77,11 @@ fn hook_source(log_heights: &LogHeights) -> String {
     format!(
         r#"
         use {{
-            AUX_RAND_ELEM_ADDRESS_PTR, AUX_TRACE_COM_PTR, LOG_AIR_TRACE_LENGTHS_PTR,
+            AUX_TRACE_COM_PTR, LOG_AIR_TRACE_LENGTHS_PTR,
             RANDOM_COIN_COUNTER_PTR, RANDOM_COIN_CV_PTR, RANDOM_COIN_INPUT_BUF_PTR,
             RANDOM_COIN_INPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_WORD_PTR
         }} from miden::core::stark::constants
+        use miden::core::stark::random_coin
         use miden::core::sys::pvm::aux_trace
         use miden::core::sys::pvm::ood_frames
 
@@ -117,71 +89,25 @@ fn hook_source(log_heights: &LogHeights) -> String {
             {}
             exec.ood_frames::stage_proof_order_maps
             exec.aux_trace::observe_aux_trace
+            mem_load.RANDOM_COIN_INPUT_LENGTH_PTR push.4 assert_eq
+            mem_load.RANDOM_COIN_OUTPUT_LENGTH_PTR assertz
+            mem_load.RANDOM_COIN_COUNTER_PTR assertz
+            {samples}
         end
         "#,
-        setup_masm(log_heights)
+        setup_masm(log_heights),
+        samples = (0..NUM_SAMPLES)
+            .map(|i| format!("exec.random_coin::sample_felt mem_store.{}", SAMPLES_PTR + i as u32))
+            .collect::<Vec<_>>()
+            .join("\n"),
     )
 }
 
-/// Reference transcript path using the public buffered word API for the same seven advice words.
-fn reference_source(log_heights: &LogHeights) -> String {
-    format!(
-        r#"
-        use {{
-            AUX_RAND_ELEM_ADDRESS_PTR, AUX_TRACE_COM_PTR, LOG_AIR_TRACE_LENGTHS_PTR,
-            RANDOM_COIN_COUNTER_PTR, RANDOM_COIN_CV_PTR, RANDOM_COIN_INPUT_BUF_PTR,
-            RANDOM_COIN_INPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_WORD_PTR
-        }} from miden::core::stark::constants
-        use miden::core::stark::random_coin
-        use miden::core::sys::pvm::layout
-
-        begin
-            {}
-            exec.random_coin::generate_aux_randomness
-
-            padw adv_loadw
-            mem_storew_le.AUX_TRACE_COM_PTR
-            exec.random_coin::observe_word
-            padw adv_loadw
-            exec.layout::aux_bus_boundary_ptr mem_storew_le
-            exec.random_coin::observe_word
-
-            padw adv_loadw
-            exec.layout::aux_bus_boundary_ptr add.4 mem_storew_le
-            exec.random_coin::observe_word
-            padw adv_loadw
-            exec.layout::aux_bus_boundary_ptr add.8 mem_storew_le
-            exec.random_coin::observe_word
-
-            padw adv_loadw
-            exec.layout::aux_bus_boundary_ptr add.12 mem_storew_le
-            exec.random_coin::observe_word
-            padw adv_loadw
-            exec.layout::aux_bus_boundary_ptr add.16 mem_storew_le
-            exec.random_coin::observe_word
-            padw adv_loadw
-            exec.layout::aux_bus_boundary_ptr add.20 mem_storew_le
-            exec.random_coin::observe_word
-        end
-        "#,
-        setup_masm(log_heights)
-    )
-}
-
-fn sampled_challenges(log_heights: &LogHeights) -> (QuadFelt, QuadFelt) {
-    let (output, _) = build_test!(&sampler_source(log_heights), &[])
-        .execute_for_output()
-        .expect("challenge sampler must execute");
-    let aux_rand_elem_ptr = pvm_layout_const("AUX_RAND_ELEM_PTR");
-    let beta = QuadFelt::new([
-        read_memory_felt(&output, aux_rand_elem_ptr),
-        read_memory_felt(&output, aux_rand_elem_ptr + 1),
-    ]);
-    let alpha = QuadFelt::new([
-        read_memory_felt(&output, aux_rand_elem_ptr + 2),
-        read_memory_felt(&output, aux_rand_elem_ptr + 3),
-    ]);
-    (alpha, beta)
+fn sampled_challenges() -> (EidosChallenger, QuadFelt, QuadFelt) {
+    let mut challenger = EidosChallenger::new(Word::new(INITIAL_CV.map(Felt::new_unchecked)));
+    let alpha = challenger.sample_algebra_element();
+    let beta = challenger.sample_algebra_element();
+    (challenger, alpha, beta)
 }
 
 fn encode_message(alpha: QuadFelt, beta: QuadFelt, scale: u32, payload: &[u32]) -> QuadFelt {
@@ -264,50 +190,25 @@ fn fixed_boundary_correction(alpha: QuadFelt, beta: QuadFelt) -> QuadFelt {
     })
 }
 
-fn proof_order(log_heights: &LogHeights) -> [usize; 12] {
-    let mut order = core::array::from_fn(|index| index);
-    order.sort_by_key(|&index| (log_heights[index], index));
-    order
+fn balanced_normalized_sums(correction: QuadFelt, log_heights: &[u8]) -> Vec<QuadFelt> {
+    let n = log_heights.len();
+    let mut sums: Vec<_> = (0..n)
+        .map(|i| QuadFelt::new([Felt::from_usize(2 * i + 1), Felt::from_usize(2 * i + 2)]))
+        .collect();
+    // Reserve the last AIR as the balancing term in the trace-length-weighted identity.
+    let weight = |i: usize| Felt::from_u64(1u64 << log_heights[i]);
+    let partial: QuadFelt = (0..n - 1).map(|i| sums[i] * weight(i)).sum();
+    sums[n - 1] = (-correction - partial) * weight(n - 1).inverse();
+    sums
 }
 
-fn balanced_normalized_sums(correction: QuadFelt, log_heights: &LogHeights) -> [Vec<QuadFelt>; 12] {
-    let mut next = 1u32;
-    let mut normalized_sums: [Vec<QuadFelt>; 12] = core::array::from_fn(|air_index| {
-        (0..AUX_VALUE_WIDTHS[air_index])
-            .map(|_| {
-                let value = QuadFelt::new([Felt::from_u32(next), Felt::from_u32(next + 1)]);
-                next += 2;
-                value
-            })
-            .collect()
-    });
-
-    // Reserve a single-width AIR as the balancing term, then apply the same trace-length weighting
-    // as `MultiAir::eval_external`.
-    normalized_sums[11][0] = QuadFelt::ZERO;
-    let partial =
-        normalized_sums.iter().enumerate().fold(QuadFelt::ZERO, |sum, (index, values)| {
-            let n = Felt::new_unchecked(1u64 << log_heights[index]);
-            sum + values.iter().copied().sum::<QuadFelt>() * n
-        });
-    let balancing_n_inv = Felt::new_unchecked(1u64 << log_heights[11])
-        .try_inverse()
-        .expect("nonzero trace length");
-    normalized_sums[11][0] = (-correction - partial) * balancing_n_inv;
-    normalized_sums
+fn proof_ordered_normalized_sums(values: &[QuadFelt], log_heights: &[u8]) -> Vec<QuadFelt> {
+    let mut order: Vec<_> = (0..log_heights.len()).collect();
+    order.sort_by_key(|&i| (log_heights[i], i));
+    order.into_iter().map(|i| values[i]).collect()
 }
 
-fn proof_ordered_normalized_sums(
-    values: &[Vec<QuadFelt>; 12],
-    log_heights: &LogHeights,
-) -> Vec<QuadFelt> {
-    proof_order(log_heights)
-        .into_iter()
-        .flat_map(|air_index| values[air_index].iter().copied())
-        .collect()
-}
-
-fn advice(normalized_sums: &[Vec<QuadFelt>; 12], log_heights: &LogHeights) -> Vec<u64> {
+fn advice(normalized_sums: &[QuadFelt], log_heights: &[u8]) -> Vec<u64> {
     let ordered = proof_ordered_normalized_sums(normalized_sums, log_heights);
     COMMITMENT
         .into_iter()
@@ -323,7 +224,7 @@ fn advice(normalized_sums: &[Vec<QuadFelt>; 12], log_heights: &LogHeights) -> Ve
 #[test]
 fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
     for (case, log_heights) in PROOF_ORDER_CASES {
-        let (alpha, beta) = sampled_challenges(&log_heights);
+        let (mut challenger, alpha, beta) = sampled_challenges();
         let correction = fixed_boundary_correction(alpha, beta);
         let normalized_sums = balanced_normalized_sums(correction, &log_heights);
         let advice = advice(&normalized_sums, &log_heights);
@@ -333,26 +234,21 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
             .unwrap_or_else(|error| {
                 panic!("{case}: PVM aux hook rejected balanced boundary: {error}")
             });
-        let (reference_output, _) = build_test!(&reference_source(&log_heights), &[], &advice)
-            .execute_for_output()
-            .unwrap_or_else(|error| panic!("{case}: reference transcript failed: {error}"));
-
-        for addr in RANDOM_COIN_CV_PTR..RANDOM_COIN_CV_PTR + 4 {
+        challenger
+            .observe_slice(&advice.iter().copied().map(Felt::new_unchecked).collect::<Vec<_>>());
+        for i in 0..NUM_SAMPLES {
+            let expected: Felt = challenger.sample_algebra_element();
             assert_eq!(
-                read_memory_felt(&hook_output, addr),
-                read_memory_felt(&reference_output, addr),
-                "{case}: transcript state differs at address {addr}"
+                read_memory_felt(&hook_output, SAMPLES_PTR + i as u32),
+                expected,
+                "{case}: sample {i}"
             );
         }
-        for addr in [
-            RANDOM_COIN_INPUT_LENGTH_PTR,
-            RANDOM_COIN_OUTPUT_LENGTH_PTR,
-            RANDOM_COIN_COUNTER_PTR,
-        ] {
+        for (i, expected) in challenger.cv().iter().enumerate() {
             assert_eq!(
-                read_memory_felt(&hook_output, addr),
-                read_memory_felt(&reference_output, addr),
-                "{case}: transcript counter differs at address {addr}"
+                read_memory_felt(&hook_output, stark_constant("RANDOM_COIN_CV_PTR") + i as u32),
+                *expected,
+                "{case}: chaining value {i}"
             );
         }
 
@@ -372,33 +268,16 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
         assert_eq!(read_memory_felt(&hook_output, bus_gamma_ptr + 2), Felt::ZERO);
         assert_eq!(read_memory_felt(&hook_output, bus_gamma_ptr + 3), Felt::ZERO);
 
-        let expected_correction: &[Felt] = correction.as_basis_coefficients_slice();
-        let c_total_ptr = pvm_layout_const("C_TOTAL_PTR");
-        assert_eq!(
-            read_memory_felt(&hook_output, c_total_ptr),
-            expected_correction[0],
-            "{case}: fixed correction coordinate 0 mismatch"
-        );
-        assert_eq!(
-            read_memory_felt(&hook_output, c_total_ptr + 1),
-            expected_correction[1],
-            "{case}: fixed correction coordinate 1 mismatch"
-        );
-        assert_eq!(read_memory_felt(&hook_output, c_total_ptr + 2), Felt::ZERO);
-        assert_eq!(read_memory_felt(&hook_output, c_total_ptr + 3), Felt::ZERO);
-
         // The hook absorbs the values in proof order and then scatters them, so the region the
         // constraint circuit reads must end up in the canonical numbering: `ChipletAir::all()`
         // order.
         let aux_bus_boundary_ptr = pvm_layout_const("AUX_BUS_BOUNDARY_PTR");
-        let canonical: Vec<QuadFelt> =
-            normalized_sums.iter().flat_map(|values| values.iter().copied()).collect();
         assert_ne!(
-            canonical,
+            normalized_sums,
             proof_ordered_normalized_sums(&normalized_sums, &log_heights),
             "{case}: the fixture heights must induce a non-identity proof order"
         );
-        for (i, value) in canonical.iter().enumerate() {
+        for (i, value) in normalized_sums.iter().enumerate() {
             let coefficients: &[Felt] = value.as_basis_coefficients_slice();
             for (coord, expected) in coefficients.iter().enumerate() {
                 assert_eq!(
@@ -414,7 +293,7 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
         }
         for (i, expected) in COMMITMENT.into_iter().enumerate() {
             assert_eq!(
-                read_memory_felt(&hook_output, AUX_TRACE_COM_PTR + i as u32),
+                read_memory_felt(&hook_output, stark_constant("AUX_TRACE_COM_PTR") + i as u32),
                 Felt::new_unchecked(expected),
                 "{case}: aux commitment coordinate {i} mismatch"
             );
@@ -424,47 +303,81 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
 
 #[test]
 fn pvm_fixed_boundary_preserves_caller_values_through_stack_overflow() {
-    let mut source = String::from(
-        "use miden::core::sys::pvm::fixed_boundary\n\
-         use miden::core::sys::pvm::layout\n\
-         begin\n",
-    );
-    // Keep caller values in both the addressable stack window and the overflow table.
-    for value in 1..=24 {
-        writeln!(source, "push.{value}").unwrap();
-    }
-    source.push_str(
-        "push.13.11.19.17 exec.layout::aux_rand_elem_ptr mem_storew_le dropw\n\
-         exec.fixed_boundary::compute_fixed_boundary_correction\n",
-    );
-    for value in (1..=24).rev() {
-        writeln!(source, "push.{value} assert_eq").unwrap();
-    }
-    source.push_str("end");
-
-    let (output, _) = build_test!(&source).execute_for_output().unwrap();
     let alpha = QuadFelt::new([Felt::from_u32(11), Felt::from_u32(13)]);
     let beta = QuadFelt::new([Felt::from_u32(17), Felt::from_u32(19)]);
     let expected = fixed_boundary_correction(alpha, beta);
     let coordinates: &[Felt] = expected.as_basis_coefficients_slice();
-    for (coord, value) in coordinates.iter().enumerate() {
-        assert_eq!(
-            read_memory_felt(&output, pvm_layout_const("C_TOTAL_PTR") + coord as u32),
-            *value,
-        );
+    let mut source = String::from(
+        "use miden::core::sys::pvm::fixed_boundary\n\
+         use {AUX_RAND_ELEM_PTR} from miden::core::stark::constants\n\
+         begin\n",
+    );
+    // Include the weighted sum's two slots and caller values that travel through overflow.
+    for value in 1..=24 {
+        writeln!(source, "push.{value}").unwrap();
+    }
+    source.push_str(
+        "push.13.11.19.17 mem_storew_le.AUX_RAND_ELEM_PTR dropw\n\
+         exec.fixed_boundary::compute_fixed_boundary_correction\n",
+    );
+    for coordinate in coordinates {
+        writeln!(source, "push.{coordinate} assert_eq").unwrap();
+    }
+    for value in (1..=24).rev() {
+        writeln!(source, "push.{value} assert_eq").unwrap();
+    }
+    source.push_str("end");
+    let test = build_test!(&source);
+    test.expect_stack(&[0; 16]);
+    test.check_constraints();
+}
+
+#[test]
+fn generated_extension_power_matches_rust_and_preserves_caller_values() {
+    use miden_ace::compiler::render_masm_ext2_power;
+
+    // Cover both relation widths, identity cases, and reuse of the retained base across bits.
+    for exponent in [0, 1, 2, 3, 5, 16, 18, 31, 32, 0x8000_0000, 0xaaaa_aaaa, u32::MAX] {
+        for base in [QuadFelt::ZERO, QuadFelt::new([Felt::from_u32(17), Felt::from_u32(19)])] {
+            let power = render_masm_ext2_power(exponent);
+            let mut source = format!(
+                "use miden::core::stark::types\n\
+                 proc power(base: types::QuadFelt) -> types::QuadFelt\n{power}\nend\nbegin\n"
+            );
+            for value in 1..=24 {
+                writeln!(source, "push.{value}").unwrap();
+            }
+            let coordinates: &[Felt] = base.as_basis_coefficients_slice();
+            writeln!(source, "push.{}.{}", coordinates[1], coordinates[0]).unwrap();
+            source.push_str("exec.power\n");
+            let expected = base.exp_u64(u64::from(exponent));
+            let coordinates: &[Felt] = expected.as_basis_coefficients_slice();
+            for coordinate in coordinates {
+                writeln!(source, "push.{coordinate} assert_eq").unwrap();
+            }
+            for value in (1..=24).rev() {
+                writeln!(source, "push.{value} assert_eq").unwrap();
+            }
+            source.push_str("end");
+            let test = build_test!(&source);
+            test.expect_stack(&[0; 16]);
+            if exponent == u32::MAX && base != QuadFelt::ZERO {
+                test.check_constraints();
+            }
+        }
     }
 }
 
 #[test]
 fn pvm_aux_hook_rejects_an_unbalanced_normalized_sum() {
     let log_heights = EIDOS_PRECEDES_ORDINARY_HEIGHTS;
-    let (alpha, beta) = sampled_challenges(&log_heights);
+    let (_, alpha, beta) = sampled_challenges();
     for index in [4, 11] {
         // Cover an inner value and the last value: omitting the final word from the external
         // identity must fail even when the other eleven values balance.
         let mut normalized_sums =
             balanced_normalized_sums(fixed_boundary_correction(alpha, beta), &log_heights);
-        normalized_sums[index][0] += QuadFelt::ONE;
+        normalized_sums[index] += QuadFelt::ONE;
         let advice = advice(&normalized_sums, &log_heights);
 
         let test = build_test!(&hook_source(&log_heights), &[], &advice);
@@ -472,5 +385,102 @@ fn pvm_aux_hook_rejects_an_unbalanced_normalized_sum() {
         // matching balanced fixture above reaches this point successfully; changing only one
         // normalized sum therefore isolates the final fixed-boundary assertion.
         expect_assert_error_message!(test);
+    }
+}
+
+/// Exercises every supported shape against Rust, including odd tails and a full final block.
+#[test]
+fn generated_logup_stage_matches_rust_for_every_air_count() {
+    use miden_ace::{
+        MAX_ORDER_AIRS,
+        compiler::{MasmAuxTraceConfig, render_masm_aux_trace, render_proof_order_maps},
+    };
+
+    let mut config = MasmAuxTraceConfig {
+        generated_by: "test",
+        boundary_module: "miden::core::sys::pvm::layout",
+        correction_module: "miden::core::sys::pvm::fixed_boundary",
+        correction_procedure: "compute_fixed_boundary_correction",
+        num_airs: 0,
+    };
+    for n in [0, 1, MAX_ORDER_AIRS + 1, usize::MAX] {
+        config.num_airs = n;
+        assert!(render_masm_aux_trace(&config).is_err(), "unsupported AIR count {n}");
+    }
+    for n in 2..=MAX_ORDER_AIRS {
+        let (mut challenger, alpha, beta) = sampled_challenges();
+        let correction = fixed_boundary_correction(alpha, beta);
+        let heights = &EQUAL_EIDOS_BYTE_PAIR_HEIGHTS[..n];
+        let sums = balanced_normalized_sums(correction, heights);
+        let mut advice = advice(&sums, heights);
+        challenger
+            .observe_slice(&advice.iter().copied().map(Felt::new_unchecked).collect::<Vec<_>>());
+        advice.extend([98765, 43210]);
+
+        config.num_airs = n;
+        let stage = render_masm_aux_trace(&config).unwrap().replace("pub proc ", "proc ");
+        let maps = render_proof_order_maps(n).unwrap().replace("pub proc ", "proc ");
+        let base = pvm_layout_const("AUX_BUS_BOUNDARY_PTR");
+        let guards = [base - 1, base + 2 * n as u32];
+        let mut source = format!(
+            "{stage}\n\
+             use {{PROOF_ORDER_IDS_PTR, RANDOM_COIN_CV_PTR, RANDOM_COIN_INPUT_BUF_PTR,\n\
+             RANDOM_COIN_INPUT_LENGTH_PTR, RANDOM_COIN_OUTPUT_LENGTH_PTR,\n\
+             RANDOM_COIN_OUTPUT_WORD_PTR, RANDOM_COIN_COUNTER_PTR}} from miden::core::stark::constants\n\
+             {maps}\nbegin\n{}\nexec.stage_proof_order_maps\n",
+            setup_masm(&EQUAL_EIDOS_BYTE_PAIR_HEIGHTS),
+        );
+        for address in guards {
+            writeln!(source, "push.777 mem_store.{address}").unwrap();
+        }
+        for value in 1..=24 {
+            writeln!(source, "push.{value}").unwrap();
+        }
+        source.push_str("exec.observe_aux_trace\n");
+        let rejection_source = format!("{source}repeat.24 drop end end");
+        writeln!(
+            source,
+            "mem_load.RANDOM_COIN_INPUT_LENGTH_PTR push.{} assert_eq\n\
+             mem_load.RANDOM_COIN_OUTPUT_LENGTH_PTR assertz",
+            (4 + 2 * n) % 8,
+        )
+        .unwrap();
+        for address in guards {
+            writeln!(source, "mem_load.{address} push.777 assert_eq").unwrap();
+        }
+        for (i, sum) in sums.iter().enumerate() {
+            let coordinates: &[Felt] = sum.as_basis_coefficients_slice();
+            for (coordinate, value) in coordinates.iter().enumerate() {
+                writeln!(
+                    source,
+                    "mem_load.{} push.{value} assert_eq",
+                    base + (2 * i + coordinate) as u32
+                )
+                .unwrap();
+            }
+        }
+        // Check both the next proof field and samples spanning a challenger refill.
+        source.push_str("adv_push push.98765 assert_eq adv_push push.43210 assert_eq\n");
+        for _ in 0..6 {
+            let expected: Felt = challenger.sample_algebra_element();
+            writeln!(source, "exec.random_coin::sample_felt push.{expected} assert_eq").unwrap();
+        }
+        for value in (1..=24).rev() {
+            writeln!(source, "push.{value} assert_eq").unwrap();
+        }
+        source.push_str("end");
+        let test = build_test!(&source, &[], &advice);
+        test.expect_stack(&[0; 16]);
+        if [3, 6, MAX_ORDER_AIRS].contains(&n) {
+            test.check_constraints();
+        }
+        // Corrupt each coordinate of the final pair, including the odd-count scalar tail.
+        for coordinate in 0..2 {
+            let mut corrupted = advice.clone();
+            let index = 4 + 2 * n - 2 + coordinate;
+            corrupted[index] =
+                (Felt::new_unchecked(corrupted[index]) + Felt::ONE).as_canonical_u64();
+            expect_assert_error_message!(build_test!(&rejection_source, &[], &corrupted));
+        }
     }
 }

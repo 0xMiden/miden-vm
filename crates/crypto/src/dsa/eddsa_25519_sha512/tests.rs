@@ -147,6 +147,117 @@ mod signing_key {
     }
 }
 
+mod verification {
+    use curve25519_dalek::{
+        constants::{ED25519_BASEPOINT_POINT, EIGHT_TORSION},
+        scalar::Scalar,
+        traits::IsIdentity,
+    };
+    use ed25519_dalek::Verifier;
+
+    use crate::{
+        Felt, Word,
+        dsa::eddsa_25519_sha512::{PublicKey, Signature, UncheckedVerificationError},
+        utils::{Deserializable, DeserializationError, Serializable},
+    };
+
+    #[test]
+    fn rejects_noncanonical_public_key_encodings() {
+        for sign in [0, 0x80] {
+            let mut canonical = [0u8; 32];
+            canonical[0] = 3;
+            canonical[31] = sign;
+            let canonical_key = PublicKey::read_from_bytes(&canonical).unwrap();
+
+            // y = p+3 decodes to the same non-small-order point as y = 3.
+            let mut noncanonical = [0xff; 32];
+            noncanonical[0] = 0xf0;
+            noncanonical[31] = 0x7f | sign;
+            let noncanonical_key = ed25519_dalek::VerifyingKey::from_bytes(&noncanonical).unwrap();
+            assert_eq!(canonical_key.inner.to_edwards(), noncanonical_key.to_edwards());
+            assert!(!canonical_key.inner.is_weak());
+            assert!(matches!(
+                PublicKey::read_from_bytes(&noncanonical),
+                Err(DeserializationError::InvalidValue(_))
+            ));
+        }
+
+        // y=1 with the sign bit set encodes x=-0. Its y-coordinate is canonical, but its
+        // compressed point encoding is not.
+        let mut negative_zero = [0u8; 32];
+        negative_zero[0] = 1;
+        negative_zero[31] = 0x80;
+        assert!(matches!(
+            PublicKey::read_from_bytes(&negative_zero),
+            Err(DeserializationError::InvalidValue(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_small_order_public_keys_with_satisfiable_equations() {
+        let mut signature_bytes = [0u8; 64];
+        signature_bytes[..32].copy_from_slice(&ED25519_BASEPOINT_POINT.compress().to_bytes());
+        signature_bytes[32] = 1;
+        let signature = Signature::read_from_bytes(&signature_bytes).unwrap();
+
+        for point in EIGHT_TORSION {
+            let public_key = PublicKey::read_from_bytes(&point.compress().to_bytes()).unwrap();
+            let message = (0u32..256)
+                .map(|value| Word::new([value, 0, 0, 0].map(Felt::from_u32)))
+                .find(|&message| {
+                    let k = Scalar::from_bytes_mod_order_wide(
+                        &public_key.compute_challenge_k(message, &signature),
+                    );
+                    (k * point).is_identity()
+                })
+                .expect("a challenge annihilating the small-order public key");
+
+            // R=B and s=1 satisfy [s]B = R+[k]A when [k]A=0.
+            assert!(public_key.inner.verify(&message.to_bytes(), &signature.inner).is_ok());
+            assert!(!public_key.verify(message, &signature));
+            assert!(matches!(
+                public_key.verify_with_unchecked_k(
+                    public_key.compute_challenge_k(message, &signature),
+                    &signature,
+                ),
+                Err(UncheckedVerificationError::SmallOrderPublicKey)
+            ));
+        }
+    }
+
+    #[test]
+    fn rejects_small_order_signature_points_with_satisfiable_equations() {
+        let a = ED25519_BASEPOINT_POINT + EIGHT_TORSION[1];
+        let public_key = PublicKey::read_from_bytes(&a.compress().to_bytes()).unwrap();
+        for r in EIGHT_TORSION {
+            let mut signature_bytes = [0u8; 64];
+            signature_bytes[..32].copy_from_slice(&r.compress().to_bytes());
+            let signature = Signature::read_from_bytes(&signature_bytes).unwrap();
+            let message = (0u32..256)
+                .map(|value| Word::new([value, 0, 0, 0].map(Felt::from_u32)))
+                .find(|&message| {
+                    let k = Scalar::from_bytes_mod_order_wide(
+                        &public_key.compute_challenge_k(message, &signature),
+                    );
+                    k * ED25519_BASEPOINT_POINT == r + k * a
+                })
+                .expect("a challenge cancelling the signature's torsion point");
+            let k_hash = public_key.compute_challenge_k(message, &signature);
+            let k = Scalar::from_bytes_mod_order_wide(&k_hash);
+            signature_bytes[32..].copy_from_slice(&k.to_bytes());
+            let signature = Signature::read_from_bytes(&signature_bytes).unwrap();
+
+            // s=k and R=-[k]T satisfy the equation under A=B+T; strict verification rejects R.
+            assert!(public_key.inner.verify(&message.to_bytes(), &signature.inner).is_ok());
+            assert!(!signature.verify(message, &public_key));
+            assert!(matches!(
+                public_key.verify_with_unchecked_k(k_hash, &signature),
+                Err(UncheckedVerificationError::SmallOrderSignature)
+            ));
+        }
+    }
+}
+
 mod signature {
     use crate::{dsa::eddsa_25519_sha512::Signature, rand::test_utils::seeded_rng};
 

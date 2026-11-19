@@ -101,6 +101,126 @@ macro_rules! test_basic_roundtrip {
 // IES SCHEME TESTS
 // ================================================================================================
 
+#[test]
+fn test_rejects_cross_type_messages() {
+    use crate::{Felt, dsa::ecdsa_k256_keccak::KeyExchangeKey, utils::elements_to_bytes};
+
+    let mut rng = test_rng(4135);
+    let k256_key = KeyExchangeKey::with_rng(&mut rng);
+    let x25519_key = KeyExchangeKey25519::with_rng(&mut rng);
+    let ecgfp5_key = crate::ecdh::ecgfp5::SecretKey::with_rng(&mut rng);
+    let keys = [
+        (
+            SealingKey::K256XChaCha20Poly1305(k256_key.public_key()),
+            UnsealingKey::K256XChaCha20Poly1305(k256_key.clone()),
+        ),
+        (
+            SealingKey::X25519XChaCha20Poly1305(x25519_key.public_key()),
+            UnsealingKey::X25519XChaCha20Poly1305(x25519_key.clone()),
+        ),
+        (
+            SealingKey::K256AeadEidos(k256_key.public_key()),
+            UnsealingKey::K256AeadEidos(k256_key),
+        ),
+        (
+            SealingKey::X25519AeadEidos(x25519_key.public_key()),
+            UnsealingKey::X25519AeadEidos(x25519_key),
+        ),
+        (
+            SealingKey::Ecgfp5Eidos(ecgfp5_key.public_key()),
+            UnsealingKey::Ecgfp5Eidos(ecgfp5_key),
+        ),
+    ];
+    let elements = [Felt::from_u32(42), Felt::from_u32(1337)];
+    let bytes = elements_to_bytes(&elements);
+
+    for (sealing, unsealing) in keys {
+        for associated_data in [&[][..], &[Felt::ONE][..]] {
+            let ad_bytes = elements_to_bytes(associated_data);
+            let sealed = sealing
+                .seal_elements_with_associated_data(&mut rng, &elements, associated_data)
+                .unwrap();
+            assert!(matches!(
+                unsealing.unseal_bytes_with_associated_data(sealed, &ad_bytes),
+                Err(IesError::DecryptionFailed)
+            ));
+            let sealed =
+                sealing.seal_bytes_with_associated_data(&mut rng, &bytes, &ad_bytes).unwrap();
+            assert!(matches!(
+                unsealing.unseal_elements_with_associated_data(sealed, associated_data),
+                Err(IesError::DecryptionFailed)
+            ));
+        }
+    }
+}
+
+mod recipient_binding {
+    use super::*;
+    use crate::{Felt, dsa::ecdsa_k256_keccak};
+
+    fn rejects_alias(sealing: SealingKey, unsealing: UnsealingKey) {
+        let mut rng = test_rng(57);
+        let sealed = sealing.seal_bytes_with_associated_data(&mut rng, b"message", b"ad").unwrap();
+        assert!(matches!(
+            unsealing.unseal_bytes_with_associated_data(sealed, b"ad"),
+            Err(IesError::DecryptionFailed)
+        ));
+        let elements = [Felt::ONE, Felt::from_u32(42)];
+        let ad = [Felt::from_u32(7)];
+        let sealed = sealing.seal_elements_with_associated_data(&mut rng, &elements, &ad).unwrap();
+        assert!(matches!(
+            unsealing.unseal_elements_with_associated_data(sealed, &ad),
+            Err(IesError::DecryptionFailed)
+        ));
+    }
+
+    #[test]
+    fn x25519_recipient_binding() {
+        use curve25519_dalek::{constants::EIGHT_TORSION, edwards::CompressedEdwardsY};
+
+        use crate::ecdh::x25519::EphemeralSecretKey;
+
+        let key = KeyExchangeKey25519::with_rng(&mut test_rng(5701));
+        let public = key.public_key();
+        let point = CompressedEdwardsY(public.to_bytes().try_into().unwrap()).decompress().unwrap();
+        let shared = EphemeralSecretKey::with_rng(&mut test_rng(5703)).diffie_hellman(&public);
+        // Negation preserves the Montgomery coordinate; clamped multiplication removes torsion.
+        for alias_point in [-point, point + EIGHT_TORSION[1]] {
+            let alias = crate::dsa::eddsa_25519_sha512::PublicKey::read_from_bytes(
+                &alias_point.compress().to_bytes(),
+            )
+            .unwrap();
+            assert_ne!(public, alias);
+            let alias_shared =
+                EphemeralSecretKey::with_rng(&mut test_rng(5703)).diffie_hellman(&alias);
+            assert_eq!(shared.as_ref(), alias_shared.as_ref());
+            rejects_alias(
+                SealingKey::X25519XChaCha20Poly1305(alias.clone()),
+                UnsealingKey::X25519XChaCha20Poly1305(key.clone()),
+            );
+            rejects_alias(
+                SealingKey::X25519AeadEidos(alias),
+                UnsealingKey::X25519AeadEidos(key.clone()),
+            );
+        }
+    }
+
+    #[test]
+    fn k256_recipient_binding() {
+        let key = ecdsa_k256_keccak::KeyExchangeKey::with_rng(&mut test_rng(5702));
+        let public = key.public_key();
+        let mut bytes = public.to_bytes();
+        bytes[0] ^= 1; // SEC1 0x02/0x03 select the two signs of the same x-coordinate.
+        let alias = ecdsa_k256_keccak::PublicKey::read_from_bytes(&bytes).unwrap();
+        assert_ne!(public, alias);
+        rejects_alias(
+            SealingKey::K256XChaCha20Poly1305(alias.clone()),
+            UnsealingKey::K256XChaCha20Poly1305(key.clone()),
+        );
+        rejects_alias(SealingKey::K256AeadEidos(alias), UnsealingKey::K256AeadEidos(key));
+    }
+}
+
 /// K256 + XChaCha20-Poly1305 test suite
 mod k256_xchacha_tests {
     use super::*;

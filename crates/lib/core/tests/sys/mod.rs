@@ -32,9 +32,8 @@ proptest! {
 // EXECUTION CLAIM CROSS-TESTS
 // ================================================================================================
 
-/// The MASM `sys::vm::claim::claim_commitment` procedure must agree with the native
-/// `ExecutionClaim::commitment` on the same claim region (same encoding, same domain tag, same
-/// Eidos framing layout).
+/// Claim materialization preserves both neighboring cells and copies the native encoding exactly.
+/// Rehashing the stored claim must reproduce the native commitment.
 #[test]
 fn masm_claim_commitment_matches_native() {
     use miden_core::{
@@ -62,21 +61,11 @@ fn masm_claim_commitment_matches_native() {
         StackOutputs::new(&[Felt::new_unchecked(8), Felt::new_unchecked(9)]).unwrap();
     let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
 
-    // stage the canonical 40-felt encoding into a claim region at CLAIM_PTR
-    const CLAIM_PTR: u64 = 1000;
+    const CLAIM_PTR: u32 = 1000;
+    const GUARD: u64 = 0xcafe;
     let elements = claim.to_elements();
-    let mut store_ops = String::new();
-    for (i, chunk) in elements.chunks(4).enumerate() {
-        // `push.e3.e2.e1.e0.addr mem_storew_le` stores [e0, e1, e2, e3] at addr..addr+4
-        store_ops.push_str(&format!(
-            "push.{}.{}.{}.{}.{} mem_storew_le dropw\n",
-            chunk[3].as_canonical_u64(),
-            chunk[2].as_canonical_u64(),
-            chunk[1].as_canonical_u64(),
-            chunk[0].as_canonical_u64(),
-            CLAIM_PTR + 4 * i as u64,
-        ));
-    }
+    let commitment: Vec<u64> =
+        claim.commitment().as_elements().iter().map(Felt::as_canonical_u64).collect();
 
     let source = format!(
         "
@@ -84,18 +73,33 @@ fn masm_claim_commitment_matches_native() {
         use miden::core::sys::vm::claim
 
         begin
-            {store_ops}
+            push.{GUARD} mem_store.{before}
+            push.{GUARD} mem_store.{after}
+            push.{CLAIM_PTR}
+            exec.claim::materialize_claim
             push.{CLAIM_PTR}
             exec.claim::claim_commitment
             exec.sys::truncate_stack
         end
-        "
+        ",
+        before = CLAIM_PTR - 1,
+        after = CLAIM_PTR + elements.len() as u32,
     );
 
-    let mut expected: Vec<u64> =
-        claim.commitment().as_elements().iter().map(Felt::as_canonical_u64).collect();
+    let mut expected = commitment.clone();
     expected.resize(16, 0);
-    build_test!(source.as_str(), &[]).expect_stack(&expected);
+    let memory: Vec<_> = core::iter::once(GUARD)
+        .chain(elements.iter().map(Felt::as_canonical_u64))
+        .chain(core::iter::once(GUARD))
+        .collect();
+    build_test!(
+        source.as_str(),
+        &commitment,
+        &[],
+        miden_utils_testing::crypto::MerkleStore::new(),
+        vec![(claim.commitment(), elements.to_vec())]
+    )
+    .expect_stack_and_memory(&expected, CLAIM_PTR - 1, &memory);
 }
 
 /// The MASM `eidos::hash_elements_in_domain` must agree with the native implementation for

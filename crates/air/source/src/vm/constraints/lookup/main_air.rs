@@ -132,8 +132,7 @@ where
     }
 
     fn max_message_width(&self) -> usize {
-        // The widest main-trace payload is `HasherMsg::State` (addr, node_index, 12 state lanes).
-        // The recursive verifier uses `beta^16` as the bus-domain offset, so this width must be 16.
+        // All VM LookupAir implementations share this width so they use the same bus prefixes.
         super::messages::MIDEN_MAX_MESSAGE_WIDTH
     }
 

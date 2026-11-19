@@ -19,7 +19,8 @@ use super::{
 #[cfg(feature = "std")]
 use crate::PrecompileWitness;
 use crate::{
-    ExecutionError, ExecutionOutput, ExecutionWitness, Host, LoadedMastForest, Stopper, SyncHost,
+    AdviceProvider, ExecutionError, ExecutionOutput, ExecutionWitness, Host, LoadedMastForest,
+    Stopper, SyncHost,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
     errors::{
@@ -156,7 +157,12 @@ impl FastProcessor {
     /// precompile witness is returned separately because [`crate::trace::VmTrace`] retains only
     /// its authenticated root.
     #[cfg(feature = "std")]
-    #[instrument(name = "execute_and_build_trace_sync", skip_all)]
+    #[instrument(
+        target = "miden::vm",
+        level = "trace",
+        name = "execute_and_build_trace_sync",
+        skip_all
+    )]
     pub fn execute_and_build_trace_sync(
         self,
         program: &Program,
@@ -191,8 +197,11 @@ impl FastProcessor {
             // Execution and the host remain on the calling thread. An idle Rayon worker can steal
             // only the builder task.
             let span = tracing::Span::current();
+            let hasher_span =
+                tracing::trace_span!(target: "miden::vm::trace", "build_streamed_hasher");
             scope.spawn(move |_| {
                 let _span = span.entered();
+                let _hasher_span = hasher_span.entered();
                 let result = build_hasher_chiplet(
                     receiver.into_iter().map(Ok),
                     max_trace_len,
@@ -201,12 +210,15 @@ impl FastProcessor {
                 *hasher_slot = Some(result);
             });
 
-            let execution_output = self.execute_with_tracer_sync(program, host, &mut tracer);
+            let execution_output =
+                tracing::trace_span!(target: "miden::vm::execute", "execute_program")
+                    .in_scope(|| self.execute_with_tracer_sync(program, host, &mut tracer));
 
             match execution_output {
                 Ok(output) => {
                     let (mut vm_witness, precompiles_witness) =
                         Self::execution_witness_from_parts(program, stack_inputs, output, tracer)
+                            .0
                             .into_parts();
                     // End the stream before this scope waits for the builder.
                     drop(vm_witness.take_hasher_replay());
@@ -266,12 +278,36 @@ impl FastProcessor {
     ///
     /// assert_eq!(*trace.program_hash(), program.hash());
     /// ```
-    #[instrument(name = "execute_for_proving_sync", skip_all)]
+    #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
+        name = "execute_for_proving_sync",
+        skip_all
+    )]
     pub fn execute_for_proving_sync(
         self,
         program: &Program,
         host: &mut impl SyncHost,
     ) -> Result<ExecutionWitness, ExecutionError> {
+        self.execute_for_proving_with_advice_sync(program, host)
+            .map(|(witness, _)| witness)
+    }
+
+    /// Executes the program synchronously and returns its witness and final advice provider.
+    ///
+    /// The advice provider retains the final advice stack, map, and Merkle store. It is returned
+    /// separately from the witness and is not included in the witness's serialized form.
+    #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
+        name = "execute_for_proving_with_advice_sync",
+        skip_all
+    )]
+    pub fn execute_for_proving_with_advice_sync(
+        self,
+        program: &Program,
+        host: &mut impl SyncHost,
+    ) -> Result<(ExecutionWitness, AdviceProvider), ExecutionError> {
         let stack_inputs = self.initial_stack_inputs();
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
@@ -288,13 +324,40 @@ impl FastProcessor {
 
     /// Executes the given program synchronously with package-owned source/debug context and returns
     /// its complete post-execution witness.
-    #[instrument(name = "execute_for_proving_with_package_debug_info_sync", skip_all)]
+    #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
+        name = "execute_for_proving_with_package_debug_info_sync",
+        skip_all
+    )]
     pub fn execute_for_proving_with_package_debug_info_sync(
         self,
         program: &Program,
         package_debug_info: &PackageDebugInfo,
         host: &mut impl SyncHost,
     ) -> Result<ExecutionWitness, ExecutionError> {
+        self.execute_for_proving_with_package_debug_info_and_advice_sync(
+            program,
+            package_debug_info,
+            host,
+        )
+        .map(|(witness, _)| witness)
+    }
+
+    /// Executes synchronously with package debug information and returns the witness and final
+    /// advice provider.
+    #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
+        name = "execute_for_proving_with_package_debug_info_and_advice_sync",
+        skip_all
+    )]
+    pub fn execute_for_proving_with_package_debug_info_and_advice_sync(
+        self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        host: &mut impl SyncHost,
+    ) -> Result<(ExecutionWitness, AdviceProvider), ExecutionError> {
         let stack_inputs = self.initial_stack_inputs();
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
@@ -318,6 +381,8 @@ impl FastProcessor {
     /// Executes the given program synchronously with package-owned source/debug context rooted at
     /// `entrypoint_source_node_id` and returns its complete post-execution witness.
     #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
         name = "execute_for_proving_with_package_debug_info_at_source_node_sync",
         skip_all
     )]
@@ -328,6 +393,30 @@ impl FastProcessor {
         entrypoint_source_node_id: DebugSourceNodeId,
         host: &mut impl SyncHost,
     ) -> Result<ExecutionWitness, ExecutionError> {
+        self.execute_for_proving_with_package_debug_info_at_source_node_and_advice_sync(
+            program,
+            package_debug_info,
+            entrypoint_source_node_id,
+            host,
+        )
+        .map(|(witness, _)| witness)
+    }
+
+    /// Executes synchronously with package debug information rooted at `entrypoint_source_node_id`
+    /// and returns the witness and final advice provider.
+    #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
+        name = "execute_for_proving_with_package_debug_info_at_source_node_and_advice_sync",
+        skip_all
+    )]
+    pub fn execute_for_proving_with_package_debug_info_at_source_node_and_advice_sync(
+        self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        entrypoint_source_node_id: DebugSourceNodeId,
+        host: &mut impl SyncHost,
+    ) -> Result<(ExecutionWitness, AdviceProvider), ExecutionError> {
         let stack_inputs = self.initial_stack_inputs();
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
@@ -350,12 +439,35 @@ impl FastProcessor {
 
     /// Async variant of [`Self::execute_for_proving_sync`] for async hosts.
     #[inline(always)]
-    #[instrument(name = "execute_for_proving", skip_all)]
+    #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
+        name = "execute_for_proving",
+        skip_all
+    )]
     pub async fn execute_for_proving(
         self,
         program: &Program,
         host: &mut impl Host,
     ) -> Result<ExecutionWitness, ExecutionError> {
+        self.execute_for_proving_with_advice(program, host)
+            .await
+            .map(|(witness, _)| witness)
+    }
+
+    /// Async variant of [`Self::execute_for_proving_with_advice_sync`].
+    #[inline(always)]
+    #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
+        name = "execute_for_proving_with_advice",
+        skip_all
+    )]
+    pub async fn execute_for_proving_with_advice(
+        self,
+        program: &Program,
+        host: &mut impl Host,
+    ) -> Result<(ExecutionWitness, AdviceProvider), ExecutionError> {
         let stack_inputs = self.initial_stack_inputs();
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
@@ -371,15 +483,42 @@ impl FastProcessor {
     }
 
     /// Async variant of [`Self::execute_for_proving_with_package_debug_info_sync`].
-    #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
-    #[instrument(name = "execute_for_proving_with_package_debug_info", skip_all)]
+    #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
+        name = "execute_for_proving_with_package_debug_info",
+        skip_all
+    )]
     pub async fn execute_for_proving_with_package_debug_info(
         self,
         program: &Program,
         package_debug_info: &PackageDebugInfo,
         host: &mut impl Host,
     ) -> Result<ExecutionWitness, ExecutionError> {
+        self.execute_for_proving_with_package_debug_info_and_advice(
+            program,
+            package_debug_info,
+            host,
+        )
+        .await
+        .map(|(witness, _)| witness)
+    }
+
+    /// Async variant of [`Self::execute_for_proving_with_package_debug_info_and_advice_sync`].
+    #[inline(always)]
+    #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
+        name = "execute_for_proving_with_package_debug_info_and_advice",
+        skip_all
+    )]
+    pub async fn execute_for_proving_with_package_debug_info_and_advice(
+        self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        host: &mut impl Host,
+    ) -> Result<(ExecutionWitness, AdviceProvider), ExecutionError> {
         let stack_inputs = self.initial_stack_inputs();
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
@@ -404,9 +543,13 @@ impl FastProcessor {
 
     /// Async variant of
     /// [`Self::execute_for_proving_with_package_debug_info_at_source_node_sync`].
-    #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
-    #[instrument(name = "execute_for_proving_with_package_debug_info_at_source_node", skip_all)]
+    #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
+        name = "execute_for_proving_with_package_debug_info_at_source_node",
+        skip_all
+    )]
     pub async fn execute_for_proving_with_package_debug_info_at_source_node(
         self,
         program: &Program,
@@ -414,6 +557,32 @@ impl FastProcessor {
         entrypoint_source_node_id: DebugSourceNodeId,
         host: &mut impl Host,
     ) -> Result<ExecutionWitness, ExecutionError> {
+        self.execute_for_proving_with_package_debug_info_at_source_node_and_advice(
+            program,
+            package_debug_info,
+            entrypoint_source_node_id,
+            host,
+        )
+        .await
+        .map(|(witness, _)| witness)
+    }
+
+    /// Async variant of
+    /// [`Self::execute_for_proving_with_package_debug_info_at_source_node_and_advice_sync`].
+    #[inline(always)]
+    #[instrument(
+        target = "miden::vm::execute",
+        level = "trace",
+        name = "execute_for_proving_with_package_debug_info_at_source_node_and_advice",
+        skip_all
+    )]
+    pub async fn execute_for_proving_with_package_debug_info_at_source_node_and_advice(
+        self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        entrypoint_source_node_id: DebugSourceNodeId,
+        host: &mut impl Host,
+    ) -> Result<(ExecutionWitness, AdviceProvider), ExecutionError> {
         let stack_inputs = self.initial_stack_inputs();
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
@@ -437,7 +606,7 @@ impl FastProcessor {
     }
 
     /// Executes the given program with the provided tracer using an async host.
-    pub async fn execute_with_tracer<T>(
+    async fn execute_with_tracer<T>(
         mut self,
         program: &Program,
         host: &mut impl Host,
@@ -506,7 +675,7 @@ impl FastProcessor {
     }
 
     /// Executes the given program with the provided tracer using a sync host.
-    pub fn execute_with_tracer_sync<T>(
+    fn execute_with_tracer_sync<T>(
         mut self,
         program: &Program,
         host: &mut impl SyncHost,
@@ -731,7 +900,7 @@ impl FastProcessor {
         stack_inputs: StackInputs,
         execution_output: ExecutionOutput,
         tracer: ExecutionTracer,
-    ) -> ExecutionWitness {
+    ) -> (ExecutionWitness, AdviceProvider) {
         ExecutionWitness::from_execution(
             program.to_info(),
             stack_inputs,
@@ -1203,8 +1372,20 @@ impl FastProcessor {
         let was_cached = cached.is_some();
         let loaded_mast_forest = match cached {
             Some(mast_forest) => mast_forest,
-            None => host.get_mast_forest(&node_digest).ok_or_else(|| {
-                match (package_debug_info, source_node_id) {
+            None => host
+                .get_mast_forest(&node_digest)
+                .map_err(|error| match (package_debug_info, source_node_id) {
+                    (Some(debug_info), Some(source_node_id)) => {
+                        crate::errors::mast_forest_error_with_package_source_context(
+                            node_digest,
+                            error,
+                            PackageSourceDebugContext::new(debug_info, source_node_id),
+                            host,
+                        )
+                    },
+                    _ => crate::errors::mast_forest_error_with_context(node_digest, error),
+                })?
+                .ok_or_else(|| match (package_debug_info, source_node_id) {
                     (Some(debug_info), Some(source_node_id)) => {
                         crate::errors::procedure_not_found_with_package_source_context(
                             node_digest,
@@ -1213,8 +1394,7 @@ impl FastProcessor {
                         )
                     },
                     _ => crate::errors::procedure_not_found_with_context(node_digest),
-                }
-            })?,
+                })?,
         };
         let mast_forest = loaded_mast_forest.mast_forest().clone();
 
@@ -1263,7 +1443,21 @@ impl FastProcessor {
         let loaded_mast_forest = match cached {
             Some(mast_forest) => mast_forest,
             None => {
-                if let Some(mast_forest) = host.get_mast_forest(&node_digest).await {
+                if let Some(mast_forest) =
+                    host.get_mast_forest(&node_digest).await.map_err(|error| {
+                        match (package_debug_info, source_node_id) {
+                            (Some(debug_info), Some(source_node_id)) => {
+                                crate::errors::mast_forest_error_with_package_source_context(
+                                    node_digest,
+                                    error,
+                                    PackageSourceDebugContext::new(debug_info, source_node_id),
+                                    host,
+                                )
+                            },
+                            _ => crate::errors::mast_forest_error_with_context(node_digest, error),
+                        }
+                    })?
+                {
                     mast_forest
                 } else {
                     return Err(match (package_debug_info, source_node_id) {

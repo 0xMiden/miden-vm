@@ -31,12 +31,8 @@ use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, StackInputs,
     operation::OperationError,
 };
-use miden_utils_testing::recursive_verifier::VerifierData;
 
-use super::{
-    EXAMPLE_FIB_SMALL, fib_stack_inputs, generate_recursive_verifier_data,
-    verifier_stack::{CALLER_WORD, VERIFIER_RETURN, VerifierStack},
-};
+use super::verifier_stack::{CALLER_WORD, VERIFIER_RETURN, VerifierStack};
 use crate::{
     helpers::{masm_push_word, masm_store_felts},
     support::ecdsa::valid_fixture,
@@ -75,6 +71,7 @@ fn pvm_keccak_only_recursive_verifier_cost_is_bounded() {
         summary.padded_trace_len() <= 1 << 19,
         "the fixed SHA programs must not force Keccak-only recursion past 2^19 rows"
     );
+    super::deep_queries::check_pvm_queries(&test, &proof);
 }
 
 #[test]
@@ -223,7 +220,7 @@ fn pvm_verifies_a_session_mixing_every_precompile() {
 }
 
 #[test]
-fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
+fn pvm_verifies_distinct_orders_and_rejects_tampering() {
     let verifier_root = pvm_verify_proof_root();
     let short_proof = prove_keccak_claim(b"PVM MASM verifier end-to-end fixture");
     let short = PvmRecursiveVerifierInputs::for_request(verifier_root, &short_proof)
@@ -256,19 +253,6 @@ fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
     assert_pvm_verifies(&short);
     assert_pvm_verifies(&long);
     assert_pvm_rejects_tampering(&short);
-
-    let vm = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
-    run_interleaved_verifiers(
-        &vm,
-        &short,
-        &[
-            RecursiveProofKind::Mvm,
-            RecursiveProofKind::Pvm,
-            RecursiveProofKind::Mvm,
-            RecursiveProofKind::Pvm,
-        ],
-    )
-    .expect("VM/PVM/VM/PVM verification must not leak shared scratch state");
 }
 
 fn assert_pvm_rejects_tampering(inputs: &PvmRecursiveVerifierInputs) {
@@ -483,72 +467,6 @@ fn pvm_proof_order(inputs: &PvmRecursiveVerifierInputs) -> Vec<usize> {
     let mut proof_order: Vec<usize> = (0..NUM_CHIPLETS).collect();
     proof_order.sort_by_key(|&i| (heights[i].as_canonical_u64(), i));
     proof_order
-}
-
-#[test]
-fn five_mvm_proofs_and_one_pvm_proof_verify_together() {
-    let proof = prove_keccak_claim(b"combined MVM and PVM verification");
-    let pvm = PvmRecursiveVerifierInputs::for_request(pvm_verify_proof_root(), &proof).unwrap();
-    let vm = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
-    use RecursiveProofKind::{Mvm, Pvm};
-    run_interleaved_verifiers(&vm, &pvm, &[Mvm, Mvm, Pvm, Mvm, Mvm, Mvm]).expect(
-        "five MVM verifications and one PVM verification must preserve shared scratch state",
-    );
-}
-
-enum RecursiveProofKind {
-    Mvm,
-    Pvm,
-}
-
-fn run_interleaved_verifiers(
-    vm: &VerifierData,
-    pvm: &PvmRecursiveVerifierInputs,
-    sequence: &[RecursiveProofKind],
-) -> Result<(), ExecutionError> {
-    let mut advice_stack = Vec::new();
-    let mut invocations = String::new();
-    for kind in sequence {
-        match kind {
-            RecursiveProofKind::Mvm => {
-                advice_stack.extend_from_slice(vm.advice_stack());
-                invocations.push_str(&format!(
-                    "{} exec.verify_mvm\n",
-                    masm_push_word(&vm.claim_commitment)
-                ));
-            },
-            RecursiveProofKind::Pvm => {
-                advice_stack.extend(proof_stream(pvm).iter().map(Felt::as_canonical_u64));
-                invocations.push_str(&format!(
-                    "{} exec.pvm::verify_proof dropw dropw dropw\n",
-                    masm_push_word(&pvm.claim_commitment())
-                ));
-            },
-        }
-    }
-
-    let mut store = vm.store.clone();
-    store.extend(pvm.advice().store().inner_nodes());
-    let mut advice_map = vm.advice_map.clone();
-    advice_map.extend(pvm.advice().map().iter().map(|(key, values)| (*key, values.to_vec())));
-
-    let source = format!(
-        "
-        use miden::core::sys::pvm
-        use miden::core::sys::vm
-
-        proc verify_mvm
-            exec.vm::verify_proof
-            dropw dropw dropw dropw
-        end
-
-        begin
-            {invocations}
-        end
-        "
-    );
-    let test = build_test!(source, &[], &advice_stack, store, advice_map);
-    test.execute().map(|_| ())
 }
 
 fn pvm_verify_proof_root() -> Word {

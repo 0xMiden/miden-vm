@@ -2,7 +2,8 @@
 //!
 //! [`ControllerFlags`] is a pure naming layer over compositions of the hasher-internal
 //! sub-selectors `(s0, s1, s2)`. It carries no chiplet-level scope; callers combine these flags
-//! with [`ChipletFlags`](super::super::selectors::ChipletFlags).
+//! with the controller activity gates from
+//! [`ChipletSelectors`](super::super::selectors::ChipletSelectors).
 //!
 //! ## Selector encoding
 //!

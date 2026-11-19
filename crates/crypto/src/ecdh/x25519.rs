@@ -190,6 +190,10 @@ impl KeyAgreementScheme for X25519 {
 
     type SharedSecret = SharedSecret;
 
+    fn public_key(static_sk: &Self::SecretKey) -> Self::PublicKey {
+        static_sk.public_key()
+    }
+
     fn generate_ephemeral_keypair<R: CryptoRng>(
         rng: &mut R,
     ) -> (Self::EphemeralSecretKey, Self::EphemeralPublicKey) {

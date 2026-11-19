@@ -8,7 +8,7 @@ use std::{vec, vec::Vec};
 
 use miden_core::{
     Felt,
-    field::{PrimeCharacteristicRing, QuadFelt},
+    field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_stark::air::{BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder};
@@ -45,6 +45,8 @@ impl BaseAir<Felt> for AuxRegisterAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for AuxRegisterAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -81,7 +83,7 @@ impl LiftedAir<Felt, QuadFelt> for AuxRegisterAir {
         (RowMajorMatrix::new(data, AUX_WIDTH), normalized_sum)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         // Phase 1: the extension-field Horner register on aux col 1.
         //   reg[0] = 0,  reg[r+1] = reg[r]·β + x[r].
         let x_local: AB::Var = current_main::<_, AB::Var, NUM_MAIN_COLS>(builder.main(), 0)[COL_X];

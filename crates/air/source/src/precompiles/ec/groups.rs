@@ -30,6 +30,7 @@ use miden_stark::{
         LookupGroup,
     },
 };
+use p3_field::Algebra;
 
 use crate::precompiles::{
     ec::EcGroupMsg,
@@ -80,6 +81,8 @@ impl BaseAir<Felt> for EcGroupsAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for EcGroupsAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -102,7 +105,7 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupsAir {
         miden_stark::lookup::build_logup_aux_trace(&EcGroupsAir, main, challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         eval_main(builder, 0);
 
         // Phase 2: LogUp.

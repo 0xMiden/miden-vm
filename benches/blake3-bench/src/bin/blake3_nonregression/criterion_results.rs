@@ -151,8 +151,8 @@ fn report_span_metric_name(name: &str) -> Option<String> {
         },
         "build aux traces" => Some("build_aux_trace".to_string()),
         "to_core_chiplets_matrices" => Some("to_row_major_matrix".to_string()),
-        "build_trace"
-        | "commit to main traces"
+        "build_vm_trace" | "build_trace" => Some("build_trace".to_string()),
+        "commit to main traces"
         | "commit to aux traces"
         | "evaluate constraints"
         | "commit to quotient poly chunks"

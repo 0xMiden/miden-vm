@@ -1,17 +1,12 @@
 //! Shared reference oracles for generated evaluator tests.
 
-use std::{
-    collections::HashMap,
-    panic::{AssertUnwindSafe, catch_unwind},
-};
+use std::collections::HashMap;
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{Algebra, BasedVectorSpace, PrimeCharacteristicRing};
 use miden_stark::air::{
-    AirBuilder, ExtensionBuilder, LiftedAir, PermutationAirBuilder, RowWindow,
-    symbolic::{
-        AirLayout, SymbolicAirBuilder, SymbolicExpr, SymbolicExpression, SymbolicExpressionExt,
-    },
+    AirBuilder, EvalInputs, ExtensionBuilder, LiftedAir, PermutationAirBuilder, RowWindow,
+    symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpr, eval_air},
 };
 use p3_field::{PackedField, PackedValue};
 
@@ -21,7 +16,7 @@ use crate::ir::{Class, Graph, Leaf, Node, OpKind};
 /// uses the builder's symbolic degree rules independently of the optimizer IR.
 pub fn constraint_degrees<A: LiftedAir<Felt, QuadFelt>>(air: &A) -> [Vec<usize>; 2] {
     let mut builder = SymbolicAirBuilder::<Felt>::new(air.air_layout());
-    air.eval(&mut builder);
+    eval_air(air, &mut builder);
     [
         builder.base_constraints().iter().map(SymbolicExpr::degree_multiple).collect(),
         builder
@@ -133,37 +128,6 @@ fn mix(seed: u64, tag: u64, a: u64, b: u64) -> u64 {
     x ^= x >> 27;
     x = x.wrapping_mul(0x94d049bb133111eb);
     x ^ (x >> 31)
-}
-
-/// Assert that an AIR dispatches to its generated prepared evaluator.
-///
-/// Generated prepared evaluators reject a mismatched term count. This distinguishes the AIR's
-/// override from the default `eval` fallback, which ignores the supplied terms.
-///
-/// # Panics
-///
-/// Panics if evaluation accepts an extra prepared term.
-#[track_caller]
-pub fn assert_prepared_evaluator_dispatch<A>(air: &A)
-where
-    A: LiftedAir<Felt, QuadFelt> + core::fmt::Debug,
-{
-    let mut builder = SymbolicAirBuilder::<Felt, QuadFelt>::new(air.air_layout());
-    let challenges: Vec<_> = builder
-        .permutation_randomness()
-        .iter()
-        .map(|&challenge| challenge.into())
-        .collect();
-    let mut terms = air.precompute_challenge_terms::<SymbolicExpression<Felt>, SymbolicExpressionExt<Felt, QuadFelt>>(&challenges);
-    air.eval_with_challenge_terms(&mut builder, &terms);
-    terms.push(SymbolicExpressionExt::ZERO);
-    assert!(
-        catch_unwind(AssertUnwindSafe(|| {
-            air.eval_with_challenge_terms(&mut builder, &terms);
-        }))
-        .is_err(),
-        "{air:?}: prepared evaluation accepted an extra term; check evaluator dispatch",
-    );
 }
 
 /// Concrete full-field inputs shared by scalar and packed evaluator checks and timing.
@@ -335,7 +299,7 @@ where
     }
 }
 
-/// Compare ordinary and prepared scalar/SIMD evaluations with independently captured graph values,
+/// Compare scalar/SIMD evaluations with independently captured graph values,
 /// including global assertion order and class. Packed lanes receive distinct full-field inputs.
 pub fn assert_concrete_evaluation<A: LiftedAir<Felt, QuadFelt>>(
     air: &A,
@@ -347,65 +311,64 @@ pub fn assert_concrete_evaluation<A: LiftedAir<Felt, QuadFelt>>(
     type PE = <QuadFelt as miden_crypto::field::ExtensionField<Felt>>::ExtensionPacking;
     let scalar_inputs = EvaluationInputs::<Felt, QuadFelt>::new(air.air_layout(), seed);
     let packed_inputs = EvaluationInputs::<P, PE>::new(air.air_layout(), seed);
-    for prepared in [false, true] {
-        let mut scalar = scalar_inputs.builder();
-        if prepared {
-            let terms = air.precompute_challenge_terms::<Felt, QuadFelt>(&scalar_inputs.challenges);
-            air.eval_with_challenge_terms(&mut scalar, &terms);
-        } else {
-            air.eval(&mut scalar);
-        }
-        assert_eq!(scalar.base_indices, captured.base_global_indices);
-        assert_eq!(scalar.ext_indices, captured.ext_global_indices);
-        let mut packed = packed_inputs.builder();
-        if prepared {
-            let terms = air.precompute_challenge_terms::<P, PE>(&packed_inputs.challenges);
-            air.eval_with_challenge_terms(&mut packed, &terms);
-        } else {
-            air.eval(&mut packed);
-        }
-        assert_eq!(packed.base_indices, captured.base_global_indices);
-        assert_eq!(packed.ext_indices, captured.ext_global_indices);
-        for lane in 0..P::WIDTH {
-            let oracle = eval_graph_with(graph, |leaf| {
-                // Public values are shared scalar inputs across the SIMD lanes.
-                let leaf_seed = if matches!(leaf, Leaf::Public(_)) {
-                    seed
-                } else {
-                    seed.wrapping_add(lane as u64)
-                };
-                leaf_value(leaf_seed, leaf)
-            });
-            for (index, root) in captured.base_roots.iter().enumerate() {
-                let expected: Felt = oracle[root.index()].as_basis_coefficients_slice()[0];
-                assert_eq!(
-                    packed.base_constraints[index].as_slice()[lane],
-                    expected,
-                    "base assertion {index}, lane {lane}"
-                );
-                if lane == 0 {
-                    assert_eq!(scalar.base_constraints[index], expected);
-                }
+    let mut scalar = scalar_inputs.builder();
+    let data = air.prepare(EvalInputs {
+        public_values: &scalar_inputs.public,
+        challenges: &scalar_inputs.challenges,
+        aux_values: &scalar_inputs.values,
+    });
+    air.eval(&mut scalar, &data);
+    assert_eq!(scalar.base_indices, captured.base_global_indices);
+    assert_eq!(scalar.ext_indices, captured.ext_global_indices);
+    let mut packed = packed_inputs.builder();
+    let public: Vec<P> = packed_inputs.public.iter().copied().map(P::broadcast).collect();
+    let data = air.prepare(EvalInputs {
+        public_values: &public,
+        challenges: &packed_inputs.challenges,
+        aux_values: &packed_inputs.values,
+    });
+    air.eval(&mut packed, &data);
+    assert_eq!(packed.base_indices, captured.base_global_indices);
+    assert_eq!(packed.ext_indices, captured.ext_global_indices);
+    for lane in 0..P::WIDTH {
+        let oracle = eval_graph_with(graph, |leaf| {
+            // Public values are shared scalar inputs across the SIMD lanes.
+            let leaf_seed = if matches!(leaf, Leaf::Public(_)) {
+                seed
+            } else {
+                seed.wrapping_add(lane as u64)
+            };
+            leaf_value(leaf_seed, leaf)
+        });
+        for (index, root) in captured.base_roots.iter().enumerate() {
+            let expected: Felt = oracle[root.index()].as_basis_coefficients_slice()[0];
+            assert_eq!(
+                packed.base_constraints[index].as_slice()[lane],
+                expected,
+                "base assertion {index}, lane {lane}"
+            );
+            if lane == 0 {
+                assert_eq!(scalar.base_constraints[index], expected);
             }
-            for (index, root) in captured.ext_roots.iter().enumerate() {
-                let expected = oracle[root.index()];
-                let actual = QuadFelt::from_basis_coefficients_fn(|coefficient| {
-                    <PE as BasedVectorSpace<P>>::as_basis_coefficients_slice(
-                        &packed.ext_constraints[index],
-                    )[coefficient]
-                        .as_slice()[lane]
-                });
-                assert_eq!(actual, expected, "extension assertion {index}, lane {lane}");
-                if lane == 0 {
-                    assert_eq!(scalar.ext_constraints[index], expected);
-                }
+        }
+        for (index, root) in captured.ext_roots.iter().enumerate() {
+            let expected = oracle[root.index()];
+            let actual = QuadFelt::from_basis_coefficients_fn(|coefficient| {
+                <PE as BasedVectorSpace<P>>::as_basis_coefficients_slice(
+                    &packed.ext_constraints[index],
+                )[coefficient]
+                    .as_slice()[lane]
+            });
+            assert_eq!(actual, expected, "extension assertion {index}, lane {lane}");
+            if lane == 0 {
+                assert_eq!(scalar.ext_constraints[index], expected);
             }
         }
     }
 }
 
-/// Times scalar and packed field evaluation with reused input/output allocations.
-/// Build in release mode; input generation and graph capture are outside the timed region.
+/// Times scalar and packed row evaluation with prepared data and reused input/output allocations.
+/// Build in release mode; preparation, input generation and graph capture are outside the timer.
 pub fn time_evaluation<A: LiftedAir<Felt, QuadFelt>>(
     air: &A,
     iterations: usize,
@@ -418,11 +381,17 @@ pub fn time_evaluation<A: LiftedAir<Felt, QuadFelt>>(
     {
         let inputs = EvaluationInputs::<P, PE>::new(air.air_layout(), 0x243f6a8885a308d3);
         let mut builder = inputs.builder();
-        air.eval(&mut builder);
+        let public: Vec<P> = inputs.public.iter().copied().map(P::broadcast).collect();
+        let data = air.prepare(EvalInputs {
+            public_values: &public,
+            challenges: &inputs.challenges,
+            aux_values: &inputs.values,
+        });
+        air.eval(&mut builder, &data);
         let start = std::time::Instant::now();
         for _ in 0..iterations {
             builder.clear();
-            air.eval(std::hint::black_box(&mut builder));
+            air.eval(std::hint::black_box(&mut builder), &data);
             std::hint::black_box((&builder.base_constraints, &builder.ext_constraints));
         }
         start.elapsed()

@@ -2,20 +2,43 @@
 
 set -euo pipefail
 
-# Script to check all feature combinations compile without warnings
-# This script ensures that warnings are treated as errors for CI
-
-echo "Checking all feature combinations with cargo-hack..."
-
-# Set environment variables to treat warnings as errors
 export RUSTFLAGS="-D warnings"
 export MIDEN_BUILD_LIB_DOCS=1
 
-# Run cargo-hack with comprehensive feature checking
-cargo hack check \
-    --workspace \
-    --each-feature \
-    --exclude-features default \
-    --all-targets
+check_all_targets() {
+    CARGO_BUILD_WARNINGS=deny cargo hack check \
+        --workspace \
+        --each-feature \
+        --exclude-features default,python \
+        --all-targets
+}
 
-echo "All feature combinations compiled successfully!"
+check_libraries() {
+    # Dev-dependencies can enable std and hide broken library feature configurations.
+    # Removing them can leave valid workspace dependencies unused.
+    CARGO_BUILD_WARNINGS=warn cargo hack check \
+        --workspace \
+        --exclude miden-bench \
+        --exclude miden-debug-lit-support \
+        --exclude miden-release-policy \
+        --exclude miden-format \
+        --each-feature \
+        --exclude-features default,python \
+        --lib \
+        --no-dev-deps
+}
+
+case "${1:-all}" in
+    all)
+        check_all_targets
+        check_libraries
+        ;;
+    all-targets) check_all_targets ;;
+    libraries) check_libraries ;;
+    *)
+        echo "Usage: $0 [all|all-targets|libraries]" >&2
+        exit 2
+        ;;
+esac
+
+echo "Workspace feature checks passed!"
