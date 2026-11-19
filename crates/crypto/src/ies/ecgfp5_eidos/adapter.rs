@@ -83,7 +83,7 @@ fn check_byte_lengths(plaintext_felts: usize, context_bytes: usize) -> Result<()
 }
 
 impl From<Envelope> for SealedMessage {
-    /// Wraps a Felt envelope, including one produced by either MASM sealing procedure.
+    /// Wraps a Felt envelope in the common IES wire format.
     fn from(sealed: Envelope) -> Self {
         encode(sealed, DataType::Elements)
     }
