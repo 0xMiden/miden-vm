@@ -22,6 +22,7 @@ mod eval;
 mod keccak;
 mod keccak_node;
 mod keccak_sponge;
+mod msm_scalar_domain;
 mod sha256;
 mod sha256_io;
 mod sha256_multiplex;
@@ -33,6 +34,7 @@ mod uint_add;
 mod uint_dag;
 mod uint_mul;
 mod utils;
+mod vm_admission;
 mod vm_uint;
 
 use std::{string::String, vec, vec::Vec};

@@ -1,0 +1,8 @@
+begin
+    push.3
+    push.4
+    add
+    # Fold the result into a padding zero so the program ends with <= 16 stack
+    # elements (the VM rejects more than 16 at program end).
+    add
+end

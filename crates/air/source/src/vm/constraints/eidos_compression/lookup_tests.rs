@@ -282,12 +282,10 @@ fn derived_rotation_encode_expected_relations() {
     );
     let fractions = lookup_fractions(&felt_matrix_from_rows(&trace.rows));
 
-    for row in 0..FUSED_G_ROWS {
+    for (row, trace_row) in trace.rows[..FUSED_G_ROWS].iter().enumerate() {
         let step = fused_step_at(row).expect("row is fused");
-        let lhs =
-            trace.rows[row][g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 0)] as u8;
-        let rhs =
-            trace.rows[row][g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 1)] as u8;
+        let lhs = trace_row[g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 0)] as u8;
+        let rhs = trace_row[g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 1)] as u8;
         let rotation = Rotation::from_bits(step.second_rotation);
         let result = eidos_lookup::contribution(rotation, MISSING_ROTATION_BYTE, lhs, rhs);
         let relation = BytePairRelation::for_rotation(rotation, MISSING_ROTATION_BYTE);

@@ -14,7 +14,7 @@ use p3_matrix::{
     bitrev::{BitReversedMatrixView, BitReversibleMatrix},
     dense::{RowMajorMatrix, RowMajorMatrixView},
 };
-use tracing::info_span;
+use tracing::trace_span;
 
 use crate::{
     StarkConfig,
@@ -168,7 +168,7 @@ where
         let log_trace_height = domain.log_trace_height();
         let coset_shift = domain.lde_shift();
         // This span includes synchronous leaf hashing when block hashing is enabled.
-        info_span!("LDE", trace = idx, log_height = log_trace_height, width).in_scope(|| {
+        trace_span!(target: "miden::vm::prove", "LDE", trace = idx, log_height = log_trace_height, width).in_scope(|| {
             if let Some(make_consumer) = make_consumer {
                 config
                     .dft()

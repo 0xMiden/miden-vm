@@ -5,6 +5,7 @@ use std::sync::{
 
 use curve25519_dalek::{
     constants::{ED25519_BASEPOINT_POINT, EIGHT_TORSION},
+    edwards::CompressedEdwardsY,
     scalar::Scalar,
     traits::IsIdentity,
 };
@@ -20,7 +21,7 @@ use miden_core_lib::{
     handlers::precompiles::ed25519::{ED25519_DECOMPRESS_EVENT_NAME, handle_ed25519_decompress},
 };
 use miden_crypto::{
-    dsa::eddsa_25519_sha512::SigningKey,
+    dsa::eddsa_25519_sha512::{PublicKey, Signature, SigningKey},
     hash::{eidos::Eidos, sha2::Sha512},
 };
 use miden_precompiles::{Ed25519Base, UintSpec, ed25519_decompress_x};
@@ -65,6 +66,46 @@ fn ed25519_verify_bytes_accepts_rfc8032_empty_message() {
     let output = run_bytes(&[], &pk, &sig).expect("RFC 8032 empty-message signature");
     assert_precompile_witness_round_trips(&output);
     assert!(run_bytes(&[0], &pk, &sig).is_err());
+}
+
+#[test]
+fn ed25519_accepts_mixed_order_points() {
+    // A=B+T, R=[7]B+T', and s=7+k, with T'=-[k]T. Both points have nonzero torsion
+    // components, but neither has small order and the exact signature equation holds.
+    let pk = hex_bytes("98519eadf35b995233b51b5cd23e9cc5a28b639b5a4af0ec903cb960d81b7819");
+    let sig = hex_bytes(concat!(
+        "e9b2fe981587efae6478f48ba1fa60cec6126d0e26dde72a0a24f640dcd783e5",
+        "6e25177ec8171e4d262460329d5d28418f562cbcbc07aa09f561dd3e1806e603"
+    ));
+    let a = CompressedEdwardsY(pk).decompress().unwrap();
+    let r = CompressedEdwardsY(sig[..32].try_into().unwrap()).decompress().unwrap();
+    for point in [a, r] {
+        assert!(!point.is_small_order());
+        assert!(!point.is_torsion_free());
+    }
+
+    let public_key = PublicKey::read_from_bytes(&pk).unwrap();
+    let signature = Signature::read_from_bytes(&sig).unwrap();
+    let message = Word::default();
+    assert!(public_key.verify(message, &signature));
+    let k_hash = public_key.compute_challenge_k(message, &signature);
+    assert!(public_key.verify_with_unchecked_k(k_hash, &signature).is_ok());
+    for output in [
+        run_word(message, public_key.to_commitment(), &pk, &sig).unwrap(),
+        run_bytes(&message.to_bytes(), &pk, &sig).unwrap(),
+    ] {
+        let root = output.precompile_root();
+        let prepared = output
+            .precompile_witness
+            .unwrap()
+            .prepare(
+                Arc::new(miden_precompiles::registry()),
+                &miden_precompiles::default_verification_precompile_limits(),
+            )
+            .unwrap();
+        assert_eq!(prepared.root(), root);
+        prepared.evaluate().unwrap();
+    }
 }
 
 #[test]

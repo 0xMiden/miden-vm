@@ -24,3 +24,6 @@ syn = { workspace = true, features = ["derive", "extra-traits", "full"] }
 [dev-dependencies]
 proptest = { workspace = true }
 proptest-derive = { workspace = true }
+
+[lints]
+workspace = true

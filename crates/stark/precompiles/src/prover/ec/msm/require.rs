@@ -44,10 +44,25 @@ fn fresh_intro(
     uint: &mut UintStores,
     base: EcPointPtr,
 ) -> EcExprPtr {
-    let group = ec.store.point_params(base).0;
+    let (group, coordinates) = ec.store.point_params(base);
     let sbound = ec.store.group_sbound(group);
+    let (a_ptr, b_ptr, bound_ptr) = ec.store.group_params(group);
+    let (beta_ptr, lambda_ptr) = ec.store.group_glv_params(group);
     let one = uint.require().intern(from_hex("1"), sbound);
-    msm.intro(group, sbound, base, one)
+    ec.store.require_ecpoint(base);
+    ec.store.require_ecgroup(group);
+    msm.intro(
+        group,
+        sbound,
+        base,
+        one,
+        a_ptr,
+        b_ptr,
+        bound_ptr,
+        beta_ptr,
+        lambda_ptr,
+        coordinates,
+    )
 }
 
 /// Promote a stored point `P` to the 1-term MSM expression `⟨P × 0⟩`

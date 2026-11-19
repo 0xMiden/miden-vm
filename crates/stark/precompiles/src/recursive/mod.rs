@@ -199,16 +199,6 @@ fn build_advice(
     let log_heights: [u8; NUM_CHIPLETS] = stark.log_trace_heights().try_into().map_err(|_| {
         PvmRecursiveVerifierInputsError::InvalidProofShape("unexpected AIR-height count")
     })?;
-    // Fixed-height instances must arrive at exactly their pinned height: the MASM verifier
-    // opens the setup tree at the matching fixed depth, so any other value would let the
-    // recursive and native verifiers disagree on proof shape.
-    for (air, &log_height) in ChipletAir::all().iter().zip(&log_heights) {
-        if air.fixed_log_height().is_some_and(|fixed| u32::from(log_height) != fixed) {
-            return Err(PvmRecursiveVerifierInputsError::InvalidProofShape(
-                "fixed-height AIR arrived at a different trace height",
-            ));
-        }
-    }
     if stark.all_aux_values.len() != NUM_CHIPLETS {
         return Err(PvmRecursiveVerifierInputsError::InvalidProofShape(
             "unexpected number of aux-final groups",
@@ -380,8 +370,8 @@ mod tests {
         assert_eq!(
             digest,
             [
-                43, 174, 194, 61, 43, 227, 149, 95, 67, 186, 61, 149, 110, 231, 17, 43, 210, 49,
-                122, 247, 169, 69, 117, 208, 42, 198, 84, 222, 141, 65, 84, 246
+                122, 28, 166, 65, 99, 190, 167, 62, 64, 109, 113, 103, 147, 207, 134, 206, 17, 213,
+                173, 210, 39, 85, 83, 215, 98, 6, 144, 245, 131, 225, 173, 90
             ],
             "packaged PVM advice differs from the current fixture's encoding",
         );

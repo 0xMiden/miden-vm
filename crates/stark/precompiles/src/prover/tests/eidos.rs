@@ -1093,10 +1093,9 @@ fn continuation_lookup_binds_previous_digest_even_with_zero_input_multiplicity()
         1,
     );
 
-    for row in 0..EIDOS_COMPRESSION_CYCLE_LEN {
+    for (row, forged_row) in forged.rows.iter().enumerate() {
         let dst = (EIDOS_COMPRESSION_CYCLE_LEN + row) * NUM_MAIN_COLS;
-        compression.values[dst..dst + NUM_EIDOS_COMPRESSION_COLS]
-            .copy_from_slice(&forged.rows[row]);
+        compression.values[dst..dst + NUM_EIDOS_COMPRESSION_COLS].copy_from_slice(forged_row);
     }
 
     set_cycle_metadata(

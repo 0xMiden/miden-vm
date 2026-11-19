@@ -31,25 +31,33 @@ use miden::core::stark::utils
 #! Before calling this procedure, a relation wrapper must:
 #!
 #! - store the transcript-bound security parameters, which this procedure validates;
-#! - store its relation digest and canonical AIR heights;
-#! - stage its fixed OOD and query-row addresses in the generic context cells; and
+#! - store its relation digest, preprocessed commitment at `PREPROCESSED_TRACE_COM_PTR`, and
+#!   canonical AIR heights; and
 #! - supply the five hooks listed above in the documented ABI order.
+#!
+#! The relation's ACE READ vector must place the lookup challenges at `AUX_RAND_ELEM_PTR` and
+#! its first OOD row at `OOD_EVALUATIONS_PTR`. ACE alignment slots must be zero, as in a fresh
+#! execution context. Its query row must fit from `CURRENT_TRACE_ROW_PTR` up to the FRI query
+#! reservation at `FRI_COM_PTR - 4 * NUM_QUERIES_MAX`. The relation generator checks these extents.
 #!
 #! Relation-dependent constants live under `sys/<relation>`. The circuit digest and circuit shape
 #! must be derived by regeneration, while any hand-written copy must be pinned to that source.
 #!
-#! Hardcoded protocol parameters:
+#! LOG_TRACE_LENGTH_PTR must contain the maximum checked AIR log height, at least
+#! LOG_FINAL_DEGREE - 1, so fold-by-four reaches one of the two remainder specializations.
+#!
+#! Protocol parameters:
 #!
 #! - Blowup factor: 8.
-#! - Maximum remainder polynomial degree: 127.
+#! - FRI folding and remainder bounds: generated in `pcs/fri/parameters.masm`.
 #! - Constraint folding, OOD evaluations, and aux-trace values use the quadratic extension field.
 #!
 #! Rust counterpart: `miden_stark::VerifierInstance::verify`. Rust checks PCS openings
 #! before evaluating constraints; this procedure evaluates constraints first. Constraint evaluation
 #! does not change the Fiat-Shamir transcript, so the order of challenges is the same.
 #!
-#! Inputs:  [D0, D1, D2, D3, D4]
-#! Outputs: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
+#! Inputs:  [D0(4), D1(4), D2(4), D3(4), D4(4), ...]
+#! Outputs: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 pub proc verify(hooks: types::VerifierHooks) -> types::StackProofParameters
 
     #==============================================================================================
@@ -78,7 +86,7 @@ pub proc verify(hooks: types::VerifierHooks) -> types::StackProofParameters
     # sampling auxiliary randomness.
     padw adv_loadw
     mem_storew_le.MAIN_TRACE_COM_PTR
-    # => [main_trace_commitment, ...]
+    # => [main_trace_commitment(4), ...]
     exec.random_coin::observe_word_and_flush_buffer
     # => [...]
 
@@ -105,11 +113,7 @@ pub proc verify(hooks: types::VerifierHooks) -> types::StackProofParameters
     #          and generate the Out-of-Domain (OOD) challenge z
     #==============================================================================================
 
-    # Reseed with constraint composition polynomial commitment.
-    #
-    # SAFETY: reseed_direct requires input_len=0 (see SAFETY note above for rationale).
-    # Guaranteed here because generate_constraint_composition_coefficients only samples
-    # (decrements output_len) and never observes (input_len stays 0).
+    # Bind the constraint-composition commitment before drawing the OOD point.
     padw adv_loadw
     mem_storew_le.COMPOSITION_POLY_COM_PTR
     exec.random_coin::reseed_direct
@@ -117,9 +121,7 @@ pub proc verify(hooks: types::VerifierHooks) -> types::StackProofParameters
     # => [...]
 
     #==============================================================================================
-    #       V) Read the OOD frames for the main trace, auxiliary trace and the trace of evaluations
-    #           of H over the LDE domain. This also computes some values needed for the computation
-    #           of the DEEP queries.
+    #       V) Read and fold the preprocessed, main, auxiliary and quotient OOD evaluations.
     #==============================================================================================
 
     exec.ood_frames::load_and_horner_eval_ood_frames

@@ -7,6 +7,7 @@ use alloc::{borrow::Cow, vec::Vec};
 
 use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 use miden_stark::air::{BaseAir, LiftedAir, LiftedAirBuilder};
+use p3_field::Algebra;
 
 use crate::precompiles::{
     ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
@@ -14,7 +15,7 @@ use crate::precompiles::{
         chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir, sha256::Sha256Air,
         sha512::Sha512Air,
     },
-    primitives::byte_pair_lut::{self, BytePairLutAir},
+    primitives::byte_pair_lut::BytePairLutAir,
     transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
@@ -61,10 +62,10 @@ macro_rules! delegate {
 
 fn eval_lifted<A, AB>(air: &A, builder: &mut AB)
 where
-    A: LiftedAir<Felt, QuadFelt>,
+    A: LiftedAir<Felt, QuadFelt, EvalData<AB::Expr, AB::ExprEF> = ()>,
     AB: LiftedAirBuilder<F = Felt>,
 {
-    <A as LiftedAir<Felt, QuadFelt>>::eval::<AB>(air, builder);
+    <A as LiftedAir<Felt, QuadFelt>>::eval::<AB>(air, builder, &());
 }
 
 impl ChipletAir {
@@ -92,18 +93,6 @@ impl ChipletAir {
     pub fn all() -> [ChipletAir; NUM_CHIPLETS] {
         crate::precompiles::relation::AIRS
     }
-
-    /// The fixed log2 trace height of this instance, if the relation pins one.
-    ///
-    /// `BytePairLut` commits its main and preprocessed traces at
-    /// [`byte_pair_lut::TRACE_HEIGHT`], so its proof shapes must carry exactly that height;
-    /// every other instance ranges above its derived minimum.
-    pub fn fixed_log_height(&self) -> Option<u32> {
-        match self {
-            ChipletAir::BytePairLut => Some(byte_pair_lut::TRACE_HEIGHT.ilog2()),
-            _ => None,
-        }
-    }
 }
 
 impl BaseAir<Felt> for ChipletAir {
@@ -125,6 +114,12 @@ impl BaseAir<Felt> for ChipletAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for ChipletAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
+    fn log_preprocessed_height(&self) -> Option<u8> {
+        delegate!(self, log_preprocessed_height)
+    }
+
     fn max_periodic_length(&self) -> usize {
         delegate!(self, max_periodic_length)
     }
@@ -165,7 +160,7 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
             challenges
         )
     }
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         match self {
             ChipletAir::ChunkNodeSponge => eval_lifted(&ChunkNodeSpongeAir, builder),
             ChipletAir::EidosCompression => eval_lifted(&EidosCompressionAir, builder),

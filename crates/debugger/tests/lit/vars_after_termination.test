@@ -1,0 +1,35 @@
+# Variable views must not resolve historical locations against a completed program's state.
+# Reloading restores live variable inspection, and final stack outputs remain accessible.
+#
+# RUN: compile-abi-fixture %S/abi_types.masm -o %t.masp
+# RUN: miden-debug --commands %s %t.masp -- 4294967303 2>&1 | filecheck %s
+
+vars all
+break for eqz
+continue
+vars all
+delete 0
+continue
+vars all
+vars
+locals
+stack
+reload
+vars all
+break for eqz
+continue
+vars all
+
+# CHECK: No debug variables tracked
+# CHECK: snapshot=4294967303u64
+# CHECK: Program terminated successfully
+# CHECK-NEXT: Result: 4294967303u64
+# CHECK-NEXT: Program has terminated; no live variables
+# CHECK-NEXT: Program has terminated; no live variables
+# CHECK-NEXT: Program has terminated; no live variables
+# CHECK-NEXT: Operand Stack (16 elements):
+# CHECK-NEXT: > [0] 7 (0x7)
+# CHECK-NEXT: [1] 1 (0x1)
+# CHECK: Program reloaded
+# CHECK: No debug variables tracked
+# CHECK: snapshot=4294967303u64

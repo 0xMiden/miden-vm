@@ -51,9 +51,8 @@ pub struct AirEvaluator<'a> {
 /// Emit evaluators with a reusable preparation step for challenge-only expressions.
 ///
 /// The module begins with `header` (a newline-terminated doc block) and imports, followed by
-/// `precompute_{name}<B, E>`, `eval_{name}`, and `eval_{name}_with_challenge_terms` for each AIR.
-/// Preparation reads only challenges and constants. The ordinary evaluator prepares the terms
-/// and delegates to the prepared evaluator, which requires the same AIR and challenge values.
+/// `precompute_{name}<B, E>` and `eval_{name}` for each AIR. Preparation reads only challenges
+/// and constants. The evaluator requires terms prepared for the same AIR and challenge values.
 ///
 /// # Panics
 ///
@@ -93,30 +92,6 @@ fn emit_module_with_plan(header: &str, evals: &[AirEvaluator<'_>], optimized: bo
         }
         writeln!(out, "    [{}]\n}}", values.join(", ")).unwrap();
 
-        // The generated preparation function needs only the challenge prefix used by this graph.
-        let challenges = (0..plan.challenge_count())
-            .map(|i| format!("builder.permutation_randomness()[{i}].into()"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        writeln!(
-            out,
-            "\n/// Evaluate `{}` with terms computed from the builder's challenges.",
-            eval.air_label
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "pub fn eval_{}<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {{",
-            eval.name
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "    let terms = precompute_{}::<AB::Expr, AB::ExprEF>(&[{challenges}]);",
-            eval.name
-        )
-        .unwrap();
-        writeln!(out, "    eval_{}_with_challenge_terms(builder, &terms);\n}}", eval.name).unwrap();
         emit_evaluator(eval, &mut out, &plan, optimized);
     }
     out
@@ -612,7 +587,7 @@ fn emit_evaluator(
          /// Emits constraints in the exact global order of the hand-written `eval`,\n\
          /// {schedule}\n\
          #[inline(never)]\n\
-         pub fn eval_{}_with_challenge_terms<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &[AB::ExprEF]) {{",
+         pub fn eval_{}<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &[AB::ExprEF]) {{",
         eval.air_label, eval.name,
     )
     .unwrap();
@@ -720,18 +695,12 @@ pub fn precompute_base_mock<B: PrimeCharacteristicRing, E: Algebra<B>>(challenge
     []
 }
 
-/// Evaluate `MockAir::BASE` with terms computed from the builder's challenges.
-pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
-    let terms = precompute_base_mock::<AB::Expr, AB::ExprEF>(&[]);
-    eval_base_mock_with_challenge_terms(builder, &terms);
-}
-
 /// Generated globally-CSE'd evaluator for `MockAir::BASE`.
 ///
 /// Emits constraints in the exact global order of the hand-written `eval`,
 /// with each node's `let` placed at its first use.
 #[inline(never)]
-pub fn eval_base_mock_with_challenge_terms<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &[AB::ExprEF]) {
+pub fn eval_base_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &[AB::ExprEF]) {
     assert_eq!(terms.len(), 0);
     let main = builder.main();
     let m0 = main.current_slice();
@@ -798,7 +767,7 @@ pub fn eval_base_mock_with_challenge_terms<AB: LiftedAirBuilder<F = Felt>>(build
             }],
         );
 
-        let body = r"pub fn eval_ext_mock_with_challenge_terms<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &[AB::ExprEF]) {
+        let body = r"pub fn eval_ext_mock<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &[AB::ExprEF]) {
     assert_eq!(terms.len(), 0);
     let main = builder.main();
     let m0 = main.current_slice();
@@ -828,7 +797,7 @@ pub fn eval_base_mock_with_challenge_terms<AB: LiftedAirBuilder<F = Felt>>(build
 ";
         // The module wrapper (header + imports) is pinned by the base golden;
         // compare only the emitted function here.
-        let signature = "pub fn eval_ext_mock_with_challenge_terms";
+        let signature = "pub fn eval_ext_mock";
         let (_, tail) = out.split_once(signature).expect("prepared evaluator emitted");
         let tail = format!("{signature}{tail}");
         assert_eq!(tail, body);
@@ -1243,7 +1212,7 @@ pub fn eval_base_mock_with_challenge_terms<AB: LiftedAirBuilder<F = Felt>>(build
             (products, _) = b.op(Class::Ext, OpKind::Add, products, Some(product));
         }
         let out = optimized(b, vec![], vec![sum, products]);
-        let row = out.split("pub fn eval_optimized_with_challenge_terms").nth(1).unwrap();
+        let row = out.split("pub fn eval_optimized").nth(1).unwrap();
         assert!(row.contains("terms[0]") && row.contains("terms[1]"), "{row}");
         assert!(!row.contains("permutation_randomness"), "{row}");
     }

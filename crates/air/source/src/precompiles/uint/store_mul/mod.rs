@@ -34,6 +34,7 @@ use miden_stark::{
     },
 };
 use miden_utils_sync::LazyLock;
+use p3_field::Algebra;
 
 use crate::precompiles::{
     logup::{NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col},
@@ -147,6 +148,8 @@ impl BaseAir<Felt> for UintStoreMulAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for UintStoreMulAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn max_periodic_length(&self) -> usize {
         PERIOD
     }
@@ -173,7 +176,7 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreMulAir {
         aux::build_aux(main, challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         // ---- STORE (`UintStoreAir::eval` constraints, columns 0..18) ----
         {
             let local: [AB::Var; STORE_NUM_MAIN_COLS] = current_main(builder.main(), 0);

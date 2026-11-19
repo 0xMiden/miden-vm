@@ -1,0 +1,28 @@
+# Source-name breakpoints and raw linkage-name breakpoints stop at the same Rust procedure.
+# RUN: compile-masm %S/function_breakpoint_rust.masm -o %t.masp
+# RUN: miden-debug --commands %s %t.masp -- 5 2>&1 | filecheck %s --implicit-check-not 'error:'
+
+break in foo::inner
+continue
+backtrace
+delete 0
+reload
+break in *_ZN3foo5inner17h0123456789abcdefE
+continue
+backtrace
+delete 0
+continue
+stack
+
+# CHECK: Breakpoint 0 set: call *::foo::inner
+# CHECK: in [inferred] $exec::foo::inner
+# CHECK: Backtrace (2 frames):
+# CHECK-NEXT: * #0 [inferred] $exec::foo::inner
+# CHECK-NEXT: #1 $exec::$main
+# CHECK: Breakpoint 0 set: call *_ZN3foo5inner17h0123456789abcdefE
+# CHECK: in [inferred] $exec::foo::inner
+# CHECK: Backtrace (2 frames):
+# CHECK-NEXT: * #0 [inferred] $exec::foo::inner
+# CHECK-NEXT: #1 $exec::$main
+# CHECK: Program terminated successfully
+# CHECK: [0] 16 (0x10)

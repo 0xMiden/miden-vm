@@ -284,12 +284,8 @@ fn babai_reduce(
         if k.is_zero() {
             break;
         }
-        let kf = (k.clone().karatsuba(f))
-            .reduce_by_cyclotomic(n)
-            .map(|bi| bi << (capital_size - size));
-        let kg = (k.clone().karatsuba(g))
-            .reduce_by_cyclotomic(n)
-            .map(|bi| bi << (capital_size - size));
+        let kf = k.karatsuba(f).reduce_by_cyclotomic(n).map(|bi| bi << (capital_size - size));
+        let kg = k.karatsuba(g).reduce_by_cyclotomic(n).map(|bi| bi << (capital_size - size));
         *capital_f -= kf;
         *capital_g -= kg;
 
@@ -394,10 +390,10 @@ mod tests {
         let big = |v: i64| BigInt::from_i64(v).unwrap();
         for (a, b) in [(240, 46), (46, 240), (17, 5), (12, 18), (0, 9), (9, 0), (1, 1)] {
             let (g, u, v) = xgcd(&big(a), &big(b));
-            assert_eq!(u.clone() * big(a) + v.clone() * big(b), g, "Bezout failed for ({a}, {b})");
+            assert_eq!(u * big(a) + v * big(b), g, "Bezout failed for ({a}, {b})");
             if a != 0 && b != 0 {
                 assert!(
-                    (big(a) % g.clone()).is_zero() && (big(b) % g.clone()).is_zero(),
+                    (big(a) % g.clone()).is_zero() && (big(b) % g).is_zero(),
                     "gcd does not divide both operands for ({a}, {b})"
                 );
             }

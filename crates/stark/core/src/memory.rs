@@ -354,6 +354,8 @@ mod tests {
     }
 
     impl LiftedAir<Felt, QuadFelt> for TestAir {
+        type EvalData<B: p3_field::Algebra<Felt>, E: p3_field::Algebra<B>> = ();
+
         fn num_randomness(&self) -> usize {
             0
         }
@@ -376,7 +378,7 @@ mod tests {
             panic!("memory estimation must not allocate auxiliary traces")
         }
 
-        fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+        fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
             let value: AB::Expr = builder.main().current_slice()[0].into();
             builder.assert_zero(value.exp_u64(self.constraint_degree));
         }

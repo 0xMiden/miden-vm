@@ -1,0 +1,36 @@
+# Tests for invalid profiling CLI argument combinations.
+#
+# First, compile a trivial program so we have a package to pass.
+# RUN: compile-masm %S/add.masm -o %t.masp
+#
+# Case 1: --profiling-reports-dir points to a file, not a directory.
+# RUN: touch %t.regular_file
+# RUN: miden-debug \
+# RUN:   --profiling-reports-dir %t.regular_file \
+# RUN:   --profiling-instruments op-histogram-global \
+# RUN:   --commands %s %t.masp 2>&1 | filecheck %s --check-prefix=ERR-FILE
+#
+# Case 2: --profiling-reports-dir set but no instruments specified.
+# RUN: mkdir -p %t_reports
+# RUN: miden-debug \
+# RUN:   --profiling-reports-dir %t_reports \
+# RUN:   --commands %s %t.masp 2>&1 | filecheck %s --check-prefix=ERR-NO-INSTR
+#
+# Case 3: --profiling-instruments set but no reports dir.
+# RUN: miden-debug \
+# RUN:   --profiling-instruments op-histogram-global \
+# RUN:   --commands %s %t.masp 2>&1 | filecheck %s --check-prefix=ERR-NO-DIR
+#
+# Case 4: Unknown instrument name.
+# RUN: mkdir -p %t_reports2
+# RUN: miden-debug \
+# RUN:   --profiling-reports-dir %t_reports2 \
+# RUN:   --profiling-instruments bogus-instrument \
+# RUN:   --commands %s %t.masp 2>&1 | filecheck %s --check-prefix=ERR-UNKNOWN
+
+continue
+
+# ERR-FILE: x invalid profiling reports directory
+# ERR-NO-INSTR: x profiling requires at least one instrument
+# ERR-NO-DIR: x profiling instruments require --profiling-reports-dir
+# ERR-UNKNOWN: x unknown profiling instrument 'bogus-instrument'

@@ -20,7 +20,7 @@ use miden_core::{
     utils::Idx,
 };
 use miden_stark::memory::ProvingBudget;
-use rayon::prelude::*;
+use p3_maybe_rayon::prelude::*;
 use tracing::instrument;
 
 use super::{
@@ -38,7 +38,7 @@ use crate::{
     errors::MapExecErrNoCtx,
     trace::{
         ChipletsLengths, TraceLenSummary, VmTrace, VmWitness,
-        chiplets::{Ace, Bitwise, Hasher, KernelRom, Memory},
+        chiplets::{Ace, AeadStream, Bitwise, Hasher, KernelRom, Memory},
         parallel::{processor::ReplayProcessor, tracer::CoreTraceGenerationTracer},
         range::RangeChecker,
         utils::RowMajorTraceWriter,
@@ -105,7 +105,6 @@ mod tests;
 ///
 /// assert_eq!(*trace.program_hash(), program.hash());
 /// ```
-#[instrument(name = "build_trace", skip_all)]
 pub fn build_trace(
     witness: VmWitness,
     budget: &ProvingBudget<MIDEN_AIR_COUNT>,
@@ -125,6 +124,7 @@ pub(crate) fn build_trace_with_prebuilt_hasher(
     build_trace_inner(witness, Some(prebuilt_hasher), budget)
 }
 
+#[instrument(target = "miden::vm::trace", name = "build_vm_trace", level = "trace", skip_all)]
 fn build_trace_inner(
     witness: VmWitness,
     prebuilt_hasher: Option<Hasher>,
@@ -235,11 +235,13 @@ fn build_trace_inner(
         });
     }
 
+    // The reported bitwise region includes the AEAD stream rows.
+    let bitwise_region_start = chiplets.aead_stream_start();
     let trace_len_summary = TraceLenSummary::new(
         core_trace_len,
         ChipletsLengths::from_parts(
-            chiplets.bitwise_start().into(),
-            chiplets.memory_start() - chiplets.bitwise_start(),
+            bitwise_region_start.into(),
+            chiplets.memory_start() - bitwise_region_start,
             chiplets.ace_start() - chiplets.memory_start(),
             chiplets.kernel_rom_start() - chiplets.ace_start(),
             chiplets.padding_start() - chiplets.kernel_rom_start(),
@@ -251,7 +253,7 @@ fn build_trace_inner(
     .expect("trace builder pads every AIR to at least its unpadded row count");
 
     // Each segment is built at its own per-AIR height (no cross-padding to the unified max).
-    let ((chiplets_trace, eidos_compression_trace, mut and8_counts), ()) = rayon::join(
+    let ((chiplets_trace, eidos_compression_trace, mut and8_counts), ()) = join(
         || chiplets.into_traces(chiplets_height, eidos_compression_height),
         || pad_core_row_major(&mut core_trace_data, core_height),
     );
@@ -576,8 +578,8 @@ fn push_halt_opcode_row(
 
         // Pad op_bits columns with HALT opcode bits
         let halt_opcode = opcodes::HALT;
-        for bit_idx in 0..NUM_OP_BITS {
-            row.decoder.op_bits[bit_idx] = Felt::from_u8((halt_opcode >> bit_idx) & 1);
+        for (bit_idx, bit) in row.decoder.op_bits.iter_mut().enumerate() {
+            *bit = Felt::from_u8((halt_opcode >> bit_idx) & 1);
         }
 
         // Pad hasher state columns (8 columns)
@@ -648,7 +650,7 @@ fn initialize_chiplets(
         return Err(ExecutionError::TraceLenExceeded(max_trace_len));
     }
 
-    let (hasher, (bitwise, (memory, (ace, kernel_rom)))) = rayon::join(
+    let (hasher, (bitwise_chiplets, (memory, (ace, kernel_rom)))) = join(
         || match prebuilt_hasher {
             Some(hasher) => Ok(hasher),
             None => build_hasher_chiplet(
@@ -664,13 +666,13 @@ fn initialize_chiplets(
             }),
         },
         || {
-            rayon::join(
-                || build_bitwise_chiplet(bitwise, max_trace_len),
+            join(
+                || build_bitwise_chiplets(bitwise, max_trace_len),
                 || {
-                    rayon::join(
+                    join(
                         || build_memory_chiplet(memory_writes, core_trace_contexts, max_trace_len),
                         || {
-                            rayon::join(
+                            join(
                                 || build_ace_chiplet(ace_replay, max_trace_len),
                                 || build_kernel_rom_chiplet(kernel, kernel_replay, max_trace_len),
                             )
@@ -681,9 +683,12 @@ fn initialize_chiplets(
         },
     );
 
+    let hasher = hasher?;
+    let (bitwise, aead_stream) = bitwise_chiplets?;
     let chiplets = Chiplets {
-        hasher: hasher?,
-        bitwise: bitwise?,
+        hasher,
+        aead_stream,
+        bitwise,
         memory: memory?,
         ace: ace?,
         kernel_rom: kernel_rom?,
@@ -727,6 +732,21 @@ fn non_hasher_trace_len(
         .ok_or_else(overflow)
 }
 
+/// Checks a Merkle path request from the hasher replay before the hasher chiplet records it.
+///
+/// The replay can come from a deserialized execution witness, so this returns an error for the
+/// inputs that `Hasher::build_merkle_root` and `Hasher::update_merkle_root` assert against: an
+/// empty path, or an index that does not fit in the path's depth.
+fn check_replayed_merkle_path(path: &[Word], index: Felt) -> Result<(), ExecutionError> {
+    if path.is_empty() {
+        return Err(ExecutionError::Internal("replayed Merkle path is empty"));
+    }
+    if index.as_canonical_u64().checked_shr(path.len() as u32).unwrap_or(0) != 0 {
+        return Err(ExecutionError::Internal("replayed Merkle path index exceeds the path depth"));
+    }
+    Ok(())
+}
+
 /// Builds the hasher chiplet from buffered or streamed, fully resolved requests.
 pub(crate) fn build_hasher_chiplet<'a>(
     ops: impl IntoIterator<Item = Result<ResolvedHasherOp<'a>, ExecutionError>>,
@@ -754,9 +774,11 @@ pub(crate) fn build_hasher_chiplet<'a>(
                 },
             },
             ResolvedHasherOp::BuildMerkleRoot((value, path, index)) => {
+                check_replayed_merkle_path(&path, index)?;
                 let _ = hasher.build_merkle_root(value, &path, index);
             },
             ResolvedHasherOp::UpdateMerkleRoot((old_value, new_value, path, index)) => {
+                check_replayed_merkle_path(&path, index)?;
                 hasher.update_merkle_root(old_value, new_value, &path, index);
             },
         }
@@ -769,11 +791,12 @@ pub(crate) fn build_hasher_chiplet<'a>(
     Ok(hasher)
 }
 
-fn build_bitwise_chiplet(
+fn build_bitwise_chiplets(
     bitwise_replay: BitwiseReplay,
     max_trace_len: usize,
-) -> Result<Bitwise, ExecutionError> {
+) -> Result<(Bitwise, AeadStream), ExecutionError> {
     let mut bitwise = Bitwise::default();
+    let mut aead_stream = AeadStream::default();
     for entry in bitwise_replay {
         match entry {
             BitwiseReplayEntry::U32(BitwiseOp::U32And, a, b) => {
@@ -783,25 +806,14 @@ fn build_bitwise_chiplet(
                 bitwise.u32xor(a, b).map_exec_err_no_ctx()?;
             },
             BitwiseReplayEntry::AeadStream(entry) => {
-                bitwise
-                    .aead_stream(
-                        entry.ctx,
-                        entry.clk,
-                        entry.src_ptr,
-                        entry.dst_ptr,
-                        entry.lane_base,
-                        entry.plaintext,
-                        entry.keystream,
-                        entry.ciphertext,
-                    )
-                    .map_exec_err_no_ctx()?;
+                aead_stream.record(*entry).map_exec_err_no_ctx()?;
             },
         }
-        if bitwise.trace_len() > max_trace_len {
+        if bitwise.trace_len() + aead_stream.trace_len() > max_trace_len {
             return Err(ExecutionError::TraceLenExceeded(max_trace_len));
         }
     }
-    Ok(bitwise)
+    Ok((bitwise, aead_stream))
 }
 
 fn build_memory_chiplet(
@@ -938,8 +950,8 @@ fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, core_height: usize) {
 
         // Pad op_bits columns with HALT opcode bits
         let halt_opcode = opcodes::HALT;
-        for i in 0..NUM_OP_BITS {
-            template.decoder.op_bits[i] = Felt::from_u8((halt_opcode >> i) & 1);
+        for (i, bit) in template.decoder.op_bits.iter_mut().enumerate() {
+            *bit = Felt::from_u8((halt_opcode >> i) & 1);
         }
         // Pad hasher state columns (8 columns)
         // - First 4 columns: copy the last value (to propagate program hash)

@@ -15,18 +15,12 @@ pub fn precompute_cached<B: PrimeCharacteristicRing, E: Algebra<B>>(challenges: 
     [e1.dup(), e5.dup()]
 }
 
-/// Evaluate `Cached` with terms computed from the builder's challenges.
-pub fn eval_cached<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
-    let terms = precompute_cached::<AB::Expr, AB::ExprEF>(&[builder.permutation_randomness()[0].into(), builder.permutation_randomness()[1].into()]);
-    eval_cached_with_challenge_terms(builder, &terms);
-}
-
 /// Generated globally-CSE'd evaluator for `Cached`.
 ///
 /// Emits constraints in the exact global order of the hand-written `eval`,
 /// with single-use arithmetic specialized at its first use.
 #[inline(never)]
-pub fn eval_cached_with_challenge_terms<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &[AB::ExprEF]) {
+pub fn eval_cached<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &[AB::ExprEF]) {
     assert_eq!(terms.len(), 2);
     let main = builder.main();
     let m0 = main.current_slice();
@@ -50,18 +44,12 @@ pub fn precompute_uncached<B: PrimeCharacteristicRing, E: Algebra<B>>(challenges
     []
 }
 
-/// Evaluate `Uncached` with terms computed from the builder's challenges.
-pub fn eval_uncached<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
-    let terms = precompute_uncached::<AB::Expr, AB::ExprEF>(&[]);
-    eval_uncached_with_challenge_terms(builder, &terms);
-}
-
 /// Generated globally-CSE'd evaluator for `Uncached`.
 ///
 /// Emits constraints in the exact global order of the hand-written `eval`,
 /// with single-use arithmetic specialized at its first use.
 #[inline(never)]
-pub fn eval_uncached_with_challenge_terms<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &[AB::ExprEF]) {
+pub fn eval_uncached<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB, terms: &[AB::ExprEF]) {
     assert_eq!(terms.len(), 0);
     let main = builder.main();
     let m0 = main.current_slice();

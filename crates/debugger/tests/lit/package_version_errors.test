@@ -1,0 +1,18 @@
+# Incompatible package versions should explain that the package must be opened with the matching
+# Miden toolchain.
+# RUN: printf 'MASP\000\006\000\000' > %t.old.masp
+# RUN: miden-debug --repl %t.old.masp 2>&1 | filecheck %s --check-prefix=OLD
+
+# OLD: Error: miden_debug::incompatible_package_format
+# OLD: uses unsupported package
+# OLD: 6.0.0
+# OLD: package, MAST, and debug-info formats are tied to the Miden
+# OLD: `miden +0.16.0 debug <FILE>`
+
+# Corrupt input is not necessarily from another toolchain and must not receive the compatibility
+# hint.
+# RUN: printf 'not a package' > %t.corrupt.masp
+# RUN: miden-debug --repl %t.corrupt.masp 2>&1 | filecheck %s --check-prefix=CORRUPT
+
+# CORRUPT: failed to load Miden package from
+# CORRUPT-NOT: miden +0.16.0 debug

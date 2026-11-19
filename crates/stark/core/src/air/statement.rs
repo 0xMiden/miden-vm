@@ -158,6 +158,8 @@ where
     /// }
     ///
     /// impl LiftedAir<Felt, Felt> for ExampleAir {
+    ///     type EvalData<B: p3_field::Algebra<Felt>, E: p3_field::Algebra<B>> = ();
+    ///
     ///     fn num_randomness(&self) -> usize {
     ///         0
     ///     }
@@ -180,7 +182,7 @@ where
     ///         (RowMajorMatrix::new(vec![Felt::ZERO; main.height()], 1), Vec::new())
     ///     }
     ///
-    ///     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, _builder: &mut AB) {}
+    ///     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, _builder: &mut AB, _data: &()) {}
     /// }
     ///
     /// struct ExampleMultiAir {

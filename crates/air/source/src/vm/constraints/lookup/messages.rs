@@ -37,16 +37,8 @@ type WordFields<E> = [E; WORD_SIZE];
 /// messages, i.e. the exponent of `gamma = beta^MIDEN_MAX_MESSAGE_WIDTH` used in
 /// `bus_prefix[i] = alpha + (i + 1) * gamma`.
 ///
-/// Must match the recursive verifier's hardcoded `gamma = beta^16` computation in
-/// `crates/lib/core/asm/sys/vm/public_inputs.masm` (4 squarings). The const assertion
-/// below is a tripwire: anyone changing `MIDEN_MAX_MESSAGE_WIDTH` must also update the
-/// MASM-side computation in lockstep, or the build fails here.
+/// Recursive-verifier generation derives the separator's exponentiation from this value.
 pub const MIDEN_MAX_MESSAGE_WIDTH: usize = 16;
-
-const _: () = assert!(
-    MIDEN_MAX_MESSAGE_WIDTH == 16,
-    "MIDEN_MAX_MESSAGE_WIDTH is hardcoded as 16 by the MASM recursive verifier (4 squarings to reach gamma = beta^16). Update `crates/lib/core/asm/sys/vm/public_inputs.masm` before changing this constant.",
-);
 
 /// Domain-separated bus interaction identifier.
 ///

@@ -12,7 +12,7 @@ use miden_core::{
 use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_RATE, domains::LMCS_LEAF};
 
 use super::pvm_layout_const;
-use crate::helpers::{masm_push_word, read_memory_felt};
+use crate::helpers::{masm_push_word, read_memory_felt, stark_constant};
 
 const FULL_DEPTH: u8 = 20;
 const PREPROCESSED_DEPTH: u8 = 19;
@@ -22,9 +22,7 @@ const FOLDED_INDEX: u32 = FULL_INDEX & ((1 << PREPROCESSED_DEPTH) - 1);
 const QUERY_PTR: u32 = 1_000;
 const QUERY_END_PTR: u32 = QUERY_PTR + 4;
 const ALPHA_PTR: u32 = 2_000;
-const MAIN_COM_PTR: u32 = 3_223_322_640;
-const AUX_COM_PTR: u32 = 3_223_322_644;
-const QUOTIENT_COM_PTR: u32 = 3_223_322_648;
+const ROW_SENTINEL: u32 = 123_456;
 
 const ALPHA: [u64; 2] = [3, 5];
 const DOMAIN_GENERATOR: u64 = 7;
@@ -46,6 +44,25 @@ fn row(width: usize, offset: u32) -> Vec<Felt> {
     (0..width)
         .map(|i| Felt::from_u32(((i as u32 + 1) * 17 + offset) % 65_521))
         .collect()
+}
+
+fn query_rows() -> [Vec<Felt>; 4] {
+    [
+        ("PREPROCESSED_CURRENT_PTR", "MAIN_CURRENT_PTR", 100),
+        ("MAIN_CURRENT_PTR", "AUX_CURRENT_PTR", 200),
+        ("AUX_CURRENT_PTR", "QUOTIENT_CURRENT_PTR", 300),
+        ("QUOTIENT_CURRENT_PTR", "PREPROCESSED_NEXT_PTR", 400),
+    ]
+    .map(|(start, end, offset)| row(commitment_width(start, end), offset))
+}
+
+fn query_fixture(rows: &[Vec<Felt>; 4]) -> (String, MerkleStore) {
+    let mut store = MerkleStore::new();
+    let preprocessed_root = add_path(&mut store, &rows[0], FOLDED_INDEX, PREPROCESSED_DEPTH, 1_000);
+    let main_root = add_path(&mut store, &rows[1], FULL_INDEX, FULL_DEPTH, 2_000);
+    let aux_root = add_path(&mut store, &rows[2], FULL_INDEX, FULL_DEPTH, 3_000);
+    let quotient_root = add_path(&mut store, &rows[3], FULL_INDEX, FULL_DEPTH, 4_000);
+    (source(preprocessed_root, main_root, aux_root, quotient_root), store)
 }
 
 fn add_path(
@@ -80,8 +97,11 @@ fn lmcs_leaf(row: &[Felt]) -> Word {
 }
 
 fn source(preprocessed_root: Word, main_root: Word, aux_root: Word, quotient_root: Word) -> String {
-    let result_row_ptr = pvm_layout_const("CURRENT_TRACE_ROW_PTR");
-    let preprocessed_com_ptr = pvm_layout_const("PREPROCESSED_COM_PTR");
+    let result_row_ptr = stark_constant("CURRENT_TRACE_ROW_PTR");
+    let row_width =
+        u32::try_from(commitment_width("PREPROCESSED_CURRENT_PTR", "PREPROCESSED_NEXT_PTR"))
+            .unwrap();
+    let preprocessed_com_ptr = stark_constant("PREPROCESSED_TRACE_COM_PTR");
     format!(
         r#"
         use {{
@@ -90,6 +110,10 @@ fn source(preprocessed_root: Word, main_root: Word, aux_root: Word, quotient_roo
         use miden::core::sys::pvm::deep_queries
 
         begin
+            # Detect writes outside the query-row buffer.
+            push.{ROW_SENTINEL} mem_store.{row_before}
+            push.{ROW_SENTINEL} mem_store.{row_after}
+
             # Query word: [natural index, full tree depth, natural index, 0].
             push.0.{index}.{depth}.{index} push.{query_ptr} mem_storew_le dropw
 
@@ -129,28 +153,26 @@ fn source(preprocessed_root: Word, main_root: Word, aux_root: Word, quotient_roo
         alpha1 = ALPHA[1],
         alpha_ptr = ALPHA_PTR,
         result_row_ptr = result_row_ptr,
+        row_before = result_row_ptr - 1,
+        row_after = result_row_ptr + row_width,
         domain_generator = DOMAIN_GENERATOR,
         lde_size = 1u32 << FULL_DEPTH,
         preprocessed_root = masm_push_word(&preprocessed_root),
         preprocessed_com_ptr = preprocessed_com_ptr,
         main_root = masm_push_word(&main_root),
-        main_com_ptr = MAIN_COM_PTR,
+        main_com_ptr = stark_constant("MAIN_TRACE_COM_PTR"),
         aux_root = masm_push_word(&aux_root),
-        aux_com_ptr = AUX_COM_PTR,
+        aux_com_ptr = stark_constant("AUX_TRACE_COM_PTR"),
         quotient_root = masm_push_word(&quotient_root),
-        quotient_com_ptr = QUOTIENT_COM_PTR,
+        quotient_com_ptr = stark_constant("COMPOSITION_POLY_COM_PTR"),
     )
 }
 
 #[test]
 fn pvm_deep_query_hook_authenticates_folded_setup_index_and_reduces_every_group() {
-    let result_row_ptr = pvm_layout_const("CURRENT_TRACE_ROW_PTR");
-    let widths = [
-        commitment_width("PREPROCESSED_CURRENT_PTR", "MAIN_CURRENT_PTR"),
-        commitment_width("MAIN_CURRENT_PTR", "AUX_CURRENT_PTR"),
-        commitment_width("AUX_CURRENT_PTR", "QUOTIENT_CURRENT_PTR"),
-        commitment_width("QUOTIENT_CURRENT_PTR", "PREPROCESSED_NEXT_PTR"),
-    ];
+    let result_row_ptr = stark_constant("CURRENT_TRACE_ROW_PTR");
+    let rows = query_rows();
+    let widths = rows.each_ref().map(Vec::len);
     let next_widths = [
         commitment_width("PREPROCESSED_NEXT_PTR", "MAIN_NEXT_PTR"),
         commitment_width("MAIN_NEXT_PTR", "AUX_NEXT_PTR"),
@@ -159,41 +181,21 @@ fn pvm_deep_query_hook_authenticates_folded_setup_index_and_reduces_every_group(
     ];
     assert_eq!(widths, next_widths, "current and next PVM OOD rows must have equal geometry");
 
-    let [preprocessed_width, main_width, aux_width, quotient_width] = widths;
-    let preprocessed = row(preprocessed_width, 100);
-    let main = row(main_width, 200);
-    let aux = row(aux_width, 300);
-    let quotient = row(quotient_width, 400);
-
-    let mut store = MerkleStore::new();
-    let preprocessed_root =
-        add_path(&mut store, &preprocessed, FOLDED_INDEX, PREPROCESSED_DEPTH, 1_000);
-    let main_root = add_path(&mut store, &main, FULL_INDEX, FULL_DEPTH, 2_000);
-    let aux_root = add_path(&mut store, &aux, FULL_INDEX, FULL_DEPTH, 3_000);
-    let quotient_root = add_path(&mut store, &quotient, FULL_INDEX, FULL_DEPTH, 4_000);
-
-    let advice_map = [
-        (lmcs_leaf(&preprocessed), preprocessed.clone()),
-        (lmcs_leaf(&main), main.clone()),
-        (lmcs_leaf(&aux), aux.clone()),
-        (lmcs_leaf(&quotient), quotient.clone()),
-    ];
-
-    let program = source(preprocessed_root, main_root, aux_root, quotient_root);
+    let (program, store) = query_fixture(&rows);
+    let advice_map = rows.each_ref().map(|row| (lmcs_leaf(row), row.clone()));
     let (output, _) = build_test!(&program, &[], &[], store, advice_map)
         .execute_for_output()
         .expect("PVM DEEP-query hook must execute");
 
-    let opened_row: Vec<Felt> =
-        preprocessed.into_iter().chain(main).chain(aux).chain(quotient).collect();
-    let scratch_row_width = pvm_layout_const("PREPROCESSED_COM_PTR")
-        .checked_sub(result_row_ptr)
-        .expect("PVM query scratch precedes the preprocessed commitment");
-    assert_eq!(
-        opened_row.len(),
-        usize::try_from(scratch_row_width).expect("PVM query scratch extent fits in usize"),
-        "OOD commitment-group widths must match the independently allocated query scratch row"
-    );
+    let opened_row: Vec<Felt> = rows.into_iter().flatten().collect();
+    let row_end = result_row_ptr + u32::try_from(opened_row.len()).unwrap();
+    for address in [result_row_ptr - 1, row_end] {
+        assert_eq!(
+            read_memory_felt(&output, address),
+            Felt::from_u32(ROW_SENTINEL),
+            "query-row boundary at {address} was overwritten"
+        );
+    }
     for (i, expected) in opened_row.iter().enumerate() {
         assert_eq!(
             read_memory_felt(&output, result_row_ptr + i as u32),
@@ -215,4 +217,25 @@ fn pvm_deep_query_hook_authenticates_folded_setup_index_and_reduces_every_group(
     assert_eq!(read_memory_felt(&output, QUERY_PTR + 1), Felt::from_u32(FULL_INDEX));
     assert_eq!(read_memory_felt(&output, QUERY_PTR + 2), expected_eval[0]);
     assert_eq!(read_memory_felt(&output, QUERY_PTR + 3), expected_eval[1]);
+}
+
+#[test]
+fn pvm_deep_query_hook_rejects_tampered_rows() {
+    let rows = query_rows();
+    let (program, store) = query_fixture(&rows);
+    for (group, message) in [
+        "preprocessed query leaf hash mismatch",
+        "main query leaf hash mismatch",
+        "aux query leaf hash mismatch",
+        "quotient query leaf hash mismatch",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        // Keep the authenticated leaf digest as the key; forge only the advised row.
+        let mut advice_map = rows.each_ref().map(|row| (lmcs_leaf(row), row.clone()));
+        advice_map[group].1[0] += Felt::ONE;
+        let test = build_test!(&program, &[], &[], store.clone(), advice_map);
+        expect_assert_error_code_from_msg!(test, message);
+    }
 }

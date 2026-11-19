@@ -37,10 +37,10 @@
 //! execution (or skip the cycle entirely). The controller side emits one interaction per
 //! compression row:
 //!
-//! - **Hash compression** (`s_ctrl * !controller_merkle_or_padding`, multiplicity `+1`):
+//! - **Hash compression** (`controller_active * !ctrl.merkle_or_padding`, multiplicity `+1`):
 //!   `[block(8), cv_in(4), cv_out(4)]`.
-//! - **Merkle compression** (`s_ctrl * controller_merkle_or_padding * s0`, multiplicity `+1`):
-//!   `[block(8), fixed_merkle_cv(4), cv_out(4)]`.
+//! - **Merkle compression** (`controller_active * ctrl.merkle_or_padding * ctrl.s0`, multiplicity
+//!   `+1`): `[block(8), fixed_merkle_cv(4), cv_out(4)]`.
 //!
 //! The Eidos compression AIR emits the matching receive on the final footer row of the
 //! standalone block.
@@ -95,7 +95,7 @@ pub(in crate::vm::constraints::lookup) fn emit_v_wiring<LB>(
     // Typed ACE chiplet overlay. `read()` exposes `m_0` / `m_1`, `eval()` exposes `v_2`;
     // wiring uses both overlays because its `sblock`-muxed multiplicities combine the
     // READ and EVAL row interpretations onto one column.
-    let ace = local.ace();
+    let ace = local.ace_cols();
     let ace_read = ace.read();
     let ace_eval = ace.eval();
 
@@ -118,8 +118,8 @@ pub(in crate::vm::constraints::lookup) fn emit_v_wiring<LB>(
     let sblock: LB::Expr = ace.s_block.into();
 
     // Controller rows emit one compression-link tuple except padding rows.
-    let ctrl = local.controller();
-    let merkle_or_padding: LB::Expr = local.controller_merkle_or_padding().into();
+    let ctrl = local.controller_cols();
+    let merkle_or_padding: LB::Expr = ctrl.merkle_or_padding.into();
     let f_hash_compression = ctx.chiplet_active.controller.clone() * merkle_or_padding.not();
 
     let ctrl_state: [LB::Var; 12] = array::from_fn(|i| ctrl.state[i]);

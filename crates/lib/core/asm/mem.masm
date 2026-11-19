@@ -351,8 +351,8 @@ pub proc pipe_preimage_to_memory(
   movup.4 movdn.8
   # => [HASH, COMMITMENT, write_ptr', ...]
 
-  # Check the COMMITMENT.
-  assert_eqw
+  # check the COMMITMENT.
+  assert_eqw.err="pipe_preimage_to_memory: COMMITMENT does not match"
   # => [write_ptr', ...]
 end
 

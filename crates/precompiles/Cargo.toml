@@ -28,3 +28,6 @@ std = ["miden-core/std", "miden-crypto/std", "ruint/std"]
 miden-core.workspace = true
 miden-crypto.workspace = true
 ruint.workspace = true
+
+[lints]
+workspace = true

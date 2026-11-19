@@ -92,8 +92,8 @@ pub struct Fold4Ext2TestVectors {
 /// Proves a FRI claim over a random polynomial of degree less than `2^log_poly_degree` using
 /// fold-4 layer folding over the quadratic extension field, verifies it, then unpacks the proof.
 ///
-/// Folding proceeds until the final polynomial has exactly `2^log_final_degree` coefficients, so
-/// `log_poly_degree - log_final_degree` must be even. Folding PoW is disabled and query positions
+/// Folding proceeds until the coefficient bound is at most `2^log_final_degree`, following the
+/// native stopping rule, including zero-round cases. Folding PoW is disabled and query positions
 /// are selected by the fixture rather than sampled from the transcript. These vectors exercise
 /// transcript-derived folding challenges, fold consistency, Merkle authentication, and the
 /// remainder check.
@@ -102,9 +102,8 @@ pub struct Fold4Ext2TestVectors {
 ///
 /// # Panics
 ///
-/// Panics if the extension degree is not 2, the final degree exceeds the source degree, fold-4
-/// cannot land exactly on the requested final degree, the domain parameters are invalid, or
-/// `num_queries` is outside `2..=lde_size`.
+/// Panics if the extension degree is not 2, the domain parameters are invalid, or `num_queries`
+/// is outside `2..=lde_size`.
 pub fn fold4_ext2_test_vectors<F, EF, L, Chal, CommitmentToLimbs>(
     lmcs: &L,
     challenger: &Chal,
@@ -128,16 +127,6 @@ where
         EXTENSION_DEGREE,
         "fold4_ext2 vectors require a quadratic extension field"
     );
-    assert!(
-        log_final_degree <= log_poly_degree,
-        "final degree must not exceed the polynomial degree"
-    );
-    assert_eq!(
-        (log_poly_degree - log_final_degree) % LOG_FOLD_ARITY,
-        0,
-        "fold-4 folding must land exactly on the final degree"
-    );
-
     let domain = canonical_domain::<F>(log_poly_degree, log_blowup);
     let poly_degree = domain.trace_height();
     let lde_size = domain.lde_height();

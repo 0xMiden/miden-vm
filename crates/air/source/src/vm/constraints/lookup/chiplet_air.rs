@@ -17,13 +17,12 @@
 use miden_stark::lookup::LookupBuilder;
 
 use super::buses::{
-    ChipletActiveFlags,
     chiplet_responses::{self, emit_chiplet_responses},
     hash_kernel::{self, emit_hash_kernel_table},
     hasher_returns::{self, emit_hasher_returns},
     wiring::{self, emit_v_wiring},
 };
-use crate::vm::{ChipletCols, Felt};
+use crate::vm::{ChipletCols, Felt, constraints::chiplets::selectors::ChipletActiveFlags};
 
 // CHIPLET LOOKUP BUILDER
 // ================================================================================================

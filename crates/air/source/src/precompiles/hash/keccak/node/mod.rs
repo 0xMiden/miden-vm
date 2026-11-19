@@ -231,6 +231,8 @@ pub(crate) fn eval_chunk_count<AB>(
 }
 
 impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -253,7 +255,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
         miden_stark::lookup::build_logup_aux_trace(&KeccakNodeAir, main, challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
         let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
 

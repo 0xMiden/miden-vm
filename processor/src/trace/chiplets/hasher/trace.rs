@@ -3,10 +3,7 @@ use core::{borrow::BorrowMut, ops::Range};
 
 use miden_air_definitions::vm::{
     ControllerCols,
-    trace::{
-        CHIPLETS_MODE_COL,
-        chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, PADDING, TRACE_WIDTH},
-    },
+    trace::chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, PADDING, TRACE_WIDTH},
 };
 use miden_core::chiplets::eidos_compression;
 
@@ -48,13 +45,14 @@ impl HasherOp {
 
 /// Execution trace for hasher controller rows.
 ///
-/// Each controller row writes 22 fragment cells:
+/// Each controller row writes 23 fragment cells:
 /// - 3 row-kind selectors.
 /// - 12 state cells.
 /// - 4 row-kind data cells.
 /// - 1 final-row marker.
 /// - 1 carried MRUPDATE id.
-/// - 1 controller mode cell, written to the chiplets shared mode column.
+/// - 1 Merkle-or-padding marker.
+/// - 1 controller row address.
 #[derive(Debug, Default)]
 pub(super) struct HasherTrace {
     ops: Vec<HasherOp>,
@@ -180,10 +178,11 @@ impl HasherTrace {
                         *row_data,
                         *op_final,
                         *mrupdate_id,
+                        Felt::new_unchecked(row_idx as u64 + 1),
                     );
                 },
                 HasherOp::Padding { count, mrupdate_id } => {
-                    for row in chunk.chunks_mut(row_width).take(*count) {
+                    for (i, row) in chunk.chunks_mut(row_width).take(*count).enumerate() {
                         write_controller_row(
                             row,
                             PADDING,
@@ -191,20 +190,13 @@ impl HasherTrace {
                             [ZERO; 4],
                             ZERO,
                             *mrupdate_id,
+                            Felt::new_unchecked((row_idx + i) as u64 + 1),
                         );
                     }
                 },
             }
 
             trace.copy_rows_into(row_idx, &chunk[..n * row_width]);
-
-            // Write `s_ctrl = ONE` on controller and padding rows.
-            for i in 0..n {
-                let prefix = trace.prefix_mut(row_idx + i);
-                if let Some(s_ctrl) = prefix.first_mut() {
-                    *s_ctrl = ONE;
-                }
-            }
 
             row_idx += n;
         }
@@ -222,29 +214,25 @@ fn write_controller_row(
     row_data: [Felt; 4],
     op_final: Felt,
     mrupdate_id: Felt,
+    addr: Felt,
 ) {
     row.fill(ZERO);
 
-    let cols: &mut ControllerCols<Felt> = row[..CONTROLLER_OVERLAY_WIDTH].borrow_mut();
+    let cols: &mut ControllerCols<Felt> = row[..TRACE_WIDTH].borrow_mut();
     cols.s0 = selectors[0];
     cols.s1 = selectors[1];
     cols.s2 = selectors[2];
     cols.state = *state;
     cols.row_data = row_data;
-    row[OP_FINAL_OFFSET] = op_final;
-    row[MRUPDATE_ID_OFFSET] = mrupdate_id;
-    row[CONTROLLER_MERKLE_OR_PADDING_OFFSET] =
-        if selectors == PADDING || is_merkle_selector(selectors) {
-            ONE
-        } else {
-            ZERO
-        };
+    cols.op_final = op_final;
+    cols.mrupdate_id = mrupdate_id;
+    cols.merkle_or_padding = if selectors == PADDING || is_merkle_selector(selectors) {
+        ONE
+    } else {
+        ZERO
+    };
+    cols.addr = addr;
 }
-
-const CONTROLLER_OVERLAY_WIDTH: usize = 19;
-const OP_FINAL_OFFSET: usize = 19;
-const MRUPDATE_ID_OFFSET: usize = 20;
-const CONTROLLER_MERKLE_OR_PADDING_OFFSET: usize = CHIPLETS_MODE_COL - 1;
 
 fn is_merkle_selector(selectors: Selectors) -> bool {
     selectors == MP_VERIFY || selectors == MR_UPDATE_OLD || selectors == MR_UPDATE_NEW

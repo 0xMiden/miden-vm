@@ -22,10 +22,13 @@ pub use airs::{
 pub use constraints::{
     and8_lookup,
     and8_lookup::columns::{And8LookupCols, And8LookupPreprocessedCols},
-    chiplets::columns::{
-        AceCols, AceEvalCols, AceReadCols, AeadStreamCols, AeadStreamHighFirstCols,
-        AeadStreamHighSecondCols, AeadStreamLowSecondCols, AeadStreamReadCols, BitwiseCols,
-        ControllerCols, KernelRomCols, MemoryCols,
+    chiplets::{
+        columns::{
+            AceCols, AceEvalCols, AceReadCols, AeadStreamCols, AeadStreamHighFirstCols,
+            AeadStreamHighSecondCols, AeadStreamLowSecondCols, AeadStreamReadCols, BitwiseOpCols,
+            ControllerCols, KernelRomCols, MemoryCols,
+        },
+        selectors::ChipletActiveFlags,
     },
     columns::{ChipletCols, CoreCols},
     decoder::columns::DecoderCols,

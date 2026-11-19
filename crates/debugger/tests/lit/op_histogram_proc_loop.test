@@ -1,0 +1,31 @@
+# Per-procedure histogram with a procedure called in a loop: the procedure's histogram
+# accumulates over all executions.
+#
+# RUN: compile-masm %S/op_histogram_proc_loop.masm -o %t.masp
+# RUN: (miden-debug \
+# RUN:   --profiling-reports-dir %t_reports \
+# RUN:   --profiling-instruments op-histogram-proc \
+# RUN:   --commands %s %t.masp 2>&1; \
+# RUN:  cat %t_reports/op-histogram-proc) | filecheck %s
+
+continue
+stack
+
+# CHECK: Program terminated successfully
+# CHECK: [0] 0
+# `double` was executed 3 times, so each of its ops is counted 3 times.
+# CHECK: procedure: ::$exec::double
+# CHECK-NEXT: total_cycles        100% 6
+# CHECK-NEXT: add               50.00% 3
+# CHECK-NEXT: dup0              50.00% 3
+# CHECK-NEXT: procedure: ::$exec::$main
+# CHECK-NEXT: total_cycles        100% 5
+# CHECK-NEXT: noop              60.00% 3
+# CHECK-NEXT: drop              20.00% 1
+# CHECK-NEXT: push              20.00% 1
+# Unattributed setup operations are reported separately.
+# CHECK-NEXT: procedure: <unknown>
+# CHECK-NEXT: total_cycles        100% 4
+# CHECK-NEXT: push              50.00% 2
+# CHECK-NEXT: drop              25.00% 1
+# CHECK-NEXT: mstore            25.00% 1

@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 
 pub use p3_blake3_air::{Blake3Air, NUM_BLAKE3_COLS};
-use p3_field::{Field, PrimeField64};
+use p3_field::{Algebra, Field, PrimeField64};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::air::{Air, BaseAir, LiftedAir, LiftedAirBuilder};
@@ -27,6 +27,8 @@ impl<F> BaseAir<F> for LiftedBlake3Air {
 }
 
 impl<F: PrimeField64, EF: Field> LiftedAir<F, EF> for LiftedBlake3Air {
+    type EvalData<B: Algebra<F>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         1
     }
@@ -50,7 +52,7 @@ impl<F: PrimeField64, EF: Field> LiftedAir<F, EF> for LiftedBlake3Air {
         (RowMajorMatrix::new(EF::zero_vec(main.height()), 1), Vec::new())
     }
 
-    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB, _data: &()) {
         Air::eval(&Blake3Air {}, builder);
     }
 }

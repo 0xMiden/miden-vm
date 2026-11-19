@@ -60,6 +60,7 @@ miden-stark = { workspace = true, optional = true }
 
 # External dependencies
 p256 = { workspace = true, features = ["ecdsa"] }
+rand.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
@@ -78,6 +79,7 @@ miden-package-registry = { workspace = true, features = ["resolver"] }
 miden-processor = { workspace = true, features = ["testing"] }
 miden-precompiles-stark = { workspace = true, features = ["concurrent", "prover", "testing"] }
 miden-prover = { workspace = true, features = ["concurrent"] }
+miden-serde-utils.workspace = true
 miden-utils-testing.workspace = true
 miden-verifier = { workspace = true, features = ["std"] }
 num = { workspace = true }
@@ -85,6 +87,7 @@ p3-security.workspace = true
 rand = { workspace = true, features = ["std", "std_rng", "thread_rng"] }
 rand_chacha = { workspace = true }
 rstest = { workspace = true }
+serde-wincode.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
 toml = { workspace = true, features = ["parse"] }
 
@@ -100,3 +103,6 @@ miden-core-lib-codegen = { workspace = true, features = ["std"] }
 name = "regenerate-constraints"
 path = "src/bin/regenerate-constraints.rs"
 required-features = ["constraints-tools"]
+
+[lints]
+workspace = true

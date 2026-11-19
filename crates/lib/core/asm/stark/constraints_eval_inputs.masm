@@ -1,6 +1,9 @@
 use {
+    CONSTRAINT_ALPHA_HI_PTR,
     CONSTRAINT_COMPOSITION_COEFS_PTR,
     LOG_TRACE_LENGTH_PTR,
+    OOD_POINT_HI_PTR,
+    OOD_POINT_LO_PTR,
     OOD_POINT_PTR,
     TRACE_DOMAIN_GENERATOR_PTR,
 } from miden::core::stark::constants
@@ -29,25 +32,24 @@ const SELECTOR_STRIDE = 6
 #!
 #! `heights_ptr` addresses the relation's `num_airs` consecutive per-AIR log-height
 #! cells; AIR k's selectors are derived from the height at `heights_ptr + k`.
+#! `proof_order_ids_ptr` addresses a permutation of those AIR indices sorted by increasing height.
+#! The relation must compute this map from its validated heights before calling this procedure.
+#! Heights and `max_cycle_len_log` must not exceed the maximum height stored at
+#! `LOG_TRACE_LENGTH_PTR`. Reverse proof order lets the lifted OOD point and inverse domain
+#! generator advance by squaring, while selectors are stored in canonical order.
 #!
 #! `stark_vars_ptr` is the relation's stark-vars base. The ACE READ section is one dense
 #! vector whose region spacing must equal the relation's circuit layout spacing, so this
 #! base is relation-local rather than a shared constant.
+#! The output region must be disjoint from both input arrays and the shared domain state.
 #!
-#! The three quotient recomposition inputs are relation-supplied, and they do NOT all
-#! derive from the same quantity:
-#!   `quot_shift_ratio` (f)  the primitive D-th root of unity, D = the quotient arity
-#!   `quot_first_weight`     1 / (D * s0^(D-1)) — a function of BOTH D and s0
-#!   `quot_first_shift` (s0) shift^N — a PCS-configuration value (LDE shift and blowup),
-#!                           independent of D
-#! When a relation's arity and blowup factor coincide, a value derived from either quantity
-#! is numerically identical; a relation whose arity differs from its blowup needs different
-#! values, which is why these cannot stay shared constants.
+#! For quotient arity D and maximum trace length N, the relation supplies
+#! quot_first_shift = s0 = shift^N, quot_shift_ratio (a primitive D-th root of unity), and
+#! quot_first_weight = 1 / (D * s0^(D-1)). D and the LDE blowup are separate protocol parameters.
 #!
 #! Input:  [max_cycle_len_log, num_airs, heights_ptr, stark_vars_ptr, quot_first_weight,
-#!          quot_first_shift, quot_shift_ratio, ...]
+#!          quot_first_shift, quot_shift_ratio, proof_order_ids_ptr, ...]
 #! Output: [...]
-@locals(1)
 pub proc set_up_auxiliary_inputs_ace(
     max_cycle_len_log: u8,
     num_airs: u8,
@@ -56,91 +58,99 @@ pub proc set_up_auxiliary_inputs_ace(
     quot_first_weight: felt,
     quot_first_shift: felt,
     quot_shift_ratio: felt,
+    proof_order_ids_ptr: types::Address,
 )
-    # The block base is dereferenced many times below; a local keeps it out of the working
-    # stack instead of threading it through every intermediate.
-    movup.3 loc_store.0
-    # => [max_cycle_len_log, num_airs, heights_ptr, weight0, s0, f, ...]
+    # Retain the block base below the setup inputs and selector-loop state.
+    movup.3 movdn.6
+    # => [max_cycle_len_log, num_airs, heights_ptr, weight0, s0, f, base, ids_ptr, ...]
 
     # f and s0 (word 4), then the reserved slot with weight0 (word 3).
     movup.5 push.0 movup.6 push.0 movup.3
-    # => [f, 0, s0, 0, max_cycle_len_log, num_airs, heights_ptr, weight0, ...]
-    loc_load.0 add.16
+    # => [f, 0, s0, 0, max_cycle_len_log, num_airs, heights_ptr, weight0, base, ids_ptr, ...]
+    dup.8 add.16
     mem_storew_le
     dropw
-    # => [max_cycle_len_log, num_airs, heights_ptr, weight0, ...]
+    # => [max_cycle_len_log, num_airs, heights_ptr, weight0, base, ids_ptr, ...]
 
     movup.3
-    # => [weight0, max_cycle_len_log, num_airs, heights_ptr, ...]
+    # => [weight0, max_cycle_len_log, num_airs, heights_ptr, base, ids_ptr, ...]
     push.0.0
     # => [0, 0, weight0, ...]
     push.0 movdn.3
-    # => [0, 0, weight0, 0, max_cycle_len_log, num_airs, heights_ptr, ...]
-    loc_load.0 add.12
+    # => [0, 0, weight0, 0, max_cycle_len_log, num_airs, heights_ptr, base, ids_ptr, ...]
+    dup.7 add.12
     mem_storew_le
     dropw
-    # => [max_cycle_len_log, num_airs, heights_ptr, ...]
+    # => [max_cycle_len_log, num_airs, heights_ptr, base, ids_ptr, ...]
 
-    padw mem_loadw_le.CONSTRAINT_COMPOSITION_COEFS_PTR
-    # => [alpha0, alpha1, beta0, beta1, max_cycle_len_log, ...]
-
-    # alpha, z^N.
-    movup.3 movup.3
-    push.0.0 mem_loadw_le.OOD_POINT_PTR
-    # => [z_n_0, z_n_1, z_0, z_1, alpha0, alpha1, max_cycle_len_log, ...]
-
-    # Compute z_k = z^(N / max_cycle_len) by repeated squaring.
+    # Read the OOD point and z^N once, and pair z^N with alpha for the first ACE word.
+    padw mem_loadw_le.OOD_POINT_PTR
+    mem_load.CONSTRAINT_ALPHA_HI_PTR
+    mem_load.CONSTRAINT_COMPOSITION_COEFS_PTR
+    # => [alpha(2), z_n(2), z(2), max_cycle_len_log, num_airs, heights_ptr, base, ids_ptr, ...]
+    # k squarings give z_k = z^(2^k), where k = log_trace_length - max_cycle_len_log.
     mem_load.LOG_TRACE_LENGTH_PTR
-    movup.7
-    sub
-    # => [k, z_n_0, z_n_1, z_0, z_1, alpha0, alpha1, ...]
+    movup.7 sub
+    movdn.6
+    # => [alpha(2), z_n(2), z(2), k, num_airs, heights_ptr, base, ids_ptr, ...]
+    dup.9 mem_storew_le dropw
+    # => [z_0, z_1, k, num_airs, heights_ptr, base, ids_ptr, ...]
 
-    dup.4 dup.4
-    # => [z_0, z_1, k, z_n_0, z_n_1, z_0, z_1, alpha0, alpha1, ...]
-
-    push.1
+    # A cycle spanning the full trace has k = 0 and leaves z unchanged.
+    dup.2 neq.0
     while.true
-        dup.1 dup.1
-        ext2mul
-        dup.2 sub.1 swap.3
-        push.1 neq
+        dup.1 dup.1 ext2mul
+        movup.2 sub.1 dup movdn.3
+        neq.0
     end
-
     movup.2 drop
-    # => [z_k_0, z_k_1, z_n_0, z_n_1, z_0, z_1, alpha0, alpha1, ...]
+    # => [z_k_0, z_k_1, num_airs, heights_ptr, base, ids_ptr, ...]
 
-    movup.3 movup.3
-    # => [z_n_0, z_n_1, z_k_0, z_k_1, z_0, z_1, alpha0, alpha1, ...]
-    movup.7 movup.7
-    # => [alpha0, alpha1, z_n_0, z_n_1, z_k_0, z_k_1, z_0, z_1, ...]
-
-    loc_load.0 mem_storew_le dropw
-    # => [z_k_0, z_k_1, z_0, z_1, num_airs, heights_ptr, ...]
-
-    # Store z_k with zero in the unused global-selector slot beside it.
     push.0.0 movup.3 movup.3
-    loc_load.0 add.4 mem_storew_le dropw
-    drop drop
-    # => [num_airs, heights_ptr, ...]
+    dup.6 add.4 mem_storew_le dropw
+    # => [num_airs, heights_ptr, base, ids_ptr, ...]
 
-    # AIR k's selectors use its canonical log-height cell at heights_ptr + k.
-    push.0
-    # => [k = 0, num_airs, heights_ptr]
-    dup.1 dup.1 u32gt
-    while.true
-        # => [k, num_airs, heights_ptr]
-        dup.2 dup.1 add mem_load
-        # => [h_k, k, num_airs, heights_ptr]
-        dup.1 mul.SELECTOR_STRIDE push.FIRST_SELECTOR_OFFSET add
-        # => [offset_k, h_k, k, num_airs, heights_ptr]
-        loc_load.0 movdn.2
-        # => [offset_k, h_k, stark_vars_ptr, k, num_airs, heights_ptr]
-        exec.compute_per_air_selectors
-        # => [k, num_airs, heights_ptr]
-        add.1
-        dup.1 dup.1 u32gt
+    # Visit log heights from the maximum H downwards, squaring once per height step.
+    # At height h, t = z^(2^(H - h)) and g_inv = g_H^(-2^(H - h)); ties skip the squaring loop.
+    u32assert
+    movup.3 dup movdn.2 add
+    # => [order_end, order_start, heights_ptr, base, ...]
+    dup dup.2 neq
+    if.true
+        mem_load.TRACE_DOMAIN_GENERATOR_PTR inv
+        mem_load.OOD_POINT_HI_PTR
+        mem_load.OOD_POINT_LO_PTR
+        mem_load.LOG_TRACE_LENGTH_PTR
+        # => [height, z0, z1, g_inv, cursor, start, heights_ptr, base, ...]
+        push.1
+        while.true
+            movup.4 sub.1 dup movdn.5 mem_load
+            # => [id, height, z0, z1, g_inv, cursor, start, heights_ptr, base, ...]
+            dup dup.8 add mem_load
+            dup movdn.3 movup.2 swap sub
+            # => [height_gap, id, next_height, point(2), g_inv, cursor, start, heights_ptr, base, ...]
+            movup.3 movup.4 movup.5 swap.2
+            # => [point(2), g_inv, height_gap, id, next_height, cursor, start, heights_ptr, base, ...]
+            dup.3 neq.0
+            while.true
+                dup.1 dup.1 ext2mul
+                movup.2 dup mul movdn.2
+                movup.3 sub.1 dup movdn.4 neq.0
+            end
+            movup.3 drop
+
+            # Compute this AIR's selectors without consuming the lifted domain state.
+            movup.3 mul.SELECTOR_STRIDE dup.8 add add.FIRST_SELECTOR_OFFSET
+            dup.8 swap dup.4 dup.4 dup.4
+            exec.store_lifted_selectors
+            movup.3
+            # => [next_height, z0, z1, g_inv, cursor, start, heights_ptr, base, ...]
+            dup.4 dup.6 neq
+        end
+        dropw dropw
+    else
+        dropw
     end
-    drop drop drop
 end
 
 #! Load the quad field element stored at `[addr, addr + 1]`.
@@ -152,79 +162,49 @@ proc load_quad(address: ptr<types::QuadFelt>) -> types::QuadFelt
     swap mem_load
 end
 
-#! Compute one AIR's lifted selectors in the ACE input region.
+#! Writes first-row, last-row, and transition selectors to the six cells at `out_ptr`.
 #!
-#! Procedure locals do not cross procedure boundaries, so the relation's stark-vars base
-#! is passed in and stored here rather than read from a shared constant.
-#!
-#! Input:  [out_offset, log_air, stark_vars_ptr, ...]
-#! Output: [...]
-@locals(1)
-proc compute_per_air_selectors(out_offset: u32, log_air: u8, stark_vars_ptr: types::Address)
-    movup.2 loc_store.0
-    # => [out_offset, log_air, ...]
-    swap
-    mem_load.LOG_TRACE_LENGTH_PTR
-    swap sub
-    # => [r_log, out_offset, ...]
-    dup
-    # => [r_log, saved_r_log, out_offset, ...]
-
-    push.OOD_POINT_PTR add.2 exec.load_quad
-    movup.2
-    # => [r_log, z_0, z_1, saved_r_log, out_offset, ...]
-    dup push.0 neq
-    while.true
-        movdn.2
-        dup.1 dup.1 ext2mul
-        movup.2 sub.1
-        dup push.0 neq
-    end
-    drop
-    # => [z_lift_0, z_lift_1, saved_r_log, out_offset, ...]
-
-    loc_load.0 add.2 exec.load_quad
+#! For lifted point t and inverse generator g_inv, these are (z^N - 1)/(t - 1),
+#! (z^N - 1)/(t - g_inv), and t - g_inv. The shared z^N input is at `stark_vars_ptr + 2`.
+#! Both divisions check their inverses and reject a zero denominator.
+proc store_lifted_selectors(
+    point: types::QuadFelt,
+    generator_inverse: felt,
+    out_ptr: types::Address,
+    stark_vars_ptr: types::Address,
+)
+    movup.4 add.2 exec.load_quad
     sub.1
-    # => [van_0, van_1, z_lift_0, z_lift_1, saved_r_log, out_offset, ...]
+    # => [van_0, van_1, z_lift_0, z_lift_1, g_air_inv, out_ptr, ...]
 
     dup.3 dup.3
     sub.1 ext2inv
     dup.3 dup.3 ext2mul
-    # => [if_0, if_1, van_0, van_1, z_lift_0, z_lift_1, saved_r_log, out_offset, ...]
-    dup.7 loc_load.0 add mem_store
-    dup.6 loc_load.0 add.1 add mem_store
-    # => [van_0, van_1, z_lift_0, z_lift_1, saved_r_log, out_offset, ...]
+    # => [if_0, if_1, van_0, van_1, z_lift_0, z_lift_1, g_air_inv, out_ptr, ...]
+    dup.7 mem_store
+    dup.6 add.1 mem_store
+    # => [van_0, van_1, z_lift_0, z_lift_1, g_air_inv, out_ptr, ...]
 
-    mem_load.TRACE_DOMAIN_GENERATOR_PTR
-    inv
-    movup.5
-    # => [r_log, g_max_inv, van_0, van_1, z_lift_0, z_lift_1, out_offset, ...]
-    dup push.0 neq
-    while.true
-        swap dup mul
-        swap sub.1
-        dup push.0 neq
-    end
-    drop
-    # => [g_air_inv, van_0, van_1, z_lift_0, z_lift_1, out_offset, ...]
+    movup.4
+    # => [g_air_inv, van_0, van_1, z_lift_0, z_lift_1, out_ptr, ...]
 
     movup.3 swap sub
     movup.3
     swap
-    # => [it_0, it_1, van_0, van_1, out_offset, ...]
+    # => [it_0, it_1, van_0, van_1, out_ptr, ...]
 
     dup.1 dup.1
     ext2inv
     movup.5 movup.5
     ext2mul
-    # => [il_0, il_1, it_0, it_1, out_offset, ...]
+    # => [il_0, il_1, it_0, it_1, out_ptr, ...]
 
-    dup.4 loc_load.0 add.2 add mem_store
-    dup.3 loc_load.0 add.3 add mem_store
-    # => [it_0, it_1, out_offset, ...]
+    dup.4 add.2 mem_store
+    dup.3 add.3 mem_store
+    # => [it_0, it_1, out_ptr, ...]
 
-    dup.2 loc_load.0 add.4 add mem_store
-    dup.1 loc_load.0 add.5 add mem_store
-    # => [out_offset, ...]
+    dup.2 add.4 mem_store
+    dup.1 add.5 mem_store
+    # => [out_ptr, ...]
     drop
 end

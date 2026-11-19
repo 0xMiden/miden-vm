@@ -1,0 +1,18 @@
+# Per-procedure histogram fixture. `double` and `square` tie in cycle count, exercising the
+# tie-break by procedure name in the report.
+proc double
+    dup
+    add
+end
+
+proc square
+    dup
+    mul
+end
+
+begin
+    push.5
+    exec.double
+    exec.square
+    drop
+end

@@ -1,0 +1,9 @@
+proc leaf
+    push.3 mul
+end
+
+begin
+    exec.leaf
+    exec.leaf
+    push.1 add
+end

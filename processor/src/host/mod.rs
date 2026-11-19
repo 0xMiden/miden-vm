@@ -1,5 +1,5 @@
-use alloc::{sync::Arc, vec::Vec};
-use core::future::Future;
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use core::{error::Error, future::Future};
 
 use miden_core::{
     Felt, Word,
@@ -22,6 +22,9 @@ use handlers::{EventError, TraceError};
 
 mod mast_forest_store;
 pub use mast_forest_store::{LoadedMastForest, MastForestStore, MemMastForestStore};
+
+/// An error returned when a host cannot retrieve a MAST forest.
+pub type MastForestLoadError = Box<dyn Error + Send + Sync + 'static>;
 
 // ADVICE MAP MUTATIONS
 // ================================================================================================
@@ -115,9 +118,13 @@ impl<T: BaseHost + ?Sized> BaseHost for &mut T {
 
 /// Defines a synchronous interface by which the VM can interact with the host during execution.
 pub trait SyncHost: BaseHost {
-    /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
-    /// this digest could not be found in this host.
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<LoadedMastForest>;
+    /// Returns the forest for the requested procedure root.
+    ///
+    /// `Ok(None)` means the procedure was not found. `Err` preserves a retrieval failure.
+    fn get_mast_forest(
+        &self,
+        node_digest: &Word,
+    ) -> Result<Option<LoadedMastForest>, MastForestLoadError>;
 
     /// Handles the event emitted from the VM and provides advice mutations to be applied to
     /// the advice provider.
@@ -155,14 +162,64 @@ pub trait SyncHost: BaseHost {
 ///
 /// This mirrors the historic async host surface while allowing the sync-first core to depend on
 /// [`BaseHost`].
+/// # Example
+///
+/// Return retrieval errors from the host, then inspect their source after execution.
+///
+/// ```
+/// use miden_processor::{
+///     BaseHost, ExecutionError, FastProcessor, FutureMaybeSend, Host,
+///     LoadedMastForest, MastForestLoadError, ProcessorState, StackInputs, Word,
+///     advice::AdviceMutation, event::EventError,
+/// };
+/// # use std::sync::Arc;
+/// # use miden_debug_types::{Location, SourceFile, SourceSpan};
+///
+/// struct DatabaseHost;
+/// # impl BaseHost for DatabaseHost {
+/// #     fn get_label_and_source_file(&self, _: &Location) -> (SourceSpan, Option<Arc<SourceFile>>) {
+/// #         (SourceSpan::UNKNOWN, None)
+/// #     }
+/// # }
+///
+/// impl Host for DatabaseHost {
+///     fn get_mast_forest(&self, _root: &Word)
+///         -> impl FutureMaybeSend<Result<Option<LoadedMastForest>, MastForestLoadError>> {
+///         async { Err(std::io::Error::other("database unavailable").into()) }
+///     }
+/// #     fn on_event(&mut self, _: &ProcessorState<'_>)
+/// #         -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
+/// #         async { Ok(Vec::new()) }
+/// #     }
+/// }
+///
+/// # #[tokio::main(flavor = "current_thread")]
+/// # async fn main() {
+/// # let program = miden_assembly::Assembler::default()
+/// #     .assemble_program("program", "begin dynexec end").unwrap().unwrap_program();
+/// let mut host = DatabaseHost;
+/// let error = FastProcessor::new(StackInputs::default())
+///     .execute(&program, &mut host).await.unwrap_err();
+/// let ExecutionError::MastForestError { error, .. } = error else {
+///     panic!("expected the database error");
+/// };
+/// assert_eq!(
+///     error.downcast_ref::<std::io::Error>().unwrap().to_string(),
+///     "database unavailable",
+/// );
+/// # }
+/// ```
 pub trait Host: BaseHost {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
-    /// this digest could not be found in this host.
-    fn get_mast_forest(&self, node_digest: &Word)
-    -> impl FutureMaybeSend<Option<LoadedMastForest>>;
+    /// Returns the forest for the requested procedure root.
+    ///
+    /// `Ok(None)` means the procedure was not found. `Err` preserves a retrieval failure.
+    fn get_mast_forest(
+        &self,
+        node_digest: &Word,
+    ) -> impl FutureMaybeSend<Result<Option<LoadedMastForest>, MastForestLoadError>>;
 
     /// Handles the event emitted from the VM and provides advice mutations to be applied to
     /// the advice provider.
@@ -208,7 +265,7 @@ where
     fn get_mast_forest(
         &self,
         node_digest: &Word,
-    ) -> impl FutureMaybeSend<Option<LoadedMastForest>> {
+    ) -> impl FutureMaybeSend<Result<Option<LoadedMastForest>, MastForestLoadError>> {
         let result = SyncHost::get_mast_forest(self, node_digest);
         async move { result }
     }
