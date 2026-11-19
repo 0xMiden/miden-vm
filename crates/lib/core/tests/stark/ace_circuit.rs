@@ -1,7 +1,7 @@
 //! Generated ACE artifacts, protocol constants, and input-region bounds.
 
 use miden_air::vm::config;
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::Felt;
 #[cfg(feature = "constraints-tools")]
 use miden_core_lib::constraints_regen;
 
@@ -49,7 +49,9 @@ fn quotient_recomposition_constants_match_derivation() {
 
     let log_quotient_degree = miden_air::vm::AIRS
         .iter()
-        .map(miden_stark::log_quotient_degree::<Felt, QuadFelt, _>)
+        .map(|air| {
+            miden_stark::log_quotient_degree(air).expect("canonical quotient allocation is valid")
+        })
         .max()
         .expect("the Miden AIR set is non-empty");
     let expected = miden_stark::quotient_recomposition_inputs::<Felt>(

@@ -1,30 +1,17 @@
 use miden_ace::{
-    AceError, EXT_DEGREE, InputKey, InputLayout,
+    AceError, EXT_DEGREE, InputKey,
     compiler::{
-        AceConfig, AceDag, LayoutKind, NodeKind, PeriodicColumnData, build_ace_dag_for_air,
-        build_verifier_dag, emit_circuit,
+        AceConfig, LayoutKind, build_ace_dag_for_air, emit_circuit,
         testing::{
-            eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient, fill_inputs,
+            eval_dag, eval_native_constraints, eval_periodic_values, eval_quotient, fill_inputs,
             zps_for_chunk,
         },
     },
 };
-use miden_air_definitions::vm::{AIRS, BaseAir, LiftedAir, MIDEN_AIR_COUNT, MidenAir};
+use miden_air_definitions::vm::{AIRS, MIDEN_AIR_COUNT, MidenAir};
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{Field, PrimeCharacteristicRing};
-use miden_stark::air::symbolic::{AirLayout, SymbolicAirBuilder};
-
-fn air_layout_for(air: MidenAir, layout: &InputLayout) -> AirLayout {
-    AirLayout {
-        preprocessed_width: BaseAir::<Felt>::preprocessed_width(&air),
-        main_width: layout.counts.width,
-        num_public_values: layout.counts.num_public,
-        permutation_width: layout.counts.aux_width,
-        num_permutation_challenges: layout.counts.num_randomness,
-        num_permutation_values: LiftedAir::<Felt, QuadFelt>::num_aux_values(&air),
-        num_periodic_columns: air.periodic_columns().len(),
-    }
-}
+use miden_stark::air::LiftedAir;
 
 /// The DAG's evaluation on arbitrary inputs must equal an independently
 /// computed reference: folded constraints minus recomposed quotient times
@@ -39,20 +26,11 @@ fn assert_dag_matches_manual_eval(air: MidenAir) {
     let layout = artifacts.layout.clone();
     let inputs: Vec<QuadFelt> = fill_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
-    let periodic_columns = air.periodic_columns();
-    let periodic_values = eval_periodic_values::<Felt, QuadFelt>(&periodic_columns, z_k);
+    let spec = air.spec();
+    let periodic_columns = &spec.periodic_columns;
+    let periodic_values = eval_periodic_values::<Felt, QuadFelt>(periodic_columns, z_k);
 
-    let mut builder = SymbolicAirBuilder::<Felt, QuadFelt>::new(air_layout_for(air, &layout));
-    <MidenAir as LiftedAir<Felt, QuadFelt>>::eval(&air, &mut builder, &());
-
-    let acc = eval_folded_constraints(
-        &builder.base_constraints(),
-        &builder.extension_constraints(),
-        &builder.constraint_layout(),
-        &inputs,
-        &layout,
-        &periodic_values,
-    );
+    let acc = eval_native_constraints(&air, &spec, &inputs, &layout, &periodic_values);
     let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
     let vanishing = z_pow_n - QuadFelt::ONE;
     let expected = acc - eval_quotient::<Felt, QuadFelt>(&layout, &inputs) * vanishing;
@@ -175,24 +153,21 @@ fn multi_air_ace_circuit_has_aligned_trace_regions_and_per_air_slots() {
     const LMCS_ALIGNMENT: usize = 8;
     let expected_preprocessed_width = AIRS
         .iter()
-        .map(|air| BaseAir::<Felt>::preprocessed_width(air).next_multiple_of(LMCS_ALIGNMENT))
+        .map(|air| air.spec().preprocessed_width().next_multiple_of(LMCS_ALIGNMENT))
         .sum::<usize>();
     let expected_main_width = AIRS
         .iter()
-        .map(|air| BaseAir::<Felt>::width(air).next_multiple_of(LMCS_ALIGNMENT))
+        .map(|air| air.spec().main_width.next_multiple_of(LMCS_ALIGNMENT))
         .sum::<usize>();
     // Aux-trace widths concatenate each per-AIR coordinate region after LMCS
     // alignment, then convert back to extension-field columns.
     let expected_aux_width = AIRS
         .iter()
         .map(|air| {
-            (LiftedAir::<Felt, QuadFelt>::aux_width(air) * EXT_DEGREE)
-                .next_multiple_of(LMCS_ALIGNMENT)
-                / EXT_DEGREE
+            (air.spec().aux_width * EXT_DEGREE).next_multiple_of(LMCS_ALIGNMENT) / EXT_DEGREE
         })
         .sum::<usize>();
-    let expected_aux_boundary =
-        AIRS.iter().map(LiftedAir::<Felt, QuadFelt>::num_aux_values).sum::<usize>();
+    let expected_aux_boundary = AIRS.iter().map(|air| air.spec().num_exports).sum::<usize>();
 
     assert_eq!(layout.counts.preprocessed_width, expected_preprocessed_width);
     assert_eq!(
@@ -218,75 +193,6 @@ fn multi_air_ace_circuit_has_aligned_trace_regions_and_per_air_slots() {
         }
     }
     assert!(layout.index(InputKey::IsFirstAir(MIDEN_AIR_COUNT)).is_none());
-}
-
-/// A DAG node relabeled by index: `NodeId` embeds a per-builder dag id, so
-/// nodes from two builders can only be compared through their indices.
-#[derive(Debug, PartialEq)]
-enum Norm {
-    Input(InputKey),
-    Constant(QuadFelt),
-    Add(usize, usize),
-    Sub(usize, usize),
-    Mul(usize, usize),
-    Neg(usize),
-}
-
-fn normalized(dag: &AceDag<QuadFelt>) -> (Vec<Norm>, usize) {
-    let nodes = dag
-        .nodes
-        .iter()
-        .map(|node| match *node {
-            NodeKind::Input(key) => Norm::Input(key),
-            NodeKind::Constant(value) => Norm::Constant(value),
-            NodeKind::Add(a, b) => Norm::Add(a.index(), b.index()),
-            NodeKind::Sub(a, b) => Norm::Sub(a.index(), b.index()),
-            NodeKind::Mul(a, b) => Norm::Mul(a.index(), b.index()),
-            NodeKind::Neg(a) => Norm::Neg(a.index()),
-        })
-        .collect();
-    (nodes, dag.root().index())
-}
-
-/// Node-for-node differential: the IR-driven lowering must replicate the
-/// symbolic-tree lowering's `DagBuilder` interning order exactly (the order is
-/// digest-visible). Compares the complete single-AIR verifier DAGs — periodic
-/// evaluation, constraint bodies, alpha fold, quotient wrapping — and localizes
-/// the first mismatching node.
-#[test]
-fn ir_lowering_matches_symbolic_lowering_node_for_node() {
-    let config = AceConfig {
-        num_quotient_chunks: 8,
-        layout: LayoutKind::Masm,
-    };
-    for air in AIRS {
-        // Production path: handwritten capture -> IR -> DAG.
-        let artifacts = build_ace_dag_for_air(&air, config).unwrap();
-
-        // Anchor: the original symbolic-tree lowering over the same constraints.
-        let mut builder =
-            SymbolicAirBuilder::<Felt, QuadFelt>::new(air_layout_for(air, &artifacts.layout));
-        <MidenAir as LiftedAir<Felt, QuadFelt>>::eval(&air, &mut builder, &());
-        let periodic_columns = BaseAir::<Felt>::periodic_columns(&air);
-        let periodic_data = (!periodic_columns.is_empty())
-            .then(|| PeriodicColumnData::from_periodic_columns::<Felt>(periodic_columns.to_vec()));
-        let tree_dag = build_verifier_dag(
-            &builder.base_constraints(),
-            &builder.extension_constraints(),
-            &builder.constraint_layout(),
-            &artifacts.layout,
-            periodic_data.as_ref(),
-            periodic_columns.iter().map(Vec::len).max().unwrap_or(1),
-        );
-
-        let (tree_nodes, tree_root) = normalized(&tree_dag);
-        let (ir_nodes, ir_root) = normalized(&artifacts.dag);
-        for (i, (tree, ir)) in tree_nodes.iter().zip(&ir_nodes).enumerate() {
-            assert_eq!(tree, ir, "first mismatch at node {i}");
-        }
-        assert_eq!(tree_nodes.len(), ir_nodes.len(), "node counts differ");
-        assert_eq!(tree_root, ir_root, "roots differ");
-    }
 }
 
 /// The recursive verifier's canonical entry point must be a thin wrapper over the canonical

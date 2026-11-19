@@ -164,13 +164,13 @@ mod tests {
 
         use miden_air_definitions::precompiles as source;
         use miden_core::field::QuadFelt;
-        use miden_stark::air::{MultiAir, Statement};
+        use miden_stark::air::{DirectKernel, MultiAir, Statement};
 
         // Setup must be reconstructed from authored AIRs, independently of the production
         // evaluator adapter. Preprocessing only needs this list, not relation hook logic.
-        struct AuthoredAirs([source::ChipletAir; source::NUM_CHIPLETS]);
+        struct AuthoredAirs([DirectKernel<source::ChipletAir>; source::NUM_CHIPLETS]);
         impl MultiAir<Felt, QuadFelt> for AuthoredAirs {
-            type Air = source::ChipletAir;
+            type Air = DirectKernel<source::ChipletAir>;
 
             fn airs(&self) -> &[Self::Air] {
                 &self.0
@@ -178,7 +178,9 @@ mod tests {
         }
 
         let statement = Statement::<Felt, QuadFelt, _>::new(
-            AuthoredAirs(source::ChipletAir::all()),
+            AuthoredAirs(
+                source::ChipletAir::all().map(|source| DirectKernel::new(source).unwrap()),
+            ),
             vec![(
                 source::ChipletAir::TRANSCRIPT_EVAL_INDEX,
                 vec![Felt::ZERO; source::logup::NUM_PUBLIC_VALUES],
@@ -194,7 +196,8 @@ mod tests {
         assert_eq!(
             <[u8; 32]>::from(
                 miden_stark::Preprocessed::build(&statement, &blake3_config)
-                    .unwrap()
+                    .expect("valid authored fixed setup")
+                    .expect("chiplet stack declares a fixed table")
                     .commitment(),
             ),
             PVM_BLAKE3_PREPROCESSED_COMMITMENT,
@@ -205,7 +208,8 @@ mod tests {
         assert_eq!(
             <[u64; 4]>::from(
                 miden_stark::Preprocessed::build(&statement, &keccak_config)
-                    .unwrap()
+                    .expect("valid authored fixed setup")
+                    .expect("chiplet stack declares a fixed table")
                     .commitment(),
             ),
             PVM_KECCAK_PREPROCESSED_COMMITMENT,
@@ -217,7 +221,10 @@ mod tests {
             miden_core::program::domain::STARK_TRANSCRIPT,
         );
         let commitment = <[u64; 4]>::from(
-            miden_stark::Preprocessed::build(&statement, &config).unwrap().commitment(),
+            miden_stark::Preprocessed::build(&statement, &config)
+                .expect("valid authored fixed setup")
+                .expect("chiplet stack declares a fixed table")
+                .commitment(),
         );
         assert_eq!(commitment, PVM_PREPROCESSED_COMMITMENT, "{UPDATE_HINT}");
     }

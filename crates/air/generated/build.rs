@@ -1,28 +1,29 @@
 use std::{env, fs, path::PathBuf};
 
-use miden_air_definitions::{
-    compiler::vm::{CapturedAir, CompiledRelation, LayoutKind},
-    vm::AIRS,
+use miden_air_definitions::compiler::vm::{CompiledRelation, LayoutKind, capture_vm_airs};
+use miden_constraint_compiler::backend::{
+    rust_descriptor::{self, AirDescriptorEmitter},
+    rust_eval::{AirEvaluator, emit_native_optimized_module},
 };
-use miden_constraint_compiler::backend::rust_eval::{AirEvaluator, emit_optimized_module};
 
 #[path = "build/precompiles.rs"]
 mod precompiles;
+#[path = "build/preparation_pilot.rs"]
+mod preparation_pilot;
 
 fn main() {
     precompiles::generate();
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=build/preparation_pilot.rs");
+    println!("cargo:rerun-if-changed=build/preparation_fixture.rs");
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo provides OUT_DIR"));
+    preparation_pilot::generate(&out);
     let write = |name: &str, contents: String| {
         let path = out.join(name);
         fs::write(&path, contents)
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
     };
-    let captured: Vec<_> = AIRS
-        .iter()
-        .copied()
-        .map(|air| (air, CapturedAir::new(&air).expect("capture VM AIR")))
-        .collect();
+    let captured = capture_vm_airs().expect("capture canonical VM sources");
     let labels: Vec<_> =
         captured.iter().map(|(air, _)| format!("MidenAir::{}", air.name())).collect();
     let evals: Vec<_> = captured
@@ -33,22 +34,20 @@ fn main() {
             air_label: label,
             graph: captured.graph(),
             constraints: captured.constraints(),
+            descriptor: captured.descriptor(),
         })
         .collect();
-    write("evaluators.rs", emit_optimized_module("", &evals));
-    let degree_arms = captured
+    let descriptors: Vec<_> = captured
         .iter()
-        .map(|(air, captured)| {
-            format!("source::MidenAir::{} => {:?},", air.name(), captured.degrees())
+        .zip(&labels)
+        .map(|((air, captured), label)| AirDescriptorEmitter {
+            name: air.file_token(),
+            air_label: label,
+            descriptor: captured.descriptor(),
         })
-        .collect::<String>();
-    write(
-        "degrees.rs",
-        format!(
-            "fn generated_degrees(air: MidenAir) -> ConstraintDegrees {{ match air.0 {{ \
-             {degree_arms} }} }}"
-        ),
-    );
+        .collect();
+    write("native_evaluators.rs", emit_native_optimized_module("", &evals));
+    write("native_descriptors.rs", rust_descriptor::emit_module("", &descriptors));
     let airs: Vec<_> = captured.iter().map(|(_, air)| air).collect();
     let relation = CompiledRelation::from_captured(&airs, miden_crypto::hash::eidos::BLOCK_LEN)
         .expect("compile VM relation");

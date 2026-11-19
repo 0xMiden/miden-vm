@@ -16,8 +16,7 @@ pub mod trace;
 mod tests;
 
 pub use airs::{
-    And8LookupAir, ChipletsAir, CoreAir, EidosCompressionAir, LOGUP_AUX_TRACE_WIDTH, MidenAir,
-    MidenAirBuilder,
+    And8LookupAir, ChipletsAir, CoreAir, EidosCompressionAir, MidenAir, NativeMidenAirBuilder,
 };
 pub use constraints::{
     and8_lookup,
@@ -47,10 +46,7 @@ pub use miden_core::{
 };
 pub use miden_stark::{
     StarkConfig,
-    air::{
-        AirBuilder, BaseAir, ConstraintCounts, ConstraintDegrees, ExtensionBuilder, LiftedAir,
-        LiftedAirBuilder, MultiAir, PermutationAirBuilder, ProverStatement, Statement,
-    },
+    air::{MultiAir, ProverStatement, Statement},
     debug,
     pcs::PcsParams,
 };

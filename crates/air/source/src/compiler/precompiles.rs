@@ -7,7 +7,7 @@ use miden_ace::{
     compiler::{AceCircuit, CapturedAir, CompiledRelation, LayoutKind},
 };
 use miden_core::field::QuadFelt;
-use p3_security::budget::AirShape;
+use miden_stark::security::AirShape;
 
 use crate::{
     precompiles::{ace::PvmRecursiveAceCircuit, geometry::lookup_shape, relation::AIRS},
@@ -26,7 +26,8 @@ impl CapturedPvmRelation {
 
     pub fn new() -> Result<Self, AceError> {
         Ok(Self {
-            airs: AIRS.iter().map(CapturedAir::new).collect::<Result<_, _>>()?,
+            // Every backend consumes this one authored capture in canonical instance order.
+            airs: AIRS.iter().map(CapturedAir::new_native).collect::<Result<_, _>>()?,
         })
     }
 

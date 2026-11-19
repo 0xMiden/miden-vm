@@ -1,7 +1,6 @@
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::PrimeCharacteristicRing;
 
-pub use crate::compiler::testing::eval_folded_constraints;
 use crate::{
     InputLayout,
     compiler::dag::{NodeId, NodeKind},

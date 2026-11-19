@@ -1,10 +1,12 @@
+use alloc::vec::Vec;
+
 use miden_ace::{
     AceError,
     compiler::{AceCircuit, AceConfig},
 };
 use miden_core::field::QuadFelt;
 
-use crate::vm::AIRS;
+use super::{CompiledRelation, capture_vm_airs};
 
 /// Per-AIR preprocessed, main, and aux regions are padded to this width before concatenation.
 const LMCS_ALIGNMENT: usize = 8;
@@ -17,7 +19,14 @@ const LMCS_ALIGNMENT: usize = 8;
 pub fn build_canonical_multi_air_ace_circuit(
     config: AceConfig,
 ) -> Result<AceCircuit<QuadFelt>, AceError> {
-    miden_ace::compiler::build_canonical_multi_air_ace_circuit(&AIRS, config, LMCS_ALIGNMENT)
+    let captured = capture_vm_airs()?;
+    let airs: Vec<_> = captured.iter().map(|(_, air)| air).collect();
+    let relation = CompiledRelation::with_quotient_chunks(
+        &airs,
+        LMCS_ALIGNMENT,
+        Some(config.num_quotient_chunks),
+    )?;
+    relation.build_circuit(config.layout)
 }
 
 #[cfg(test)]

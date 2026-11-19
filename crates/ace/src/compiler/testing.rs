@@ -7,15 +7,12 @@
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
-use miden_stark::air::symbolic::{
-    BaseEntry, BaseLeaf, ConstraintLayout, ExtEntry, ExtLeaf, SymbolicExpression,
-    SymbolicExpressionExt, eval_air,
-};
+use miden_stark::air;
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
 
 use crate::{AceError, InputCounts, InputKey, InputLayout, compiler::AceDag};
 
-/// Evaluates a multi-AIR relation from symbolic constraints, independently of DAG lowering.
+/// Evaluates a multi-AIR relation directly from native sources, independently of DAG lowering.
 ///
 /// Inputs use canonical AIR offsets with each trace region padded to `trace_alignment` base
 /// felts. Selectors are per-AIR; periodic columns use the largest period across the AIR set.
@@ -30,23 +27,21 @@ pub fn eval_multi_air_constraints<A>(
     trace_alignment: usize,
 ) -> QuadFelt
 where
-    A: miden_stark::air::LiftedAir<Felt, QuadFelt>,
+    A: air::LiftedAir<F = Felt>,
 {
-    use miden_stark::air::symbolic::SymbolicAirBuilder;
-
-    let periods: Vec<_> = airs.iter().map(|air| air.periodic_columns()).collect();
+    let specs: Vec<_> = airs.iter().map(air::LiftedAir::spec).collect();
     let shared_period =
-        periods.iter().flat_map(|cols| cols.iter().map(Vec::len)).max().unwrap_or(1);
+        specs.iter().map(air::AirSpec::max_periodic_length).max().unwrap_or(0).max(1);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
     let (mut public, mut preprocessed, mut main, mut aux, mut boundary) = (0, 0, 0, 0, 0);
     let mut roots = Vec::with_capacity(airs.len());
-    for (i, air) in airs.iter().enumerate() {
+    for (i, (air, spec)) in airs.iter().zip(&specs).enumerate() {
         let counts = InputCounts {
-            preprocessed_width: air.preprocessed_width(),
-            width: air.width(),
-            aux_width: air.aux_width(),
-            num_aux_boundary: air.num_aux_values(),
-            num_public: air.num_public_values(),
+            preprocessed_width: spec.preprocessed_width(),
+            width: spec.main_width,
+            aux_width: spec.aux_width,
+            num_aux_boundary: spec.num_exports,
+            num_public: spec.num_public_values,
             num_randomness: layout.counts.num_randomness,
             num_quotient_chunks: layout.counts.num_quotient_chunks,
         };
@@ -74,19 +69,12 @@ where
         ] {
             values[local.index(dst).unwrap()] = inputs[layout.index(src).unwrap()];
         }
-        let mut builder = SymbolicAirBuilder::<Felt, QuadFelt>::new(air.air_layout());
-        eval_air(air, &mut builder);
-        let period = periods[i].iter().map(Vec::len).max().unwrap_or(1);
-        let periodic_values =
-            eval_periodic_values(&periods[i], z_k.exp_u64((shared_period / period) as u64));
-        roots.push(eval_folded_constraints(
-            &builder.base_constraints(),
-            &builder.extension_constraints(),
-            &builder.constraint_layout(),
-            &values,
-            &local,
-            &periodic_values,
-        ));
+        let period = spec.max_periodic_length().max(1);
+        let periodic_values = eval_periodic_values(
+            &spec.periodic_columns,
+            z_k.exp_u64((shared_period / period) as u64),
+        );
+        roots.push(eval_native_constraints(air, spec, &values, &local, &periodic_values));
         public += counts.num_public;
         preprocessed += counts.preprocessed_width.next_multiple_of(trace_alignment);
         main += counts.width.next_multiple_of(trace_alignment);
@@ -96,6 +84,110 @@ where
     let folded = proof_order.iter().fold(QuadFelt::ZERO, |acc, &i| acc * beta + roots[i]);
     let vanishing = inputs[layout.index(InputKey::ZPowN).unwrap()] - QuadFelt::ONE;
     folded - eval_quotient::<Felt, QuadFelt>(layout, inputs) * vanishing
+}
+
+/// Direct scalar reference for one snapshotted source; does not use compiler IR or DAG nodes.
+///
+/// Auxiliary coordinate inputs are QuadFelt values, so reconstruction multiplies each whole
+/// coordinate by its extension basis element. The source emits once into the global Horner fold.
+pub fn eval_native_constraints<A: air::LiftedAir<F = Felt>>(
+    air: &A,
+    spec: &air::AirSpec<'_, Felt>,
+    inputs: &[QuadFelt],
+    layout: &InputLayout,
+    periodic_values: &[QuadFelt],
+) -> QuadFelt {
+    assert_eq!(spec.num_challenges, 2, "ACE source reference requires two challenges");
+    let main = [0, 1].map(|offset| {
+        (0..spec.main_width)
+            .map(|index| inputs[layout.index(InputKey::Main { offset, index }).unwrap()])
+            .collect::<Vec<_>>()
+    });
+    let preprocessed = [0, 1].map(|offset| {
+        (0..spec.preprocessed_width())
+            .map(|index| inputs[layout.index(InputKey::Preprocessed { offset, index }).unwrap()])
+            .collect::<Vec<_>>()
+    });
+    let basis = <QuadFelt as miden_crypto::field::BasedVectorSpace<Felt>>::ith_basis_element(1)
+        .expect("quadratic extension basis");
+    let auxiliary = [0, 1].map(|offset| {
+        (0..spec.aux_width)
+            .map(|index| {
+                let c0 =
+                    inputs[layout.index(InputKey::AuxCoord { offset, index, coord: 0 }).unwrap()];
+                let c1 =
+                    inputs[layout.index(InputKey::AuxCoord { offset, index, coord: 1 }).unwrap()];
+                c0 + basis * c1
+            })
+            .collect::<Vec<_>>()
+    });
+    let public_values: Vec<_> = (0..spec.num_public_values)
+        .map(|index| inputs[layout.index(InputKey::Public(index)).unwrap()])
+        .collect();
+    let challenges = [
+        inputs[layout.index(InputKey::AuxRandAlpha).unwrap()],
+        inputs[layout.index(InputKey::AuxRandBeta).unwrap()],
+    ];
+    let exports: Vec<_> = (0..spec.num_exports)
+        .map(|index| inputs[layout.index(InputKey::AuxBusBoundary(index)).unwrap()])
+        .collect();
+    let frame = air::AirFrame {
+        main: air::Rows { current: &main[0], next: &main[1] },
+        preprocessed: air::Rows {
+            current: &preprocessed[0],
+            next: &preprocessed[1],
+        },
+        aux: air::Rows {
+            current: &auxiliary[0],
+            next: &auxiliary[1],
+        },
+        periodic: periodic_values,
+        selectors: air::Selectors {
+            first: inputs[layout.index(InputKey::IsFirst).unwrap()],
+            last: inputs[layout.index(InputKey::IsLast).unwrap()],
+            transition: inputs[layout.index(InputKey::IsTransition).unwrap()],
+        },
+    };
+    let mut folder = ReferenceFolder {
+        alpha: inputs[layout.index(InputKey::Alpha).unwrap()],
+        accumulator: QuadFelt::ZERO,
+    };
+    air::LiftedAir::eval(
+        air,
+        &frame,
+        air::UniformInputs {
+            public_values: &public_values,
+            challenges: &challenges,
+            exports: &exports,
+        },
+        &mut folder,
+    );
+    folder.accumulator
+}
+
+struct ReferenceFolder {
+    alpha: QuadFelt,
+    accumulator: QuadFelt,
+}
+
+impl ReferenceFolder {
+    fn fold(&mut self, value: QuadFelt) {
+        self.accumulator = self.accumulator * self.alpha + value;
+    }
+}
+
+impl air::LiftedAirBuilder for ReferenceFolder {
+    type F = Felt;
+    type Expr = QuadFelt;
+    type ExtExpr = QuadFelt;
+
+    fn emit_base(&mut self, value: QuadFelt, _meta: air::ConstraintMeta<'_>) {
+        self.fold(value);
+    }
+
+    fn emit_ext(&mut self, value: QuadFelt, _meta: air::ConstraintMeta<'_>) {
+        self.fold(value);
+    }
 }
 
 /// Deterministic input filler for layout-sized buffers.
@@ -148,161 +240,6 @@ where
             acc
         })
         .collect()
-}
-
-/// Evaluate a base-field symbolic expression at concrete inputs.
-pub fn eval_base_expr<F, EF>(
-    expr: &SymbolicExpression<F>,
-    inputs: &[EF],
-    layout: &InputLayout,
-    periodic_values: &[EF],
-) -> EF
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    match expr {
-        SymbolicExpression::Leaf(leaf) => match leaf {
-            BaseLeaf::Variable(v) => match v.entry {
-                BaseEntry::Main { offset } => {
-                    let key = InputKey::Main { offset, index: v.index };
-                    inputs[layout.index(key).unwrap()]
-                },
-                BaseEntry::Preprocessed { offset } => {
-                    let key = InputKey::Preprocessed { offset, index: v.index };
-                    inputs[layout.index(key).unwrap()]
-                },
-                BaseEntry::Public => {
-                    let key = InputKey::Public(v.index);
-                    inputs[layout.index(key).unwrap()]
-                },
-                BaseEntry::Periodic => periodic_values[v.index],
-            },
-            BaseLeaf::IsFirstRow => inputs[layout.index(InputKey::IsFirst).unwrap()],
-            BaseLeaf::IsLastRow => inputs[layout.index(InputKey::IsLast).unwrap()],
-            BaseLeaf::IsTransition => inputs[layout.index(InputKey::IsTransition).unwrap()],
-            BaseLeaf::Constant(c) => EF::from(*c),
-        },
-        SymbolicExpression::Add { x, y, .. } => {
-            eval_base_expr::<F, EF>(x, inputs, layout, periodic_values)
-                + eval_base_expr::<F, EF>(y, inputs, layout, periodic_values)
-        },
-        SymbolicExpression::Sub { x, y, .. } => {
-            eval_base_expr::<F, EF>(x, inputs, layout, periodic_values)
-                - eval_base_expr::<F, EF>(y, inputs, layout, periodic_values)
-        },
-        SymbolicExpression::Mul { x, y, .. } => {
-            eval_base_expr::<F, EF>(x, inputs, layout, periodic_values)
-                * eval_base_expr::<F, EF>(y, inputs, layout, periodic_values)
-        },
-        SymbolicExpression::Neg { x, .. } => {
-            -eval_base_expr::<F, EF>(x, inputs, layout, periodic_values)
-        },
-    }
-}
-
-/// Evaluate an extension-field symbolic expression at concrete inputs.
-pub fn eval_ext_expr<F, EF>(
-    expr: &SymbolicExpressionExt<F, EF>,
-    inputs: &[EF],
-    layout: &InputLayout,
-    periodic_values: &[EF],
-) -> EF
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    match expr {
-        SymbolicExpressionExt::Leaf(leaf) => match leaf {
-            ExtLeaf::Base(base_expr) => {
-                eval_base_expr::<F, EF>(base_expr, inputs, layout, periodic_values)
-            },
-            ExtLeaf::ExtVariable(v) => match v.entry {
-                ExtEntry::Permutation { offset } => {
-                    let mut acc = EF::ZERO;
-                    for coord in 0..EF::DIMENSION {
-                        let basis = EF::ith_basis_element(coord).unwrap();
-                        let key = InputKey::AuxCoord { offset, index: v.index, coord };
-                        let value = inputs[layout.index(key).unwrap()];
-                        acc += basis * value;
-                    }
-                    acc
-                },
-                ExtEntry::Challenge => {
-                    let alpha = inputs[layout.index(InputKey::AuxRandAlpha).unwrap()];
-                    let beta = inputs[layout.index(InputKey::AuxRandBeta).unwrap()];
-                    match v.index {
-                        0 => alpha,
-                        1 => beta,
-                        _ => panic!(
-                            "challenge index {} exceeds the 2-element randomness convention",
-                            v.index
-                        ),
-                    }
-                },
-                ExtEntry::PermutationValue => {
-                    let key = InputKey::AuxBusBoundary(v.index);
-                    inputs[layout.index(key).unwrap()]
-                },
-            },
-            ExtLeaf::ExtConstant(c) => *c,
-        },
-        SymbolicExpressionExt::Add { x, y, .. } => {
-            eval_ext_expr::<F, EF>(x, inputs, layout, periodic_values)
-                + eval_ext_expr::<F, EF>(y, inputs, layout, periodic_values)
-        },
-        SymbolicExpressionExt::Sub { x, y, .. } => {
-            eval_ext_expr::<F, EF>(x, inputs, layout, periodic_values)
-                - eval_ext_expr::<F, EF>(y, inputs, layout, periodic_values)
-        },
-        SymbolicExpressionExt::Mul { x, y, .. } => {
-            eval_ext_expr::<F, EF>(x, inputs, layout, periodic_values)
-                * eval_ext_expr::<F, EF>(y, inputs, layout, periodic_values)
-        },
-        SymbolicExpressionExt::Neg { x, .. } => {
-            -eval_ext_expr::<F, EF>(x, inputs, layout, periodic_values)
-        },
-    }
-}
-
-/// Evaluate the folded constraint accumulator from symbolic constraints.
-///
-/// Merges base and extension constraints in evaluation order (using the
-/// `ConstraintLayout`), then folds them via Horner with `alpha`.
-pub fn eval_folded_constraints<F, EF>(
-    base_constraints: &[SymbolicExpression<F>],
-    ext_constraints: &[SymbolicExpressionExt<F, EF>],
-    constraint_layout: &ConstraintLayout,
-    inputs: &[EF],
-    layout: &InputLayout,
-    periodic_values: &[EF],
-) -> EF
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    let alpha = inputs[layout.index(InputKey::Alpha).unwrap()];
-
-    let total = constraint_layout.base_indices.len() + constraint_layout.ext_indices.len();
-    let mut ordered: Vec<(usize, bool, usize)> = Vec::with_capacity(total);
-    for (i, &pos) in constraint_layout.base_indices.iter().enumerate() {
-        ordered.push((pos, false, i));
-    }
-    for (i, &pos) in constraint_layout.ext_indices.iter().enumerate() {
-        ordered.push((pos, true, i));
-    }
-    ordered.sort_by_key(|(pos, ..)| *pos);
-
-    let mut acc = EF::ZERO;
-    for &(_, is_ext, idx) in &ordered {
-        let val = if is_ext {
-            eval_ext_expr::<F, EF>(&ext_constraints[idx], inputs, layout, periodic_values)
-        } else {
-            eval_base_expr::<F, EF>(&base_constraints[idx], inputs, layout, periodic_values)
-        };
-        acc = acc * alpha + val;
-    }
-    acc
 }
 
 /// Evaluate the quotient recomposition at `zeta` using provided inputs.

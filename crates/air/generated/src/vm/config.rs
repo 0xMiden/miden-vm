@@ -97,7 +97,7 @@ mod tests {
     use alloc::{format, vec::Vec};
 
     use miden_air_definitions::compiler::vm::build_recursive_verifier_ace_circuit;
-    use miden_core::{Felt, field::QuadFelt};
+    use miden_core::Felt;
 
     const UPDATE_HINT: &str = "an intentional relation change must update the pinned constants \
                                in crates/air/generated/src/vm/config.rs and update \
@@ -107,13 +107,11 @@ mod tests {
     #[test]
     fn handwritten_degrees_fit_the_pcs_policy() {
         for air in miden_air_definitions::vm::AIRS {
-            assert!(
-                miden_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air) <= super::LOG_BLOWUP
-            );
-            assert!(
-                air.column_shape().len()
-                    <= miden_stark::air::LiftedAir::<Felt, QuadFelt>::aux_width(&air)
-            );
+            use miden_stark::air::AirKernel;
+            let lookup_columns = air.column_shape().len();
+            let kernel = miden_stark::air::DirectKernel::new(air).unwrap();
+            assert!(miden_stark::log_quotient_degree(&kernel).unwrap() <= super::LOG_BLOWUP);
+            assert!(lookup_columns <= kernel.descriptor().spec().aux_width);
         }
     }
 

@@ -1,8 +1,8 @@
 //! Captured AIRs and the geometry shared by relation artifact generators.
 
-use miden_constraint_compiler::ir::{CapturedConstraints, Graph, Leaf, Node, OpKind, capture};
+use miden_constraint_compiler::ir::{CapturedConstraints, Graph, capture_native};
 use miden_core::{Felt, field::QuadFelt};
-use miden_stark::air::{ConstraintCounts, ConstraintDegrees, LiftedAir};
+use miden_stark::air::{self, ConstraintCounts, ConstraintDegrees};
 
 use crate::{
     AceError, EXT_DEGREE, InputCounts, InputKey, InputLayout, MAX_ORDER_AIRS,
@@ -24,35 +24,38 @@ pub struct CapturedAir {
     pub(crate) periodic_columns: Vec<Vec<Felt>>,
     /// Minimum trace height imposed by periodic columns, or zero when absent.
     pub(crate) max_periodic_length: usize,
+    descriptor: air::AirDescriptor<Felt>,
 }
 
 impl CapturedAir {
-    pub fn new<A: LiftedAir<Felt, QuadFelt>>(air: &A) -> Result<Self, AceError> {
-        if air.num_randomness() != 2 {
+    /// Capture an authored native source once for the existing compiler and ACE pipeline.
+    ///
+    /// Metadata comes from the same validated descriptor as the captured equations. The raw
+    /// degree diagnostics retain height-independent artifact geometry; setup must separately
+    /// check the descriptor's actual-height capacity before execution. No fixed-table factory
+    /// or witness construction is invoked, and no prover capability is required.
+    pub fn new_native<A: air::LiftedAir<F = Felt>>(air: &A) -> Result<Self, AceError> {
+        let (graph, constraints, descriptor) = capture_native(air)
+            .map_err(|error| invalid(format!("native AIR capture failed: {error}")))?;
+        let spec = descriptor.spec();
+        if spec.num_challenges != 2 {
             return Err(invalid(format!(
                 "AIR must declare exactly 2 randomness challenges (alpha, beta), got {}",
-                air.num_randomness()
+                spec.num_challenges,
             )));
         }
-        let periodic_columns = air.periodic_columns().into_owned();
-        if periodic_columns.iter().any(|column| !column.len().is_power_of_two()) {
-            return Err(invalid("periodic column lengths must be positive powers of two"));
-        }
-        let max_periodic_length = periodic_columns.iter().map(Vec::len).max().unwrap_or(0);
-        if max_periodic_length != air.max_periodic_length() {
-            return Err(invalid("AIR periodic length hint disagrees with its periodic columns"));
-        }
-        let (graph, constraints) = capture(air);
-        let degrees = constraint_degrees(&graph, &constraints)?;
+        let degrees = descriptor.analysis().raw_degrees();
         let counts = InputCounts {
-            preprocessed_width: air.preprocessed_width(),
-            width: air.width(),
-            aux_width: air.aux_width(),
-            num_aux_boundary: air.num_aux_values(),
-            num_public: air.num_public_values(),
-            num_randomness: air.num_randomness(),
+            preprocessed_width: spec.preprocessed_width(),
+            width: spec.main_width,
+            aux_width: spec.aux_width,
+            num_aux_boundary: spec.num_exports,
+            num_public: spec.num_public_values,
+            num_randomness: spec.num_challenges,
             num_quotient_chunks: quotient_chunks(degrees.max())?,
         };
+        let periodic_columns = spec.periodic_columns.to_vec();
+        let max_periodic_length = spec.max_periodic_length();
         Ok(Self {
             graph,
             constraints,
@@ -60,7 +63,13 @@ impl CapturedAir {
             degrees,
             periodic_columns,
             max_periodic_length,
+            descriptor,
         })
+    }
+
+    /// The checked descriptor owned by this canonical authored capture.
+    pub fn descriptor(&self) -> &air::AirDescriptor<Felt> {
+        &self.descriptor
     }
 
     pub fn graph(&self) -> &Graph {
@@ -76,48 +85,8 @@ impl CapturedAir {
     }
 
     pub(crate) fn constraint_counts(&self) -> ConstraintCounts {
-        ConstraintCounts {
-            base: self.constraints.base_roots.len(),
-            ext: self.constraints.ext_roots.len(),
-        }
+        self.descriptor.analysis().counts()
     }
-}
-
-// Match SymbolicExpression::degree_multiple without evaluating the AIR a second time.
-fn constraint_degrees(
-    graph: &Graph,
-    constraints: &CapturedConstraints,
-) -> Result<ConstraintDegrees, AceError> {
-    let mut degrees: Vec<usize> = Vec::with_capacity(graph.len());
-    for (_, node) in graph.iter() {
-        let degree = match node {
-            Node::Leaf(
-                Leaf::Preprocessed { .. }
-                | Leaf::Main { .. }
-                | Leaf::Periodic(_)
-                | Leaf::IsFirst
-                | Leaf::IsLast
-                | Leaf::Aux { .. },
-            ) => 1,
-            Node::Leaf(Leaf::ExtBase(inner)) => degrees[inner.index()],
-            Node::Leaf(_) => 0,
-            Node::Op { op, x, y, .. } => {
-                let x = degrees[x.index()];
-                match op {
-                    OpKind::Neg => x,
-                    OpKind::Add | OpKind::Sub => x.max(degrees[y.unwrap().index()]),
-                    OpKind::Mul => x
-                        .checked_add(degrees[y.unwrap().index()])
-                        .ok_or_else(|| invalid("constraint degree overflow"))?,
-                }
-            },
-        };
-        degrees.push(degree);
-    }
-    Ok(ConstraintDegrees {
-        base: constraints.base_roots.iter().map(|id| degrees[id.index()]).max().unwrap_or(0),
-        ext: constraints.ext_roots.iter().map(|id| degrees[id.index()]).max().unwrap_or(0),
-    })
 }
 
 fn quotient_chunks(degree: usize) -> Result<usize, AceError> {
@@ -243,7 +212,8 @@ impl RelationGeometry {
                 .ok_or_else(|| invalid("auxiliary boundary count overflow"))?;
             result.num_constraints = result
                 .num_constraints
-                .checked_add(constraint_counts.total())
+                .checked_add(constraint_counts.base)
+                .and_then(|count| count.checked_add(constraint_counts.ext))
                 .ok_or_else(|| invalid("constraint count overflow"))?;
             result.max_constraint_degree = result.max_constraint_degree.max(air.degrees.max());
             result.shared_period = result.shared_period.max(air.max_periodic_length);
@@ -408,7 +378,12 @@ impl<'a> CompiledRelation<'a> {
         Self::with_quotient_chunks(airs, trace_alignment, None)
     }
 
-    pub(crate) fn with_quotient_chunks(
+    /// Derive artifact geometry with a caller-selected quotient allocation.
+    ///
+    /// `None` uses the existing raw-degree-derived allocation. `Some` preserves the caller's
+    /// configuration, including a larger allocation. Setup must separately check actual-height
+    /// descriptor capacity; artifact geometry does not establish that proof-engine requirement.
+    pub fn with_quotient_chunks(
         airs: &[&'a CapturedAir],
         trace_alignment: usize,
         chunks: Option<usize>,
@@ -436,5 +411,153 @@ impl<'a> CompiledRelation<'a> {
                 layout,
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        borrow::Cow,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    use air::LiftedAirBuilder as _;
+    use miden_core::utils::RowMajorMatrix;
+    use miden_crypto::field::PrimeCharacteristicRing;
+    use p3_field::Dup;
+
+    use super::*;
+
+    struct PairedAir {
+        main_width: usize,
+        challenges: usize,
+        offset: Felt,
+        periodic: Vec<Vec<Felt>>,
+        spec_reads: AtomicUsize,
+        evaluations: AtomicUsize,
+        fixed_builds: AtomicUsize,
+    }
+
+    impl PairedAir {
+        fn new(challenges: usize, period: usize, offset: u32) -> Self {
+            Self {
+                main_width: 2,
+                challenges,
+                offset: Felt::from_u32(offset),
+                periodic: vec![vec![Felt::ONE, Felt::TWO], vec![Felt::from_u32(offset); period]],
+                spec_reads: AtomicUsize::new(0),
+                evaluations: AtomicUsize::new(0),
+                fixed_builds: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl air::LiftedAir for PairedAir {
+        type F = Felt;
+
+        fn spec(&self) -> air::AirSpec<'_, Felt> {
+            self.spec_reads.fetch_add(1, Ordering::Relaxed);
+            air::AirSpec {
+                main_width: self.main_width,
+                aux_width: 2,
+                num_public_values: 2,
+                num_challenges: self.challenges,
+                num_exports: 1,
+                preprocessed: Some(air::PreprocessedSpec { width: 1, log_height: 3 }),
+                periodic_columns: Cow::Borrowed(&self.periodic),
+            }
+        }
+
+        fn build_preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
+            self.fixed_builds.fetch_add(1, Ordering::Relaxed);
+            Some(RowMajorMatrix::new(vec![Felt::ONE; 8], 1))
+        }
+
+        fn eval<B: air::LiftedAirBuilder<F = Felt>>(
+            &self,
+            frame: &air::Frame<'_, B>,
+            inputs: air::Inputs<'_, B>,
+            sink: &mut B,
+        ) {
+            self.evaluations.fetch_add(1, Ordering::Relaxed);
+            let alpha = if self.challenges > 0 {
+                inputs.challenge(0)
+            } else {
+                B::ExtExpr::ZERO
+            };
+            let beta = if self.challenges > 1 {
+                inputs.challenge(1)
+            } else {
+                B::ExtExpr::ZERO
+            };
+            sink.when(frame.first_row()).assert_zero(
+                frame.main.current[0].dup()
+                    + frame.preprocessed.current[0].dup()
+                    + inputs.public(0)
+                    - self.offset,
+            );
+            sink.assert_zero_ext(frame.aux.current[0].dup() + alpha + inputs.export(0));
+            sink.when(frame.transition()).assert_zero(
+                frame.main.next[1].dup() - frame.main.current[1].dup().square()
+                    + frame.preprocessed.next[0].dup()
+                    + frame.periodic[0].dup(),
+            );
+            sink.when(frame.last_row()).assert_zero_ext(
+                frame.aux.next[1].dup()
+                    + beta * inputs.public(1)
+                    + B::ExtExpr::from(frame.periodic[1].dup()),
+            );
+            // Both classes retain their zero-gated emissions at the original global positions.
+            sink.when(B::Expr::ZERO).assert_zero(frame.main.current[0].dup());
+            sink.when(B::Expr::ZERO).assert_zero_ext(frame.aux.current[0].dup());
+        }
+    }
+
+    fn counts(air: &CapturedAir) -> [usize; 7] {
+        let counts = air.counts;
+        [
+            counts.preprocessed_width,
+            counts.width,
+            counts.aux_width,
+            counts.num_aux_boundary,
+            counts.num_public,
+            counts.num_randomness,
+            counts.num_quotient_chunks,
+        ]
+    }
+
+    #[test]
+    fn native_capture_owns_checked_metadata_without_building_fixed_data() {
+        let source = PairedAir::new(2, 4, 3);
+        let captured = CapturedAir::new_native(&source).unwrap();
+        assert_eq!(source.evaluations.load(Ordering::Relaxed), 1);
+        assert_eq!(source.spec_reads.load(Ordering::Relaxed), 1);
+        assert_eq!(source.fixed_builds.load(Ordering::Relaxed), 0);
+        assert_eq!(captured.descriptor().analysis().layout().base_indices(), &[0, 2, 4]);
+        assert_eq!(captured.descriptor().analysis().layout().ext_indices(), &[1, 3, 5]);
+        assert_eq!(captured.constraint_counts(), ConstraintCounts { base: 3, ext: 3 });
+        assert_eq!(counts(&captured), [1, 2, 2, 1, 2, 2, 1]);
+        drop(source);
+        assert_eq!(captured.descriptor().spec().periodic_columns[1].len(), 4);
+    }
+
+    #[test]
+    fn native_constructor_keeps_ace_challenge_policy_and_checked_schema() {
+        for challenges in [0, 1, 3] {
+            let source = PairedAir::new(challenges, 4, 3);
+            assert!(
+                matches!(CapturedAir::new_native(&source), Err(AceError::InvalidInputLayout { message }) if message.contains("exactly 2 randomness challenges"))
+            );
+            assert_eq!(source.spec_reads.load(Ordering::Relaxed), 1);
+            assert_eq!(source.evaluations.load(Ordering::Relaxed), 1);
+            assert_eq!(source.fixed_builds.load(Ordering::Relaxed), 0);
+        }
+        let source = PairedAir { main_width: 0, ..PairedAir::new(2, 4, 3) };
+        assert!(
+            matches!(CapturedAir::new_native(&source), Err(AceError::InvalidInputLayout { message }) if message.contains("at least one main column"))
+        );
+        assert_eq!(source.spec_reads.load(Ordering::Relaxed), 1);
+        assert_eq!(source.evaluations.load(Ordering::Relaxed), 0);
+        assert_eq!(source.fixed_builds.load(Ordering::Relaxed), 0);
     }
 }
