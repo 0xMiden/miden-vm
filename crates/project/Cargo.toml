@@ -21,6 +21,7 @@ std = ["miden-assembly-syntax/std", "miden-package-registry/std", "miden-package
 serde = ["dep:serde", "dep:serde-untagged", "miden-assembly-syntax/serde", "miden-mast-package/serde", "miden-package-registry/serde", "toml/serde", "toml/parse", "toml/display"]
 
 [dependencies]
+miden-utils-diagnostics.workspace = true
 miden-assembly-syntax.workspace = true
 miden-core.workspace = true
 miden-mast-package.workspace = true

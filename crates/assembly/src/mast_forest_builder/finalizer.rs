@@ -50,7 +50,7 @@ impl BuiltMastForest {
 }
 
 /// Errors raised while converting builder-owned records into a finalized [`MastForest`].
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Diagnostic)]
 pub(super) enum MastForestBuilderError {
     #[error("pending {node_kind} node {node_ref} has {actual} children, expected {expected}")]
     InvalidChildCount {
@@ -108,8 +108,6 @@ pub(super) enum MastForestBuilderError {
         source: MastForestError,
     },
 }
-
-impl Diagnostic for MastForestBuilderError {}
 
 /// Stateful finalization helper for converting live builder records into a [`MastForest`].
 ///

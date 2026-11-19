@@ -24,6 +24,8 @@
 //! }
 //! ```
 
+mod diagnostic;
+
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
@@ -33,6 +35,17 @@ use syn::{
     Attribute, Data, DeriveInput, Fields, Ident, Lit, Meta, NestedMeta, Type, Variant,
     parse_macro_input,
 };
+
+/// Derives metadata from annotated error fields and variants.
+///
+/// Supports `diagnostic(help(...), code(...), severity(...), forward(field))`,
+/// `diagnostic(transparent)`, and field attributes `source_code`, `label`, `related`, and `help`.
+/// Generated code uses `core`, `alloc`, and `miden-utils-diagnostics`.
+#[proc_macro_derive(Diagnostic, attributes(diagnostic, source_code, label, related, help))]
+pub fn derive_diagnostic(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    diagnostic::expand(input).unwrap_or_else(syn::Error::into_compile_error).into()
+}
 
 /// Derive the MastNodeExt trait for an enum.
 ///

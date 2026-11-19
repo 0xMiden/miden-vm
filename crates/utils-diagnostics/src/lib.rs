@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 extern crate alloc;
+extern crate self as miden_utils_diagnostics;
 
 mod diagnostic;
 mod label;
@@ -11,6 +12,7 @@ pub mod reporting;
 #[cfg(test)]
 mod tests;
 
+pub use miden_utils_core_derive::Diagnostic;
 pub use tracing;
 
 pub use self::{
@@ -24,6 +26,9 @@ pub type LabeledSpan = Label;
 
 #[doc(hidden)]
 pub use alloc::format;
+
+#[doc(hidden)]
+pub use miden_debug_types::Spanned;
 
 #[macro_export]
 macro_rules! report {

@@ -32,7 +32,7 @@ pub use self::{
     target::{BinTarget, LibTarget},
     workspace::WorkspaceFile,
 };
-use crate::{Diagnostic, DiagnosticDetails, Label, RelatedError, Report, SourceFile, SourceSpan};
+use crate::{Diagnostic, Label, RelatedError, Report, SourceFile, SourceSpan};
 
 /// Represents all possible variants of `miden-project.toml`
 #[derive(Debug)]
@@ -101,133 +101,105 @@ impl MidenProject {
 }
 
 /// An internal error type used when parsing a `miden-project.toml` file.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Diagnostic)]
 pub(crate) enum ProjectFileError {
     #[error("unable to parse project manifest: {message}")]
     ParseError {
         message: String,
+        #[source_code]
         source_file: Arc<SourceFile>,
+        #[label(primary)]
         span: SourceSpan,
     },
     #[error("invalid project name")]
+    #[diagnostic(help("The project name must be a valid Miden Assembly namespace identifier"))]
     InvalidProjectName {
+        #[source_code]
         source_file: Arc<SourceFile>,
+        #[label(primary)]
         label: Label,
     },
     #[error("invalid workspace dependency specification")]
     InvalidWorkspaceDependency {
+        #[source_code]
         source_file: Arc<SourceFile>,
+        #[label(primary)]
         label: Label,
     },
     #[cfg(all(feature = "std", feature = "serde"))]
     #[error("invalid dependency specification: {}", label.label().unwrap_or(""))]
     InvalidPackageDependency {
+        #[source_code]
         source_file: Arc<SourceFile>,
+        #[label(primary)]
         label: Label,
     },
     #[error("invalid build target configuration")]
     InvalidBuildTargets {
+        #[source_code]
         source_file: Arc<SourceFile>,
+        #[related]
         related: Vec<RelatedError>,
     },
     #[error("package is not a member of a workspace")]
     NotAWorkspace {
+        #[source_code]
         source_file: Arc<SourceFile>,
+        #[label(primary)]
         span: SourceSpan,
     },
     #[cfg(all(feature = "std", feature = "serde"))]
     #[error("failed to load workspace member: {}", span.label().unwrap_or("unknown"))]
     LoadWorkspaceMemberFailed {
+        #[source_code]
         source_file: Arc<SourceFile>,
+        #[label(primary)]
         span: Label,
     },
     #[cfg(all(feature = "std", feature = "serde"))]
     #[error("duplicate workspace member package name '{name}'")]
     DuplicateWorkspaceMember {
         name: String,
+        #[source_code]
         source_file: Arc<SourceFile>,
+        #[label(primary, "duplicate workspace member")]
         span: SourceSpan,
+        #[label("previous workspace member")]
         prev: SourceSpan,
     },
     #[error("no profile named '{name}' has been defined yet")]
     UnknownProfile {
         name: Arc<str>,
+        #[source_code]
         source_file: Arc<SourceFile>,
+        #[label(primary)]
         span: SourceSpan,
     },
     #[cfg(all(feature = "std", feature = "serde"))]
     #[error("cannot redefine profile '{name}'")]
     DuplicateProfile {
         name: Arc<str>,
+        #[source_code]
         source_file: Arc<SourceFile>,
+        #[label(primary)]
         span: SourceSpan,
+        #[label]
         prev: SourceSpan,
     },
     #[cfg(all(feature = "std", feature = "serde"))]
     #[error("missing required field 'version'")]
     MissingVersion {
+        #[source_code]
         source_file: Arc<SourceFile>,
+        #[label(primary)]
         span: SourceSpan,
     },
     #[cfg(all(feature = "std", feature = "serde"))]
     #[error("workspace does not define 'version'")]
     MissingWorkspaceVersion {
+        #[source_code]
         source_file: Arc<SourceFile>,
+        #[label(primary)]
         span: SourceSpan,
     },
-}
-
-impl Diagnostic for ProjectFileError {
-    fn details(&self) -> DiagnosticDetails<'_> {
-        match self {
-            Self::ParseError { source_file, span, .. }
-            | Self::NotAWorkspace { source_file, span }
-            | Self::UnknownProfile { source_file, span, .. }
-            | Self::MissingVersion { source_file, span }
-            | Self::MissingWorkspaceVersion { source_file, span } => DiagnosticDetails {
-                source: Some(source_file),
-                labels: alloc::vec![Label::underline(*span).primary()].into(),
-                ..DiagnosticDetails::default()
-            },
-            Self::InvalidProjectName { source_file, label } => DiagnosticDetails {
-                source: Some(source_file),
-                labels: alloc::vec![label.clone().primary()].into(),
-                help: Some(
-                    "The project name must be a valid Miden Assembly namespace identifier".into(),
-                ),
-                ..DiagnosticDetails::default()
-            },
-            Self::InvalidWorkspaceDependency { source_file, label }
-            | Self::InvalidPackageDependency { source_file, label } => DiagnosticDetails {
-                source: Some(source_file),
-                labels: alloc::vec![label.clone().primary()].into(),
-                ..DiagnosticDetails::default()
-            },
-            Self::InvalidBuildTargets { source_file, related } => DiagnosticDetails {
-                source: Some(source_file),
-                related: related.iter().map(|error| error as &dyn Diagnostic).collect(),
-                ..DiagnosticDetails::default()
-            },
-            Self::LoadWorkspaceMemberFailed { source_file, span } => DiagnosticDetails {
-                source: Some(source_file),
-                labels: alloc::vec![span.clone().primary()].into(),
-                ..DiagnosticDetails::default()
-            },
-            Self::DuplicateWorkspaceMember { source_file, span, prev, .. } => DiagnosticDetails {
-                source: Some(source_file),
-                labels: alloc::vec![
-                    Label::new(*span, "duplicate workspace member").primary(),
-                    Label::new(*prev, "previous workspace member")
-                ]
-                .into(),
-                ..DiagnosticDetails::default()
-            },
-            Self::DuplicateProfile { source_file, span, prev, .. } => DiagnosticDetails {
-                source: Some(source_file),
-                labels: alloc::vec![Label::underline(*span).primary(), Label::underline(*prev)]
-                    .into(),
-                ..DiagnosticDetails::default()
-            },
-        }
-    }
 }

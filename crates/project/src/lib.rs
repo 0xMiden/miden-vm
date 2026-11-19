@@ -22,7 +22,6 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_assembly_syntax::{
     Report,
     debuginfo::{SourceSpan, Span},
-    diagnostics::{Diagnostic, DiagnosticDetails, Label},
 };
 // Re-exported for consistency
 pub use miden_assembly_syntax::{Word, debuginfo::Uri, semver};
@@ -32,6 +31,9 @@ use miden_assembly_syntax::{
     diagnostics::{RelatedError, RelatedLabel},
 };
 pub use miden_mast_package::TargetType;
+use miden_utils_diagnostics::Diagnostic;
+#[cfg(feature = "serde")]
+use miden_utils_diagnostics::Label;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 pub use toml::Value;

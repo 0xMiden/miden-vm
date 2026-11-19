@@ -1,9 +1,9 @@
-use alloc::{format, sync::Arc};
+use alloc::{boxed::Box, format, string::String, sync::Arc, vec, vec::Vec};
 use core::{error::Error, fmt};
 
 use miden_debug_types::{SourceFile, SourceId, SourceLanguage, SourceSpan, Uri};
 
-use crate::{IntoDiagnostic, Label, RelatedLabel, Report, WrapErr};
+use crate::{Diagnostic, IntoDiagnostic, Label, RelatedLabel, Report, Severity, WrapErr};
 
 fn source(text: &str) -> Arc<SourceFile> {
     Arc::new(SourceFile::new(
@@ -12,6 +12,103 @@ fn source(text: &str) -> Arc<SourceFile> {
         Uri::new("test.masm"),
         text,
     ))
+}
+
+#[derive(Debug, Diagnostic)]
+enum DerivedDiagnostic {
+    #[diagnostic(severity(Warning), code(test::metadata), help("expected {expected}"))]
+    Annotated {
+        #[source_code]
+        source: Arc<SourceFile>,
+        #[label(primary, "expected {expected}")]
+        span: SourceSpan,
+        #[label(collection)]
+        labels: Vec<Label>,
+        #[related]
+        related: Vec<RelatedLabel>,
+        expected: &'static str,
+    },
+    #[diagnostic(transparent)]
+    Transparent(Box<DerivedDiagnostic>),
+    #[diagnostic(forward(inner))]
+    Forward {
+        inner: Box<DerivedDiagnostic>,
+        #[source_code]
+        source: Option<Arc<SourceFile>>,
+        #[label]
+        span: SourceSpan,
+    },
+    Collection {
+        #[label(collection)]
+        labels: Vec<Label>,
+        #[help]
+        help: Option<String>,
+    },
+}
+
+impl fmt::Display for DerivedDiagnostic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("derived diagnostic")
+    }
+}
+
+impl Error for DerivedDiagnostic {}
+
+#[test]
+fn derive_preserves_mixed_labels_and_forwarded_metadata() {
+    let file = source("begin\nend");
+    let span = SourceSpan::new(file.id(), 0..5);
+    let secondary = SourceSpan::new(file.id(), 6..9);
+    let error = DerivedDiagnostic::Annotated {
+        source: file.clone(),
+        span,
+        labels: vec![Label::new(secondary, "other declaration")],
+        related: vec![RelatedLabel::advice("related note")],
+        expected: "procedure",
+    };
+    let details = error.details();
+    assert_eq!(error.severity(), Severity::Warning);
+    assert_eq!(details.code, Some("test::metadata"));
+    assert_eq!(details.help.as_deref(), Some("expected procedure"));
+    assert_eq!(details.source.unwrap().id(), file.id());
+    assert_eq!(details.labels.len(), 2);
+    assert!(details.labels[0].primary);
+    assert_eq!(details.labels[0].span, span);
+    assert_eq!(details.labels[0].label(), Some("expected procedure"));
+    assert_eq!(details.labels[1].span, secondary);
+    assert_eq!(details.related.len(), 1);
+    assert_eq!(details.related[0].severity(), Severity::Advice);
+    drop(details);
+
+    let transparent = DerivedDiagnostic::Transparent(Box::new(error));
+    assert_eq!(transparent.severity(), Severity::Warning);
+    assert_eq!(transparent.details().labels.len(), 2);
+    let forwarded = DerivedDiagnostic::Forward {
+        inner: Box::new(transparent),
+        source: None,
+        span: secondary,
+    };
+    let details = forwarded.details();
+    assert_eq!(forwarded.severity(), Severity::Warning);
+    assert_eq!(details.help.as_deref(), Some("expected procedure"));
+    assert_eq!(details.code, Some("test::metadata"));
+    assert!(details.source.is_none());
+    assert_eq!(details.labels.len(), 1);
+    assert_eq!(details.labels[0].span, secondary);
+    assert_eq!(details.related.len(), 1);
+}
+
+#[test]
+fn derive_borrows_label_collections_and_optional_help() {
+    let error = DerivedDiagnostic::Collection {
+        labels: vec![Label::underline(SourceSpan::UNKNOWN)],
+        help: Some(String::from("check this")),
+    };
+    let details = error.details();
+    assert!(matches!(details.labels, alloc::borrow::Cow::Borrowed(_)));
+    assert_eq!(details.help.as_deref(), Some("check this"));
+    let missing = DerivedDiagnostic::Collection { labels: Vec::new(), help: None };
+    assert!(missing.details().help.is_none());
 }
 
 #[test]

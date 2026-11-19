@@ -14,7 +14,7 @@ type FxHashMap<K, V> = hashbrown::HashMap<K, V, rustc_hash::FxBuildHasher>;
 #[cfg(feature = "std")]
 use crate::LinkLibrary;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Diagnostic)]
 enum InstallPackageError {
     #[error("package {package}@{version} is already registered under a different digest")]
     AlreadyInstalledWithDifferentDigest {
@@ -22,8 +22,6 @@ enum InstallPackageError {
         version: miden_package_registry::Version,
     },
 }
-
-impl Diagnostic for InstallPackageError {}
 
 /// The in-memory package registry used during debugger execution.
 ///

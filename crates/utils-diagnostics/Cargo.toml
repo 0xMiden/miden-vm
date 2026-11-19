@@ -19,6 +19,7 @@ default = ["std"]
 std = ["miden-debug-types/std"]
 
 [dependencies]
+miden-utils-core-derive.workspace = true
 miden-debug-types.workspace = true
 tracing.workspace = true
 unicode-width = { version = "0.2", default-features = false }

@@ -2790,6 +2790,7 @@ dependencies = [
  "miden-package-registry",
  "miden-project",
  "miden-test-serialization-macros",
+ "miden-utils-diagnostics",
  "proptest",
  "smallvec",
  "tempfile",
@@ -3097,6 +3098,7 @@ dependencies = [
  "miden-mast-package",
  "miden-package-registry",
  "miden-processor",
+ "miden-utils-diagnostics",
  "miden-utils-sync",
  "num-traits",
  "proptest",
@@ -3341,6 +3343,7 @@ dependencies = [
  "miden-mast-package",
  "miden-package-registry",
  "miden-test-serialization-macros",
+ "miden-utils-diagnostics",
  "proptest",
  "proptest-derive",
  "serde",
@@ -3514,6 +3517,7 @@ name = "miden-utils-diagnostics"
 version = "1.0.0-rc.2"
 dependencies = [
  "miden-debug-types",
+ "miden-utils-core-derive",
  "tracing",
  "unicode-width 0.2.2",
 ]

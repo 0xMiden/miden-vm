@@ -11,7 +11,7 @@ pub use miden_package_registry::{SemVer, Version, VersionReq, VersionRequirement
 
 #[cfg(all(feature = "std", feature = "serde"))]
 pub use self::graph::*;
-use crate::{Diagnostic, DiagnosticDetails, Label, Linkage, SourceSpan, Span, Uri};
+use crate::{Diagnostic, Linkage, SourceSpan, Span, Uri};
 
 /// Represents a project/package dependency declaration
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,46 +143,40 @@ impl fmt::Display for GitRevision {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum InvalidDependencySpecError {
     #[error("package is not a member of a workspace")]
-    NotAWorkspace { span: SourceSpan },
+    NotAWorkspace {
+        #[label(primary)]
+        span: SourceSpan,
+    },
     #[error("digests cannot be used with 'git' dependencies")]
-    GitWithDigest { span: SourceSpan },
+    #[diagnostic(help(
+        "Package digests are only valid when depending on an already-assembled package"
+    ))]
+    GitWithDigest {
+        #[label(primary)]
+        span: SourceSpan,
+    },
     #[error("'git' dependencies must also specify a revision using either 'branch' or 'rev'")]
-    MissingGitRevision { span: SourceSpan },
+    MissingGitRevision {
+        #[label(primary)]
+        span: SourceSpan,
+    },
     #[error(
         "conflicting 'git' revisions: 'branch' and 'rev' may refer to different commits, you cannot specify both"
     )]
-    ConflictingGitRevision { first: SourceSpan, second: SourceSpan },
+    ConflictingGitRevision {
+        #[label(primary)]
+        first: SourceSpan,
+        #[label]
+        second: SourceSpan,
+    },
     #[error("missing version: expected one of 'version', 'git', or 'digest' to be provided")]
-    MissingVersion { span: SourceSpan },
-}
-
-impl Diagnostic for InvalidDependencySpecError {
-    fn details(&self) -> DiagnosticDetails<'_> {
-        match self {
-            Self::NotAWorkspace { span }
-            | Self::MissingGitRevision { span }
-            | Self::MissingVersion { span } => DiagnosticDetails {
-                labels: alloc::vec![Label::underline(*span).primary()].into(),
-                ..DiagnosticDetails::default()
-            },
-            Self::GitWithDigest { span } => DiagnosticDetails {
-                labels: alloc::vec![Label::underline(*span).primary()].into(),
-                help: Some(
-                    "Package digests are only valid when depending on an already-assembled package"
-                        .into(),
-                ),
-                ..DiagnosticDetails::default()
-            },
-            Self::ConflictingGitRevision { first, second } => DiagnosticDetails {
-                labels: alloc::vec![Label::underline(*first).primary(), Label::underline(*second)]
-                    .into(),
-                ..DiagnosticDetails::default()
-            },
-        }
-    }
+    MissingVersion {
+        #[label(primary)]
+        span: SourceSpan,
+    },
 }
 
 #[cfg(feature = "serde")]

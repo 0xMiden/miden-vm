@@ -40,7 +40,7 @@ pub enum PathError {
 }
 
 /// Represents an error when parsing or validating a library namespace
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum NamespaceError {
     #[error("invalid library namespace name: cannot be empty")]
     Empty,
@@ -53,8 +53,6 @@ pub enum NamespaceError {
     #[error("invalid library namespace name: must start with lowercase ascii-alphabetic character")]
     InvalidStart,
 }
-
-impl Diagnostic for NamespaceError {}
 
 /// This trait abstracts over the concept of matching a prefix pattern against a path
 ///

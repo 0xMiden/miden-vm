@@ -5,7 +5,7 @@ use miden_utils_diagnostics::Diagnostic;
 
 use crate::{Felt, Word, crypto::merkle::MerkleError};
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum AdviceError {
     #[error(
         "value for key {} already present in the advice map: previous values were '{prev_values:?}', attempted replacement values were '{new_values:?}'",
@@ -40,5 +40,3 @@ pub enum AdviceError {
     #[error("Merkle store backend update failed")]
     MerkleStoreUpdateFailed(#[source] MerkleError),
 }
-
-impl Diagnostic for AdviceError {}

@@ -1485,6 +1485,7 @@ dependencies = [
  "miden-mast-package",
  "miden-package-registry",
  "miden-project",
+ "miden-utils-diagnostics",
  "proptest",
  "smallvec",
  "thiserror",
@@ -1716,6 +1717,7 @@ dependencies = [
  "miden-core",
  "miden-mast-package",
  "miden-package-registry",
+ "miden-utils-diagnostics",
  "proptest",
  "serde",
  "serde-untagged",
@@ -1780,6 +1782,7 @@ name = "miden-utils-diagnostics"
 version = "1.0.0-rc.2"
 dependencies = [
  "miden-debug-types",
+ "miden-utils-core-derive",
  "tracing",
  "unicode-width 0.2.2",
 ]

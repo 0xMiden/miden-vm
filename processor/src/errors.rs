@@ -7,7 +7,7 @@ use miden_mast_package::{
     PackageDebugInfoError,
     debug_info::{DebugSourceNodeId, PackageDebugInfo},
 };
-use miden_utils_diagnostics::{Diagnostic, DiagnosticDetails, Label};
+use miden_utils_diagnostics::Diagnostic;
 
 use crate::{
     BaseHost, ContextId, Felt, Word,
@@ -22,17 +22,22 @@ use crate::{
 // ================================================================================================
 
 #[non_exhaustive]
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum ExecutionError {
     #[error("failed to execute arithmetic circuit evaluation operation: {error}")]
     AceChipError {
+        #[label("this call failed")]
         label: SourceSpan,
+        #[source_code]
         source_file: Option<Arc<SourceFile>>,
         error: AceError,
     },
     #[error("{err}")]
+    #[diagnostic(forward(err))]
     AdviceError {
+        #[label]
         label: SourceSpan,
+        #[source_code]
         source_file: Option<Arc<SourceFile>>,
         err: AdviceError,
     },
@@ -43,7 +48,9 @@ pub enum ExecutionError {
         None => format!("with ID: {event_id}"),
     })]
     EventError {
+        #[label]
         label: SourceSpan,
+        #[source_code]
         source_file: Option<Arc<SourceFile>>,
         event_id: EventId,
         event_name: Option<EventName>,
@@ -53,7 +60,9 @@ pub enum ExecutionError {
     /// Failed to load a MAST forest from the host.
     #[error("failed to load MAST forest for procedure with root digest {root_digest}: {error}")]
     MastForestError {
+        #[label]
         label: SourceSpan,
+        #[source_code]
         source_file: Option<Arc<SourceFile>>,
         root_digest: Word,
         #[source]
@@ -62,7 +71,9 @@ pub enum ExecutionError {
     /// Deferred system event failed while validating or evaluating a committed node.
     #[error("{err}")]
     DeferredError {
+        #[label]
         label: SourceSpan,
+        #[source_code]
         source_file: Option<Arc<SourceFile>>,
         err: PrecompileError,
     },
@@ -84,8 +95,11 @@ pub enum ExecutionError {
     ///
     /// Use `MemoryResultExt::map_mem_err` to convert `Result<T, MemoryError>` with context.
     #[error("{err}")]
+    #[diagnostic(forward(err))]
     MemoryError {
+        #[label]
         label: SourceSpan,
+        #[source_code]
         source_file: Option<Arc<SourceFile>>,
         err: MemoryError,
     },
@@ -94,10 +108,14 @@ pub enum ExecutionError {
     /// Use `ExecutionError::MemoryErrorNoCtx` for memory errors that don't have error context
     /// available (e.g., during call/syscall context initialization).
     #[error(transparent)]
+    #[diagnostic(transparent)]
     MemoryErrorNoCtx(MemoryError),
     #[error("{err}")]
+    #[diagnostic(forward(err))]
     OperationError {
+        #[label]
         label: SourceSpan,
+        #[source_code]
         source_file: Option<Arc<SourceFile>>,
         err: OperationError,
     },
@@ -105,7 +123,9 @@ pub enum ExecutionError {
     OutputStackOverflow(usize),
     #[error("procedure with root digest {root_digest} could not be found")]
     ProcedureNotFound {
+        #[label]
         label: SourceSpan,
+        #[source_code]
         source_file: Option<Arc<SourceFile>>,
         root_digest: Word,
     },
@@ -115,53 +135,6 @@ pub enum ExecutionError {
     HostError(#[from] HostError),
     #[error(transparent)]
     PackageDebugInfoError(#[from] PackageDebugInfoError),
-}
-
-impl Diagnostic for ExecutionError {
-    fn details(&self) -> DiagnosticDetails<'_> {
-        fn at_instruction<'a>(
-            mut details: DiagnosticDetails<'a>,
-            source: Option<&'a SourceFile>,
-            label: SourceSpan,
-        ) -> DiagnosticDetails<'a> {
-            details.source = source;
-            details.labels = alloc::vec![Label::underline(label)].into();
-            details
-        }
-
-        match self {
-            Self::AceChipError { label, source_file, .. } => DiagnosticDetails {
-                source: source_file.as_deref(),
-                labels: alloc::vec![Label::new(*label, "this call failed")].into(),
-                ..DiagnosticDetails::default()
-            },
-            Self::AdviceError { label, source_file, err } => {
-                at_instruction(err.details(), source_file.as_deref(), *label)
-            },
-            Self::MemoryError { label, source_file, err } => {
-                at_instruction(err.details(), source_file.as_deref(), *label)
-            },
-            Self::OperationError { label, source_file, err } => {
-                at_instruction(err.details(), source_file.as_deref(), *label)
-            },
-            Self::EventError { label, source_file, .. }
-            | Self::MastForestError { label, source_file, .. }
-            | Self::DeferredError { label, source_file, .. }
-            | Self::ProcedureNotFound { label, source_file, .. } => {
-                at_instruction(DiagnosticDetails::default(), source_file.as_deref(), *label)
-            },
-            Self::MemoryErrorNoCtx(error) => error.details(),
-            Self::CycleLimitExceeded(..)
-            | Self::Internal(..)
-            | Self::StackDepthLimitExceeded { .. }
-            | Self::TraceLenExceeded(..)
-            | Self::ProverMemoryExceeded { .. }
-            | Self::OutputStackOverflow(..)
-            | Self::ProvingError(..)
-            | Self::HostError(..)
-            | Self::PackageDebugInfoError(..) => DiagnosticDetails::default(),
-        }
-    }
 }
 
 impl ExecutionError {
@@ -229,30 +202,22 @@ pub enum HostError {
 /// This enum wraps errors from the advice provider and memory subsystems without
 /// carrying source location context. Context is added at the call site via
 /// `IoResultExt::map_io_err`.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum IoError {
     #[error(transparent)]
     Advice(#[from] AdviceError),
     #[error(transparent)]
     Memory(#[from] MemoryError),
     #[error(transparent)]
+    #[diagnostic(transparent)]
     Operation(#[from] OperationError),
     /// Stack operation error (increment/decrement size failures).
     ///
     /// These are internal execution errors that don't need additional context
     /// since they already carry their own error information.
     #[error(transparent)]
+    #[diagnostic(transparent)]
     Execution(Box<ExecutionError>),
-}
-
-impl Diagnostic for IoError {
-    fn details(&self) -> DiagnosticDetails<'_> {
-        match self {
-            Self::Operation(error) => error.details(),
-            Self::Execution(error) => error.details(),
-            Self::Advice(..) | Self::Memory(..) => DiagnosticDetails::default(),
-        }
-    }
 }
 
 impl From<ExecutionError> for IoError {
@@ -269,7 +234,7 @@ impl From<ExecutionError> for IoError {
 /// This enum captures error conditions without expensive context information (no source location,
 /// no file references). When a `MemoryError` propagates up to become an `ExecutionError`, the
 /// context is resolved lazily via `MapExecErr::map_exec_err`.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum MemoryError {
     #[error("memory address cannot exceed 2^32 but was {addr}")]
     AddressOutOfBounds { addr: u64 },
@@ -290,27 +255,10 @@ pub enum MemoryError {
     #[error(
         "writing to memory address {addr} in context {ctx} would exceed the maximum number of memory elements {max}"
     )]
+    #[diagnostic(help(
+        "increase the limit via `ExecutionOptions::with_max_memory_elements`, or reduce the number of distinct memory addresses the program writes to"
+    ))]
     MemoryElementLimitExceeded { ctx: ContextId, addr: u32, max: usize },
-}
-
-impl Diagnostic for MemoryError {
-    fn details(&self) -> DiagnosticDetails<'_> {
-        match self {
-            Self::MemoryElementLimitExceeded { .. } => DiagnosticDetails {
-                help: Some(
-                    "increase the limit via `ExecutionOptions::with_max_memory_elements`, or \
-                     reduce the number of distinct memory addresses the program writes to"
-                        .into(),
-                ),
-                ..DiagnosticDetails::default()
-            },
-            Self::AddressOutOfBounds { .. }
-            | Self::IllegalMemoryAccess { .. }
-            | Self::InvalidMemoryRange { .. }
-            | Self::UnalignedWordAccess { .. }
-            | Self::MemoryReadFailed(..) => DiagnosticDetails::default(),
-        }
-    }
 }
 
 // CRYPTO ERROR
@@ -321,21 +269,13 @@ impl Diagnostic for MemoryError {
 /// This enum wraps errors from the advice provider and operation subsystems without carrying
 /// source location context. Context is added at the call site via
 /// `CryptoResultExt::map_crypto_err`.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum CryptoError {
     #[error(transparent)]
     Advice(#[from] AdviceError),
     #[error(transparent)]
+    #[diagnostic(transparent)]
     Operation(#[from] OperationError),
-}
-
-impl Diagnostic for CryptoError {
-    fn details(&self) -> DiagnosticDetails<'_> {
-        match self {
-            Self::Operation(error) => error.details(),
-            Self::Advice(..) => DiagnosticDetails::default(),
-        }
-    }
 }
 
 // OPERATION ERROR
@@ -371,7 +311,7 @@ impl Diagnostic for CryptoError {
 /// For wrapper errors (`AdviceError`, `EventError`, `AceError`), use the corresponding extension
 /// traits (`AdviceResultExt`, `AceResultExt`) or helper functions (`advice_error_with_context`,
 /// `event_error_with_context`).
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error, Diagnostic)]
 pub enum OperationError {
     #[error("external node with mast root {0} resolved to an external node")]
     CircularExternalNode(Word),
@@ -448,8 +388,6 @@ pub enum OperationError {
     #[error("failed to execute the operation for internal reason: {0}")]
     Internal(&'static str),
 }
-
-impl Diagnostic for OperationError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryValueErrorContext {
