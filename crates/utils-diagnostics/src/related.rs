@@ -133,11 +133,6 @@ impl RelatedError {
     pub fn into_report(self) -> Report {
         self.0
     }
-
-    #[inline(always)]
-    pub(crate) fn as_diagnostic(&self) -> &dyn Diagnostic {
-        self.0.as_ref()
-    }
 }
 
 impl Diagnostic for RelatedError {
