@@ -168,17 +168,24 @@ fn renders_empty_source_and_retains_labels_when_an_excerpt_is_unavailable() {
 
 #[test]
 fn skips_unknown_and_synthetic_locations_but_keeps_their_labels() {
-    let file = source("begin");
-    let error = RelatedLabel::error("bad input")
-        .with_source_file(Some(file))
-        .with_labeled_span(SourceSpan::UNKNOWN, "unknown location")
-        .with_labeled_span(SourceSpan::SYNTHETIC, "generated code");
+    for source_id in [SourceId::new(1), SourceId::UNKNOWN] {
+        let file = Arc::new(SourceFile::new(
+            source_id,
+            SourceLanguage::Masm,
+            Uri::new("test.masm"),
+            "begin",
+        ));
+        let error = RelatedLabel::error("bad input")
+            .with_source_file(Some(file))
+            .with_labeled_span(SourceSpan::UNKNOWN, "unknown location")
+            .with_labeled_span(SourceSpan::SYNTHETIC, "generated code");
 
-    let rendered = format!("{:?}", Report::new(error));
-    assert!(rendered.contains("= unknown location"), "{rendered}");
-    assert!(rendered.contains("= generated code"), "{rendered}");
-    assert!(!rendered.contains("-->"), "{rendered}");
-    assert!(!rendered.contains("source label unavailable"), "{rendered}");
+        let rendered = format!("{:?}", Report::new(error));
+        assert!(rendered.contains("= unknown location"), "{rendered}");
+        assert!(rendered.contains("= generated code"), "{rendered}");
+        assert!(!rendered.contains("-->"), "{rendered}");
+        assert!(!rendered.contains("source label unavailable"), "{rendered}");
+    }
 
     // Detached CST spans still use their byte range when source is attached later.
     let detached = RelatedLabel::error("detached input")

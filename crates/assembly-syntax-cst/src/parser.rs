@@ -1616,7 +1616,7 @@ impl<'input> Parser<'input> {
             let text = token.text();
             if kind == SyntaxKind::Error {
                 self.diagnostics.push(diagnostic!(
-                    labels = vec![Label::new(span, format!("unrecognized token `{text}`"))],
+                    labels = vec![diagnostic_label(span, format!("unrecognized token `{text}`"))],
                     "syntax error"
                 ));
             }
@@ -1643,12 +1643,22 @@ impl<'input> Parser<'input> {
     }
 
     fn error_at_span(&mut self, span: SourceSpan, message: impl Into<String>) {
-        self.diagnostics
-            .push(diagnostic!(labels = vec![Label::new(span, message.into())], "syntax error"));
+        self.diagnostics.push(diagnostic!(
+            labels = vec![diagnostic_label(span, message.into())],
+            "syntax error"
+        ));
     }
 
     fn error_at_eof(&mut self, message: impl Into<String>) {
         self.error_at_span(self.eof_span, message);
+    }
+}
+
+fn diagnostic_label(span: SourceSpan, message: String) -> Label {
+    if span.source_id().is_unknown() {
+        Label::detached(span.into_range(), message)
+    } else {
+        Label::new(span, message)
     }
 }
 
@@ -2925,11 +2935,20 @@ end
             })
             .expect("end-of-input diagnostic at the start of the detached source");
 
-        let report = miden_utils_diagnostics::Report::from(diagnostic.clone())
-            .with_source_code(parse.source_file());
-        let rendered = format!("{report:?}");
-        assert!(rendered.contains("memory:///inline.masm:1:1"), "{rendered}");
-        assert!(rendered.contains("1 | @\n   : ^"), "{rendered}");
+        let rebound = Arc::new(ManagedSourceFile::new(
+            SourceId::new(13),
+            SourceLanguage::Masm,
+            Uri::new("memory:///rebound.masm"),
+            "@",
+        ));
+        for source in [parse.source_file(), rebound] {
+            let expected_location = format!("{}:1:1", source.uri());
+            let report =
+                miden_utils_diagnostics::Report::from(diagnostic.clone()).with_source_code(source);
+            let rendered = format!("{report:?}");
+            assert!(rendered.contains(&expected_location), "{rendered}");
+            assert!(rendered.contains("1 | @\n   : ^"), "{rendered}");
+        }
     }
 
     #[test]
