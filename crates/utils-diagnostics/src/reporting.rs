@@ -85,9 +85,11 @@ fn render_diagnostic(
     let source = details.source.or(inherited_source);
     let has_primary_label = details.labels.iter().any(|label| label.primary);
     for label in details.labels.iter() {
-        if let Some(source) =
-            source.filter(|_| !label.span.is_unknown() && !label.span.is_synthetic())
-        {
+        // Detached sources use UNKNOWN as their ID, so their valid 0..0 range has the same value
+        // as the unknown-location sentinel.
+        if let Some(source) = source.filter(|source| {
+            (!label.span.is_unknown() || source.id().is_unknown()) && !label.span.is_synthetic()
+        }) {
             match Excerpt::new(source, label) {
                 Ok(excerpt) => {
                     let marker = if has_primary_label && !label.primary { '-' } else { '^' };

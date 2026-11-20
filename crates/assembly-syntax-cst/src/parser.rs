@@ -2910,6 +2910,29 @@ end
     }
 
     #[test]
+    fn detached_eof_diagnostic_renders_its_zero_length_source_location() {
+        let parse = parse_text("@");
+        let diagnostic = parse
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| {
+                diagnostic
+                    .labels
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|label| label.span.is_unknown())
+            })
+            .expect("end-of-input diagnostic at the start of the detached source");
+
+        let report = miden_utils_diagnostics::Report::from(diagnostic.clone())
+            .with_source_code(parse.source_file());
+        let rendered = format!("{report:?}");
+        assert!(rendered.contains("memory:///inline.masm:1:1"), "{rendered}");
+        assert!(rendered.contains("1 | @\n   : ^"), "{rendered}");
+    }
+
+    #[test]
     fn eof_diagnostics_anchor_to_the_last_character_offset() {
         let source = Arc::new(ManagedSourceFile::new(
             SourceId::new(13),
