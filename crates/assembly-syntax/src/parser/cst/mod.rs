@@ -119,7 +119,7 @@ impl From<Vec<MessageDiagnostic>> for SyntaxError {
 /// Converts a single CST diagnostic into the parser's severity-preserving syntax error wrapper.
 impl From<MessageDiagnostic> for SyntaxError {
     fn from(value: MessageDiagnostic) -> Self {
-        let MessageDiagnostic { message, severity, help, labels } = value;
+        let MessageDiagnostic { message, severity, help, labels, .. } = value;
 
         let severity = severity.unwrap_or(Severity::Error);
         match severity {

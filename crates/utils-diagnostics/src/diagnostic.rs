@@ -7,6 +7,7 @@ use crate::Label;
 
 /// Metadata available for rendering an error or a parser diagnostic.
 #[derive(Default)]
+#[non_exhaustive]
 pub struct DiagnosticDetails<'a> {
     pub code: Option<&'a str>,
     pub help: Option<Cow<'a, str>>,
@@ -45,6 +46,7 @@ impl fmt::Display for Severity {
 
 /// An owned diagnostic for parser recovery and other errors built at runtime.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct MessageDiagnostic {
     pub message: String,
     pub severity: Option<Severity>,
