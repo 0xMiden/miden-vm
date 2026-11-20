@@ -120,7 +120,7 @@ fn renders_multiline_spans_with_tabs_crlf_and_wide_characters() {
         .with_labeled_span(span, "check this");
 
     let rendered = format!("{:?}", Report::new(error));
-    assert!(rendered.contains("test.masm:1:7"), "{rendered}");
+    assert!(rendered.contains("test.masm:1:3"), "{rendered}");
     assert!(rendered.contains("1 |     界x\n   :       ^"), "{rendered}");
     assert!(rendered.contains("2 | next\n   : ^ check this"), "{rendered}");
     assert!(!rendered.contains(['\t', '\r']), "{rendered}");

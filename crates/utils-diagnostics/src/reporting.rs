@@ -155,13 +155,10 @@ impl<'a> Excerpt<'a> {
         let first = self.first_line.to_usize();
         let last = self.last_line.to_usize();
 
-        if let Some(start) = content.line_start(self.first_line)
-            && let Some(prefix) = self.source.as_str().get(start.to_usize()..span.start)
-        {
-            let column = display_column(prefix.trim_end_matches(['\r', '\n']), 0);
+        if let Some(location) = content.location(label.span.start()) {
             write_inline(
                 out,
-                format_args!("  --> {}:{}:{}", self.source.uri(), first + 1, column + 1),
+                format_args!("  --> {}:{}:{}", location.uri, location.line, location.column),
             )?;
             out.write_char('\n')?;
         }
@@ -194,6 +191,7 @@ impl<'a> Excerpt<'a> {
             let Some(marked) = text.get(label_start..label_end) else {
                 continue;
             };
+            // Source locations count Unicode scalars. Underlines count terminal display cells.
             let column = display_column(prefix, 0);
             let width = (display_column(marked, column) - column).max(1);
 
