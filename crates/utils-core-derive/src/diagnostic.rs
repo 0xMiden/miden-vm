@@ -140,7 +140,7 @@ fn formatted(arguments: TokenStream) -> TokenStream {
     {
         return quote!(#literal);
     }
-    quote!(::alloc::format!(#arguments))
+    quote!(::miden_utils_diagnostics::format!(#arguments))
 }
 
 pub fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
@@ -319,7 +319,8 @@ fn expand_fields(
         ));
     }
     if !labels.is_empty() {
-        assignments.push(quote!(details.labels = ::alloc::vec![#(#labels,)*].into();));
+        assignments
+            .push(quote!(details.labels = ::miden_utils_diagnostics::vec![#(#labels,)*].into();));
         if let Some(collection) = collection {
             assignments.push(quote!(details.labels.to_mut().extend_from_slice(#collection);));
         }

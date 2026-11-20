@@ -40,7 +40,7 @@ use syn::{
 ///
 /// Supports `diagnostic(help(...), code(...), severity(...), forward(field))`,
 /// `diagnostic(transparent)`, and field attributes `source_code`, `label`, `related`, and `help`.
-/// Generated code uses `core`, `alloc`, and `miden-utils-diagnostics`.
+/// Generated code uses `core` and `miden-utils-diagnostics`.
 #[proc_macro_derive(Diagnostic, attributes(diagnostic, source_code, label, related, help))]
 pub fn derive_diagnostic(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

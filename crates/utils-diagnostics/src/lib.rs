@@ -25,7 +25,7 @@ pub use self::{
 pub type LabeledSpan = Label;
 
 #[doc(hidden)]
-pub use alloc::format;
+pub use alloc::{format, vec};
 
 #[doc(hidden)]
 pub use miden_debug_types::Spanned;
