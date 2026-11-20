@@ -85,7 +85,9 @@ fn render_diagnostic(
     let source = details.source.or(inherited_source);
     let has_primary_label = details.labels.iter().any(|label| label.primary);
     for label in details.labels.iter() {
-        if let Some(source) = source.filter(|_| !label.span.is_synthetic()) {
+        if let Some(source) =
+            source.filter(|_| !label.span.is_unknown() && !label.span.is_synthetic())
+        {
             match Excerpt::new(source, label) {
                 Ok(excerpt) => {
                     let marker = if has_primary_label && !label.primary { '-' } else { '^' };
