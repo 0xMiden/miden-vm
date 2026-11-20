@@ -127,6 +127,19 @@ fn renders_multiline_spans_with_tabs_crlf_and_wide_characters() {
 }
 
 #[test]
+fn eof_anchor_inside_crlf_uses_the_visible_end_of_line() {
+    let file = source("begin\r\n");
+    let span = SourceSpan::at(file.id(), 6);
+    let error = RelatedLabel::error("missing end")
+        .with_source_file(Some(file))
+        .with_labeled_span(span, "expected end");
+
+    let rendered = format!("{:?}", Report::new(error));
+    assert!(rendered.contains("test.masm:1:6"), "{rendered}");
+    assert!(rendered.contains("1 | begin\n   :      ^ expected end"), "{rendered}");
+}
+
+#[test]
 fn renders_empty_source_and_retains_labels_when_an_excerpt_is_unavailable() {
     let file = source("");
     let point = SourceSpan::at(file.id(), 0);

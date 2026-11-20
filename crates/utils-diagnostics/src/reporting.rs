@@ -155,7 +155,15 @@ impl<'a> Excerpt<'a> {
         let first = self.first_line.to_usize();
         let last = self.last_line.to_usize();
 
-        if let Some(location) = content.location(label.span.start()) {
+        // An anchor inside CRLF is displayed at the end of the line's content.
+        let mut location_start = label.span.start();
+        let bytes = self.source.as_bytes();
+        if bytes.get(span.start) == Some(&b'\n')
+            && bytes.get(span.start.saturating_sub(1)) == Some(&b'\r')
+        {
+            location_start = ByteIndex::new(location_start.to_u32() - 1);
+        }
+        if let Some(location) = content.location(location_start) {
             write_inline(
                 out,
                 format_args!("  --> {}:{}:{}", location.uri, location.line, location.column),
