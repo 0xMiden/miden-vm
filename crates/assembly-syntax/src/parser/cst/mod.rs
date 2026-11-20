@@ -7,7 +7,7 @@ mod instructions;
 use alloc::{collections::BTreeSet, string::String, sync::Arc, vec::Vec};
 
 use miden_debug_types::{SourceFile, SourceSpan};
-use miden_utils_diagnostics::LabeledSpan;
+use miden_utils_diagnostics::Label;
 
 use self::{context::LoweringContext, forms::lower_source_file};
 use crate::{
@@ -27,7 +27,7 @@ pub enum SyntaxError {
     Error {
         message: String,
         #[label(collection)]
-        labels: Vec<LabeledSpan>,
+        labels: Vec<Label>,
         #[help]
         help: Option<String>,
     },
@@ -36,7 +36,7 @@ pub enum SyntaxError {
     Warning {
         message: String,
         #[label(collection)]
-        labels: Vec<LabeledSpan>,
+        labels: Vec<Label>,
         #[help]
         help: Option<String>,
     },
@@ -45,7 +45,7 @@ pub enum SyntaxError {
     Advice {
         message: String,
         #[label(collection)]
-        labels: Vec<LabeledSpan>,
+        labels: Vec<Label>,
         #[help]
         help: Option<String>,
     },

@@ -12,6 +12,11 @@ pub mod reporting;
 #[cfg(test)]
 mod tests;
 
+#[doc(hidden)]
+pub use alloc::{format, vec};
+
+#[doc(hidden)]
+pub use miden_debug_types::Spanned;
 pub use miden_utils_core_derive::Diagnostic;
 pub use tracing;
 
@@ -21,14 +26,6 @@ pub use self::{
     related::{RelatedError, RelatedLabel},
     report::{IntoDiagnostic, Report, Result, WrapErr},
 };
-
-pub type LabeledSpan = Label;
-
-#[doc(hidden)]
-pub use alloc::{format, vec};
-
-#[doc(hidden)]
-pub use miden_debug_types::Spanned;
 
 #[macro_export]
 macro_rules! report {

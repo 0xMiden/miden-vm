@@ -289,7 +289,7 @@ fn expand_fields(
                 continue;
             }
             let value = match (type_name(&field.ty), label.message) {
-                (Some(name), None) if name == "Label" || name == "LabeledSpan" => {
+                (Some(name), None) if name == "Label" => {
                     quote!(#binding.clone())
                 },
                 (_, Some(message)) => {
