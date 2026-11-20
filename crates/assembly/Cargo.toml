@@ -34,6 +34,7 @@ testing = ["logging", "miden-assembly-syntax/testing"]
 logging = ["dep:env_logger"]
 
 [dependencies]
+miden-utils-diagnostics.workspace = true
 # Miden dependencies
 miden-assembly-syntax.workspace = true
 miden-core.workspace = true

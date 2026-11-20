@@ -207,8 +207,6 @@ fn reexport_target_docs(
 /// Assemble the core and precompiles sources as separate packages and serialize both into the
 /// `assets` folder.
 fn main() -> Result<(), Report> {
-    use miden_assembly::diagnostics::reporting::ReportHandlerOpts;
-
     // re-build the `[OUT_DIR]/assets/core.masp` file iff core-library MASM sources,
     // generated core-library MASM, or the builder changed:
     println!("cargo:rerun-if-changed=asm");
@@ -217,12 +215,6 @@ fn main() -> Result<(), Report> {
     // NOTE: path is relative to the package root (crates/lib/core/), so we need
     // ../../ to reach crates/assembly/src.
     println!("cargo:rerun-if-changed=../../assembly/src");
-
-    miden_assembly::diagnostics::reporting::set_hook(Box::new(|_| {
-        Box::new(ReportHandlerOpts::new().build())
-    }))
-    .unwrap();
-    miden_assembly::diagnostics::reporting::set_panic_hook();
 
     // Enable debug tracing to stderr via the MIDEN_LOG environment variable, if present
     env_logger::Builder::from_env("MIDEN_LOG").format_timestamp(None).init();

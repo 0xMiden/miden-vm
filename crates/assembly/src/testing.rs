@@ -10,7 +10,7 @@ use miden_assembly_syntax::{
     Parse, Path,
     ast::{Module, ModuleKind},
     debuginfo::{DefaultSourceManager, SourceManager},
-    diagnostics::{Report, reporting::set_hook},
+    diagnostics::Report,
 };
 pub use miden_assembly_syntax::{
     assert_diagnostic, assert_diagnostic_lines, parse_module, regex, source_file, testing::Pattern,
@@ -23,16 +23,10 @@ use miden_mast_package::PackageId;
 use miden_project::TargetType;
 
 use crate::assembler::Assembler;
-#[cfg(not(feature = "std"))]
-use crate::diagnostics::reporting::DefaultReportHandler;
-#[cfg(feature = "std")]
-use crate::diagnostics::reporting::{ReportHandlerOpts, set_panic_hook};
 
 /// A [TestContext] provides common functionality for all tests which interact with an [Assembler].
 ///
-/// It is used by constructing it with `TestContext::default()`, which will initialize the
-/// diagnostic reporting infrastructure, and construct a default [Assembler] instance for you. You
-/// can then optionally customize the context, or start invoking any of its test helpers.
+/// Construct it with `TestContext::default()` to use a default [Assembler].
 ///
 /// Some of the assertion macros defined above require a [TestContext], so be aware of that.
 pub struct TestContext {
@@ -56,19 +50,6 @@ impl TestContext {
             let _ = env_logger::Builder::from_env("MIDEN_LOG").format_timestamp(None).try_init();
         }
 
-        #[cfg(feature = "std")]
-        {
-            let result = set_hook(Box::new(|_| Box::new(ReportHandlerOpts::new().build())));
-            #[cfg(feature = "std")]
-            if result.is_ok() {
-                set_panic_hook();
-            }
-        }
-
-        #[cfg(not(feature = "std"))]
-        {
-            let _ = set_hook(Box::new(|_| Box::new(DefaultReportHandler::default())));
-        }
         let source_manager = Arc::new(DefaultSourceManager::default());
         let assembler = Assembler::new(source_manager.clone()).with_warnings_as_errors(true);
         #[cfg(feature = "std")]

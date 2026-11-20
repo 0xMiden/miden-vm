@@ -106,6 +106,9 @@ fn link_diagnostic_for_private_submodule_import() -> TestResult {
 
     assert_diagnostic!(&err, "private submodule '::diag::root::child'");
     assert_diagnostic!(&err, "only public submodules can be imported from another module");
+    assert_diagnostic!(&err, "use diag::root::child");
+    assert_diagnostic!(&err, "mod child");
+    assert_diagnostic!(&err, "the referenced submodule is private");
 
     Ok(())
 }

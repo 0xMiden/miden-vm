@@ -1,13 +1,11 @@
 use alloc::{string::String, sync::Arc};
 use core::fmt;
 
-use miden_assembly_syntax::{
-    Report,
-    diagnostics::{Diagnostic, miette},
-};
+use miden_assembly_syntax::Report;
 use miden_core::serde::DeserializationError;
 use miden_debug_types::Uri;
 use miden_mast_package::{Package, PackageDebugInfoError};
+use miden_utils_diagnostics::Diagnostic;
 
 const PACKAGE_MAGIC: &[u8; 5] = b"MASP\0";
 const TOOLCHAIN_HELP: &str = "package, MAST, and debug-info formats are tied to the Miden \

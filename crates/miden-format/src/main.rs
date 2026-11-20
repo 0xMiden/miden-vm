@@ -12,7 +12,7 @@ use std::{
 use clap::Parser;
 use miden_assembly_syntax_cst::{
     Report,
-    diagnostics::{miette::MietteDiagnostic, reporting::PrintDiagnostic},
+    diagnostics::{MessageDiagnostic, reporting::PrintDiagnostic},
     parse_source_file,
 };
 use miden_debug_types::{
@@ -91,8 +91,6 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), CliError> {
-    miden_assembly_syntax_cst::diagnostics::reporting::set_panic_hook();
-
     let cli = Cli::parse();
     let source_manager = Arc::new(DefaultSourceManager::default());
 
@@ -328,7 +326,7 @@ fn unique_temp_suffix() -> u128 {
         .unwrap_or_default()
 }
 
-fn report_parse_diagnostic(source: Arc<SourceFile>, diagnostic: MietteDiagnostic) -> Report {
+fn report_parse_diagnostic(source: Arc<SourceFile>, diagnostic: MessageDiagnostic) -> Report {
     Report::from(diagnostic).with_source_code(source)
 }
 

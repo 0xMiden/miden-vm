@@ -36,6 +36,7 @@ std = [
 proptest = ["std", "dep:proptest"]
 
 [dependencies]
+miden-utils-diagnostics.workspace = true
 clap = { workspace = true, optional = true, features = ["env"] }
 hashbrown.workspace = true
 log.workspace = true
