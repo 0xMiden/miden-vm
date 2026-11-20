@@ -131,6 +131,7 @@ fn run_rejects_missing_inferred_inputs_file() {
     cmd.arg("run").arg(&program_path);
     cmd.assert()
         .failure()
+        .stderr(predicate::str::starts_with("error: "))
         .stderr(predicate::str::contains("Failed to open input file"))
         .stderr(predicate::str::contains("miden-vm-cli-missing-run-"))
         .stderr(predicate::str::contains("test.inputs"))

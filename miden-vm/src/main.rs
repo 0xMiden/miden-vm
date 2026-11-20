@@ -1,6 +1,9 @@
 extern crate alloc;
 
-use std::ffi::{OsStr, OsString};
+use std::{
+    ffi::{OsStr, OsString},
+    process::ExitCode,
+};
 
 use clap::{FromArgMatches, Parser, Subcommand};
 use miden_assembly::diagnostics::Report;
@@ -120,7 +123,17 @@ impl Cli {
 }
 
 /// Executable entry point
-pub fn main() -> Result<(), Report> {
+pub fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprint!("{error:?}");
+            ExitCode::FAILURE
+        },
+    }
+}
+
+fn run() -> Result<(), Report> {
     // read command-line args
     let cli = <MidenVmCli as clap::CommandFactory>::command();
     let matches = cli.get_matches();
