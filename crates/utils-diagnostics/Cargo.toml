@@ -1,6 +1,6 @@
 [package]
 name = "miden-utils-diagnostics"
-version = "1.0.0"
+version.workspace = true
 description = "Diagnostic infrastructure used in the Miden assembler and VM"
 documentation = "https://docs.rs/miden-utils-diagnostics"
 readme = "README.md"
@@ -20,8 +20,8 @@ std = ["miette/fancy-no-syscall", "miette/std", "miden-debug-types/std"]
 
 [dependencies]
 miden-debug-types.workspace = true
-miette = { workspace = true, features = [
-    "fancy-no-syscall",
-    "derive",
-] }
+miette = { workspace = true, features = ["derive"] }
 tracing.workspace = true
+
+[lints]
+workspace = true

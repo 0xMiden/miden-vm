@@ -100,8 +100,8 @@ pub trait Visit<T = ()> {
     fn visit_constant_expr(&mut self, expr: &ConstantExpr) -> ControlFlow<T> {
         visit_constant_expr(self, expr)
     }
-    fn visit_constant_ref(&mut self, path: &Span<Arc<Path>>) -> ControlFlow<T> {
-        visit_constant_ref(self, path)
+    fn visit_constant_ref(&mut self, _path: &Span<Arc<Path>>) -> ControlFlow<T> {
+        ControlFlow::Continue(())
     }
     fn visit_type_decl(&mut self, ty: &TypeDecl) -> ControlFlow<T> {
         visit_type_decl(self, ty)
@@ -130,8 +130,8 @@ pub trait Visit<T = ()> {
     fn visit_inst(&mut self, inst: &Span<Instruction>) -> ControlFlow<T> {
         visit_inst(self, inst)
     }
-    fn visit_system_event(&mut self, sys_event: Span<&SystemEventNode>) -> ControlFlow<T> {
-        visit_system_event(self, sys_event)
+    fn visit_system_event(&mut self, _sys_event: Span<&SystemEventNode>) -> ControlFlow<T> {
+        ControlFlow::Continue(())
     }
 
     fn visit_exec(&mut self, target: &InvocationTarget) -> ControlFlow<T> {
@@ -146,20 +146,20 @@ pub trait Visit<T = ()> {
     fn visit_procref(&mut self, target: &InvocationTarget) -> ControlFlow<T> {
         visit_procref(self, target)
     }
-    fn visit_invoke_target(&mut self, target: &InvocationTarget) -> ControlFlow<T> {
-        visit_invoke_target(self, target)
+    fn visit_invoke_target(&mut self, _target: &InvocationTarget) -> ControlFlow<T> {
+        ControlFlow::Continue(())
     }
-    fn visit_immediate_u8(&mut self, imm: &Immediate<u8>) -> ControlFlow<T> {
-        visit_immediate_u8(self, imm)
+    fn visit_immediate_u8(&mut self, _imm: &Immediate<u8>) -> ControlFlow<T> {
+        ControlFlow::Continue(())
     }
-    fn visit_immediate_u16(&mut self, imm: &Immediate<u16>) -> ControlFlow<T> {
-        visit_immediate_u16(self, imm)
+    fn visit_immediate_u16(&mut self, _imm: &Immediate<u16>) -> ControlFlow<T> {
+        ControlFlow::Continue(())
     }
-    fn visit_immediate_u32(&mut self, imm: &Immediate<u32>) -> ControlFlow<T> {
-        visit_immediate_u32(self, imm)
+    fn visit_immediate_u32(&mut self, _imm: &Immediate<u32>) -> ControlFlow<T> {
+        ControlFlow::Continue(())
     }
-    fn visit_immediate_felt(&mut self, imm: &Immediate<Felt>) -> ControlFlow<T> {
-        visit_immediate_felt(self, imm)
+    fn visit_immediate_felt(&mut self, _imm: &Immediate<Felt>) -> ControlFlow<T> {
+        ControlFlow::Continue(())
     }
     fn visit_immediate_word_value(&mut self, code: &Immediate<WordValue>) -> ControlFlow<T> {
         visit_immediate_word_value(self, code)
@@ -167,8 +167,8 @@ pub trait Visit<T = ()> {
     fn visit_immediate_push_value(&mut self, code: &Immediate<PushValue>) -> ControlFlow<T> {
         visit_immediate_push_value(self, code)
     }
-    fn visit_immediate_error_message(&mut self, code: &ErrorMsg) -> ControlFlow<T> {
-        visit_immediate_error_message(self, code)
+    fn visit_immediate_error_message(&mut self, _code: &ErrorMsg) -> ControlFlow<T> {
+        ControlFlow::Continue(())
     }
 }
 
@@ -331,14 +331,6 @@ where
         | ConstantExpr::String(_)
         | ConstantExpr::Word(_) => ControlFlow::Continue(()),
     }
-}
-
-#[inline(always)]
-pub fn visit_constant_ref<V, T>(_visitor: &mut V, _path: &Span<Arc<Path>>) -> ControlFlow<T>
-where
-    V: ?Sized + Visit<T>,
-{
-    ControlFlow::Continue(())
 }
 
 pub fn visit_type_decl<V, T>(visitor: &mut V, ty: &TypeDecl) -> ControlFlow<T>
@@ -510,17 +502,10 @@ where
         | MemStoreWLe | MemStream | AdvPipe | AdvPush | AdvPushW | AdvLoadW | Hash | HDword
         | Compress | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
         | DynCall | DebugVar(_) | DebugInlineCall(_) | DebugInlineCallClear | HornerBase
-        | HornerExt | CryptoStream | EvalCircuit | LogDeferred | Emit | Trace => {
+        | HornerExt | CryptoStream | EvalCircuit | LogDeferred | ClearDeferred | Emit | Trace => {
             ControlFlow::Continue(())
         },
     }
-}
-
-pub fn visit_system_event<V, T>(_visitor: &mut V, _node: Span<&SystemEventNode>) -> ControlFlow<T>
-where
-    V: ?Sized + Visit<T>,
-{
-    ControlFlow::Continue(())
 }
 
 #[inline]
@@ -556,46 +541,6 @@ where
 }
 
 #[inline(always)]
-pub fn visit_invoke_target<V, T>(_visitor: &mut V, _target: &InvocationTarget) -> ControlFlow<T>
-where
-    V: ?Sized + Visit<T>,
-{
-    ControlFlow::Continue(())
-}
-
-#[inline(always)]
-pub fn visit_immediate_u8<V, T>(_visitor: &mut V, _imm: &Immediate<u8>) -> ControlFlow<T>
-where
-    V: ?Sized + Visit<T>,
-{
-    ControlFlow::Continue(())
-}
-
-#[inline(always)]
-pub fn visit_immediate_u16<V, T>(_visitor: &mut V, _imm: &Immediate<u16>) -> ControlFlow<T>
-where
-    V: ?Sized + Visit<T>,
-{
-    ControlFlow::Continue(())
-}
-
-#[inline(always)]
-pub fn visit_immediate_u32<V, T>(_visitor: &mut V, _imm: &Immediate<u32>) -> ControlFlow<T>
-where
-    V: ?Sized + Visit<T>,
-{
-    ControlFlow::Continue(())
-}
-
-#[inline(always)]
-pub fn visit_immediate_felt<V, T>(_visitor: &mut V, _imm: &Immediate<Felt>) -> ControlFlow<T>
-where
-    V: ?Sized + Visit<T>,
-{
-    ControlFlow::Continue(())
-}
-
-#[inline(always)]
 pub fn visit_immediate_word_value<V, T>(
     _visitor: &mut V,
     _imm: &Immediate<WordValue>,
@@ -611,14 +556,6 @@ pub fn visit_immediate_push_value<V, T>(
     _visitor: &mut V,
     _imm: &Immediate<PushValue>,
 ) -> ControlFlow<T>
-where
-    V: ?Sized + Visit<T>,
-{
-    ControlFlow::Continue(())
-}
-
-#[inline(always)]
-pub fn visit_immediate_error_message<V, T>(_visitor: &mut V, _imm: &ErrorMsg) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
@@ -652,8 +589,8 @@ pub trait VisitMut<T = ()> {
     fn visit_mut_module(&mut self, module: &mut Module) -> ControlFlow<T> {
         visit_mut_module(self, module)
     }
-    fn visit_mut_import(&mut self, import: &mut Import) -> ControlFlow<T> {
-        visit_mut_import(self, import)
+    fn visit_mut_import(&mut self, _import: &mut Import) -> ControlFlow<T> {
+        ControlFlow::Continue(())
     }
     fn visit_mut_export(&mut self, export: &mut Item) -> ControlFlow<T> {
         visit_mut_export(self, export)
@@ -667,8 +604,8 @@ pub trait VisitMut<T = ()> {
     fn visit_mut_constant_expr(&mut self, expr: &mut ConstantExpr) -> ControlFlow<T> {
         visit_mut_constant_expr(self, expr)
     }
-    fn visit_mut_constant_ref(&mut self, path: &mut Span<Arc<Path>>) -> ControlFlow<T> {
-        visit_mut_constant_ref(self, path)
+    fn visit_mut_constant_ref(&mut self, _path: &mut Span<Arc<Path>>) -> ControlFlow<T> {
+        ControlFlow::Continue(())
     }
     fn visit_mut_type_decl(&mut self, ty: &mut TypeDecl) -> ControlFlow<T> {
         visit_mut_type_decl(self, ty)
@@ -679,8 +616,8 @@ pub trait VisitMut<T = ()> {
     fn visit_mut_type_expr(&mut self, ty: &mut TypeExpr) -> ControlFlow<T> {
         visit_mut_type_expr(self, ty)
     }
-    fn visit_mut_type_ref(&mut self, path: &mut Span<Arc<Path>>) -> ControlFlow<T> {
-        visit_mut_type_ref(self, path)
+    fn visit_mut_type_ref(&mut self, _path: &mut Span<Arc<Path>>) -> ControlFlow<T> {
+        ControlFlow::Continue(())
     }
     fn visit_mut_enum(&mut self, ty: &mut EnumType) -> ControlFlow<T> {
         visit_mut_enum(self, ty)
@@ -716,14 +653,14 @@ pub trait VisitMut<T = ()> {
     fn visit_mut_invoke_target(&mut self, target: &mut InvocationTarget) -> ControlFlow<T> {
         visit_mut_invoke_target(self, target)
     }
-    fn visit_mut_immediate_u8(&mut self, imm: &mut Immediate<u8>) -> ControlFlow<T> {
-        visit_mut_immediate_u8(self, imm)
+    fn visit_mut_immediate_u8(&mut self, _imm: &mut Immediate<u8>) -> ControlFlow<T> {
+        ControlFlow::Continue(())
     }
-    fn visit_mut_immediate_u16(&mut self, imm: &mut Immediate<u16>) -> ControlFlow<T> {
-        visit_mut_immediate_u16(self, imm)
+    fn visit_mut_immediate_u16(&mut self, _imm: &mut Immediate<u16>) -> ControlFlow<T> {
+        ControlFlow::Continue(())
     }
-    fn visit_mut_immediate_u32(&mut self, imm: &mut Immediate<u32>) -> ControlFlow<T> {
-        visit_mut_immediate_u32(self, imm)
+    fn visit_mut_immediate_u32(&mut self, _imm: &mut Immediate<u32>) -> ControlFlow<T> {
+        ControlFlow::Continue(())
     }
     fn visit_mut_immediate_felt(&mut self, imm: &mut Immediate<Felt>) -> ControlFlow<T> {
         visit_mut_immediate_felt(self, imm)
@@ -844,14 +781,6 @@ where
     ControlFlow::Continue(())
 }
 
-#[inline(always)]
-pub fn visit_mut_import<V, T>(_visitor: &mut V, _import: &mut Import) -> ControlFlow<T>
-where
-    V: ?Sized + VisitMut<T>,
-{
-    ControlFlow::Continue(())
-}
-
 pub fn visit_mut_export<V, T>(visitor: &mut V, export: &mut Item) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
@@ -900,14 +829,6 @@ where
     }
 }
 
-#[inline(always)]
-pub fn visit_mut_constant_ref<V, T>(_visitor: &mut V, _path: &mut Span<Arc<Path>>) -> ControlFlow<T>
-where
-    V: ?Sized + VisitMut<T>,
-{
-    ControlFlow::Continue(())
-}
-
 pub fn visit_mut_type_decl<V, T>(visitor: &mut V, ty: &mut TypeDecl) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
@@ -941,14 +862,6 @@ where
             ControlFlow::Continue(())
         },
     }
-}
-
-#[inline(always)]
-pub fn visit_mut_type_ref<V, T>(_visitor: &mut V, _path: &mut Span<Arc<Path>>) -> ControlFlow<T>
-where
-    V: ?Sized + VisitMut<T>,
-{
-    ControlFlow::Continue(())
 }
 
 pub fn visit_mut_enum<V, T>(visitor: &mut V, ty: &mut EnumType) -> ControlFlow<T>
@@ -1081,7 +994,7 @@ where
         | MemStoreWLe | MemStream | AdvPipe | AdvPush | AdvPushW | AdvLoadW | Hash | HDword
         | Compress | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
         | DynCall | DebugVar(_) | DebugInlineCall(_) | DebugInlineCallClear | HornerBase
-        | HornerExt | EvalCircuit | CryptoStream | LogDeferred | Emit | Trace => {
+        | HornerExt | EvalCircuit | CryptoStream | LogDeferred | ClearDeferred | Emit | Trace => {
             ControlFlow::Continue(())
         },
     }
@@ -1134,30 +1047,6 @@ pub fn visit_mut_invoke_target<V, T>(
     _visitor: &mut V,
     _target: &mut InvocationTarget,
 ) -> ControlFlow<T>
-where
-    V: ?Sized + VisitMut<T>,
-{
-    ControlFlow::Continue(())
-}
-
-#[inline(always)]
-pub fn visit_mut_immediate_u8<V, T>(_visitor: &mut V, _imm: &mut Immediate<u8>) -> ControlFlow<T>
-where
-    V: ?Sized + VisitMut<T>,
-{
-    ControlFlow::Continue(())
-}
-
-#[inline(always)]
-pub fn visit_mut_immediate_u16<V, T>(_visitor: &mut V, _imm: &mut Immediate<u16>) -> ControlFlow<T>
-where
-    V: ?Sized + VisitMut<T>,
-{
-    ControlFlow::Continue(())
-}
-
-#[inline(always)]
-pub fn visit_mut_immediate_u32<V, T>(_visitor: &mut V, _imm: &mut Immediate<u32>) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
 {

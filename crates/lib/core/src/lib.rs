@@ -6,8 +6,7 @@ extern crate std;
 #[cfg(any(feature = "constraints-tools", all(test, feature = "std")))]
 pub mod constraints_regen;
 pub mod dsa;
-#[cfg(feature = "constraints-tools")]
-pub mod evaluator_regen;
+pub mod ecdh;
 pub mod handlers;
 
 extern crate alloc;
@@ -20,7 +19,7 @@ use miden_processor::{HostLibrary, event::EventHandler};
 use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
-    aead_eidos::{AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME, handle_aead_eidos_decrypt_empty_ad},
+    aead_eidos::{AEAD_EIDOS_DECRYPT_EVENT_NAME, handle_aead_eidos_decrypt},
     debug::default_debug_handlers,
     ecdsa_k256_keccak::{ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, handle_ecdsa_k256_keccak_recover},
     ecdsa_p256_sha256::{ECDSA_P256_SHA256_RECOVER_EVENT_NAME, handle_ecdsa_p256_sha256_recover},
@@ -174,7 +173,22 @@ impl CoreLibrary {
             .expect("the conjectured security estimator is exported from the core library")
     }
 
+    /// Returns the MAST root of the common recursive proven security estimator.
+    ///
+    /// Like the conjectured estimator, it encodes no acceptance threshold and does not
+    /// authenticate caller-assembled descriptors.
+    pub fn proven_security_estimator_root(&self) -> Word {
+        self.package
+            .get_procedure_root_by_path(
+                "::miden::core::stark::security::compute_proven_security_level",
+            )
+            .expect("the proven security estimator is exported from the core library")
+    }
+
     /// Returns the default event handlers required by the core library.
+    ///
+    /// Configure host support for the [EcGFp5/Eidos sealing events](crate::handlers::ecgfp5_eidos)
+    /// separately.
     ///
     /// Stack and memory print-style debug handlers write to stdout by default. These handlers can
     /// print private values if a program moves witness data onto the operand stack or into memory.
@@ -184,10 +198,7 @@ impl CoreLibrary {
     /// [`crate::handlers::debug::advice_debug_handlers`].
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
         let mut handlers: Vec<(EventName, Arc<dyn EventHandler>)> = vec![
-            (
-                AEAD_EIDOS_DECRYPT_EMPTY_AD_EVENT_NAME,
-                Arc::new(handle_aead_eidos_decrypt_empty_ad),
-            ),
+            (AEAD_EIDOS_DECRYPT_EVENT_NAME, Arc::new(handle_aead_eidos_decrypt)),
             (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
             (U64_DIV_EVENT_NAME, Arc::new(handle_u64_div)),
             (U128_DIV_EVENT_NAME, Arc::new(handle_u128_div)),
@@ -228,6 +239,11 @@ pub fn conjectured_security_estimator_root() -> Word {
     CoreLibrary::default().conjectured_security_estimator_root()
 }
 
+/// Returns the MAST root of the common recursive proven security estimator.
+pub fn proven_security_estimator_root() -> Word {
+    CoreLibrary::default().proven_security_estimator_root()
+}
+
 // TESTS
 // ================================================================================================
 
@@ -237,18 +253,58 @@ mod tests {
 
     use super::*;
 
+    fn core_package_versions_match(
+        crate_version: &miden_mast_package::Version,
+        package_version: &miden_mast_package::Version,
+    ) -> bool {
+        if !crate_version.pre.is_empty() || !package_version.pre.is_empty() {
+            crate_version == package_version
+        } else {
+            (crate_version.major, crate_version.minor)
+                == (package_version.major, package_version.minor)
+        }
+    }
+
     #[test]
-    fn core_package_version_matches_crate_version() {
+    fn core_package_version_matches_crate_release_line() {
         let core_lib = CoreLibrary::default();
+        let package_version = &core_lib.package.version;
         let crate_version = env!("CARGO_PKG_VERSION")
             .parse::<miden_mast_package::Version>()
             .expect("crate version should be a valid package version");
 
-        assert_eq!(
-            &core_lib.package.version, &crate_version,
-            "embedded package {} should track the miden-core-lib crate version",
+        assert!(
+            core_package_versions_match(&crate_version, package_version),
+            "embedded package {} version {} does not match the miden-core-lib crate version {}",
             core_lib.package.name,
+            package_version,
+            crate_version,
         );
+    }
+
+    #[test]
+    fn core_package_version_policy() {
+        for (crate_version, package_version, expected) in [
+            ("0.36.4", "0.36.3", true),
+            ("1.0.1", "1.0.0", true),
+            ("1.0.0", "1.0.1", true),
+            ("1.0.0-rc.0", "1.0.0-rc.0", true),
+            ("1.0.0-rc.0", "1.0.0-rc.1", false),
+            ("1.0.0-rc.0", "1.0.1-rc.0", false),
+            ("1.0.1-rc.0", "1.0.0-rc.0", false),
+            ("1.0.0-rc.0", "1.0.0", false),
+            ("1.0.0", "1.0.0-rc.0", false),
+            ("1.0.0", "1.1.0", false),
+            ("1.0.0", "2.0.0", false),
+        ] {
+            let crate_version = crate_version.parse().unwrap();
+            let package_version = package_version.parse().unwrap();
+            assert_eq!(
+                core_package_versions_match(&crate_version, &package_version),
+                expected,
+                "crate {crate_version}, package {package_version}",
+            );
+        }
     }
 
     #[test]

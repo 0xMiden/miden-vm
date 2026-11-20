@@ -50,8 +50,11 @@ impl Eidos {
     ///
     /// Each lane is independent. Like [`Self::compress`], this adds no message framing.
     #[inline]
-    pub fn compress_packed(cv: PackedChainingValue, block: PackedBlock) -> PackedChainingValue {
-        compression::compress_packed_felt_cv(&cv, &block)
+    pub(crate) fn compress_packed(
+        cv: &PackedChainingValue,
+        block: &PackedBlock,
+    ) -> PackedChainingValue {
+        compression::compress_packed_felt_cv(cv, block)
     }
 
     /// Return all sixteen raw XOF output lanes for one complete block.
@@ -117,7 +120,11 @@ impl Eidos {
     ///
     /// The interpretation of `param0` is defined by the registered domain.
     #[inline]
-    pub fn init_packed_chaining_word<D: EidosDomain>(_: D, param0: u32) -> PackedChainingValue {
+    #[cfg(test)]
+    pub(crate) fn init_packed_chaining_word<D: EidosDomain>(
+        _: D,
+        param0: u32,
+    ) -> PackedChainingValue {
         framing::init_packed_cv(D::TAG.as_u32(), [param0, 0, 0])
     }
 
@@ -228,7 +235,7 @@ impl Eidos {
     ///
     /// This is the packed equivalent of [`Self::merge`].
     #[inline]
-    pub fn merge_packed(values: &[PackedDigest; 2]) -> PackedDigest {
+    pub(crate) fn merge_packed(values: &[PackedDigest; 2]) -> PackedDigest {
         let block = array::from_fn(|i| values[i / DIGEST_WIDTH][i % DIGEST_WIDTH]);
         let cv = framing::init_packed_u32_cv(0, [0; 3]);
         encoding::pack_cv_to_felts(compression::compress_packed_felt_block(&cv, &block))
@@ -241,8 +248,9 @@ impl Eidos {
     }
 
     /// Hash packed pairs of words as generic eight-Felt sequences.
+    #[cfg(test)]
     #[inline]
-    pub fn hash_double_word_packed(values: &[PackedDigest; 2]) -> PackedDigest {
+    pub(crate) fn hash_double_word_packed(values: &[PackedDigest; 2]) -> PackedDigest {
         let cv = Self::init_packed_chaining_word(GENERIC_FELT_SEQUENCE, BLOCK_LEN as u32);
         compress_packed_digest_pair(values, &cv)
     }
@@ -281,6 +289,7 @@ fn compress_digest_pair(values: &[Word; 2], cv: [u32; 8]) -> Word {
 }
 
 #[inline]
+#[cfg(test)]
 fn compress_packed_digest_pair(
     values: &[PackedDigest; 2],
     cv: &PackedChainingValue,
@@ -546,7 +555,7 @@ mod tests {
         let packed_block: PackedBlock = array::from_fn(|element| {
             array::from_fn(|lane| Felt::new_unchecked((element * 101 + lane * 17 + 3) as u64))
         });
-        let packed = Eidos::compress_packed(packed_cv, packed_block);
+        let packed = Eidos::compress_packed(&packed_cv, &packed_block);
         let packed_values: [PackedDigest; 2] = [
             array::from_fn(|word| packed_block[word]),
             array::from_fn(|word| packed_block[DIGEST_WIDTH + word]),

@@ -150,22 +150,22 @@ const INFALLIBLE_OPS: &[Operation] = &[
 ];
 
 /// Strategy for operations without immediate values (non-control flow).
-pub fn op_no_imm_strategy() -> impl Strategy<Value = Operation> {
+pub(crate) fn op_no_imm_strategy() -> impl Strategy<Value = Operation> {
     prop::sample::select(OPS_NO_IMM)
 }
 
 /// Strategy for operations with immediate values.
-pub fn op_with_imm_strategy() -> impl Strategy<Value = Operation> {
+pub(crate) fn op_with_imm_strategy() -> impl Strategy<Value = Operation> {
     any::<u64>().prop_map(Felt::new_unchecked).prop_map(Operation::Push)
 }
 
 /// Strategy for all non-control flow operations.
-pub fn op_non_control_strategy() -> impl Strategy<Value = Operation> {
+pub(crate) fn op_non_control_strategy() -> impl Strategy<Value = Operation> {
     prop_oneof![op_no_imm_strategy(), op_with_imm_strategy()]
 }
 
 /// Strategy for sequences of non-control flow operations.
-pub fn op_non_control_sequence_strategy(
+pub(crate) fn op_non_control_sequence_strategy(
     max_length: usize,
 ) -> impl Strategy<Value = Vec<Operation>> {
     prop::collection::vec(op_non_control_strategy(), 1..=max_length)
@@ -217,7 +217,7 @@ fn balance_ops(ops: Vec<Operation>, max_len: usize) -> Vec<Operation> {
 #[derive(Clone, Debug)]
 pub struct BasicBlockNodeParams {
     /// Maximum number of operations in a generated basic block.
-    pub max_ops_len: usize,
+    pub(crate) max_ops_len: usize,
     /// Restricts blocks to infallible operations that leave the stack depth unchanged, so a block
     /// runs on any operand stack.
     pub executable: bool,

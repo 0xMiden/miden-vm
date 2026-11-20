@@ -1,10 +1,9 @@
 use miden_assembly::Assembler;
-use miden_core::Felt;
+use miden_core::{Felt, Word};
 use miden_processor::{
     ExecutionError, ExecutionOptions, FastProcessor, StackInputs, TestHost,
     advice::{AdviceError, AdviceInputs},
 };
-use miden_prover::Word;
 use miden_utils_testing::{build_test, crypto::MerkleStore};
 
 // ADVICE INJECTION

@@ -1,6 +1,6 @@
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 
-use miden_air::trace::{
+use miden_air_definitions::vm::trace::{
     and8_lookup::{BYTE_LOOKUP_COUNT_LEN, byte_pair_count_index},
     chiplets::hasher::{
         BLOCK_LEN, CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_ABSORB, LINEAR_HASH, MP_VERIFY,
@@ -17,19 +17,16 @@ use miden_core::{
     chiplets::{eidos_compression, hasher::compress_state},
     utils::RowMajorMatrix,
 };
-use rayon::prelude::*;
+use p3_maybe_rayon::prelude::*;
 
 use super::{
-    ChipletTraceFragment, Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch,
-    RangeChecker, Word as Digest, ZERO,
+    ChipletTraceFragment, Felt, HasherState, MerklePath, ONE, OpBatch, RangeChecker,
+    Word as Digest, ZERO, build_and8_lookup_trace,
 };
 use crate::{ContextId, RowIndex};
 
 mod trace;
 use trace::HasherTrace;
-mod and8_trace;
-pub(crate) use and8_trace::build_and8_lookup_trace;
-
 #[cfg(test)]
 mod tests;
 
@@ -82,7 +79,7 @@ fn key_to_state(key: &StateKey) -> HasherState {
 /// AIR executes one block per unique input state, with multiplicity tracked by the
 /// compression-link bus.
 #[derive(Debug, Default)]
-pub struct Hasher {
+pub(crate) struct Hasher {
     trace: HasherTrace,
     // Both maps are keyed by program-chosen values under a fast, non-HashDoS-hardened
     // hasher (foldhash); a crafted program can degrade lookups, but trace growth is
@@ -113,18 +110,6 @@ impl Hasher {
         } else {
             self.estimate_trace_len()
         }
-    }
-
-    /// Returns the layout of the hasher region as `(controller_len, compression_len)`.
-    ///
-    /// `controller_len` includes the padding rows that `finalize_trace()` will later append to
-    /// align the following chiplet section. `compression_len` is the standalone Eidos compression
-    /// AIR length, before power-of-two trace padding.
-    pub(super) fn region_lengths(&self) -> (usize, usize) {
-        debug_assert!(!self.finalized, "region_lengths must be called before finalization");
-        let controller_len = self.trace.trace_len().next_multiple_of(CONTROLLER_TRACE_ALIGNMENT);
-        let compression_len = self.eidos_compression_trace_len();
-        (controller_len, compression_len)
     }
 
     /// Returns the unpadded Eidos compression AIR trace length.
@@ -169,8 +154,7 @@ impl Hasher {
     /// This must match the actual length produced by `finalize_trace()`. The invariant is
     /// verified by a debug assertion in `fill_trace()`.
     fn estimate_trace_len(&self) -> usize {
-        let (controller_len, _) = self.region_lengths();
-        controller_len
+        self.trace.trace_len().next_multiple_of(CONTROLLER_TRACE_ALIGNMENT)
     }
 
     // HASHING METHODS
@@ -292,18 +276,13 @@ impl Hasher {
         new_value: Digest,
         path: &MerklePath,
         index: Felt,
-    ) -> MerkleRootUpdate {
+    ) {
         self.mrupdate_id += ONE;
 
-        let address = self.trace.next_row_addr();
         let index = index.as_canonical_u64();
 
-        let old_root =
-            self.verify_merkle_path(old_value, path, index, MerklePathContext::MrUpdateOld);
-        let new_root =
-            self.verify_merkle_path(new_value, path, index, MerklePathContext::MrUpdateNew);
-
-        MerkleRootUpdate { address, old_root, new_root }
+        self.verify_merkle_path(old_value, path, index, MerklePathContext::MrUpdateOld);
+        self.verify_merkle_path(new_value, path, index, MerklePathContext::MrUpdateNew);
     }
 
     // TRACE GENERATION
@@ -516,6 +495,12 @@ fn fill_eidos_compression_trace(
     let real_rows_len = requests.len() * EIDOS_COMPRESSION_CYCLE_LEN;
     let (real_rows, dummy_rows) = rows.split_at_mut(real_rows_len);
 
+    let merge_counts = |mut left: Vec<u64>, right: Vec<u64>| {
+        for (left, right) in left.iter_mut().zip(right) {
+            *left += right;
+        }
+        left
+    };
     let mut counts = real_rows
         .par_chunks_mut(EIDOS_COMPRESSION_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
         .zip(requests.par_chunks(BLOCKS_PER_FILL_CHUNK))
@@ -541,13 +526,7 @@ fn fill_eidos_compression_trace(
             }
             local_counts
         })
-        .reduce_with(|mut left, right| {
-            for (left, right) in left.iter_mut().zip(right) {
-                *left += right;
-            }
-            left
-        })
-        .unwrap_or_else(|| vec![0u64; BYTE_LOOKUP_COUNT_LEN]);
+        .par_fold_reduce(|| vec![0u64; BYTE_LOOKUP_COUNT_LEN], merge_counts, merge_counts);
 
     if !dummy_rows.is_empty() {
         let zero_state = [0u64; STATE_WIDTH];
@@ -610,6 +589,12 @@ fn fill_ordered_eidos_compression_trace(requests: &[StateKey], trace: &mut [Felt
     let real_rows_len = requests.len() * EIDOS_COMPRESSION_CYCLE_LEN;
     let (real_rows, dummy_rows) = rows.split_at_mut(real_rows_len);
 
+    let merge_counts = |mut left: Vec<u64>, right: Vec<u64>| {
+        for (left, right) in left.iter_mut().zip(right) {
+            *left += right;
+        }
+        left
+    };
     let mut counts = real_rows
         .par_chunks_mut(EIDOS_COMPRESSION_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
         .zip(requests.par_chunks(BLOCKS_PER_FILL_CHUNK))
@@ -637,13 +622,7 @@ fn fill_ordered_eidos_compression_trace(requests: &[StateKey], trace: &mut [Felt
             }
             local_counts
         })
-        .reduce_with(|mut left, right| {
-            for (left, right) in left.iter_mut().zip(right) {
-                *left += right;
-            }
-            left
-        })
-        .unwrap_or_else(|| vec![0u64; BYTE_LOOKUP_COUNT_LEN]);
+        .par_fold_reduce(|| vec![0u64; BYTE_LOOKUP_COUNT_LEN], merge_counts, merge_counts);
 
     if !dummy_rows.is_empty() {
         let zero_state = [0u64; STATE_WIDTH];
@@ -724,7 +703,10 @@ pub fn build_external_eidos_compression_traces(
 
     (
         RowMajorMatrix::new(eidos_compression, NUM_EIDOS_COMPRESSION_COLS),
-        RowMajorMatrix::new(and8, miden_air::trace::and8_lookup::NUM_AND8_LOOKUP_COLS),
+        RowMajorMatrix::new(
+            and8,
+            miden_air_definitions::vm::trace::and8_lookup::NUM_AND8_LOOKUP_COLS,
+        ),
     )
 }
 
@@ -756,7 +738,10 @@ pub fn build_ordered_external_eidos_compression_traces(
 
     (
         RowMajorMatrix::new(eidos_compression, NUM_EIDOS_COMPRESSION_COLS),
-        RowMajorMatrix::new(and8, miden_air::trace::and8_lookup::NUM_AND8_LOOKUP_COLS),
+        RowMajorMatrix::new(
+            and8,
+            miden_air_definitions::vm::trace::and8_lookup::NUM_AND8_LOOKUP_COLS,
+        ),
     )
 }
 

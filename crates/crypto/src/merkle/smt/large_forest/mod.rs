@@ -1469,12 +1469,12 @@ impl<B: Backend> LargeSmtForest<B> {
 #[cfg(test)]
 impl<B: BackendReader> LargeSmtForest<B> {
     /// Gets an immutable reference to the underlying backend of the forest.
-    pub fn get_backend(&self) -> &B {
+    pub(crate) fn get_backend(&self) -> &B {
         &self.backend
     }
 
     /// Gets an immutable reference to the underlying configuration object for the forest.
-    pub fn get_config(&self) -> &Config {
+    pub(crate) fn get_config(&self) -> &Config {
         &self.config
     }
 
@@ -1483,7 +1483,7 @@ impl<B: BackendReader> LargeSmtForest<B> {
     /// # Panics
     ///
     /// - If the `lineage` is not one that the tree knows about.
-    pub fn get_history(&self, lineage: LineageId) -> &History {
+    pub(crate) fn get_history(&self, lineage: LineageId) -> &History {
         self.lineage_data
             .get(&lineage)
             .map(|d| &d.history)
@@ -1491,7 +1491,7 @@ impl<B: BackendReader> LargeSmtForest<B> {
     }
 
     /// Gets an immutable reference to the set tracking the lineages that have non-empty histories.
-    pub fn get_non_empty_histories(&self) -> &Set<LineageId> {
+    pub(crate) fn get_non_empty_histories(&self) -> &Set<LineageId> {
         &self.non_empty_histories
     }
 }

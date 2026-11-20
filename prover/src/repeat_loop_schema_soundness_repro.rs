@@ -4,10 +4,10 @@ use alloc::{vec, vec::Vec};
 use core::borrow::{Borrow, BorrowMut};
 use std::collections::HashMap;
 
-use miden_air::{
-    ChipletCols, MidenAir,
+use miden_air::vm::MidenAir;
+use miden_air_definitions::vm::{
+    ChipletActiveFlags, ChipletCols, ControllerCols,
     logup::{BlockHashMsg, BusId, MIDEN_MAX_MESSAGE_WIDTH},
-    lookup::{Challenges, LookupMessage, build_lookup_fractions},
     trace::{
         MIN_TRACE_LEN, RowIndex,
         chiplets::hasher::{HASH_ABSORB, LINEAR_HASH, PADDING},
@@ -22,16 +22,16 @@ use miden_core::{
     program::{Program, StackOutputs},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_crypto::stark::air::BaseAir;
 use miden_processor::{
     DefaultHost, FastProcessor, StackInputs,
     trace::{VmTrace, chiplets::build_external_eidos_compression_traces},
 };
-
-use crate::{
-    Prover,
-    repro_harness::{ReproTrace, core_row_mut},
+use miden_stark::{
+    air::BaseAir,
+    lookup::{Challenges, LookupMessage, build_lookup_fractions},
 };
+
+use crate::repro_harness::{ReproTrace, core_row_mut};
 
 fn build_loop_program(body_ops: Vec<Operation>) -> Program {
     let mut mast_forest = MastForest::new();
@@ -52,13 +52,16 @@ fn execute(program: &Program, stack: &[u64]) -> VmTrace {
     let stack = stack.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
     let mut host = DefaultHost::default();
     let (trace, precompile_witness) = FastProcessor::new(StackInputs::new(&stack).unwrap())
-        .execute_and_build_trace_sync(program, &mut host, Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES)
+        .execute_and_build_trace_sync(program, &mut host, &miden_vm_stark::memory::default_budget())
         .unwrap();
     assert!(precompile_witness.is_none());
     trace
 }
 
-fn core_row(matrix: &RowMajorMatrix<Felt>, row: usize) -> &miden_air::CoreCols<Felt> {
+fn core_row(
+    matrix: &RowMajorMatrix<Felt>,
+    row: usize,
+) -> &miden_air_definitions::vm::CoreCols<Felt> {
     let width = matrix.width();
     matrix.values[row * width..(row + 1) * width].borrow()
 }
@@ -77,9 +80,11 @@ fn copy_chiplet_row(
     let width = dst.width();
     let row: &mut ChipletCols<Felt> =
         dst.values[dst_row * width..(dst_row + 1) * width].borrow_mut();
-    let clock = row.chip_clk;
+    let addr = row.controller_cols().addr;
     *row = chiplet_row(src, src_row).clone();
-    row.chip_clk = clock;
+    let controller: &mut ControllerCols<Felt> =
+        dst.values[dst_row * width + 1..(dst_row + 1) * width].borrow_mut();
+    controller.addr = addr;
 }
 
 /// Rebuilds the compression witnesses for fixtures containing only linear hash requests.
@@ -88,10 +93,10 @@ fn compression_witness(
 ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
     let requests = (0..chiplets.height()).filter_map(|index| {
         let row = chiplet_row(chiplets, index);
-        if row.chiplet_selectors()[0] == Felt::ZERO {
+        if ChipletActiveFlags::<Felt>::from_chiplet_cols(row).controller == Felt::ZERO {
             return None;
         }
-        let controller = row.controller();
+        let controller = row.controller_cols();
         let selectors = [controller.s0, controller.s1, controller.s2];
         if selectors == PADDING {
             return None;
@@ -122,7 +127,7 @@ fn rebuild_hash_witnesses(
     chiplets: &RowMajorMatrix<Felt>,
 ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
     let (_, honest_chiplets, honest_compression, mut and8) =
-        trace.main_trace().clone_air_matrices();
+        trace.main_trace().clone().into_air_matrices();
     let (rebuilt, old_counts) = compression_witness(&honest_chiplets);
     assert!(
         rebuilt.values == honest_compression.values,
@@ -150,7 +155,7 @@ fn assert_lookup_delta(
         MIDEN_MAX_MESSAGE_WIDTH,
         BusId::COUNT,
     );
-    let (core, chiplets, compression, and8) = trace.main_trace().clone_air_matrices();
+    let (core, chiplets, compression, and8) = trace.main_trace().clone().into_air_matrices();
     let mut delta = HashMap::new();
     for ((air, honest), forged) in [
         MidenAir::CORE,
@@ -246,8 +251,8 @@ fn forged_early_loop_iteration_body_is_rejected() {
     assert_eq!(victim.stack_outputs(), attacker.stack_outputs());
     let (span, repeat, body_op) = find_first_iteration_window(&victim);
     assert_eq!((span, repeat, body_op), find_first_iteration_window(&attacker));
-    let (mut core, mut chiplets, ..) = victim.main_trace().clone_air_matrices();
-    let (attacker_core, attacker_chiplets, ..) = attacker.main_trace().clone_air_matrices();
+    let (mut core, mut chiplets, ..) = victim.main_trace().clone().into_air_matrices();
+    let (attacker_core, attacker_chiplets, ..) = attacker.into_air_matrices();
     let parent = core_row(&core, span).decoder.addr;
     let committed = core_row(&core, span - 1).decoder.hasher_state[..4].try_into().unwrap();
     let substituted =
@@ -284,7 +289,7 @@ fn forged_early_loop_iteration_body_is_rejected() {
 #[test]
 fn loop_skip_body_with_retired_hasher_rows_is_rejected() {
     let trace = execute(&build_loop_program(vec![Operation::Noop, Operation::Noop]), &[0]);
-    let (mut core, mut chiplets, ..) = trace.main_trace().clone_air_matrices();
+    let (mut core, mut chiplets, ..) = trace.main_trace().clone().into_air_matrices();
     let honest_core = core.clone();
     let honest_chiplets = chiplets.clone();
     let loop_end = (1..core.height())
@@ -306,8 +311,8 @@ fn loop_skip_body_with_retired_hasher_rows_is_rejected() {
     let padding = (0..chiplets.height())
         .find(|&row| {
             let row = chiplet_row(&chiplets, row);
-            let controller = row.controller();
-            row.chiplet_selectors()[0] == Felt::ONE
+            let controller = row.controller_cols();
+            ChipletActiveFlags::from_trace_row(row).controller
                 && [controller.s0, controller.s1, controller.s2] == PADDING
         })
         .unwrap();
@@ -334,9 +339,9 @@ fn forged_in_span_repeat_with_body_hash_evidence_is_rejected() {
     let body_program = build_loop_program(vec![Operation::Not]);
     let body = execute(&body_program, &[1]);
     let repeated = execute(&body_program, &[0, 1]);
-    let (mut core, mut chiplets, ..) = victim.main_trace().clone_air_matrices();
-    let (body_core, body_chiplets, ..) = body.main_trace().clone_air_matrices();
-    let (repeat_core, ..) = repeated.main_trace().clone_air_matrices();
+    let (mut core, mut chiplets, ..) = victim.main_trace().clone().into_air_matrices();
+    let (body_core, body_chiplets, ..) = body.into_air_matrices();
+    let (repeat_core, ..) = repeated.into_air_matrices();
     let victim_end = core_row(&core, 2).clone();
     assert_eq!(decode_opcode(&victim_end.decoder.op_bits), opcodes::END);
     assert_eq!(decode_opcode(&core_row(&repeat_core, 4).decoder.op_bits), opcodes::REPEAT);
@@ -405,7 +410,7 @@ fn loop_body_end_flag_cannot_be_reassigned_to_another_end() {
     let loop_parent = main.addr(RowIndex::from(first_span));
     let hasher_state = main.decoder_hasher_state(RowIndex::from(loop_row));
     let loop_body_hash = [hasher_state[0], hasher_state[1], hasher_state[2], hasher_state[3]];
-    let (mut core, chiplets, eidos_compression, and8) = main.clone_air_matrices();
+    let (mut core, chiplets, eidos_compression, and8) = main.clone().into_air_matrices();
     let honest_body_count = count_loop_body_end_removals(&core, loop_parent, loop_body_hash);
     assert_eq!(
         core_row(&core, loop_row).decoder.group_count,
@@ -442,7 +447,7 @@ fn forged_intermediate_repeat_parent_addr_is_rejected() {
     assert_eq!(main.get_op_code(RowIndex::from(second_span)), Felt::from_u8(opcodes::SPAN));
     assert_eq!(main.get_op_code(RowIndex::from(second_repeat)), Felt::from_u8(opcodes::REPEAT));
 
-    let (mut core, chiplets, eidos_compression, and8) = main.clone_air_matrices();
+    let (mut core, chiplets, eidos_compression, and8) = main.clone().into_air_matrices();
     let forged_parent = Felt::new_unchecked(99);
     core_row_mut(&mut core, second_span).decoder.addr = forged_parent;
     core_row_mut(&mut core, second_repeat).decoder.addr = forged_parent;
@@ -464,8 +469,8 @@ fn direct_repeat_without_body_hash_evidence_is_rejected() {
     let loop_program = build_loop_program(vec![Operation::Not]);
     let loop_trace = execute(&loop_program, &[0, 1]);
     let (mut core, chiplets, eidos_compression, and8) =
-        victim_trace.main_trace().clone_air_matrices();
-    let (repeat_core, ..) = loop_trace.main_trace().clone_air_matrices();
+        victim_trace.main_trace().clone().into_air_matrices();
+    let (repeat_core, ..) = loop_trace.into_air_matrices();
     assert_eq!(decode_opcode(&core_row(&repeat_core, 4).decoder.op_bits), opcodes::REPEAT);
 
     let repeat = core_row(&repeat_core, 4).clone();

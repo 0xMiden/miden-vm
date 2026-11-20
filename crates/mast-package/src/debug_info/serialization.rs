@@ -1,6 +1,11 @@
 //! Serialization and deserialization for the debug_info section.
 
-use alloc::{string::ToString, sync::Arc, vec::Vec};
+#![allow(
+    clippy::empty_enums,
+    reason = "zerocopy derives generate uninhabited helper types"
+)]
+
+use alloc::{sync::Arc, vec::Vec};
 use core::{alloc::Layout, ptr::NonNull};
 
 use miden_assembly_syntax::ast::DebugVarLocation;
@@ -24,6 +29,7 @@ use super::{
     MAX_DEBUG_INFO_STRING_ROWS, MAX_DEBUG_INFO_STRING_SIZE, MAX_DEBUG_INFO_TYPE_ROWS,
     OptionalIndex, PackageDebugInfo,
 };
+use crate::serde_helpers::read_capped_str;
 
 /// Base alignment for copied payloads. The assertions below ensure that this is sufficient for
 /// every row type decoded directly from the payload.
@@ -183,7 +189,7 @@ impl PackageDebugInfo {
     /// its memory and processing costs. This method still checks the wire format and honors the
     /// reader's remaining input and allocation budget. Use [`Self::read_from`] for potentially
     /// adversarial input with the standard fixed limits.
-    pub fn read_from_unmetered<R: ByteReader>(
+    pub(crate) fn read_from_unmetered<R: ByteReader>(
         source: &mut R,
     ) -> Result<Self, DeserializationError> {
         Self::read_from_with_limits(source, PackageDebugInfoDecodeLimits::UNMETERED)
@@ -193,7 +199,7 @@ impl PackageDebugInfo {
     /// [`Self::read_from_bytes`].
     ///
     /// Use this only when the caller accepts the memory and processing costs of the encoded data.
-    /// The wire-format checks described by [`Self::read_from_unmetered`] still apply. Use
+    /// The same wire-format checks still apply. Use
     /// [`Self::read_from_bytes`] for potentially adversarial input with the standard fixed limits.
     pub fn read_from_bytes_unmetered(bytes: &[u8]) -> Result<Self, DeserializationError> {
         Self::read_from_unmetered(&mut miden_core::serde::SliceReader::new(bytes))
@@ -312,8 +318,9 @@ impl Deserializable for PackageDebugInfo {
     /// input.
     ///
     /// The limits cap the encoded payload, string table, individual strings, and type table. This
-    /// method also performs the normal wire-format checks. Use [`Self::read_from_unmetered`] only
-    /// when the data may exceed those limits and the caller accepts its resource costs.
+    /// method also performs the normal wire-format checks. Use
+    /// [`Self::read_from_bytes_unmetered`] only when the data may exceed those limits and the
+    /// caller accepts its resource costs.
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Self::read_from_with_limits(source, PackageDebugInfoDecodeLimits::BOUNDED)
     }
@@ -934,14 +941,12 @@ fn read_string<R: ByteReader>(
     source: &mut R,
     max_size: usize,
 ) -> Result<Arc<str>, DeserializationError> {
-    let len = read_bounded_len(source, "debug string bytes", 1)?;
-    check_decode_limit("debug string size", len, max_size)
-        .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
-    let bytes = source.read_slice(len)?;
-    let s = core::str::from_utf8(bytes).map_err(|err| {
-        DeserializationError::InvalidValue(alloc::format!("invalid utf-8 in string: {err}"))
+    let value = read_capped_str(source, "debug string bytes", max_size, |len| {
+        DeserializationError::InvalidValue(alloc::format!(
+            "debug string size {len} exceeds limit {max_size}"
+        ))
     })?;
-    Ok(Arc::from(s))
+    Ok(Arc::from(value))
 }
 
 fn read_debug_type_indices<R: ByteReader>(

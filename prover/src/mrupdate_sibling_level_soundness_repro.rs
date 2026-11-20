@@ -13,8 +13,12 @@
 //! each update now returns the other tree's root, so a self-update changes the public outputs.
 
 use alloc::vec::Vec;
+use core::borrow::Borrow;
 
-use miden_air::trace::chiplets::hasher::{DIGEST_LEN, MR_UPDATE_NEW, NUM_SELECTORS, STATE_WIDTH};
+use miden_air_definitions::vm::{
+    ChipletActiveFlags, ChipletCols,
+    trace::chiplets::hasher::{DIGEST_LEN, MR_UPDATE_NEW, NUM_SELECTORS, STATE_WIDTH},
+};
 use miden_core::{
     Felt, Word,
     advice::AdviceInputs,
@@ -26,12 +30,9 @@ use miden_core::{
 use miden_crypto::merkle::{MerklePath, store::MerkleStore};
 use miden_processor::{DefaultHost, FastProcessor, StackInputs};
 
-use crate::{
-    Prover,
-    repro_harness::{ReproTrace, core_row_mut},
-};
+use crate::repro_harness::{ReproTrace, core_row_mut};
 
-/// The controller overlay starts after `s_ctrl`, the first chiplets column.
+/// The controller overlay follows the top-level chiplet selector.
 const CONTROLLER_OFFSET: usize = 1;
 
 /// The controller payload `state[12] || row_data[4]` follows the three row-kind selectors.
@@ -98,11 +99,15 @@ fn build_fixture() -> Fixture {
     let (trace, precompile_witness) = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default().with_merkle_store(store))
         .unwrap()
-        .execute_and_build_trace_sync(&program, &mut host, Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES)
+        .execute_and_build_trace_sync(
+            &program,
+            &mut host,
+            &miden_vm_stark::memory::default_budget(),
+        )
         .unwrap();
     assert!(precompile_witness.is_none());
 
-    let (core, chiplets, eidos_compression, and8) = trace.clone_air_matrices();
+    let (core, chiplets, eidos_compression, and8) = trace.main_trace().clone().into_air_matrices();
     let honest_outputs =
         core::array::from_fn(|lane| trace.stack_outputs().get_element(lane).unwrap());
     Fixture {
@@ -172,9 +177,10 @@ fn forge_chiplets(fixture: &Fixture) -> RowMajorMatrix<Felt> {
     let width = chiplets.width();
     let new_path_rows: Vec<usize> = (0..chiplets.height())
         .filter(|&row| {
-            let cells = &chiplets.values[row * width..(row + 1) * width];
-            cells[0] == Felt::ONE
-                && cells[CONTROLLER_OFFSET..CONTROLLER_OFFSET + NUM_SELECTORS] == MR_UPDATE_NEW
+            let cols: &ChipletCols<Felt> = chiplets.values[row * width..(row + 1) * width].borrow();
+            let controller = cols.controller_cols();
+            ChipletActiveFlags::from_trace_row(cols).controller
+                && [controller.s0, controller.s1, controller.s2] == MR_UPDATE_NEW
         })
         .collect();
     assert_eq!(new_path_rows.len(), 4, "two updates at depth 2 have four new-path rows");

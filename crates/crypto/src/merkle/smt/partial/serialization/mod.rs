@@ -1,7 +1,7 @@
 //! This module contains a system for producing compact serialized representations of the
 //! `PartialSmt` data structure, intended to reduce data sent over the wire through de-duplication.
 
-pub mod property_tests;
+pub(crate) mod property_tests;
 mod tests;
 
 use alloc::{collections::BTreeMap, string::ToString};
@@ -75,7 +75,7 @@ impl UniqueNodes {
     }
 
     /// Returns the hash of the leaf at `position`, or its canonical empty hash when absent.
-    pub fn get_leaf_hash(&self, position: u64) -> Word {
+    pub(crate) fn get_leaf_hash(&self, position: u64) -> Word {
         self.leaves
             .get(&position)
             .map(SmtLeaf::hash)
@@ -84,7 +84,7 @@ impl UniqueNodes {
     }
 
     /// Returns the hash of the node at `index`, or its canonical empty root when absent.
-    pub fn get_node_hash(&self, index: NodeIndex) -> Word {
+    pub(crate) fn get_node_hash(&self, index: NodeIndex) -> Word {
         self.nodes
             .get(&index)
             .copied()
@@ -260,6 +260,10 @@ impl Deserializable for UniqueNodes {
         let unique_nodes = Self { root, nodes, leaves, value_only_leaves };
         unique_nodes.validate()?;
         Ok(unique_nodes)
+    }
+
+    fn min_serialized_size() -> usize {
+        32 + 3 * 8 // root and three u64 collection counts
     }
 }
 

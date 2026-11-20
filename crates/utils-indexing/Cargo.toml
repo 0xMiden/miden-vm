@@ -1,6 +1,6 @@
 [package]
 name = "miden-utils-indexing"
-version = "1.0.0"
+version.workspace = true
 description = "Type-safe u32-indexed vector utilities for Miden"
 readme = "README.md"
 categories = ["development-tools", "no-std"]
@@ -28,3 +28,6 @@ proptest = { workspace = true, optional = true }
 [dev-dependencies]
 miden-test-serialization-macros.workspace = true
 proptest.workspace = true
+
+[lints]
+workspace = true

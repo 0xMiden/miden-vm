@@ -1,0 +1,13 @@
+@locals(1)
+proc frame_values
+    push.400
+    loc_store.0
+    push.400
+    mem_store.100
+    push.42
+    mem_store.101
+end
+
+begin
+    exec.frame_values
+end

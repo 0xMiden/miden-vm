@@ -1,0 +1,92 @@
+#! Scalar validation for EcGFp5 agreement.
+#!
+#! The private scalar r is supplied as ten little-endian u32 limbs. Check 0 < r < n,
+#! where n is the prime subgroup order, then store twenty little-endian radix-2^16 digits.
+
+# n = sum_i SCALAR_ORDER_LIMB_i * 2^(32*i), for 0 <= i < 10.
+pub const SCALAR_ORDER_LIMB_0 = 2492202977
+pub const SCALAR_ORDER_LIMB_1 = 3893352854
+pub const SCALAR_ORDER_LIMB_2 = 3609501852
+pub const SCALAR_ORDER_LIMB_3 = 3901250617
+pub const SCALAR_ORDER_LIMB_4 = 3484943929
+pub const SCALAR_ORDER_LIMB_5 = 2147483622
+pub const SCALAR_ORDER_LIMB_6 = 22
+pub const SCALAR_ORDER_LIMB_7 = 2147483633
+pub const SCALAR_ORDER_LIMB_8 = 2147483655
+pub const SCALAR_ORDER_LIMB_9 = 2147483645
+
+pub const NUM_DIGITS = 20
+pub const DIGIT_BITS = 16
+pub const RADIX = 65536 # 2^DIGIT_BITS
+
+# mem[DIGITS_PTR .. DIGITS_PTR+20) = [d0, ..., d19], least significant first.
+pub const DIGITS_PTR = 2048
+const DIGITS_4_PTR = DIGITS_PTR + 4
+const DIGITS_8_PTR = DIGITS_PTR + 8
+const DIGITS_12_PTR = DIGITS_PTR + 12
+const DIGITS_16_PTR = DIGITS_PTR + 16
+
+#! Reads r, checks 0 < r < n, and writes its twenty 16-bit digits.
+#!
+#! Input:  [...]
+#! Advice: [r0, ..., r9, ...], with u32 limbs in little-endian order
+#! Output: [...]
+#!
+#! Writes mem[DIGITS_PTR .. DIGITS_PTR+20) = [d0, ..., d19].
+pub proc prepare()
+    # Subtract the group order n from r, carrying the borrow from low to high limbs.
+    # At each pair boundary the stack is [borrow, limb_sum, ...].
+    push.0.0
+    push.SCALAR_ORDER_LIMB_0 exec.read_limb
+    # => [d0, d1, borrow, limb_sum, ...]
+    movup.2 movup.3 swap
+    push.SCALAR_ORDER_LIMB_1 exec.read_limb
+    # => [d2, d3, borrow, limb_sum, d0, d1, ...]
+    movup.5 movup.5 mem_storew_le.DIGITS_PTR dropw
+    # => [borrow, limb_sum, ...]
+
+    push.SCALAR_ORDER_LIMB_2 exec.read_limb
+    movup.2 movup.3 swap
+    push.SCALAR_ORDER_LIMB_3 exec.read_limb
+    movup.5 movup.5 mem_storew_le.DIGITS_4_PTR dropw
+
+    push.SCALAR_ORDER_LIMB_4 exec.read_limb
+    movup.2 movup.3 swap
+    push.SCALAR_ORDER_LIMB_5 exec.read_limb
+    movup.5 movup.5 mem_storew_le.DIGITS_8_PTR dropw
+
+    push.SCALAR_ORDER_LIMB_6 exec.read_limb
+    movup.2 movup.3 swap
+    push.SCALAR_ORDER_LIMB_7 exec.read_limb
+    movup.5 movup.5 mem_storew_le.DIGITS_12_PTR dropw
+
+    push.SCALAR_ORDER_LIMB_8 exec.read_limb
+    movup.2 movup.3 swap
+    push.SCALAR_ORDER_LIMB_9 exec.read_limb
+    movup.5 movup.5 mem_storew_le.DIGITS_16_PTR dropw
+
+    # The final borrow is one exactly when r < n.
+    assert.err="scalar range"
+    # The limb sum is at most 10*(2^32-1) < p, so it is zero only for r = 0.
+    neq.0 assert.err="nonzero scalar"
+end
+
+#! Splits the next scalar limb into two 16-bit digits and advances the r - n comparison.
+#!
+#! Input:  [order_limb, borrow, limb_sum, ...]
+#! Advice: [limb, ...], checked to be a u32
+#! Output: [low16, high16, next_borrow, next_sum, ...]
+#!
+#! next_sum = limb_sum + limb. The borrow is a bit, and each fixed order limb is below u32::MAX,
+#! so order_limb + borrow fits in a u32.
+proc read_limb(order_limb: u32, borrow: i1, limb_sum: felt) -> (u16, u16, i1, felt)
+    adv_push u32assert2
+    # => [limb, order_limb, borrow, limb_sum, ...]
+    dup movup.4 add movdn.3
+    # => [limb, order_limb, borrow, next_sum, ...]
+    dup movdn.3 swap movup.2 add
+    u32overflowing_sub swap drop
+    # => [next_borrow, limb, next_sum, ...]
+    swap u32divmod.RADIX
+    # => [low16, high16, next_borrow, next_sum, ...]
+end

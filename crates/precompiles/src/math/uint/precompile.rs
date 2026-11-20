@@ -8,7 +8,7 @@ use miden_core::{
     Felt,
     deferred::{
         DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
-        PrecompileError,
+        PrecompileError, WorkItem,
     },
     program::domain::Uint256PrecompileDomain,
 };
@@ -129,7 +129,7 @@ impl UintPrecompile {
     pub const NAME: &'static str = "uint256";
 
     /// Operation discriminants owned by this precompile.
-    pub const VALUE_OP_ID: u64 = 0;
+    pub(crate) const VALUE_OP_ID: u64 = 0;
     pub const ADD_OP_ID: u64 = 1;
     pub const SUB_OP_ID: u64 = 2;
     pub const MUL_OP_ID: u64 = 3;
@@ -197,9 +197,7 @@ impl UintPrecompile {
         }))
     }
 
-    pub(crate) fn limbs_from_typed_value_node(
-        node: &Node,
-    ) -> Result<(UintDomain, Limbs), DeferredError> {
+    fn limbs_from_typed_value_node(node: &Node) -> Result<(UintDomain, Limbs), DeferredError> {
         let Some(frame) = node.frame() else {
             return Err(DeferredError::InvalidPayload);
         };
@@ -281,6 +279,11 @@ impl Precompile for UintPrecompile {
         payload.as_chunks().len() == 1
     }
 
+    fn work(&self, params: [u32; 3], _payload: &Payload) -> Result<WorkItem, PrecompileError> {
+        UintOp::decode(params).ok_or(PrecompileError::InvalidNode)?;
+        Ok(WorkItem::new(crate::UINT_WORK, 1))
+    }
+
     fn evaluate(
         &self,
         params: [u32; 3],
@@ -312,7 +315,7 @@ impl Precompile for UintPrecompile {
     }
 }
 
-pub(crate) fn decode_limbs(felts: &[Felt; 8]) -> Result<Limbs, DeferredError> {
+fn decode_limbs(felts: &[Felt; 8]) -> Result<Limbs, DeferredError> {
     let mut limbs = [0u32; 8];
     for (i, felt) in felts.iter().enumerate() {
         let v = felt.as_canonical_u64();
@@ -333,7 +336,11 @@ mod tests {
     use super::*;
 
     fn state() -> DeferredState {
-        DeferredState::new(Arc::new(crate::registry())).expect("precompile init must succeed")
+        DeferredState::new(
+            Arc::new(crate::registry()),
+            crate::default_execution_precompile_limits(),
+        )
+        .expect("precompile init must succeed")
     }
 
     fn evaluate(state: &mut DeferredState, node: Node) -> Result<Node, PrecompileError> {
@@ -390,13 +397,15 @@ mod tests {
             .expect("multi-chunk data is structurally valid");
         let digest = node.digest();
         let mut state = state();
-        let remaining = state.remaining_elements();
 
         let error = state.register(node).unwrap_err();
 
         assert!(matches!(error.root(), PrecompileError::InvalidNode), "{error:?}");
         assert!(state.get_node(&digest).is_none());
-        assert_eq!(state.remaining_elements(), remaining);
+        // Payload shape is rejected before execution work is charged.
+        state
+            .set_execution_limits(miden_core::deferred::PrecompileLimits::new(0))
+            .unwrap();
     }
 
     #[test]

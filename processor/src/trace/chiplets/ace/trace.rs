@@ -1,7 +1,8 @@
 use alloc::vec::Vec;
 use core::borrow::BorrowMut;
 
-use miden_air::{
+use miden_ace::instruction::{Op, decode_instruction};
+use miden_air_definitions::vm::{
     AceCols, QuadFeltExpr,
     trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS},
 };
@@ -11,10 +12,7 @@ use miden_core::{
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
-use super::{
-    MAX_NUM_ACE_WIRES,
-    instruction::{Op, decode_instruction},
-};
+use super::MAX_NUM_ACE_WIRES;
 use crate::{ContextId, errors::AceError};
 
 /// One row of the ACE chiplet trace in `READ` mode: two memory-loaded wires per row, plus the
@@ -60,7 +58,7 @@ struct EvalNode {
     all(feature = "arbitrary", test),
     miden_test_serialization_macros::serialization_test
 )]
-pub struct CircuitEvaluation {
+pub(crate) struct CircuitEvaluation {
     ctx: ContextId,
     clk: RowIndex,
     wire_bus: WireBus,
@@ -73,9 +71,10 @@ impl CircuitEvaluation {
     /// located in a contiguous memory region.
     ///
     /// # Panics:
-    /// This function panics if the number of rows for each section leads to more than
-    /// [`MAX_NUM_ACE_WIRES`] wires.
+    /// This function panics if `num_eval_rows` is zero or if the number of rows for each section
+    /// leads to more than [`MAX_NUM_ACE_WIRES`] wires.
     pub fn new(ctx: ContextId, clk: RowIndex, num_read_rows: u32, num_eval_rows: u32) -> Self {
+        assert!(num_eval_rows > 0, "ACE circuit evaluation must contain at least one eval row");
         let num_wires = 2 * (num_read_rows as u64) + (num_eval_rows as u64);
         assert!(num_wires <= MAX_NUM_ACE_WIRES as u64, "too many wires");
 
@@ -94,18 +93,6 @@ impl CircuitEvaluation {
 
     pub fn clk(&self) -> u32 {
         self.clk.into()
-    }
-
-    pub fn ctx(&self) -> u32 {
-        self.ctx.into()
-    }
-
-    pub fn num_read_rows(&self) -> u32 {
-        self.read_nodes.len() as u32
-    }
-
-    pub fn num_eval_rows(&self) -> u32 {
-        self.eval_nodes.len() as u32
     }
 
     /// Reads the word from memory at `ptr`, interpreting it as `[v_00, v_01, v_10, v_11]`, and
@@ -167,7 +154,14 @@ impl CircuitEvaluation {
     /// Writes this circuit evaluation's rows into the row-major buffer `out`
     /// (`ACE_CHIPLET_NUM_COLS` contiguous cells per row), starting at row `offset`. `out`
     /// is assumed zero-initialized, so columns that are zero on a row are left untouched.
+    ///
+    /// # Panics
+    /// Panics if no evaluation nodes have been recorded.
     pub fn fill(&self, offset: usize, out: &mut [Felt]) {
+        assert!(
+            !self.eval_nodes.is_empty(),
+            "ACE circuit evaluation must contain at least one eval node"
+        );
         const W: usize = ACE_CHIPLET_NUM_COLS;
         let (out_rows, _) = out.as_chunks_mut::<W>();
         let num_read_rows = self.read_nodes.len();

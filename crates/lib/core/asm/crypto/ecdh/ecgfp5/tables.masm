@@ -1,0 +1,47 @@
+#! Merkle openings for the paired-point multiplication tables.
+#!
+#! The caller hashes the twenty ordered roots into the public-key commitment before reading
+#! entries. For ordinary-key agreement that commitment is the fixed generator commitment;
+#! for preprocessed agreement it is the recipient's input.
+#!
+#! Each opened entry is written directly into arithmetic's two term slots:
+#! offset  0: [Gx0, Gx1, Gx2, Gx3]       offset  4: [Gy0, Gy1, Gy2, Gy3]
+#! offset  8: [Qx0, Qx1, Qx2, Qx3]       offset 12: [Qy0, Qy1, Qy2, Qy3]
+#! offset 16: [Gx4, Gy4, Qx4, Qy4]       offset 20: [is_identity, 0, 0, 0]
+#!
+#! Zero digits are skipped, so the entries used by agreement have is_identity = 0.
+
+use {DIGIT_BITS} from miden::core::crypto::ecdh::ecgfp5::scalar
+use {TERMS_PTR} from miden::core::crypto::ecdh::ecgfp5::arithmetic
+
+# mem[ROOTS_PTR .. ROOTS_PTR+80) = [root0(4), ..., root19(4)].
+pub const ROOTS_PTR = 512
+
+# Eidos::init_chaining_word(ECGFP5_PREPROCESSED_PUBLIC_KEY, 80): twenty ordered window roots.
+pub const ROOTS_INIT_CV = [
+    13503953893947609345, 11912009168875159632, 11170449401267093504, 6620516959492505600
+]
+
+# Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, 24): one packed paired-point entry.
+const LEAF_INIT_CV = [
+    13503953893947607553, 11912009168875159576, 11170449401267093504, 6620516959492505600
+]
+
+#! Reads T_window[digit] from advice and checks its path against the corresponding window root.
+#!
+#! Input:  [digit, window, ...]
+#! Advice: [entry(24), ...], with the Merkle path in the advice provider
+#! Output: [window, ...]
+#!
+#! Requires 0 < digit < 2^16 and window < 20. Reads the root at ROOTS_PTR + 4*window and
+#! writes the packed entry at arithmetic::TERMS_PTR.
+pub proc read_entry(digit: u32, window: u32) -> u32
+    padw dup.5 mul.4 add.ROOTS_PTR mem_loadw_le
+    movup.4 push.DIGIT_BITS
+    # => [depth=16, digit, root(4), window, ...]
+    push.TERMS_PTR push.LEAF_INIT_CV padw padw
+    repeat.3 adv_pipe compress end
+    dropw dropw movup.4 drop
+    mtree_verify.err="table binding"
+    dropw drop drop dropw
+end

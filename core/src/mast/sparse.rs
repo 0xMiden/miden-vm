@@ -10,7 +10,10 @@ use miden_utils_indexing::newtype_id;
 use crate::{
     Word,
     advice::AdviceMap,
-    mast::{ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId},
+    mast::{
+        ExecutableMastForest, MastForest, MastForestError, MastForestMergeSource,
+        MastForestRootMap, MastNode, MastNodeExt, MastNodeId, MixedMastForestMerger,
+    },
     serde::DeserializationError,
     utils::Idx,
 };
@@ -72,9 +75,10 @@ mod mast_forest_id_arbitrary {
 /// the full child node, and they make accidental entry into a pruned node a clean
 /// `get_node_by_id` miss rather than a partially-populated node.
 ///
-/// Its serialized form is a trusted, version-local trace-replay format. It has no stable wire
-/// version and must not be persisted across releases or accepted as an untrusted program format;
-/// use the validated [`MastForest`] entry points for those cases.
+/// Its serialized form is a version-local replay format. The default reader checks full-node
+/// hashes against available child digests. Digest-only entries and external nodes remain opaque:
+/// these checks do not prove membership in a source forest. The explicit trusted reader skips
+/// hash recomputation. This format must not be persisted across releases.
 #[derive(Debug)]
 pub struct SparseMastForest {
     /// Subset of the original forest's nodes, keyed by their original [`MastNodeId`].
@@ -93,6 +97,106 @@ pub struct SparseMastForest {
 }
 
 impl SparseMastForest {
+    /// Extracts the complete subgraphs reachable from selected procedure roots.
+    ///
+    /// Every selected root must be exported by `source`. Node IDs and child references remain in
+    /// the source forest's ID space, and repeated roots remain repeated in the result. All
+    /// reachable nodes are copied in full, including both split branches and call targets.
+    /// External and dynamic nodes are leaves. Advice data is not copied because sparse replay uses
+    /// `AdviceReplay`.
+    ///
+    /// This constructor assumes that `source` is valid. It does not rebuild node hashes or route
+    /// the nodes through a forest builder.
+    pub fn from_procedure_roots(
+        source: &MastForest,
+        roots: &[MastNodeId],
+    ) -> Result<Self, MastForestError> {
+        for &root in roots {
+            if !source.is_procedure_root(root) {
+                return Err(MastForestError::NotAProcedureRoot(root));
+            }
+        }
+
+        let mut nodes = BTreeMap::new();
+        let mut unvisited = roots.to_vec();
+        while let Some(node_id) = unvisited.pop() {
+            if nodes.contains_key(&node_id) {
+                continue;
+            }
+
+            let node = source.get_node_by_id(node_id).ok_or_else(|| {
+                MastForestError::NodeIdOverflow(node_id, source.num_nodes() as usize)
+            })?;
+            node.append_children_to(&mut unvisited);
+            nodes.insert(node_id, node.clone());
+        }
+
+        Ok(Self {
+            nodes,
+            digests: BTreeMap::new(),
+            roots: roots.to_vec(),
+            advice_map: AdviceMap::default(),
+        })
+    }
+
+    /// Merges dense and sparse forests into a sparse forest.
+    ///
+    /// Full nodes are deduplicated after remapping their children. Digest-only entries remain
+    /// opaque and are retained when no full node is available. Sparse replay forests cannot carry
+    /// advice data, so this returns an error if any input has a non-empty advice map.
+    pub fn merge<'forest, F>(
+        forests: impl IntoIterator<Item = F>,
+    ) -> Result<(Self, MastForestRootMap), MastForestError>
+    where
+        F: Into<MastForestMergeSource<'forest>>,
+    {
+        MixedMastForestMerger::merge_sparse(forests.into_iter().map(Into::into).collect())
+    }
+
+    pub(in crate::mast) fn from_merged_parts(
+        nodes: BTreeMap<MastNodeId, MastNode>,
+        digests: BTreeMap<MastNodeId, Word>,
+        roots: Vec<MastNodeId>,
+    ) -> Result<Self, MastForestError> {
+        let forest = Self {
+            nodes,
+            digests,
+            roots,
+            advice_map: AdviceMap::default(),
+        };
+        forest.validate()?;
+        Ok(forest)
+    }
+
+    /// Checks block invariants, child ordering, and full-node hashes.
+    ///
+    /// Digest-only entries and external nodes are opaque inputs to these checks. Their membership
+    /// in a particular source forest must be checked separately against that source.
+    pub fn validate(&self) -> Result<(), MastForestError> {
+        for (&node_id, node) in &self.nodes {
+            if let MastNode::Block(block) = node {
+                block
+                    .validate_batch_invariants()
+                    .map_err(|message| MastForestError::InvalidBatchPadding(node_id, message))?;
+            }
+            let computed = node.compute_digest(|child_id| {
+                if child_id >= node_id {
+                    return Err(MastForestError::ForwardReference(node_id, child_id));
+                }
+                self.get_digest_by_id(child_id)
+                    .ok_or_else(|| MastForestError::NodeIdOverflow(child_id, self.num_nodes()))
+            })?;
+            if computed != node.digest() {
+                return Err(MastForestError::HashMismatch {
+                    node_id,
+                    expected: node.digest(),
+                    computed,
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// Returns the underlying nodes of this sparse forest, keyed by their original
     /// [`MastNodeId`].
     pub fn nodes(&self) -> &BTreeMap<MastNodeId, MastNode> {
@@ -259,6 +363,12 @@ fn require_child_digest(
     digests: &BTreeMap<MastNodeId, Word>,
 ) -> Result<(), DeserializationError> {
     validate_sparse_id(child_id, "child")?;
+    if child_id >= parent_id {
+        return Err(DeserializationError::InvalidValue(format!(
+            "sparse full node {} references non-preceding child {}",
+            parent_id.0, child_id.0
+        )));
+    }
     if !nodes.contains_key(&child_id) && !digests.contains_key(&child_id) {
         return Err(DeserializationError::InvalidValue(format!(
             "sparse full node {} references child {} without a full node or digest-only entry",
@@ -401,5 +511,145 @@ impl SparseMastForestBuilder {
             roots: source.procedure_roots().to_vec(),
             advice_map: AdviceMap::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+
+    use super::*;
+    use crate::{
+        mast::{
+            BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
+            JoinNodeBuilder, LoopNodeBuilder, MastForestRead, SplitNodeBuilder,
+        },
+        operations::Operation,
+    };
+
+    #[test]
+    fn extraction_rejects_non_roots_and_handles_empty_selection() {
+        let mut source = MastForest::new();
+        let node = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut source)
+            .unwrap();
+
+        let empty = SparseMastForest::from_procedure_roots(&source, &[]).unwrap();
+        assert!(empty.nodes().is_empty());
+        assert!(empty.digest_entries().is_empty());
+        assert!(empty.procedure_roots().is_empty());
+        assert_eq!(empty.num_nodes(), 0);
+
+        assert_eq!(
+            SparseMastForest::from_procedure_roots(&source, &[node]).unwrap_err(),
+            MastForestError::NotAProcedureRoot(node)
+        );
+    }
+
+    #[test]
+    fn extraction_copies_the_complete_reachable_graph_once() {
+        let mut source = MastForest::new();
+        let shared = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut source)
+            .unwrap();
+        let other = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+            .add_to_forest(&mut source)
+            .unwrap();
+        let split = SplitNodeBuilder::new([shared, other]).add_to_forest(&mut source).unwrap();
+        let call = CallNodeBuilder::new(split).add_to_forest(&mut source).unwrap();
+        let root = JoinNodeBuilder::new([call, shared]).add_to_forest(&mut source).unwrap();
+        source.make_root(root);
+
+        let sparse = SparseMastForest::from_procedure_roots(&source, &[root]).unwrap();
+
+        assert_eq!(sparse.procedure_roots(), &[root]);
+        assert_eq!(sparse.nodes().len(), 5);
+        assert!(sparse.digest_entries().is_empty());
+        for node_id in [shared, other, split, call, root] {
+            assert_eq!(sparse.get_node_by_id(node_id), source.get_node_by_id(node_id));
+        }
+        assert!(sparse.is_source_subset_of(&source));
+
+        let repeated = SparseMastForest::from_procedure_roots(&source, &[root, root]).unwrap();
+        assert_eq!(repeated.procedure_roots(), &[root, root]);
+        assert_eq!(repeated.nodes().len(), sparse.nodes().len());
+    }
+
+    #[test]
+    fn extraction_stops_at_external_and_dynamic_nodes() {
+        let mut source = MastForest::new();
+        let external =
+            ExternalNodeBuilder::new(Word::default()).add_to_forest(&mut source).unwrap();
+        let call = CallNodeBuilder::new(external).add_to_forest(&mut source).unwrap();
+        let dynamic = DynNodeBuilder::new_dyn().add_to_forest(&mut source).unwrap();
+        source.make_root(call);
+        source.make_root(dynamic);
+
+        let sparse = SparseMastForest::from_procedure_roots(&source, &[call, dynamic]).unwrap();
+
+        assert_eq!(sparse.nodes().len(), 3);
+        assert!(sparse.nodes().contains_key(&external));
+        assert!(sparse.nodes().contains_key(&call));
+        assert!(sparse.nodes().contains_key(&dynamic));
+    }
+
+    #[test]
+    fn extraction_follows_loop_bodies_and_their_descendants() {
+        let mut source = MastForest::new();
+        let left = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut source)
+            .unwrap();
+        let right = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+            .add_to_forest(&mut source)
+            .unwrap();
+        let body = JoinNodeBuilder::new([left, right]).add_to_forest(&mut source).unwrap();
+        let root = LoopNodeBuilder::new(body).add_to_forest(&mut source).unwrap();
+        source.make_root(root);
+
+        let sparse = SparseMastForest::from_procedure_roots(&source, &[root]).unwrap();
+
+        assert_eq!(sparse.nodes().len(), 4);
+        for node_id in [left, right, body, root] {
+            assert_eq!(sparse.get_node_by_id(node_id), source.get_node_by_id(node_id));
+        }
+    }
+
+    #[test]
+    fn extraction_preserves_large_source_id_gaps() {
+        let mut source = MastForest::new();
+        for _ in 0..1_000 {
+            BasicBlockNodeBuilder::new(vec![Operation::Add])
+                .add_to_forest(&mut source)
+                .unwrap();
+        }
+        let root = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+            .add_to_forest(&mut source)
+            .unwrap();
+        source.make_root(root);
+
+        let sparse = SparseMastForest::from_procedure_roots(&source, &[root]).unwrap();
+
+        assert_eq!(sparse.nodes().len(), 1);
+        assert_eq!(sparse.num_nodes(), root.to_usize() + 1);
+        assert_eq!(sparse.get_node_by_id(root), source.get_node_by_id(root));
+    }
+
+    #[test]
+    fn extraction_handles_deep_call_chains_iteratively() {
+        const DEPTH: usize = 16_384;
+
+        let mut source = MastForest::new();
+        let mut root = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut source)
+            .unwrap();
+        for _ in 0..DEPTH {
+            root = CallNodeBuilder::new(root).add_to_forest(&mut source).unwrap();
+        }
+        source.make_root(root);
+
+        let sparse = SparseMastForest::from_procedure_roots(&source, &[root]).unwrap();
+
+        assert_eq!(sparse.nodes().len(), DEPTH + 1);
+        assert_eq!(sparse.procedure_roots(), &[root]);
     }
 }

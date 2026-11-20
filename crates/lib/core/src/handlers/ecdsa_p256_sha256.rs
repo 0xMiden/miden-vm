@@ -35,7 +35,7 @@ const SCALAR_LIMBS: usize = 8;
 /// must be word-aligned and address `R_LE_U32[8] || S_LE_U32[8] || V`, where `V` is 0 or 1 (the
 /// y-parity of R). This native memory format is distinct from external wire encodings, whose
 /// scalar components are fixed-width big-endian byte strings.
-pub fn handle_ecdsa_p256_sha256_recover(
+pub(crate) fn handle_ecdsa_p256_sha256_recover(
     process: &ProcessorState<'_>,
 ) -> Result<Vec<AdviceMutation>, EventError> {
     let digest_ptr = process.get_stack_item(1).as_canonical_u64();

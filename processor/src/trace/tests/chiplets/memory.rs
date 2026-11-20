@@ -15,16 +15,15 @@
 //!
 //! Coverage is limited to the stack-only memory ops above plus `AeadStream`. The DYN,
 //! DYNCALL, CALL-FMP-write, and PIPE memory-request paths in
-//! `air/src/constraints/lookup/buses/chiplet_requests.rs` are deferred to integration tests —
-//! each is heavyweight to set up and small in algebraic surface. A bug in those paths would
-//! escape this module.
+//! `crates/air/source/src/vm/constraints/lookup/buses/chiplet_requests.rs` are outside this
+//! module's coverage.
 //!
 //! The programs run at ctx = 0 throughout (no CALL/SYSCALL), so a request/response bug that
 //! mismatches stack-side `ctx` vs chiplet-side `mem_ctx` is not caught here.
 
 use alloc::vec::Vec;
 
-use miden_air::{
+use miden_air_definitions::vm::{
     logup::{MemoryMsg, MemoryResponseMsg},
     trace::MainTrace,
 };
@@ -129,28 +128,16 @@ fn memory_chiplet_bus_request_response_pairs() {
         }
         mem_rows_seen += 1;
 
-        let mem = main.chiplet_cols(idx).memory();
-        let is_read = mem.is_read;
-        let is_word = mem.is_word;
-        let mem_ctx = main.chiplet_memory_ctx(idx);
-        let word_addr = main.chiplet_memory_word(idx);
-        let idx0 = main.chiplet_memory_idx0(idx);
-        let idx1 = main.chiplet_memory_idx1(idx);
-        let addr = word_addr + idx1.double() + idx0;
-        let mem_clk = main.chiplet_memory_clk(idx);
-        let word = [
-            main.chiplet_memory_value_0(idx),
-            main.chiplet_memory_value_1(idx),
-            main.chiplet_memory_value_2(idx),
-            main.chiplet_memory_value_3(idx),
-        ];
+        let mem = main.chiplet_cols(idx).memory_cols();
+        let addr = mem.word_addr + mem.idx1.double() + mem.idx0;
         // `element` is ignored by `MemoryResponseMsg::encode` when `is_word = 1`, so on
         // word-access rows the fallback `ZERO` is harmless. `element_idx` uses `u64`
         // arithmetic (native `usize` indexing) while `addr` above uses felt arithmetic —
         // same math, different domain required by the consumer.
-        let element = if is_word == ZERO {
-            let element_idx = (idx1.as_canonical_u64() * 2 + idx0.as_canonical_u64()) as usize;
-            word[element_idx]
+        let element = if mem.is_word == ZERO {
+            let element_idx =
+                (mem.idx1.as_canonical_u64() * 2 + mem.idx0.as_canonical_u64()) as usize;
+            mem.values[element_idx]
         } else {
             ZERO
         };
@@ -158,13 +145,13 @@ fn memory_chiplet_bus_request_response_pairs() {
         exp.add(
             row,
             &MemoryResponseMsg {
-                is_read,
-                ctx: mem_ctx,
+                is_read: mem.is_read,
+                ctx: mem.ctx,
                 addr,
-                clk: mem_clk,
-                is_word,
+                clk: mem.clk,
+                is_word: mem.is_word,
                 element,
-                word,
+                word: mem.values,
             },
         );
     }
@@ -193,8 +180,8 @@ fn aead_stream_emits_memory_requests() {
 
     let mut exp = Expectations::new(&log);
 
-    let aead_rows: Vec<_> = (0..main.core_height())
-        .filter(|&row| main.chiplet_aead_stream_active(RowIndex::from(row)) == ONE)
+    let aead_rows: Vec<_> = (0..main.chiplets_height())
+        .filter(|&row| main.is_aead_stream_row(RowIndex::from(row)))
         .collect();
     assert_eq!(aead_rows.len(), 16, "expected two 8-row stream entries");
 
@@ -282,7 +269,11 @@ fn hornerbase_emits_one_memory_request() {
     ];
     let trace = build_trace_from_ops(operations, &stack);
     const HORNER_CLK: u32 = 11;
-    let helpers = trace.get_user_op_helpers_at(HORNER_CLK);
+    let helpers = trace
+        .main_trace()
+        .core_row(RowIndex::from(HORNER_CLK))
+        .decoder
+        .user_op_helpers();
     assert_ne!(helpers[2], ZERO);
     assert_ne!(helpers[3], ZERO);
 

@@ -1,11 +1,5 @@
-use alloc::{format, vec::Vec};
-#[cfg(any(test, feature = "testing"))]
-use core::ops::Range;
+use alloc::{format, string::ToString};
 
-use miden_air::{
-    MidenMultiAir, ProverStatement, PublicInputs, StarkConfig, Statement, config, debug,
-    trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
-};
 use miden_core::{
     deferred::{Digest, TRUE_DIGEST},
     program::ExecutionClaim,
@@ -15,10 +9,7 @@ use miden_core::{
     },
 };
 
-use crate::{
-    Felt, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
-    fast::ExecutionOutput, field::QuadFelt, utils::RowMajorMatrix,
-};
+use crate::{AdviceProvider, ProgramInfo, StackInputs, StackOutputs, fast::ExecutionOutput};
 
 pub(crate) mod utils;
 use utils::ChipletTraceFragment;
@@ -39,11 +30,11 @@ mod tests;
 // ================================================================================================
 
 pub(crate) use execution_tracer::TraceReplay;
-pub use miden_air::trace::RowIndex;
-pub use miden_core::deferred::PrecompileWitness;
-pub use parallel::{
-    CORE_TRACE_WIDTH, DEFAULT_MAX_PROVER_MEMORY_BYTES, build_trace, build_trace_with_budget,
+pub use miden_air_definitions::vm::{
+    ChipletsLengths, TraceLenSummary, TraceLenSummaryError, VmTrace, trace::RowIndex,
 };
+pub use miden_core::deferred::PrecompileWitness;
+pub use parallel::{CORE_TRACE_WIDTH, build_trace};
 // Re-exported for the streaming trace-build path
 // (`FastProcessor::execute_and_build_trace_sync`), which is std-only; the buffered path
 // uses `build_hasher_chiplet` and `MAX_TRACE_LEN` directly within `parallel`.
@@ -51,7 +42,6 @@ pub use parallel::{
 pub(crate) use parallel::{MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_prebuilt_hasher};
 #[cfg(feature = "std")]
 pub(crate) use trace_state::ResolvedHasherOp;
-pub use utils::{ChipletsLengths, TraceLenSummary};
 
 /// Complete in-memory witness produced by a traced program execution.
 ///
@@ -72,15 +62,14 @@ impl ExecutionWitness {
         stack_inputs: StackInputs,
         execution_output: ExecutionOutput,
         trace: TraceReplay,
-    ) -> Self {
+    ) -> (Self, AdviceProvider) {
         let ExecutionOutput {
             stack: stack_outputs,
-            advice: _,
+            advice,
             memory: _,
+            precompile_root,
             precompile_witness: precompile,
         } = execution_output;
-        let precompile_root =
-            precompile.as_ref().map_or(TRUE_DIGEST, PrecompileWitness::root_unchecked);
         let vm = VmWitness {
             program_info,
             stack_inputs,
@@ -89,7 +78,7 @@ impl ExecutionWitness {
             precompile_root,
         };
 
-        Self { vm, precompile }
+        (Self { vm, precompile }, advice)
     }
 
     /// Returns the public claim associated with this witness.
@@ -113,7 +102,7 @@ impl ExecutionWitness {
     /// Decodes one execution witness from a potentially adversarial byte slice.
     ///
     /// The reader applies an input-proportional limit to byte consumption and collection
-    /// preallocation, then rejects trailing bytes. These checks establish safe transport syntax.
+    /// preallocation, checks available sparse node hashes, and rejects trailing bytes.
     /// They do not prove that the sparse MAST replay is a subset of a particular source forest
     /// because the witness wire does not carry such a proof.
     ///
@@ -141,7 +130,7 @@ impl ExecutionWitness {
     pub fn read_from_bytes_trusted(bytes: &[u8]) -> Result<Self, DeserializationError> {
         let budget = bytes.len().saturating_mul(EXECUTION_WITNESS_BYTE_READ_BUDGET_MULTIPLIER);
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
-        <Self as Deserializable>::read_from(&mut reader)
+        Self::read_from_inner(&mut reader)
     }
 }
 
@@ -170,6 +159,22 @@ impl Serializable for ExecutionWitness {
 
 impl Deserializable for ExecutionWitness {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let witness = Self::read_from_inner(source)?;
+        for forest in &witness.vm.trace.mast_forest_store {
+            forest
+                .validate()
+                .map_err(|error| DeserializationError::InvalidValue(error.to_string()))?;
+        }
+        Ok(witness)
+    }
+
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        ExecutionWitness::read_from_bytes(bytes)
+    }
+}
+
+impl ExecutionWitness {
+    fn read_from_inner<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let version = u8::read_from(source)?;
         if version != EXECUTION_WITNESS_WIRE_VERSION {
             return Err(DeserializationError::InvalidValue(format!(
@@ -190,10 +195,9 @@ impl Deserializable for ExecutionWitness {
             },
             1 => {
                 let witness = PrecompileWitness::read_from(source)?;
-                if witness.root_unchecked() != vm.precompile_root {
+                if vm.precompile_root == TRUE_DIGEST {
                     return Err(DeserializationError::InvalidValue(
-                        "precompile witness root does not match the VM witness precompile root"
-                            .into(),
+                        "VM witness carries a precompile witness for an empty deferred root".into(),
                     ));
                 }
                 Some(witness)
@@ -205,10 +209,6 @@ impl Deserializable for ExecutionWitness {
             },
         };
         Ok(Self { vm, precompile })
-    }
-
-    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
-        ExecutionWitness::read_from_bytes(bytes)
     }
 }
 
@@ -245,6 +245,11 @@ impl VmWitness {
         self.precompile_root != TRUE_DIGEST
     }
 
+    /// Returns the deferred root authenticated by the replayed VM execution.
+    pub fn precompile_root(&self) -> Digest {
+        self.precompile_root
+    }
+
     /// Takes the hasher replay out, leaving an empty buffered one.
     ///
     /// The streaming path uses this to drop the replay's channel sender once execution has
@@ -257,14 +262,14 @@ impl VmWitness {
     /// Returns the replay data captured during execution.
     #[cfg(any(test, feature = "testing"))]
     #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
-    pub(crate) fn trace_replay(&self) -> &TraceReplay {
+    fn trace_replay(&self) -> &TraceReplay {
         &self.trace
     }
 
     // Kept for tests that force invalid replay data without widening the public API.
     #[cfg(any(test, feature = "testing"))]
     #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
-    pub(crate) fn trace_replay_mut(&mut self) -> &mut TraceReplay {
+    fn trace_replay_mut(&mut self) -> &mut TraceReplay {
         &mut self.trace
     }
 
@@ -273,7 +278,6 @@ impl VmWitness {
     /// Available under the `testing` feature for external tests that check which replay data a
     /// serialized witness preserves.
     #[cfg(any(test, feature = "testing"))]
-    #[allow(dead_code)]
     pub fn mast_forest_count(&self) -> usize {
         self.trace.mast_forest_store.len()
     }
@@ -301,210 +305,6 @@ impl Deserializable for VmWitness {
     }
 }
 
-// VM EXECUTION TRACE
-// ================================================================================================
-
-/// Execution trace which is generated when a program is executed on the VM.
-///
-/// The trace consists of the following components:
-/// - Per-AIR main traces for Core, Chiplets, Eidos compression, and byte-pair lookup.
-/// - Information about the program (program hash and the kernel).
-/// - Information about the initial and final stack states and authenticated precompile root.
-/// - Summary of trace lengths of the main trace components.
-#[derive(Debug)]
-pub struct VmTrace {
-    main_trace: MainTrace,
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    precompile_root: Digest,
-    trace_len_summary: TraceLenSummary,
-}
-
-impl VmTrace {
-    // CONSTRUCTOR
-    // --------------------------------------------------------------------------------------------
-
-    pub(crate) fn new_from_parts(
-        program_info: ProgramInfo,
-        stack_inputs: StackInputs,
-        stack_outputs: StackOutputs,
-        precompile_root: Digest,
-        main_trace: MainTrace,
-        trace_len_summary: TraceLenSummary,
-    ) -> Self {
-        Self {
-            main_trace,
-            program_info,
-            stack_inputs,
-            stack_outputs,
-            precompile_root,
-            trace_len_summary,
-        }
-    }
-
-    // PUBLIC ACCESSORS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns the program info of this execution trace.
-    pub fn program_info(&self) -> &ProgramInfo {
-        &self.program_info
-    }
-
-    /// Returns hash of the program execution of which resulted in this execution trace.
-    pub fn program_hash(&self) -> &Word {
-        self.program_info.program_hash()
-    }
-
-    /// Returns outputs of the program execution which resulted in this execution trace.
-    pub fn stack_outputs(&self) -> &StackOutputs {
-        &self.stack_outputs
-    }
-
-    /// Returns the public inputs for this execution trace.
-    pub fn public_inputs(&self) -> PublicInputs {
-        PublicInputs::new(
-            self.program_info.clone(),
-            self.stack_inputs,
-            self.stack_outputs,
-            self.precompile_root,
-        )
-    }
-
-    /// Returns the public values for this execution trace.
-    pub fn to_public_values(&self) -> Vec<Felt> {
-        self.public_inputs().to_elements()
-    }
-
-    /// Returns a reference to the main trace.
-    pub fn main_trace(&self) -> &MainTrace {
-        &self.main_trace
-    }
-
-    /// Returns a mutable reference to the main trace.
-    pub fn main_trace_mut(&mut self) -> &mut MainTrace {
-        &mut self.main_trace
-    }
-
-    /// Returns the authenticated root of the deferred precompile state.
-    pub fn precompile_root(&self) -> Digest {
-        self.precompile_root
-    }
-
-    /// Returns the owned stack outputs required for proof packaging.
-    pub fn into_outputs(self) -> StackOutputs {
-        self.stack_outputs
-    }
-
-    /// Returns the initial state of the top 16 stack registers.
-    pub fn init_stack_state(&self) -> StackInputs {
-        self.stack_inputs
-    }
-
-    /// Returns the final state of the top 16 stack registers.
-    pub fn last_stack_state(&self) -> StackOutputs {
-        let last_step = RowIndex::from(self.last_step());
-        let mut result = [ZERO; MIN_STACK_DEPTH];
-        for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.stack_element(i, last_step);
-        }
-        result.into()
-    }
-
-    /// Returns helper registers state at the specified `clk` of the VM
-    pub fn get_user_op_helpers_at(&self, clk: u32) -> [Felt; NUM_USER_OP_HELPERS] {
-        let mut result = [ZERO; NUM_USER_OP_HELPERS];
-        let row = RowIndex::from(clk);
-        for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.helper_register(i, row);
-        }
-        result
-    }
-
-    /// Returns the trace length.
-    pub fn get_trace_len(&self) -> usize {
-        self.main_trace.num_rows()
-    }
-
-    /// Returns the length of the trace (number of rows in the main trace).
-    pub fn length(&self) -> usize {
-        self.get_trace_len()
-    }
-
-    /// Returns a summary of the per-AIR trace lengths.
-    pub fn trace_len_summary(&self) -> &TraceLenSummary {
-        &self.trace_len_summary
-    }
-
-    // DEBUG CONSTRAINT CHECKING
-    // --------------------------------------------------------------------------------------------
-
-    /// Validates this execution trace against all AIR constraints without generating a STARK
-    /// proof.
-    ///
-    /// This is the recommended way to test trace correctness. It is much faster than full STARK
-    /// proving and provides better error diagnostics (panics on the first constraint violation
-    /// with the instance and row index).
-    ///
-    /// # Panics
-    ///
-    /// Panics if any AIR constraint evaluates to nonzero.
-    pub fn check_constraints(&self) {
-        let (core_matrix, chiplets_matrix, eidos_compression_matrix, and8_lookup_matrix) =
-            self.main_trace.clone_air_matrices();
-        let (public_values, kernel_felts) = self.public_inputs().to_air_inputs();
-
-        let statement: Statement<Felt, QuadFelt, MidenMultiAir> =
-            Statement::new(MidenMultiAir::new(), public_values, kernel_felts)
-                .expect("statement construction failed");
-        let prover_statement = ProverStatement::new(
-            statement,
-            vec![core_matrix, chiplets_matrix, eidos_compression_matrix, and8_lookup_matrix],
-        )
-        .expect("prover statement construction failed");
-
-        let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
-        debug::check_constraints(&prover_statement, config.challenger());
-    }
-
-    /// Clones the trace buffers into the per-AIR matrices consumed by the multi-AIR prover.
-    pub fn clone_air_matrices(
-        &self,
-    ) -> (
-        RowMajorMatrix<Felt>,
-        RowMajorMatrix<Felt>,
-        RowMajorMatrix<Felt>,
-        RowMajorMatrix<Felt>,
-    ) {
-        self.main_trace.clone_air_matrices()
-    }
-
-    /// Consuming variant for the proving hot path: moves the row-major buffers.
-    pub fn into_air_matrices(
-        self,
-    ) -> (
-        RowMajorMatrix<Felt>,
-        RowMajorMatrix<Felt>,
-        RowMajorMatrix<Felt>,
-        RowMajorMatrix<Felt>,
-    ) {
-        self.main_trace.into_air_matrices()
-    }
-
-    // HELPER METHODS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns the index of the last row in the Core trace.
-    fn last_step(&self) -> usize {
-        self.main_trace.core_height() - 1
-    }
-
-    #[cfg(any(test, feature = "testing"))]
-    pub fn get_column_range(&self, range: Range<usize>) -> Vec<Vec<Felt>> {
-        self.main_trace.get_column_range(range)
-    }
-}
-
 #[cfg(test)]
 mod wire_tests {
     use miden_assembly::Assembler;
@@ -514,9 +314,13 @@ mod wire_tests {
         operations::Operation,
         program::Program,
     };
+    use rstest::rstest;
 
-    use super::{ExecutionWitness, Serializable, build_trace};
-    use crate::{DefaultHost, FastProcessor, Felt, StackInputs, mast::MastNodeId};
+    use super::{
+        ExecutionWitness, Serializable, build_trace,
+        trace_state::{AeadStreamReplayEntry, BitwiseOp, BitwiseReplayEntry},
+    };
+    use crate::{DefaultHost, ExecutionError, FastProcessor, Felt, StackInputs, mast::MastNodeId};
 
     fn execution_witness(source: &str) -> ExecutionWitness {
         let program = Assembler::default()
@@ -603,6 +407,39 @@ mod wire_tests {
     }
 
     #[test]
+    fn witness_reader_checks_sparse_hashes_and_preserves_trusted_path() {
+        use miden_core::{Word, mast::SparseMastForest, serde::ByteReader};
+
+        let mut witness = execution_witness("begin push.1 drop end");
+        let forest = &mut witness.vm.trace.mast_forest_store[0];
+        let mut sparse_bytes = forest.to_bytes();
+        let mut reader = std::io::Cursor::new(sparse_bytes.as_slice());
+        let root_count = reader.read_usize().unwrap();
+        for _ in 0..root_count {
+            reader.read_u32().unwrap();
+        }
+        assert!(reader.read_usize().unwrap() > 0);
+        reader.read_u32().unwrap();
+        reader.read_u8().unwrap();
+        let hash_offset = reader.position() as usize;
+        sparse_bytes[hash_offset..hash_offset + Word::SERIALIZED_SIZE]
+            .copy_from_slice(&Word::default().to_bytes());
+        *forest = alloc::sync::Arc::new(
+            SparseMastForest::read_from_bytes_trusted(&sparse_bytes).unwrap(),
+        );
+
+        let bytes = witness.to_bytes();
+        assert!(ExecutionWitness::read_from_bytes(&bytes).is_err());
+        assert!(
+            <ExecutionWitness as super::Deserializable>::read_from(&mut std::io::Cursor::new(
+                &bytes
+            ),)
+            .is_err()
+        );
+        assert!(ExecutionWitness::read_from_bytes_trusted(&bytes).is_ok());
+    }
+
+    #[test]
     fn witness_wire_accepts_large_minimally_encoded_continuation_stack() {
         let mut witness = deferred_witness();
         let continuation = &mut witness
@@ -630,30 +467,85 @@ mod wire_tests {
         let claim = witness.claim();
         let (original_vm, original_precompile) = witness.into_parts();
         assert!(original_precompile.is_none());
-        let original_trace = build_trace(original_vm).expect("original trace should build");
+        let original_trace = build_trace(original_vm, &miden_vm_stark::memory::default_budget())
+            .expect("original trace should build");
 
         let restored =
             ExecutionWitness::read_from_bytes(&bytes).expect("witness should round trip");
         assert_eq!(restored.claim(), claim);
         let (restored_vm, restored_precompile) = restored.into_parts();
         assert!(restored_precompile.is_none());
-        let restored_trace = build_trace(restored_vm).expect("restored trace should build");
+        let restored_trace = build_trace(restored_vm, &miden_vm_stark::memory::default_budget())
+            .expect("restored trace should build");
 
         assert_eq!(restored_trace.public_inputs(), original_trace.public_inputs());
         assert_eq!(restored_trace.trace_len_summary(), original_trace.trace_len_summary());
-        assert_eq!(restored_trace.clone_air_matrices(), original_trace.clone_air_matrices());
+        assert_eq!(restored_trace.into_air_matrices(), original_trace.into_air_matrices());
+    }
+
+    #[rstest]
+    #[case::keystream_not_u32(
+        |entry: &mut AeadStreamReplayEntry, lane: usize| {
+            entry.keystream[lane] = Felt::new_unchecked(1 << 32);
+        },
+        "operation expected u32 values"
+    )]
+    #[case::ciphertext_not_u32(
+        |entry: &mut AeadStreamReplayEntry, lane: usize| {
+            entry.ciphertext[lane] = Felt::new_unchecked(1 << 32);
+        },
+        "operation expected u32 values"
+    )]
+    #[case::ciphertext_mismatch(
+        |entry: &mut AeadStreamReplayEntry, lane: usize| {
+            entry.ciphertext[lane] =
+                Felt::new_unchecked(entry.ciphertext[lane].as_canonical_u64() ^ 1);
+        },
+        "AEAD stream ciphertext does not match plaintext XOR keystream"
+    )]
+    fn build_trace_rejects_inconsistent_aead_stream_replay(
+        #[case] tamper: fn(&mut AeadStreamReplayEntry, usize),
+        #[case] expected_error: &str,
+        #[values(0, 7)] lane: usize,
+    ) {
+        let mut witness = aead_stream_witness();
+        let replay = &mut witness.vm.trace_replay_mut().bitwise_replay;
+        let mut tampered = false;
+        for entry in core::mem::take(replay) {
+            match entry {
+                BitwiseReplayEntry::AeadStream(mut entry) => {
+                    if !tampered {
+                        tamper(&mut entry, lane);
+                        tampered = true;
+                    }
+                    replay.record_aead_stream(*entry);
+                },
+                BitwiseReplayEntry::U32(BitwiseOp::U32And, a, b) => replay.record_u32and(a, b),
+                BitwiseReplayEntry::U32(BitwiseOp::U32Xor, a, b) => replay.record_u32xor(a, b),
+            }
+        }
+        assert!(tampered, "the witness should contain an AEAD stream entry");
+
+        let witness = ExecutionWitness::read_from_bytes(&witness.to_bytes())
+            .expect("the wire reader accepts Felt-valued replay lanes");
+        let Err(error) =
+            build_trace(witness.into_parts().0, &miden_vm_stark::memory::default_budget())
+        else {
+            panic!("invalid AEAD stream replay must return an error");
+        };
+        assert!(matches!(error, ExecutionError::OperationError { .. }));
+        assert!(format!("{error}").contains(expected_error), "unexpected error: {error}");
     }
 
     #[test]
-    fn witness_wire_rejects_mismatched_precompile_root() {
+    fn witness_wire_rejects_precompile_witness_with_true_root() {
         let bytes = deferred_witness_bytes();
         let restored = ExecutionWitness::read_from_bytes(&bytes).expect("witness round trip");
         let (vm, precompile) = restored.into_parts();
         let precompile = precompile.expect("deferred execution should carry a precompile witness");
         assert_ne!(vm.precompile_root, TRUE_DIGEST);
 
-        // Tamper only the VM-side precompile root and re-serialize: the two halves of the wire
-        // no longer describe the same execution, so deserialization must reject them.
+        // A carried witness with an explicitly empty VM-side root is not a valid transport shape.
         let tampered = ExecutionWitness {
             vm: super::VmWitness { precompile_root: TRUE_DIGEST, ..vm },
             precompile: Some(precompile),
@@ -662,7 +554,7 @@ mod wire_tests {
             .expect_err("tampered witness should be rejected");
         assert!(
             format!("{err:?}")
-                .contains("precompile witness root does not match the VM witness precompile root"),
+                .contains("VM witness carries a precompile witness for an empty deferred root"),
             "unexpected error: {err:?}"
         );
 

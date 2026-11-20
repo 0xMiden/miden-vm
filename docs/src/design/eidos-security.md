@@ -41,14 +41,15 @@ For an extension of degree `d`, the Eidos challenger samples `d` base-field coef
 therefore use a sampling-space size of `2^(63 * d)`.
 
 Miden's native and MASM recursive verifiers use the quadratic extension (`d = 2`), giving
-`2 * 63 = 126` bits. Their proof-security estimates are conjectured; the digest's 126-bit collision
-ceiling is a separate limit.
+`2 * 63 = 126` bits. Their conjectured security estimates use this support. Their proven estimates
+use 125 bits, which also covers rejecting base-field out-of-domain points. The digest's 126-bit
+collision ceiling is a separate limit.
 
 ## Encryption
 
 Do not encrypt a field element by adding an Eidos digest element as a mask. Its restricted
 range can reveal information about the plaintext.
 
-Eidos AEAD uses raw compression output lanes for its XOR stream, and its polynomial MAC analysis
-accounts for the restricted distribution of its MAC keys. Use the supplied AEAD APIs and follow
-their nonce and verification-budget limits. See [Eidos authenticated encryption](./eidos-aead.md).
+Use [Eidos authenticated encryption](./eidos-aead.md), which uses raw output lanes for its XOR
+stream and accounts for the restricted MAC-key distribution. Its guide specifies nonce and
+verification-budget limits.

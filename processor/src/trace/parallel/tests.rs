@@ -1,12 +1,12 @@
 use alloc::{string::String, sync::Arc};
 
-use miden_air::{
+use miden_air_definitions::vm::{
     MidenAir,
-    lookup::build_logup_aux_trace,
     trace::{RowIndex, eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN},
 };
 use miden_core::{
     Felt, Word,
+    crypto::merkle::MerklePath,
     field::QuadFelt,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
@@ -17,6 +17,7 @@ use miden_core::{
     program::{KernelDescriptor, Program, StackInputs},
     utils::RowMajorMatrix,
 };
+use miden_stark::lookup::build_logup_aux_trace;
 use miden_utils_testing::get_column_name;
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
@@ -336,7 +337,7 @@ fn test_trace_generation_at_fragment_boundaries(
         host.load_library(create_simple_library()).unwrap();
         let vm_witness =
             processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
-        build_trace(vm_witness).unwrap()
+        build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
     };
 
     let trace_from_single_fragment = {
@@ -354,7 +355,7 @@ fn test_trace_generation_at_fragment_boundaries(
             processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
         assert!(vm_witness.trace_replay().core_trace_contexts.len() == 1);
 
-        build_trace(vm_witness).unwrap()
+        build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
     };
 
     // Ensure that the trace generated from multiple fragments is identical to the one generated
@@ -414,9 +415,9 @@ fn test_trace_generation_at_fragment_boundaries(
         chip_from_fragments,
         eidos_compression_from_fragments,
         and8_from_fragments,
-    ) = trace_from_fragments.main_trace().clone_air_matrices();
+    ) = trace_from_fragments.main_trace().clone().into_air_matrices();
     let (core_from_single, chip_from_single, eidos_compression_from_single, and8_from_single) =
-        trace_from_single_fragment.main_trace().clone_air_matrices();
+        trace_from_single_fragment.into_air_matrices();
 
     // Compare every committed main-trace cell exactly. The column-oriented check above provides
     // precise diagnostics for the Core and Chiplets matrices; these assertions extend the exact
@@ -555,7 +556,7 @@ fn test_partial_last_fragment_exists_for_h0_inversion_path() {
         "repro precondition requires multiple fragments"
     );
 
-    let trace = build_trace(vm_witness).unwrap();
+    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
     let total_rows_without_halt = trace.main_trace().core_height() - 1;
 
     assert_ne!(
@@ -588,7 +589,7 @@ fn miri_repro_uninitialized_tail_read_during_h0_inversion() {
 
     assert!(vm_witness.trace_replay().core_trace_contexts.len() > 1);
 
-    let _ = build_trace(vm_witness);
+    let _ = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
 }
 
 /// Creates a library with a single procedure containing just a SWAP operation.
@@ -960,7 +961,7 @@ fn test_build_trace_returns_err_on_empty_memory_reads_replay() {
         ctx.replay.memory_reads = MemoryReadsReplay::default();
     }
 
-    let result = build_trace(vm_witness);
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
     assert!(
         result.is_err(),
         "build_trace should return Err when hasher replay has bad node ID"
@@ -1001,7 +1002,7 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
         )),
     );
 
-    let result = build_trace(vm_witness);
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
     assert!(
         result.is_err(),
         "build_trace should return Err when hasher replay has bad node ID"
@@ -1090,7 +1091,7 @@ fn test_build_trace_returns_err_on_invalid_mast_forest_id(
         },
     }
 
-    let result = build_trace(vm_witness);
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
     assert!(
         result.is_err(),
         "build_trace should return Err when a fragment carries a MastForestId out of range of \
@@ -1143,7 +1144,7 @@ fn validate_heights_within_max_trace_len_rejects_any_height_over_the_cap() {
     assert!(validate_heights_within_max_trace_len(&[MIN_TRACE_LEN; MIDEN_AIR_COUNT]).is_ok());
 }
 
-/// Tests `build_trace_with_budget` behavior at the exact byte-budget boundary computed from the
+/// Tests `build_trace` behavior at the exact byte-budget boundary computed from the
 /// actual padded per-AIR heights of a small program.
 #[rstest]
 // Case 1: budget is 1 byte less than the exact modelled peak, so the budget check should fail.
@@ -1151,7 +1152,7 @@ fn validate_heights_within_max_trace_len_rejects_any_height_over_the_cap() {
 // Case 2: budget equals the exact modelled peak, so the budget check should pass (not strictly
 // greater), and the function should succeed.
 #[case(0, true)]
-fn test_build_trace_with_budget_corner_cases(
+fn test_build_trace_corner_cases(
     #[case] budget_offset_from_exact_peak: i64,
     #[case] build_trace_succeeds: bool,
 ) {
@@ -1174,13 +1175,15 @@ fn test_build_trace_with_budget_corner_cases(
 
     // Measure the actual padded per-AIR heights under the default (generous) budget, then derive
     // the exact modelled peak for those heights.
-    let measured = build_trace(build_witness()).expect("default budget must succeed");
+    let measured = build_trace(build_witness(), &miden_vm_stark::memory::default_budget())
+        .expect("default budget must succeed");
     let summary = measured.trace_len_summary();
-    let pcs_params = config::pcs_params();
-    let exact_peak = summary.prover_memory_bytes(&pcs_params).expect("modelled peak fits in u64");
+    let exact_peak = miden_vm_stark::memory::default_budget()
+        .prover_peak_bytes(summary.padded_heights())
+        .expect("modelled peak fits in u64");
     let budget = exact_peak.checked_add_signed(budget_offset_from_exact_peak).unwrap();
 
-    let result = build_trace_with_budget(build_witness(), budget);
+    let result = build_trace(build_witness(), &miden_vm_stark::memory::canonical_budget(budget));
 
     assert_eq!(
         result.is_ok(),
@@ -1207,12 +1210,12 @@ fn test_build_trace_with_budget_corner_cases(
 /// Regression test for a tier-1 over-rejection: the raw core-trace buffer allocated by
 /// `generate_core_trace_row_major` (`core_trace_contexts.len() * fragment_size` rows at its
 /// unblown-up 1x size) used to be checked against a cap derived from the *full* proving-pipeline
-/// model (`memory::max_any_height_for_budget`, which additionally prices in blowup, quotient, and
+/// model (`ProvingBudget::max_any_height`, which additionally prices in blowup, quotient, and
 /// Merkle-tree overhead this buffer hasn't incurred yet). At the default (unshrunk) core trace
 /// fragment size, that rejected small programs under budgets that comfortably cover their real,
 /// much smaller padded heights.
 #[test]
-fn test_build_trace_with_budget_accepts_small_program_at_default_fragment_size() {
+fn test_build_trace_accepts_small_program_at_default_fragment_size() {
     fn build_witness() -> VmWitness {
         let program = basic_block_program_small();
         let processor = FastProcessor::new_with_options(
@@ -1227,10 +1230,12 @@ fn test_build_trace_with_budget_accepts_small_program_at_default_fragment_size()
 
     // Measure the exact modelled peak for the program's real (small) padded heights under the
     // default (generous) budget.
-    let measured = build_trace(build_witness()).expect("default budget must succeed");
+    let measured = build_trace(build_witness(), &miden_vm_stark::memory::default_budget())
+        .expect("default budget must succeed");
     let summary = measured.trace_len_summary();
-    let pcs_params = config::pcs_params();
-    let exact_peak = summary.prover_memory_bytes(&pcs_params).expect("modelled peak fits in u64");
+    let exact_peak = miden_vm_stark::memory::default_budget()
+        .prover_peak_bytes(summary.padded_heights())
+        .expect("modelled peak fits in u64");
 
     // A budget well above the exact peak, but that the buggy tier-1 cap (`max_any_height_for_
     // budget`, which divides the budget by the full proving pipeline's per-row cost) still shrinks
@@ -1238,15 +1243,15 @@ fn test_build_trace_with_budget_accepts_small_program_at_default_fragment_size()
     // at its own (unblown-up) per-row cost instead.
     let budget = exact_peak * 3;
 
-    let result = build_trace_with_budget(build_witness(), budget);
+    let result = build_trace(build_witness(), &miden_vm_stark::memory::canonical_budget(budget));
     assert!(
         result.is_ok(),
-        "expected build_trace_with_budget to succeed at budget={budget} (exact peak={exact_peak}) \
+        "expected build_trace to succeed at budget={budget} (exact peak={exact_peak}) \
          with the default core trace fragment size, got: {result:?}"
     );
 }
 
-/// Verifies that `build_trace_with_budget` returns `TraceLenExceeded` (instead of panicking due
+/// Verifies that `build_trace` returns `TraceLenExceeded` (instead of panicking due
 /// to arithmetic overflow) when `core_trace_contexts.len() * fragment_size` overflows `usize`.
 #[test]
 fn test_build_trace_returns_err_on_fragment_size_overflow() {
@@ -1269,7 +1274,7 @@ fn test_build_trace_returns_err_on_fragment_size_overflow() {
     // Set fragment_size to usize::MAX so that `len() * fragment_size` overflows.
     vm_witness.trace_replay_mut().fragment_size = usize::MAX;
 
-    let result = build_trace_with_budget(vm_witness, u64::MAX);
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::canonical_budget(u64::MAX));
 
     assert!(
         matches!(result, Err(ExecutionError::TraceLenExceeded(_))),
@@ -1277,7 +1282,7 @@ fn test_build_trace_returns_err_on_fragment_size_overflow() {
     );
 }
 
-/// Verifies that `build_trace_with_budget` returns `ProverMemoryExceeded` when the Eidos
+/// Verifies that `build_trace` returns `ProverMemoryExceeded` when the Eidos
 /// compression trace pushes the exact modelled peak over budget. The AIRs pad independently, so
 /// a cheap core/chiplets trace does not bound the Eidos compression AIR height.
 #[test]
@@ -1314,22 +1319,24 @@ fn test_build_trace_returns_err_when_eidos_compression_trace_exceeds_budget() {
     // Measure the actual padded per-AIR heights under the default (generous) budget.
     let mut measuring_witness = build_witness(&program, stack_inputs);
     inject_extra_compressions(&mut measuring_witness);
-    let measured = build_trace(measuring_witness).expect("default budget must succeed");
+    let measured = build_trace(measuring_witness, &miden_vm_stark::memory::default_budget())
+        .expect("default budget must succeed");
     let summary = measured.trace_len_summary();
-    let pcs_params = config::pcs_params();
-    let heights = *summary.padded_heights().expect("build_trace records padded heights");
-    let eidos_compression_height = heights[MidenAir::EidosCompression.instance_index()];
+    let heights = *summary.padded_heights();
+    let eidos_compression_height = heights[MidenAir::EIDOS_COMPRESSION.instance_index()];
     assert!(
-        eidos_compression_height > heights[MidenAir::Core.instance_index()]
-            && eidos_compression_height > heights[MidenAir::Chiplets.instance_index()]
-            && eidos_compression_height > heights[MidenAir::And8Lookup.instance_index()],
+        eidos_compression_height > heights[MidenAir::CORE.instance_index()]
+            && eidos_compression_height > heights[MidenAir::CHIPLETS.instance_index()]
+            && eidos_compression_height > heights[MidenAir::AND8_LOOKUP.instance_index()],
         "test setup must make the EidosCompression AIR the dominant height: {heights:?}"
     );
-    let exact_peak = summary.prover_memory_bytes(&pcs_params).expect("modelled peak fits in u64");
+    let exact_peak = miden_vm_stark::memory::default_budget()
+        .prover_peak_bytes(summary.padded_heights())
+        .expect("modelled peak fits in u64");
 
     let mut vm_witness = build_witness(&program, stack_inputs);
     inject_extra_compressions(&mut vm_witness);
-    let result = build_trace_with_budget(vm_witness, exact_peak - 1);
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::canonical_budget(exact_peak - 1));
 
     assert!(
         matches!(result, Err(ExecutionError::ProverMemoryExceeded { .. })),
@@ -1374,11 +1381,51 @@ fn test_build_trace_returns_err_on_inconsistent_continuation(
     stack.push_continuation(continuation);
     ctx.continuation = stack;
 
-    let result = build_trace(vm_witness);
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
     assert!(
         matches!(result, Err(ExecutionError::Internal(_))),
         "expected ExecutionError::Internal, got: {result:?}"
     );
+}
+
+fn replayed_merkle_path_op(update: bool, depth: usize, index: u64) -> ResolvedHasherOp<'static> {
+    let path = MerklePath::new(alloc::vec![Word::default(); depth]);
+    let index = Felt::new_unchecked(index);
+    if update {
+        ResolvedHasherOp::UpdateMerkleRoot((Word::default(), Word::default(), path, index))
+    } else {
+        ResolvedHasherOp::BuildMerkleRoot((Word::default(), path, index))
+    }
+}
+
+/// Merkle path requests in the hasher replay come from a deserialized witness, so an empty path
+/// or an index that does not fit in the path's depth must make the hasher chiplet builder return
+/// an error instead of panicking.
+#[rstest]
+#[case::build_root_empty_path(false, 0, 0)]
+#[case::build_root_index_exceeds_depth(false, 3, 8)]
+#[case::update_root_empty_path(true, 0, 0)]
+#[case::update_root_index_exceeds_depth(true, 3, 8)]
+fn test_build_hasher_chiplet_rejects_invalid_replayed_merkle_path(
+    #[case] update: bool,
+    #[case] depth: usize,
+    #[case] index: u64,
+) {
+    let op = replayed_merkle_path_op(update, depth, index);
+    let err = build_hasher_chiplet([Ok(op)], usize::MAX, usize::MAX).err();
+    assert!(
+        matches!(err, Some(ExecutionError::Internal(_))),
+        "expected ExecutionError::Internal, got: {err:?}"
+    );
+}
+
+/// The largest index that fits in the path's depth is still accepted.
+#[rstest]
+#[case::build_root(false)]
+#[case::update_root(true)]
+fn test_build_hasher_chiplet_accepts_replayed_merkle_path_at_max_index(#[case] update: bool) {
+    let op = replayed_merkle_path_op(update, 3, 7);
+    assert!(build_hasher_chiplet([Ok(op)], usize::MAX, usize::MAX).is_ok());
 }
 
 /// Verifies that `build_trace` returns `ExecutionError::Internal` when `core_trace_contexts` is
@@ -1404,7 +1451,7 @@ fn test_build_trace_returns_err_on_empty_core_trace_contexts() {
     // Clear core_trace_contexts to simulate an empty trace.
     vm_witness.trace_replay_mut().core_trace_contexts.clear();
 
-    let result = build_trace(vm_witness);
+    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
 
     assert!(
         matches!(result, Err(ExecutionError::Internal(_))),
@@ -1438,7 +1485,7 @@ fn build_trace_for_program(
     host.load_library(create_simple_library()).unwrap();
     let vm_witness = processor.execute_for_proving_sync(program, &mut host).unwrap().into_parts().0;
 
-    build_trace(vm_witness).unwrap()
+    build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
 }
 
 fn collect_end_flags(trace: &VmTrace) -> Vec<Word> {

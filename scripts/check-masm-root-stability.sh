@@ -19,11 +19,13 @@ parse_version() {
     local prefix="$2"
     local major minor patch
 
-    IFS=. read -r major minor patch <<<"$version"
-    if [[ ! "$major" =~ ^[0-9]+$ || ! "$minor" =~ ^[0-9]+$ || ! "$patch" =~ ^[0-9]+$ ]]; then
+    if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$ ]]; then
         echo "::error::could not parse semantic version '$version'"
         exit 1
     fi
+    major="${BASH_REMATCH[1]}"
+    minor="${BASH_REMATCH[2]}"
+    patch="${BASH_REMATCH[3]}"
 
     eval "${prefix}_major=\$major"
     eval "${prefix}_minor=\$minor"

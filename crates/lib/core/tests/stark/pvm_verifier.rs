@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use miden_air::precompiles::NUM_CHIPLETS;
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     Felt, Word,
@@ -22,21 +23,16 @@ use miden_core_lib::{
 };
 use miden_crypto::dsa::eddsa_25519_sha512::SigningKey as Ed25519SigningKey;
 use miden_precompiles::{Keccak256Precompile, Sha256Precompile, Sha512Precompile};
-use miden_precompiles_air::NUM_CHIPLETS;
-use miden_precompiles_prover::prove_precompiles;
-use miden_precompiles_verifier::masm_verifier::{
-    PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
+use miden_precompiles_stark::{
+    prover::prove_precompiles,
+    recursive::{PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError},
 };
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, StackInputs,
     operation::OperationError,
 };
-use miden_utils_testing::recursive_verifier::VerifierData;
 
-use super::{
-    EXAMPLE_FIB_SMALL, fib_stack_inputs, generate_recursive_verifier_data,
-    verifier_stack::{CALLER_WORD, VERIFIER_RETURN, VerifierStack},
-};
+use super::verifier_stack::{CALLER_WORD, VERIFIER_RETURN, VerifierStack};
 use crate::{
     helpers::{masm_push_word, masm_store_felts},
     support::ecdsa::valid_fixture,
@@ -75,6 +71,7 @@ fn pvm_keccak_only_recursive_verifier_cost_is_bounded() {
         summary.padded_trace_len() <= 1 << 19,
         "the fixed SHA programs must not force Keccak-only recursion past 2^19 rows"
     );
+    super::deep_queries::check_pvm_queries(&test, &proof);
 }
 
 #[test]
@@ -82,7 +79,11 @@ fn pvm_verifies_sha512_and_mixed_hash_claims() {
     use miden_crypto::hash::sha2::Sha512;
 
     for mixed in [false, true] {
-        let mut state = DeferredState::new(Arc::new(miden_precompiles::registry())).unwrap();
+        let mut state = DeferredState::new(
+            Arc::new(miden_precompiles::registry()),
+            miden_precompiles::default_execution_precompile_limits(),
+        )
+        .unwrap();
         // 112 bytes requires two SHA-512 padding blocks; Keccak still needs only one.
         let input = [0xa5; 112];
         let preimage = state.register(Node::chunks_from_bytes(&input)).unwrap();
@@ -101,7 +102,10 @@ fn pvm_verifies_sha512_and_mixed_hash_claims() {
                 .unwrap();
             state.log_statement(assertion).unwrap();
         }
-        let witness = state.into_witness().unwrap().expect("the state logs hash claims");
+        let witness = state
+            .into_witness(&miden_precompiles::default_verification_precompile_limits())
+            .unwrap()
+            .expect("the state logs hash claims");
         let proof = prove_precompiles(vec![witness], HashFunction::Eidos).unwrap();
         let inputs =
             PvmRecursiveVerifierInputs::for_request(pvm_verify_proof_root(), &proof).unwrap();
@@ -113,7 +117,11 @@ fn pvm_verifies_sha512_and_mixed_hash_claims() {
 fn pvm_verifies_sha256_claims() {
     use miden_crypto::hash::sha2::Sha256;
 
-    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry())).unwrap();
+    let mut state = DeferredState::new(
+        Arc::new(miden_precompiles::registry()),
+        miden_precompiles::default_execution_precompile_limits(),
+    )
+    .unwrap();
     // 56 bytes pushes the length field into a second SHA-256 padding block.
     let input = [0x5a; 56];
     let preimage = state.register(Node::chunks_from_bytes(&input)).unwrap();
@@ -122,7 +130,10 @@ fn pvm_verifies_sha256_claims() {
         .unwrap();
     let assertion = state.register(Sha256Precompile::assert_node(56, preimage, expected)).unwrap();
     state.log_statement(assertion).unwrap();
-    let witness = state.into_witness().unwrap().expect("the state logs a hash claim");
+    let witness = state
+        .into_witness(&miden_precompiles::default_verification_precompile_limits())
+        .unwrap()
+        .expect("the state logs a hash claim");
     let proof = prove_precompiles(vec![witness], HashFunction::Eidos).unwrap();
     let inputs = PvmRecursiveVerifierInputs::for_request(pvm_verify_proof_root(), &proof).unwrap();
     assert_pvm_verifies(&inputs);
@@ -209,7 +220,7 @@ fn pvm_verifies_a_session_mixing_every_precompile() {
 }
 
 #[test]
-fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
+fn pvm_verifies_distinct_orders_and_rejects_tampering() {
     let verifier_root = pvm_verify_proof_root();
     let short_proof = prove_keccak_claim(b"PVM MASM verifier end-to-end fixture");
     let short = PvmRecursiveVerifierInputs::for_request(verifier_root, &short_proof)
@@ -242,10 +253,6 @@ fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
     assert_pvm_verifies(&short);
     assert_pvm_verifies(&long);
     assert_pvm_rejects_tampering(&short);
-
-    let vm = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
-    run_interleaved_verifiers(&vm, &short)
-        .expect("VM/PVM/VM/PVM verification must not leak shared scratch state");
 }
 
 fn assert_pvm_rejects_tampering(inputs: &PvmRecursiveVerifierInputs) {
@@ -407,7 +414,9 @@ fn run_pvm_verifier_with_advice(
 
 #[track_caller]
 fn assert_pvm_verifies(inputs: &PvmRecursiveVerifierInputs) {
-    use miden_precompiles_air::security;
+    use miden_precompiles_stark::setup::security;
+
+    let air_shape = miden_air::precompiles::protocol::metadata().air_shape;
 
     let verifier_stack = run_pvm_verifier_with_advice(inputs.advice(), inputs.claim_commitment())
         .expect("PVM MASM verifier rejected a valid proof");
@@ -419,13 +428,13 @@ fn assert_pvm_verifies(inputs: &PvmRecursiveVerifierInputs) {
         .max()
         .expect("the PVM relation has chiplet AIRs");
     let expected = [
-        u64::from(security::LOOKUP_POW_BITS),
-        u64::from(security::AIR_SHAPE.num_composed_constraints),
-        u64::from(security::AIR_SHAPE.max_constraint_degree),
-        u64::from(security::AIR_SHAPE.num_deep_terms.unwrap()),
-        u64::from(security::LOOKUP_SHAPE.max_message_width),
-        u64::from(security::FIXED_BOUNDARY_LOOKUP_TERMS),
-        u64::from(security::LOOKUP_SHAPE.fractions_per_row),
+        u64::from(security::testing::LOOKUP_POW_BITS),
+        u64::from(air_shape.num_composed_constraints),
+        u64::from(air_shape.max_constraint_degree),
+        u64::from(air_shape.num_deep_terms.unwrap()),
+        u64::from(security::testing::LOOKUP_SHAPE.max_message_width),
+        u64::from(security::FIXED_LOOKUP_ERROR_TERMS),
+        u64::from(security::testing::LOOKUP_SHAPE.fractions_per_row),
         log_max_height,
         stream[0].as_canonical_u64(),
         stream[1].as_canonical_u64(),
@@ -458,51 +467,6 @@ fn pvm_proof_order(inputs: &PvmRecursiveVerifierInputs) -> Vec<usize> {
     let mut proof_order: Vec<usize> = (0..NUM_CHIPLETS).collect();
     proof_order.sort_by_key(|&i| (heights[i].as_canonical_u64(), i));
     proof_order
-}
-
-fn run_interleaved_verifiers(
-    vm: &VerifierData,
-    pvm: &PvmRecursiveVerifierInputs,
-) -> Result<(), ExecutionError> {
-    let mut advice_stack = Vec::new();
-    advice_stack.extend_from_slice(vm.advice_stack());
-    advice_stack.extend(proof_stream(pvm).iter().map(Felt::as_canonical_u64));
-    advice_stack.extend_from_slice(vm.advice_stack());
-    advice_stack.extend(proof_stream(pvm).iter().map(Felt::as_canonical_u64));
-
-    let mut store = vm.store.clone();
-    store.extend(pvm.advice().store().inner_nodes());
-    let mut advice_map = vm.advice_map.clone();
-    advice_map.extend(pvm.advice().map().iter().map(|(key, values)| (*key, values.to_vec())));
-
-    let vm_operands = masm_push_word(&vm.claim_commitment);
-    let pvm_operands = masm_push_word(&pvm.claim_commitment());
-    let source = format!(
-        "
-        use miden::core::sys::pvm
-        use miden::core::sys::vm
-
-        proc verify_mvm
-            exec.vm::verify_proof
-            dropw dropw dropw dropw
-        end
-
-        begin
-            {vm_operands}
-            exec.verify_mvm
-            {pvm_operands}
-            exec.pvm::verify_proof
-            dropw dropw dropw
-            {vm_operands}
-            exec.verify_mvm
-            {pvm_operands}
-            exec.pvm::verify_proof
-            dropw dropw dropw
-        end
-        "
-    );
-    let test = build_test!(source, &[], &advice_stack, store, advice_map);
-    test.execute().map(|_| ())
 }
 
 fn pvm_verify_proof_root() -> Word {

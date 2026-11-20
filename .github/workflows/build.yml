@@ -11,6 +11,9 @@ on:
     branches: [main, next]
   pull_request:
     types: [opened, reopened, synchronize]
+  merge_group:
+    branches: [main, next]
+    types: [checks_requested]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -30,11 +33,28 @@ jobs:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
+      # These WASM targets provide std. The bare-metal job checks dependency leaks.
       - name: Build for no-std
         run: |
           rustup update --no-self-update stable
           rustup +stable target add ${{ matrix.target }}
           RUSTUP_TOOLCHAIN=stable NO_STD_TARGET=${{ matrix.target }} make build-no-std
+
+  bare-metal:
+    name: Check isolated no-std libraries
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain and target without std
+        run: |
+          rustup toolchain install --no-self-update
+          rustup target add wasm32v1-none
+      - name: Check isolated no-std libraries
+        run: make check-no-std
 
   target-miden:
     name: Build for Miden target
@@ -65,10 +85,10 @@ jobs:
           rustup toolchain install --no-self-update
           rustup target add wasm32-wasip1
       - name: Install wasmtime
-        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: wasmtime-cli@45.0.2
-      - name: Run packed Goldilocks/Poseidon2/Eidos vs scalar tests under WASM SIMD128
+      - name: Run packed arithmetic and hash tests under WASM SIMD128
         run: make test-wasm-simd
       - name: Run overlapped trace-build tests on a threadless wasm target
         run: make test-wasm-threadless

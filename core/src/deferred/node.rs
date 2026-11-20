@@ -297,7 +297,7 @@ impl Node {
     ///
     /// Returns [`DeferredError::InvalidPayload`] if the encoded Felt length does not fit in a
     /// `u32`.
-    pub fn try_chunks_from_bytes(bytes: &[u8]) -> Result<Self, DeferredError> {
+    pub(crate) fn try_chunks_from_bytes(bytes: &[u8]) -> Result<Self, DeferredError> {
         let frame = Self::chunks_frame_for_byte_len(bytes.len())?;
         let mut felts = bytes_to_packed_u32_elements(bytes);
         let n_chunks = felts.len().div_ceil(Self::DATA_CHUNK_FELT_LEN).max(1);
@@ -323,8 +323,7 @@ impl Node {
     ///
     /// # Panics
     ///
-    /// Panics if `bytes` is longer than `32 * (u32::MAX / 8)` bytes. Use
-    /// [`Node::try_chunks_from_bytes`] for untrusted input.
+    /// Panics if `bytes` is longer than `32 * (u32::MAX / 8)` bytes.
     pub fn chunks_from_bytes(bytes: &[u8]) -> Self {
         Self::try_chunks_from_bytes(bytes)
             .expect("chunks_from_bytes requires its encoded Felt length to fit in a u32")
@@ -379,7 +378,7 @@ impl Node {
         }
     }
 
-    pub(super) fn require_precompile_frame(frame: EidosFrame) -> Result<EidosFrame, DeferredError> {
+    fn require_precompile_frame(frame: EidosFrame) -> Result<EidosFrame, DeferredError> {
         if frame.domain() == DeferredAndDomain::TAG || frame.domain() == DeferredChunksDomain::TAG {
             return Err(DeferredError::InvalidFrame);
         }
@@ -403,7 +402,7 @@ impl Node {
     /// - data and TRUE nodes have no children;
     /// - join nodes yield `lhs`, then `rhs`;
     /// - pair-list nodes yield `lhs0`, `rhs0`, `lhs1`, `rhs1`, ...
-    pub(crate) fn children(&self) -> impl Iterator<Item = Digest> + '_ {
+    pub(crate) fn children(&self) -> impl DoubleEndedIterator<Item = Digest> + '_ {
         self.payload.children().into_iter()
     }
 
@@ -431,13 +430,8 @@ impl Node {
             .expect("node felt count overflow")
     }
 
-    /// Returns the storage/budget footprint for durable state accounting.
-    pub(crate) fn storage_felt_len(&self) -> usize {
-        if self.is_true() { 0 } else { self.felt_len() }
-    }
-
     /// Appends this node's canonical external representation to `target`.
-    pub fn write_into_felts(&self, target: &mut Vec<Felt>) {
+    pub(crate) fn write_into_felts(&self, target: &mut Vec<Felt>) {
         let frame = self.frame.map(EidosFrame::as_word).unwrap_or_default();
         target.extend_from_slice(&frame.into_elements());
         for chunk in self.payload.as_chunks() {
@@ -562,7 +556,6 @@ mod tests {
         assert_eq!(true_node.digest(), TRUE_DIGEST);
         assert_eq!(true_node.felt_len(), EidosFrame::FELT_LEN);
         assert_eq!(true_node.to_felts(), alloc::vec![ZERO; EidosFrame::FELT_LEN]);
-        assert_eq!(true_node.storage_felt_len(), 0);
         assert!(true_node.payload().as_data().is_err());
         assert!(true_node.payload().as_value().is_err());
     }

@@ -13,8 +13,10 @@ use miden_crypto::{
     utils::hex_to_bytes,
 };
 use miden_precompiles::{K1Scalar, SECP256K1_LAMBDA, scalar_mul_mod_n};
-use miden_precompiles_prover::{HashFunction, prove_precompiles};
-use miden_precompiles_verifier::verify_deferred;
+use miden_precompiles_stark::{
+    prover::{HashFunction, prove_precompiles},
+    verifier::verify_deferred,
+};
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, MemoryError,
     ProcessorState, StackInputs,
@@ -659,7 +661,8 @@ fn run_core_program(
         .expect("failed to load CoreLibrary into the host");
     if let Some(handler) = recovery_handler {
         assert!(
-            host.replace_handler(ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, handler),
+            host.replace_handler(ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, handler)
+                .expect("the recovery event name is valid"),
             "the default recovery handler must already be registered",
         );
     }

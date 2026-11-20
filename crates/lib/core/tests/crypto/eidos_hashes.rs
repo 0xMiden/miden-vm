@@ -7,6 +7,8 @@ use miden_processor::{
 use miden_utils_testing::{build_expected_hash, expect_exec_error_matches};
 use rstest::rstest;
 
+use crate::helpers::{masm_push_word, read_memory_word};
+
 fn assert_hash_input_error(source: &str, message: &str) {
     let (program, ..) = build_test!(source, &[]).compile().unwrap();
     let mut host = DefaultHost::default()
@@ -1153,4 +1155,122 @@ fn test_hash_elements_empty() {
     ";
 
     build_test!(source, &[]).expect_stack(&empty_hash);
+}
+
+#[test]
+fn eidos_hash_elements_single_block_matches_masm_compress_loop() {
+    const HASH_WORD_PTR: u32 = 1000;
+
+    let init_cv =
+        Eidos::init_chaining_word(miden_crypto::hash::eidos::domains::GENERIC_FELT_SEQUENCE, 8);
+    let source = format!(
+        "
+        begin
+            {init_cv}
+            push.8.7.6.5
+            push.4.3.2.1
+            compress
+            dropw dropw
+            push.{HASH_WORD_PTR} mem_storew_le
+            dropw
+        end
+        ",
+        init_cv = masm_push_word(&init_cv),
+    );
+
+    let test = build_test!(source.as_str(), &[]);
+    let (output, _host) = test.execute_for_output().expect("execution failed");
+
+    let elements = (1..=8).map(Felt::new_unchecked).collect::<Vec<_>>();
+    let expected_word = Eidos::hash_elements(&elements);
+
+    assert_eq!(read_memory_word(&output, HASH_WORD_PTR), expected_word);
+}
+
+#[test]
+fn eidos_hash_elements_adv_pipe_loop_matches_masm_compress_loop() {
+    const HASH_WORD_PTR: u32 = 1000;
+    const STREAM_PTR: u32 = 1 << 16;
+
+    let elements = (1..=16).map(Felt::new_unchecked).collect::<Vec<_>>();
+    let init_cv = Eidos::init_chaining_word(
+        miden_crypto::hash::eidos::domains::GENERIC_FELT_SEQUENCE,
+        elements.len() as u32,
+    );
+    let advice_stack: Vec<u64> = elements.iter().map(Felt::as_canonical_u64).collect();
+
+    let source = format!(
+        "
+        begin
+            push.{STREAM_PTR}
+            {init_cv}
+            padw padw
+            repeat.2
+                adv_pipe
+                compress
+            end
+            dropw dropw
+            movup.4 drop
+            push.{HASH_WORD_PTR} mem_storew_le
+            dropw
+        end
+        ",
+        init_cv = masm_push_word(&init_cv),
+    );
+
+    let test = build_test!(source.as_str(), &[], &advice_stack);
+    let (output, _host) = test.execute_for_output().expect("execution failed");
+
+    let expected_word = Eidos::hash_elements(&elements);
+
+    assert_eq!(read_memory_word(&output, HASH_WORD_PTR), expected_word);
+}
+
+#[test]
+fn eidos_hash_elements_advice_map_loop_matches_masm_compress_loop() {
+    const STREAM_PTR: u32 = 1 << 16;
+
+    let elements = (1..=16).map(Felt::new_unchecked).collect::<Vec<_>>();
+    let expected_word = Eidos::hash_elements(&elements);
+    let map_values = elements
+        .iter()
+        .map(Felt::as_canonical_u64)
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let init_cv = Eidos::init_chaining_word(
+        miden_crypto::hash::eidos::domains::GENERIC_FELT_SEQUENCE,
+        elements.len() as u32,
+    );
+
+    let source = format!(
+        "
+        adv_map HASH_OUTPUT([{key0}, {key1}, {key2}, {key3}]) = [
+            {map_values}
+        ]
+
+        begin
+            push.HASH_OUTPUT
+            adv.push_mapval
+            push.{STREAM_PTR}
+            {init_cv}
+            padw padw
+            repeat.2
+                adv_pipe
+                compress
+            end
+            dropw dropw
+            movup.4 drop
+            assert_eqw
+        end
+        ",
+        key0 = expected_word[0].as_canonical_u64(),
+        key1 = expected_word[1].as_canonical_u64(),
+        key2 = expected_word[2].as_canonical_u64(),
+        key3 = expected_word[3].as_canonical_u64(),
+        init_cv = masm_push_word(&init_cv),
+    );
+
+    let test = build_test!(source.as_str(), &[]);
+    test.execute().expect("execution failed");
 }

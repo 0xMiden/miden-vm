@@ -391,6 +391,17 @@ impl AdviceProvider {
         self.stack.iter().copied().collect()
     }
 
+    /// Returns the number of elements on the advice stack without allocating.
+    pub fn stack_len(&self) -> usize {
+        self.stack.len()
+    }
+
+    /// Returns an iterator over the advice stack elements, ordered from the top (first) to the
+    /// bottom, without allocating.
+    pub fn stack_iter(&self) -> impl Iterator<Item = &Felt> {
+        self.stack.iter()
+    }
+
     /// Extends the stack with typed advice stack values.
     pub fn extend_advice_stack(&mut self, stack: AdviceStack) -> Result<(), AdviceError> {
         self.check_stack_capacity(stack.len())?;
@@ -627,7 +638,7 @@ impl AdviceProvider {
     ///   by the specified root.
     /// - Path to the leaf at the specified index in the specified Merkle tree is not known to this
     ///   advice provider.
-    pub fn update_merkle_node(
+    pub(crate) fn update_merkle_node(
         &mut self,
         root: Word,
         depth: Felt,

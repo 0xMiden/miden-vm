@@ -10,7 +10,7 @@ use crate::{Felt, field::QuadFelt};
 /// in-bounds and cannot reference nodes produced by subsequent instructions.
 /// This ensures the circuit can be evaluated in a single pass over the instructions.
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Circuit {
+pub(crate) struct Circuit {
     pub num_inputs: usize,
     pub constants: Vec<Felt>,
     pub instructions: Vec<Instruction>,
@@ -24,7 +24,7 @@ pub struct Circuit {
 /// The graph is interpreted as a vector of `n_i + n_c + n_e` values, with their kinds encoded as
 /// `[Input(0), ..., Input(n_i - 1), Const(0), ..., Const(n_c - 1), Eval(0), ..., Eval(n_e - 1)]`.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum NodeID {
+pub(crate) enum NodeID {
     Input(usize),
     Const(usize),
     Eval(usize),
@@ -33,23 +33,23 @@ pub enum NodeID {
 /// An `Instruction` indicating how the next `Eval` node should be computed, given existing `Node`s.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Instruction {
-    pub node_l: NodeID,
-    pub node_r: NodeID,
+    pub(crate) node_l: NodeID,
+    pub(crate) node_r: NodeID,
     pub op: Op,
 }
 
 #[derive(Debug)]
-pub enum CircuitError {
+pub(crate) enum CircuitError {
     LayoutInvalid,
     InstructionMalformed,
     InputsWrongNumber,
 }
 
 /// Layout of a circuit representing the number of different `Node`s of each type.
-pub struct CircuitLayout {
+pub(crate) struct CircuitLayout {
     pub num_inputs: usize,
-    pub num_constants: usize,
-    pub num_instructions: usize,
+    pub(crate) num_constants: usize,
+    pub(crate) num_instructions: usize,
 }
 
 impl Circuit {
@@ -140,18 +140,18 @@ impl Circuit {
 
 impl CircuitLayout {
     /// Returns the total number of variables (inputs and constants) in the circuit.
-    pub fn num_vars(&self) -> usize {
+    pub(crate) fn num_vars(&self) -> usize {
         self.num_inputs + self.num_constants
     }
 
     /// Returns the total number of `Node`s required to represent the evaluation graph of the
     /// circuit.
-    pub fn num_nodes(&self) -> usize {
+    pub(crate) fn num_nodes(&self) -> usize {
         self.num_vars() + self.num_instructions
     }
 
     /// Checks if a `NodeID` is in-bounds relative to this layout.
-    pub fn contains_node(&self, node: &NodeID) -> bool {
+    pub(crate) fn contains_node(&self, node: &NodeID) -> bool {
         match *node {
             NodeID::Input(id) => id < self.num_inputs,
             NodeID::Const(id) => id < self.num_constants,

@@ -31,6 +31,14 @@ pub fn read_memory_felt(output: &ExecutionOutput, addr: u32) -> Felt {
         .unwrap_or_else(|_| panic!("memory address {addr} was not written"))
 }
 
+/// Reads four initialized felts in address order from root-context memory.
+pub fn read_memory_word(output: &ExecutionOutput, addr: u32) -> Word {
+    Word::new(core::array::from_fn(|i| {
+        let addr = addr.checked_add(i as u32).expect("word address overflows u32");
+        read_memory_felt(output, addr)
+    }))
+}
+
 /// Generates MASM code to store field elements sequentially in memory starting at `base_addr`.
 pub fn masm_store_felts(felts: &[Felt], base_addr: u32) -> String {
     felts
@@ -73,6 +81,8 @@ pub fn masm_push_word(word: &Word) -> String {
 
 /// Portable transport preserves the execution's complete precompile obligation.
 pub fn assert_precompile_witness_round_trips(output: &ExecutionOutput) {
+    use std::sync::Arc;
+
     use miden_core::{
         deferred::{PrecompileWitness, TRUE_DIGEST},
         serde::{Deserializable, Serializable},
@@ -82,10 +92,18 @@ pub fn assert_precompile_witness_round_trips(output: &ExecutionOutput) {
         Option::<PrecompileWitness>::read_from_bytes(&output.precompile_witness.to_bytes())
             .expect("portable precompile witness must round-trip");
     assert_eq!(decoded, output.precompile_witness);
-    assert_eq!(
-        decoded.as_ref().map(PrecompileWitness::root_unchecked).unwrap_or(TRUE_DIGEST),
-        output.precompile_root(),
-    );
+    let decoded_root = decoded
+        .map(|witness| {
+            witness
+                .prepare(
+                    Arc::new(miden_precompiles::registry()),
+                    &miden_precompiles::default_verification_precompile_limits(),
+                )
+                .expect("execution-produced witness must prepare")
+                .root()
+        })
+        .unwrap_or(TRUE_DIGEST);
+    assert_eq!(decoded_root, output.precompile_root());
 }
 
 /// Reads an explicitly exported caller root and checks its portable graph without a PVM proof.
@@ -99,28 +117,42 @@ pub fn assert_exported_manual_root(
     assert_manual_graph(output, root)
 }
 
+/// Decodes a witness value stored in the advice map by `adv.export_deferred_witness`.
+pub fn decode_exported_witness(value: &[Felt]) -> miden_core::deferred::PrecompileWitness {
+    use miden_core::{
+        deferred::PrecompileWitness, serde::Deserializable, utils::packed_u32_elements_to_bytes,
+    };
+
+    let byte_len = usize::try_from(value[0].as_canonical_u64()).unwrap();
+    let mut bytes = packed_u32_elements_to_bytes(&value[1..]);
+    bytes.truncate(byte_len);
+    PrecompileWitness::read_from_bytes(&bytes).expect("exported witness must decode")
+}
+
 fn assert_manual_graph(
     output: &ExecutionOutput,
     root: Word,
 ) -> miden_core::deferred::PrecompileWitness {
     use std::sync::Arc;
 
-    use miden_core::{
-        deferred::{PrecompileWitness, TRUE_DIGEST},
-        serde::Deserializable,
-        utils::packed_u32_elements_to_bytes,
-    };
+    use miden_core::deferred::TRUE_DIGEST;
 
     assert_eq!(output.precompile_root(), TRUE_DIGEST, "manual calls must not log");
     assert!(output.precompile_witness.is_none());
     assert!(output.advice.stack().is_empty());
     let value = output.advice.get_mapped_values(&root).expect("root must be exported");
-    let byte_len = usize::try_from(value[0].as_canonical_u64()).unwrap();
-    let mut bytes = packed_u32_elements_to_bytes(&value[1..]);
-    bytes.truncate(byte_len);
-    let witness = PrecompileWitness::read_from_bytes(&bytes).expect("exported witness must decode");
-    assert_eq!(witness.root_unchecked(), root);
-    assert_eq!(witness.compute_root(Arc::new(miden_precompiles::registry())).unwrap(), root);
+    let witness = decode_exported_witness(value);
+    assert_eq!(
+        witness
+            .clone()
+            .prepare(
+                Arc::new(miden_precompiles::registry()),
+                &miden_precompiles::default_verification_precompile_limits(),
+            )
+            .unwrap()
+            .root(),
+        root
+    );
     witness
 }
 

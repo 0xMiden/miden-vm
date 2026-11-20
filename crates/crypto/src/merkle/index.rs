@@ -92,7 +92,7 @@ impl NodeIndex {
     }
 
     /// Returns left child index of the current node.
-    pub const fn left_child(mut self) -> Self {
+    pub(crate) const fn left_child(mut self) -> Self {
         self.depth += 1;
         self.position <<= 1;
         self
@@ -105,7 +105,7 @@ impl NodeIndex {
         self
     }
 
-    /// Returns the parent of the current node. This is the same as [`Self::move_up()`], but returns
+    /// Returns the parent of the current node. This is the same as `move_up`, but returns
     /// a new value instead of mutating `self`.
     pub const fn parent(mut self) -> Self {
         self.depth = self.depth.saturating_sub(1);
@@ -135,7 +135,7 @@ impl NodeIndex {
     ///
     /// - [`MerkleError::DepthTooBig`] if the depth is 64 or greater, as the resulting index would
     ///   overflow.
-    pub const fn to_scalar_index(&self) -> Result<u64, MerkleError> {
+    pub(crate) const fn to_scalar_index(self) -> Result<u64, MerkleError> {
         if self.depth >= 64 {
             return Err(MerkleError::DepthTooBig(self.depth as u64));
         }
@@ -158,7 +158,7 @@ impl NodeIndex {
     }
 
     /// Returns `true` if the n-th node on the path points to a right child.
-    pub const fn is_nth_bit_odd(&self, n: u8) -> bool {
+    pub(crate) const fn is_nth_bit_odd(&self, n: u8) -> bool {
         (self.position >> n) & 1 == 1
     }
 
@@ -171,7 +171,7 @@ impl NodeIndex {
     // --------------------------------------------------------------------------------------------
 
     /// Traverses one level towards the root, decrementing the depth by `1`.
-    pub fn move_up(&mut self) {
+    pub(crate) fn move_up(&mut self) {
         self.depth = self.depth.saturating_sub(1);
         self.position >>= 1;
     }
@@ -183,7 +183,7 @@ impl NodeIndex {
         debug_assert!(depth < self.depth);
         let delta = self.depth.saturating_sub(depth);
         self.depth = self.depth.saturating_sub(delta);
-        self.position >>= delta as u32;
+        self.position = self.position.checked_shr(delta as u32).unwrap_or(0);
     }
 
     // ITERATORS
@@ -421,5 +421,12 @@ mod tests {
 
         // depth 63, position 0: scalar = 2^63
         assert_eq!(NodeIndex::make(63, 0).to_scalar_index().unwrap(), 1u64 << 63);
+    }
+
+    #[test]
+    fn test_move_up_to_root_from_depth_64() {
+        let mut index = NodeIndex::new(64, 0).unwrap();
+        index.move_up_to(0);
+        assert_eq!(index, NodeIndex::root());
     }
 }

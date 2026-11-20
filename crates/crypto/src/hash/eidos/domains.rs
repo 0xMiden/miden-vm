@@ -87,6 +87,55 @@ crate::eidos_domain_registry! {
                 description: "Canonical Eidos LMCS leaf hashing.",
                 schema: "param0 = sum of matrix-row and salt widths after each is independently padded to 8 Felts; param1 = 0; param2 = 0; absorb rows in commitment order; an empty leaf returns the unmasked initial CV; the verifier fixes the row boundaries and widths",
             }
+            pub ECGFP5_SEAL_KEY: Ecgfp5SealKeyDomain {
+                local_id: 0x000c,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "EcGFp5-Eidos single-message key expansion; four-Felt output.",
+                schema: "param0 = 8; param1 = 0; param2 = 0; payload = extracted secret(4), context digest(4)",
+            }
+            pub ECGFP5_SEAL_NONCE: Ecgfp5SealNonceDomain {
+                local_id: 0x000d,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "EcGFp5-Eidos single-message nonce expansion; four-Felt output.",
+                schema: "param0 = 8; param1 = 0; param2 = 0; payload = extracted secret(4), context digest(4)",
+            }
+            pub ECGFP5_SEAL_CONTEXT: Ecgfp5SealContextDomain {
+                local_id: 0x000e,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "EcGFp5-Eidos application-context commitment.",
+                schema: "param0 = context length in Felts; param1 = 0; param2 = 0; payload = application context",
+            }
+            pub ECGFP5_SEAL_EXTRACT: Ecgfp5SealExtractDomain {
+                local_id: 0x000f,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "EcGFp5-Eidos single-message DH extraction; four-Felt output.",
+                schema: "param0 = 24; param1 = 0; param2 = 0; payload = shared point S(5), zero(3), ephemeral point R(5), zero(3), recipient point Q(5), zero(3)",
+            }
+            pub ECGFP5_PUBLIC_KEY: Ecgfp5PublicKeyDomain {
+                local_id: 0x0010,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "EcGFp5 public-key commitment.",
+                schema: "param0 = 5; param1 = 0; param2 = 0; payload = canonical point encoding in increasing coefficient order",
+            }
+            pub ECGFP5_PREPROCESSED_PUBLIC_KEY: Ecgfp5PreprocessedPublicKeyDomain {
+                local_id: 0x0011,
+                version: DomainVersion::numbered(1),
+                encoding: FeltSequence,
+                description: "EcGFp5 preprocessed public-key commitment.",
+                schema: "param0 = 80; param1 = 0; param2 = 0; payload = twenty ordered Merkle roots of paired 16-bit multiplication tables",
+            }
+            pub ECGFP5_SEAL_BYTE_CONTEXT: Ecgfp5SealByteContextDomain {
+                local_id: 0x0012,
+                version: DomainVersion::numbered(1),
+                encoding: ByteString,
+                description: "EcGFp5-Eidos byte-message application-context commitment.",
+                schema: "param0 = context length in bytes; param1 = 0; param2 = 0; payload = application context",
+            }
         }
     }
 }

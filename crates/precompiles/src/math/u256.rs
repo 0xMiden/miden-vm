@@ -13,7 +13,7 @@ impl U256 {
     pub const ID: Felt = ZERO;
 
     /// Encoded modulus sentinel for arithmetic modulo `2^256`.
-    pub const ENCODED_MODULUS: Limbs = [0; 8];
+    pub(crate) const ENCODED_MODULUS: Limbs = [0; 8];
 
     /// Maximum canonical U256 value, `2^256 - 1`.
     pub const MAX: Limbs = [u32::MAX; 8];

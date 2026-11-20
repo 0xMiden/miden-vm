@@ -1,4 +1,6 @@
-use miden_air::trace::{RowIndex, chiplets::hasher::STATE_WIDTH, decoder::NUM_USER_OP_HELPERS};
+use miden_air_definitions::vm::trace::{
+    RowIndex, chiplets::hasher::STATE_WIDTH, decoder::NUM_USER_OP_HELPERS,
+};
 use miden_core::{
     Felt, Word, ZERO,
     crypto::merkle::MerklePath,
@@ -55,7 +57,7 @@ use crate::{
 /// any auxiliary information they need by accessing the processor state before or after each clock
 /// cycle. However, experiments show that this requires redoing too much work in the tracer already
 /// performed by the processor, which degrades performance.
-pub trait Tracer {
+pub(crate) trait Tracer {
     type Processor;
 
     /// The forest representation passed to this tracer's [`start_clock_cycle`] /

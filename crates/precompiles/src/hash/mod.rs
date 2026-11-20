@@ -8,7 +8,9 @@ use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use miden_core::{
-    deferred::{DeferredContext, Digest, Node, NodeType, Payload, Precompile, PrecompileError},
+    deferred::{
+        DeferredContext, Digest, Node, NodeType, Payload, Precompile, PrecompileError, WorkItem,
+    },
     program::domain::DeferredChunksDomain,
 };
 use miden_crypto::hash::eidos::{DomainTag, EidosDomain, EidosFrame};
@@ -38,20 +40,6 @@ pub trait HashFunction: Default + Send + Sync + 'static {
 // ================================================================================================
 
 const ASSERT_DISC: u32 = 0;
-
-/// A structural view of a hash assertion node owned by [`HashPrecompile`].
-///
-/// This exposes only the assertion frame parameters and join child digests; it does not evaluate
-/// the preimage or expected digest children.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct HashAssertNode {
-    /// Declared preimage length in bytes.
-    pub n_bytes: u32,
-    /// Structural digest of the preimage chunk-list child.
-    pub preimage_digest: Digest,
-    /// Structural digest of the expected-digest chunk-list child.
-    pub expected_digest: Digest,
-}
 
 /// A hash assertion precompile parameterized by its [`HashFunction`].
 pub struct HashPrecompile<H>(PhantomData<H>);
@@ -102,25 +90,6 @@ impl<H: HashFunction> HashPrecompile<H> {
         Ok(Some(n_bytes))
     }
 
-    /// Decodes a hash assertion node without evaluating its children.
-    ///
-    /// Returns `Ok(None)` when `node` belongs to another precompile. Owned nodes return their
-    /// structural join child digests directly from the payload.
-    pub fn decode_assert_node(node: &Node) -> Result<Option<HashAssertNode>, PrecompileError> {
-        let Some(frame) = node.frame() else {
-            return Ok(None);
-        };
-        let Some(n_bytes) = Self::decode_assert_frame(frame)? else {
-            return Ok(None);
-        };
-        let (preimage_digest, expected_digest) = node.payload().as_join()?;
-        Ok(Some(HashAssertNode {
-            n_bytes,
-            preimage_digest,
-            expected_digest,
-        }))
-    }
-
     fn digest_chunks() -> usize {
         H::DIGEST_FELTS.div_ceil(8)
     }
@@ -142,6 +111,12 @@ impl<H: HashFunction> Precompile for HashPrecompile<H> {
     fn validate_payload(&self, _params: [u32; 3], _payload: &Payload) -> bool {
         // The registry checks the Join shape; child contents are checked during evaluation.
         true
+    }
+
+    fn work(&self, params: [u32; 3], _payload: &Payload) -> Result<WorkItem, PrecompileError> {
+        let frame = EidosFrame::new(Self::domain(), params);
+        let n_bytes = Self::decode_assert_frame(frame)?.ok_or(PrecompileError::InvalidNode)?;
+        Ok(WorkItem::new(crate::HASH_WORK, n_bytes))
     }
 
     fn evaluate(
@@ -228,9 +203,10 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     }
 
     let fresh = || {
-        DeferredState::new(Arc::new(
-            PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default()),
-        ))
+        DeferredState::new(
+            Arc::new(PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default())),
+            crate::default_execution_precompile_limits(),
+        )
         .expect("hash precompile initialization should fit the test budget")
     };
     let assert_registers = |state: &mut DeferredState,
@@ -270,23 +246,12 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
         Err(PrecompileError::InvalidNode)
     ));
 
-    let assert_node = HashPrecompile::<H>::assert_node(65, TRUE_DIGEST, TRUE_DIGEST);
-    assert_eq!(HashPrecompile::<H>::decode_assert_node(&Node::TRUE).unwrap(), None);
-    assert_eq!(
-        HashPrecompile::<H>::decode_assert_node(&assert_node).unwrap(),
-        Some(HashAssertNode {
-            n_bytes: 65,
-            preimage_digest: TRUE_DIGEST,
-            expected_digest: TRUE_DIGEST,
-        })
-    );
-    let invalid_node = Node::join(invalid_assert_frame, TRUE_DIGEST, TRUE_DIGEST).unwrap();
-    assert!(matches!(
-        HashPrecompile::<H>::decode_assert_node(&invalid_node),
-        Err(PrecompileError::InvalidNode)
-    ));
-    let invalid_shape = Node::value(assert_frame, [ZERO; 8]).unwrap();
-    assert!(HashPrecompile::<H>::decode_assert_node(&invalid_shape).is_err());
+    // The assertion frame selects a join node; a value payload under it is malformed.
+    let mut state = fresh();
+    let err = state
+        .register(Node::value(assert_frame, [ZERO; 8]).expect("value payload"))
+        .expect_err("a value payload cannot carry a join frame");
+    assert_error(err, PrecompileError::InvalidNode);
 
     let input = b"hash assertions consume generic chunks";
     let mut state = fresh();
@@ -362,18 +327,17 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     let assertion = state.register(assertion_node).unwrap();
     let root = state.log_statement(assertion).unwrap();
     let witness = state
-        .into_witness()
+        .into_witness(&crate::default_verification_precompile_limits())
         .expect("hash assertion should export")
         .expect("logged hash assertion is nonempty");
-    assert_eq!(witness.root_unchecked(), root);
-    assert_eq!(
-        witness
-            .compute_root(Arc::new(
-                PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default()),
-            ))
-            .unwrap(),
-        root
-    );
+    let prepared = witness
+        .prepare(
+            Arc::new(PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default())),
+            &crate::default_verification_precompile_limits(),
+        )
+        .unwrap();
+    assert_eq!(prepared.root(), root);
+    prepared.evaluate().unwrap();
 }
 
 #[cfg(test)]
@@ -395,7 +359,11 @@ mod tests {
             0x2a, 0x9a, 0xc9, 0x4f, 0xa5, 0x4c, 0xa4, 0x9f,
         ];
         for corrupt in [None, Some(0), Some(32), Some(63)] {
-            let mut state = DeferredState::new(Arc::new(crate::registry())).unwrap();
+            let mut state = DeferredState::new(
+                Arc::new(crate::registry()),
+                crate::default_execution_precompile_limits(),
+            )
+            .unwrap();
             let input = state.register(Node::chunks_from_bytes(b"abc")).unwrap();
             let mut expected = digest;
             if let Some(index) = corrupt {

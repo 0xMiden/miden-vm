@@ -10,10 +10,10 @@ use crate::{
     Felt, Word,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExecutableMastForest,
-        ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestError, MastForestView,
-        MastNodeExt, MastNodeId, OP_BATCH_SIZE, OpBatch, SparseMastForest, SparseMastForestBuilder,
-        SplitNodeBuilder, UntrustedMastForest, UntrustedMastForestReadOptions, VisitKind,
-        node::hash_op_batches,
+        ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor,
+        MastForestError, MastForestView, MastNodeExt, MastNodeId, OP_BATCH_SIZE, OpBatch,
+        SparseMastForest, SparseMastForestBuilder, SplitNodeBuilder, UntrustedMastForest,
+        UntrustedMastForestReadOptions, VisitKind, node::hash_op_batches,
     },
     operations::Operation,
     serde::{ByteReader, Deserializable, DeserializationError, Serializable, SliceReader},
@@ -162,6 +162,7 @@ fn confirm_operation_structure() {
         Operation::EvalCircuit => (),
         Operation::Emit => (),
         Operation::LogDeferred => (),
+        Operation::ClearDeferred => (),
     };
 }
 
@@ -252,6 +253,7 @@ fn sample_basic_block_operations_all_variants() -> Vec<Operation> {
         Operation::EvalCircuit,
         Operation::Emit,
         Operation::LogDeferred,
+        Operation::ClearDeferred,
     ]
 }
 
@@ -337,7 +339,8 @@ fn assert_operation_encoded_size_matches_serialized_len(operation: Operation) {
         | Operation::HornerExt
         | Operation::EvalCircuit
         | Operation::Emit
-        | Operation::LogDeferred) => {
+        | Operation::LogDeferred
+        | Operation::ClearDeferred) => {
             assert_eq!(operation.encoded_size(), operation.to_bytes().len());
         },
     }
@@ -372,6 +375,7 @@ fn test_operation_encoded_size_push_varint_boundaries() {
 
 fn assert_serialized_view_matches_forest(forest: &MastForest) {
     let forest = canonicalized_for_test(forest);
+    assert_size_hints_match_serialized_lengths(&forest);
     let mut bytes = Vec::new();
     forest.write_into(&mut bytes);
 
@@ -398,6 +402,100 @@ fn canonicalized_for_test(forest: &MastForest) -> MastForest {
         forest.advice_map().clone(),
     )
     .unwrap()
+}
+
+#[test]
+fn mast_forest_size_hints_match_serialized_lengths() {
+    let mut forest = MastForest::new();
+    assert_size_hints_match_serialized_lengths(&forest);
+
+    let external = ExternalNodeBuilder::new(Word::default()).add_to_forest(&mut forest).unwrap();
+    forest.make_root(external);
+    assert_size_hints_match_serialized_lengths(&forest);
+
+    let block = BasicBlockNodeBuilder::new(sample_basic_block_operations_all_variants())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block);
+    assert_size_hints_match_serialized_lengths(&forest);
+
+    forest.advice_map.insert(Word::default(), Vec::<Felt>::new());
+    assert_size_hints_match_serialized_lengths(&forest);
+
+    for count in [0, 1, 127, 128, 255, 256] {
+        let mut forest = forest.clone();
+        let block = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::from_u32(42)); 300])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        forest.roots.extend(core::iter::repeat_n(block, count));
+        for i in 0..count {
+            let key = Word::new([Felt::from_u32(i as u32), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+            forest.advice_map.insert(key, vec![Felt::from_u32(42); count]);
+        }
+        assert_size_hints_match_serialized_lengths(&forest);
+    }
+}
+
+#[test]
+fn mast_forest_hashless_size_hint_preserves_external_digests() {
+    for count in [1, 127, 128, 255, 256] {
+        let mut forest = MastForest::new();
+        for i in 0..count {
+            let digest = Word::new([Felt::from_u32(i), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+            let external = ExternalNodeBuilder::new(digest).add_to_forest(&mut forest).unwrap();
+            forest.make_root(external);
+        }
+        assert_size_hints_match_serialized_lengths(&forest);
+        assert_eq!(forest.hashless_size_hint(), forest.get_size_hint());
+    }
+}
+
+fn assert_size_hints_match_serialized_lengths(forest: &MastForest) {
+    let mut bytes = Vec::new();
+    forest.write_into(&mut bytes);
+    assert_eq!(forest.get_size_hint(), bytes.len());
+
+    let mut hashless_bytes = Vec::new();
+    forest.write_hashless(&mut hashless_bytes);
+    assert_eq!(forest.hashless_size_hint(), hashless_bytes.len());
+}
+
+fn forest_exceeding_u32_serialized_size() -> MastForest {
+    let mut forest = MastForest::new();
+    let root = DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
+    forest.roots = vec![root; 262_144];
+
+    let values: Arc<[Felt]> = vec![Felt::ZERO; 131_072].into();
+    for i in 0..4095u32 {
+        let key = Word::new([Felt::from_u32(i), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+        forest.advice_map.insert(key, Arc::clone(&values));
+    }
+
+    let advice_size = forest.advice_map.get_size_hint() as u64;
+    assert!(u32::try_from(advice_size).is_ok());
+    // The map fits in 32 bits, but the additional roots push the forest over the limit.
+    assert!(advice_size + forest.roots.len() as u64 * 4 > u64::from(u32::MAX));
+    forest
+}
+
+#[test]
+#[cfg_attr(
+    target_pointer_width = "32",
+    should_panic(expected = "MAST forest serialized size exceeds usize::MAX")
+)]
+fn mast_forest_size_hint_checks_total_size() {
+    let forest = forest_exceeding_u32_serialized_size();
+    assert!(forest.get_size_hint() as u64 > u64::from(u32::MAX));
+}
+
+#[test]
+#[cfg_attr(
+    target_pointer_width = "32",
+    should_panic(expected = "MAST forest serialized size exceeds usize::MAX")
+)]
+fn mast_forest_hashless_size_hint_checks_total_size() {
+    let forest = forest_exceeding_u32_serialized_size();
+    assert!(forest.hashless_size_hint() as u64 > u64::from(u32::MAX));
 }
 
 #[test]
@@ -806,6 +904,216 @@ fn sparse_mast_round_trip_preserves_sparse_replay_ids() {
     assert_eq!(restored.get_digest_by_id(true_branch), Some(source[true_branch].digest()));
     assert_eq!(restored.get_digest_by_id(false_branch), Some(source[false_branch].digest()));
     assert_eq!(restored.get_digest_by_id(root), Some(source[root].digest()));
+}
+
+#[test]
+fn sparse_reader_rejects_suffix_inside_basic_block_data() {
+    let (source, _sparse, true_branch, _false_branch, _root) = sparse_split_fixture();
+    let block = source[true_branch].unwrap_basic_block();
+    let mut data = BasicBlockDataBuilder::new();
+    data.encode_basic_block(block);
+    let mut data = data.finalize();
+    data.push(0);
+
+    let mut bytes = Vec::new();
+    bytes.write_usize(0); // roots
+    bytes.write_usize(1); // full nodes
+    true_branch.write_into(&mut bytes);
+    bytes.write_u8(0); // block
+    block.digest().write_into(&mut bytes);
+    bytes.write_usize(data.len());
+    bytes.write_bytes(&data);
+    bytes.write_usize(0); // digest-only entries
+    bytes.write_usize(0); // advice
+
+    for result in [
+        SparseMastForest::read_from_bytes(&bytes),
+        SparseMastForest::read_from_bytes_trusted(&bytes),
+    ] {
+        assert_matches!(
+            result,
+            Err(DeserializationError::InvalidValue(message))
+                if message.contains("extra bytes after basic block data")
+        );
+    }
+}
+
+#[test]
+fn sparse_reader_checks_hashes_on_byte_slice_and_trait_paths() {
+    let (source, sparse, true_branch, _false_branch, root) = sparse_split_fixture();
+    for corrupted_id in [true_branch, root] {
+        let nodes = sparse
+            .nodes()
+            .iter()
+            .map(|(&id, node)| {
+                let node = if id == corrupted_id {
+                    node.clone()
+                        .to_builder(&source)
+                        .with_digest(Word::default())
+                        .build_linked()
+                        .unwrap()
+                } else {
+                    node.clone()
+                };
+                (id, node)
+            })
+            .collect();
+        let corrupted = SparseMastForest::from_serialized_parts(
+            nodes,
+            sparse.digest_entries().iter().map(|(&id, &digest)| (id, digest)).collect(),
+            sparse.procedure_roots().to_vec(),
+            AdviceMap::default(),
+        )
+        .unwrap()
+        .to_bytes();
+
+        assert!(SparseMastForest::read_from_bytes(&corrupted).is_err());
+        assert!(SparseMastForest::read_from(&mut SliceReader::new(&corrupted)).is_err());
+        assert!(
+            SparseMastForest::read_from_bytes_with_budget(&corrupted, corrupted.len()).is_err()
+        );
+        let trusted = SparseMastForest::read_from_bytes_trusted(&corrupted).unwrap();
+        assert_matches!(
+            trusted.validate(),
+            Err(MastForestError::HashMismatch { node_id, .. }) if node_id == corrupted_id
+        );
+    }
+}
+
+#[test]
+fn sparse_reader_checks_parent_hash_against_opaque_child() {
+    let (_source, sparse, _true_branch, false_branch, _root) = sparse_split_fixture();
+    let corrupted = SparseMastForest::from_serialized_parts(
+        sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect(),
+        vec![(false_branch, Word::default())],
+        sparse.procedure_roots().to_vec(),
+        AdviceMap::default(),
+    )
+    .unwrap()
+    .to_bytes();
+    let trusted = SparseMastForest::read_from_bytes_trusted(&corrupted).unwrap();
+    let validation_error = trusted.validate().unwrap_err();
+    assert_matches!(
+        &validation_error,
+        MastForestError::HashMismatch { node_id, .. } if *node_id == sparse.procedure_roots()[0]
+    );
+    assert_matches!(
+        SparseMastForest::read_from_bytes(&corrupted),
+        Err(DeserializationError::InvalidValue(message))
+            if message == validation_error.to_string()
+    );
+}
+
+#[test]
+fn sparse_reader_rejects_self_and_forward_references() {
+    for child in [0, 1] {
+        let mut bytes = Vec::new();
+        bytes.write_usize(0); // roots
+        bytes.write_usize(1); // full nodes
+        bytes.write_u32(0);
+        bytes.write_u8(3); // loop
+        Word::default().write_into(&mut bytes);
+        bytes.write_u32(child);
+        bytes.write_usize(usize::from(child != 0));
+        if child != 0 {
+            bytes.write_u32(child);
+            Word::default().write_into(&mut bytes);
+        }
+        bytes.write_usize(0); // advice
+        assert!(SparseMastForest::read_from_bytes(&bytes).is_err());
+        assert!(SparseMastForest::read_from_bytes_trusted(&bytes).is_err());
+    }
+}
+
+#[test]
+fn sparse_reader_checks_dynamic_node_hashes_and_accepts_high_sparse_ids() {
+    for (tag, node) in [
+        (6, DynNodeBuilder::new_dyn().build()),
+        (7, DynNodeBuilder::new_dyncall().build()),
+    ] {
+        let mut bytes = Vec::new();
+        bytes.write_usize(0);
+        bytes.write_usize(1);
+        bytes.write_u32((MastForest::MAX_NODES - 1) as u32);
+        bytes.write_u8(tag);
+        let hash_offset = bytes.len();
+        node.digest().write_into(&mut bytes);
+        bytes.write_usize(0);
+        bytes.write_usize(0);
+        assert_eq!(SparseMastForest::read_from_bytes(&bytes).unwrap().nodes().len(), 1);
+
+        // Only the hash differs; the sparse ID remains valid.
+        bytes[hash_offset..hash_offset + Word::SERIALIZED_SIZE]
+            .copy_from_slice(&Word::default().to_bytes());
+        assert!(SparseMastForest::read_from_bytes(&bytes).is_err());
+        assert!(SparseMastForest::read_from_bytes_trusted(&bytes).is_ok());
+    }
+}
+
+#[test]
+fn sparse_reader_checks_loop_call_and_syscall_hashes() {
+    let mut source = MastForest::new();
+    let child = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut source)
+        .unwrap();
+    let loop_id = LoopNodeBuilder::new(child).add_to_forest(&mut source).unwrap();
+    let call_id = CallNodeBuilder::new(child).add_to_forest(&mut source).unwrap();
+    let syscall_id = CallNodeBuilder::new_syscall(child).add_to_forest(&mut source).unwrap();
+    for root in [loop_id, call_id, syscall_id] {
+        source.make_root(root);
+    }
+
+    let source = Arc::new(source);
+    let mut builder = SparseMastForestBuilder::new(Arc::clone(&source));
+    builder.record_visit(child, VisitKind::DigestOnly);
+    for node_id in [loop_id, call_id, syscall_id] {
+        builder.record_visit(node_id, VisitKind::FullVisit);
+    }
+    let sparse = builder.finalize();
+
+    let restored = SparseMastForest::read_from_bytes(&sparse.to_bytes()).unwrap();
+    for node_id in [loop_id, call_id, syscall_id] {
+        assert_eq!(restored.get_node_by_id(node_id), sparse.get_node_by_id(node_id));
+    }
+
+    for corrupted_id in [loop_id, call_id, syscall_id] {
+        let nodes = sparse
+            .nodes()
+            .iter()
+            .map(|(&id, node)| {
+                let node = if id == corrupted_id {
+                    node.clone()
+                        .to_builder(&source)
+                        .with_digest(Word::default())
+                        .build_linked()
+                        .unwrap()
+                } else {
+                    node.clone()
+                };
+                (id, node)
+            })
+            .collect();
+        let corrupted = SparseMastForest::from_serialized_parts(
+            nodes,
+            sparse.digest_entries().iter().map(|(&id, &digest)| (id, digest)).collect(),
+            sparse.procedure_roots().to_vec(),
+            AdviceMap::default(),
+        )
+        .unwrap()
+        .to_bytes();
+
+        let trusted = SparseMastForest::read_from_bytes_trusted(&corrupted).unwrap();
+        let validation_error = trusted.validate().unwrap_err();
+        assert_matches!(
+            &validation_error,
+            MastForestError::HashMismatch { node_id, .. } if *node_id == corrupted_id
+        );
+        assert_matches!(
+            SparseMastForest::read_from_bytes(&corrupted),
+            Err(DeserializationError::InvalidValue(message))
+                if message == validation_error.to_string()
+        );
+    }
 }
 
 #[test]

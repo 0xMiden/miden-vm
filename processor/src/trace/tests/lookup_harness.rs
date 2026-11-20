@@ -16,12 +16,15 @@
 
 use alloc::vec::Vec;
 
-use miden_air::{
-    BaseAir, MidenAir,
+use miden_air_definitions::vm::{
+    MidenAir,
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
-    lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions},
 };
 use miden_core::{field::QuadFelt, utils::RowMajorMatrix};
+use miden_stark::{
+    air::BaseAir,
+    lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions},
+};
 
 use super::{Felt, VmTrace};
 
@@ -49,7 +52,7 @@ impl InteractionLog {
     /// resulting [`LookupFractions`] buffer into per-row bags.
     pub fn new(trace: &VmTrace) -> Self {
         let (core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
-            trace.main_trace().clone_air_matrices();
+            trace.main_trace().clone().into_air_matrices();
         Self::from_air_matrices(&core_matrix, &chip_matrix, &eidos_compression_matrix, &and8_matrix)
     }
 
@@ -114,7 +117,7 @@ impl InteractionLog {
     /// For every `(row, mult, denom)` in `expected`, there must be at least as many matching
     /// pushes at that row. Unclaimed actual pushes are ignored, so partial tests can focus on one
     /// bus or one instruction without enumerating every other interaction that happens to fire.
-    pub fn assert_contains(&self, expected: &Expectations) {
+    pub(crate) fn assert_contains(&self, expected: &Expectations) {
         for &entry in &expected.entries {
             let (row, mult, denom) = entry;
             let want = expected.entries.iter().filter(|&&e| e == entry).count();
@@ -129,7 +132,7 @@ impl InteractionLog {
     }
 
     /// Return the net multiplicity emitted for `message` across the complete trace.
-    pub fn net_multiplicity<M>(&self, message: &M) -> Felt
+    pub(crate) fn net_multiplicity<M>(&self, message: &M) -> Felt
     where
         M: LookupMessage<Felt, QuadFelt>,
     {
@@ -194,12 +197,12 @@ impl<'a> Expectations<'a> {
     }
 
     /// Number of expected entries registered via `add` (multiplicity = +1).
-    pub fn count_adds(&self) -> usize {
+    pub(crate) fn count_adds(&self) -> usize {
         self.entries.iter().filter(|(_, m, _)| *m == Felt::ONE).count()
     }
 
     /// Number of expected entries registered via `remove` (multiplicity = -1).
-    pub fn count_removes(&self) -> usize {
+    pub(crate) fn count_removes(&self) -> usize {
         self.entries.iter().filter(|(_, m, _)| *m == -Felt::ONE).count()
     }
 }
@@ -207,8 +210,8 @@ impl<'a> Expectations<'a> {
 // HELPERS
 // ================================================================================================
 
-/// Slice the flat `LookupFractions` buffer into per-row bags using the row-major `counts`
-/// layout (see `air/src/lookup/fractions.rs` for the ordering spec).
+/// Slice the flat fraction buffer into per-row bags using the row-major
+/// [`LookupFractions::counts`] layout.
 fn split_rows(fractions: &LookupFractions<Felt, QuadFelt>) -> Vec<Vec<(Felt, QuadFelt)>> {
     let num_cols = fractions.num_columns();
     let counts = fractions.counts();

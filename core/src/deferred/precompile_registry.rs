@@ -6,7 +6,7 @@ use miden_crypto::hash::eidos::{DomainTag, EidosDomain, EidosFrame, namespace};
 
 use super::precompile::Precompile;
 use crate::{
-    deferred::{DEFERRED_AND_FRAME, DeferredContext, Node, NodeType, PrecompileError},
+    deferred::{DEFERRED_AND_FRAME, DeferredContext, Node, NodeType, PrecompileError, WorkItem},
     program::domain::{DeferredChunksDomain, is_vm_precompile_domain},
 };
 
@@ -151,6 +151,19 @@ impl PrecompileRegistry {
         Ok(node_type)
     }
 
+    /// Declares the work represented by a validated precompile-owned node.
+    pub(crate) fn work(&self, node: &Node) -> Result<WorkItem, PrecompileError> {
+        let frame = node.frame().ok_or(PrecompileError::InvalidNode)?;
+        if is_framework_domain(frame.domain()) {
+            return Err(PrecompileError::InvalidNode);
+        }
+        let precompile =
+            self.precompiles.get(&frame.domain()).ok_or(PrecompileError::InvalidNode)?;
+        precompile
+            .work(frame.params(), node.payload())
+            .map_err(|source| PrecompileError::with_precompile(precompile.name(), source))
+    }
+
     /// Evaluates a node through the precompile selected by its domain tag.
     ///
     /// Failures are wrapped with the owning precompile's name so callers can distinguish routing
@@ -172,7 +185,7 @@ impl PrecompileRegistry {
     }
 }
 
-fn is_framework_domain(domain: DomainTag) -> bool {
+pub(super) fn is_framework_domain(domain: DomainTag) -> bool {
     domain == DEFERRED_AND_FRAME.domain() || domain == DeferredChunksDomain::TAG
 }
 
@@ -194,10 +207,13 @@ mod tests {
     use crate::{
         ZERO,
         deferred::{
-            DeferredState, Payload, deferred_chunks_frame, precompile::test_precompile_domain_tag,
+            DeferredState, Payload, PrecompileLimits, WorkClass, WorkItem, WorkLimit,
+            deferred_chunks_frame, precompile::test_precompile_domain_tag,
         },
         program::domain::MidenVmDomainRegistry,
     };
+
+    const FIXTURE_WORK: WorkClass = WorkClass::new("fixture");
 
     /// Minimal honest precompile fixture for registry-routing tests.
     ///
@@ -237,6 +253,9 @@ mod tests {
         fn validate_payload(&self, _params: [u32; 3], payload: &Payload) -> bool {
             payload.as_value().is_ok()
         }
+        fn work(&self, _params: [u32; 3], _payload: &Payload) -> Result<WorkItem, PrecompileError> {
+            Ok(WorkItem::new(FIXTURE_WORK, 1))
+        }
         fn evaluate(
             &self,
             params: [u32; 3],
@@ -262,6 +281,9 @@ mod tests {
             Some(NodeType::True)
         }
         fn validate_payload(&self, _params: [u32; 3], _payload: &Payload) -> bool {
+            unreachable!("registry must reject precompile-owned NodeType::True")
+        }
+        fn work(&self, _params: [u32; 3], _payload: &Payload) -> Result<WorkItem, PrecompileError> {
             unreachable!("registry must reject precompile-owned NodeType::True")
         }
         fn evaluate(
@@ -393,7 +415,15 @@ mod tests {
         let frame = f.frame([0; 3]);
         let registry = Arc::new(PrecompileRegistry::default().with_precompile(f));
         let node = Node::value(frame, [ZERO; 8]).unwrap();
-        let mut state = DeferredState::new(Arc::clone(&registry)).unwrap();
+        let limits = PrecompileLimits::new(u64::MAX).with_class(
+            FIXTURE_WORK,
+            WorkLimit {
+                max_count: u64::MAX,
+                max_total_size: u64::MAX,
+                max_size: u32::MAX,
+            },
+        );
+        let mut state = DeferredState::new(Arc::clone(&registry), limits).unwrap();
         // Use the framework's evaluation path so we exercise dispatch end-to-end.
         let digest = state.register(node.clone()).unwrap();
         let (canonical_digest, canonical_node) = state.require_canonical_node(digest).unwrap();

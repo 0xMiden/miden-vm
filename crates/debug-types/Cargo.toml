@@ -1,6 +1,6 @@
 [package]
 name = "miden-debug-types"
-version = "1.0.0"
+version.workspace = true
 description = "Core source-level debugging information types used throughout the Miden toolchain"
 documentation = "https://docs.rs/miden-debug-types"
 readme = "README.md"
@@ -20,6 +20,8 @@ ignored = ["serde_json"]
 [features]
 default = ["std"]
 std = [
+    "miette/std",
+    "miette/fancy-no-syscall",
     "memchr/std",
     "miden-formatting/std",
     "miden-utils-sync/std",
@@ -40,7 +42,7 @@ miden-utils-indexing.workspace = true
 
 # External dependencies
 memchr = { version = "2.7", default-features = false }
-miette = { workspace = true, features = ["fancy-no-syscall", "derive"] }
+miette = { workspace = true, features = ["derive"] }
 paste.workspace = true
 proptest = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
@@ -52,3 +54,6 @@ zerocopy.workspace = true
 miden-test-serialization-macros.workspace = true
 proptest.workspace = true
 serde_json.workspace = true
+
+[lints]
+workspace = true

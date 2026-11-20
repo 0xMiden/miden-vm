@@ -46,10 +46,10 @@ pub use miden_mast_package as package;
 pub use self::linker::LinkerError;
 #[cfg(feature = "std")]
 pub use self::project::{
-    AssemblyInterrupted, InterruptedTargetRole, MasmSourceProvider, ProjectAssembler,
-    ProjectSourceInputs, ProjectSourceProvenanceInputs, ProjectSourceProvider,
-    ProjectTargetSelector, ResolvedPackage, SourceFileProvenance, SourceProviderRegistry,
-    TargetAssemblyContext,
+    AssemblyInterrupted, InterruptedTargetRole, MasmSourceProvider, PackagePostProcessor,
+    PostProcessContext, ProjectAssembler, ProjectSourceInputs, ProjectSourceProvenanceInputs,
+    ProjectSourceProvider, ProjectTargetSelector, ResolvedPackage, SourceFileProvenance,
+    SourceProviderRegistry, TargetAssemblyContext,
 };
 pub use self::{
     assembler::Assembler,

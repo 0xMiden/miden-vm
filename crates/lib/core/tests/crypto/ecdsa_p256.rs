@@ -21,8 +21,10 @@ use miden_precompiles::{
     CurveId, CurvePoint, Limbs, ONE_LIMBS, P256Base, P256Scalar, UintDomain, UintPrecompile,
     ZERO_LIMBS,
 };
-use miden_precompiles_prover::{HashFunction, prove_precompiles};
-use miden_precompiles_verifier::verify_deferred;
+use miden_precompiles_stark::{
+    prover::{HashFunction, prove_precompiles},
+    verifier::verify_deferred,
+};
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, MemoryError,
     ProcessorState, StackInputs,
@@ -862,7 +864,7 @@ fn run_core_program(
         .expect("failed to load CoreLibrary into the host");
     if let Some((event, handler)) = handler {
         let message = format!("the default {event} handler must already be registered");
-        assert!(host.replace_handler(event, handler), "{message}");
+        assert!(host.replace_handler(event, handler).unwrap(), "{message}");
     }
 
     let mut advice_stack = AdviceStack::new();

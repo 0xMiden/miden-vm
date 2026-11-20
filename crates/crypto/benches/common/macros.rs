@@ -5,13 +5,13 @@
 // # Usage
 // ```no_run
 // benchmark_hash_core!(
-//     hash_rpo256_elements,
-//     "rpo256",
+//     hash_eidos_elements,
+//     "eidos",
 //     "elements",
 //     HASH_ELEMENT_COUNTS,
 //     |b, count| {
 //         let elements = generate_felt_array_sequential(count);
-//         b.iter(|| Rpo256::hash_elements(black_box(&elements)))
+//         b.iter(|| Eidos::hash_elements(black_box(&elements)))
 //     },
 //     |count| Some(criterion::Throughput::Elements(count as u64))
 // );
@@ -54,13 +54,13 @@ macro_rules! benchmark_hash_core {
 //
 // # Usage
 // ```no_run
-// benchmark_hash_simple!(hash_rpo256_single, "rpo256", "single", HASH_INPUT_SIZES, |b, size| {
+// benchmark_hash_simple!(hash_eidos_single, "eidos", "single", HASH_INPUT_SIZES, |b, size| {
 //     let data = if size <= 64 {
 //         generate_byte_array_sequential(size)
 //     } else {
 //         generate_byte_array_random(size)
 //     };
-//     b.iter(|| Rpo256::hash(black_box(&data)))
+//     b.iter(|| Eidos::hash(black_box(&data)))
 // });
 // ```
 #[macro_export]
@@ -82,9 +82,9 @@ macro_rules! benchmark_hash_simple {
 //
 // # Usage
 // ```no_run
-// benchmark_hash!(hash_rpo256_bytes, "rpo256", "bytes", HASH_INPUT_SIZES, |b, size| {
+// benchmark_hash!(hash_eidos_bytes, "eidos", "bytes", HASH_INPUT_SIZES, |b, size| {
 //     let data = generate_byte_array_sequential(size);
-//     b.iter(|| Rpo256::hash(black_box(&data)))
+//     b.iter(|| Eidos::hash(black_box(&data)))
 // });
 // ```
 #[macro_export]
@@ -123,8 +123,8 @@ macro_rules! benchmark_hash {
 //
 // # Usage
 // ```rust
-// benchmark_hash_auto!(hash_rpo256_single, "rpo256", HASH_INPUT_SIZES, |b, data| {
-//     b.iter(|| Rpo256::hash(black_box(data)))
+// benchmark_hash_auto!(hash_eidos_single, "eidos", HASH_INPUT_SIZES, |b, data| {
+//     b.iter(|| Eidos::hash(black_box(data)))
 // });
 // ```
 #[macro_export]
@@ -145,7 +145,7 @@ macro_rules! benchmark_hash_auto {
 //
 // # Usage
 // ```no_run
-// benchmark_hash_merge!(hash_rpo_merge, "rpo256", &[1, 2, 4, 8, 16], |b, size| {
+// benchmark_hash_merge!(hash_eidos_merge, "eidos", &[1, 2, 4, 8, 16], |b, size| {
 //     // merge logic here
 // });
 // ```
@@ -182,12 +182,12 @@ macro_rules! benchmark_hash_merge {
 // # Usage
 // ```no_run
 // benchmark_hash_felt!(
-//     hash_rpo_elements,
-//     "rpo256",
+//     hash_eidos_elements,
+//     "eidos",
 //     &[1, 2, 4, 8, 16, 32, 64, 128],
 //     |b, count| {
 //         let elements = generate_felt_array_sequential(count);
-//         b.iter(|| Rpo256::hash_elements(black_box(&elements)))
+//         b.iter(|| Eidos::hash_elements(black_box(&elements)))
 //     },
 //     |count| Some(criterion::Throughput::Elements(count as u64))
 // );

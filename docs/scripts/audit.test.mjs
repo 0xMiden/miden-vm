@@ -2,25 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { checkAudit } from "./audit.mjs";
 
-function fixture() {
-  const vulnerabilities = {};
-  const packages = {};
-  for (const [name, version, id] of [
-    ["braces", "3.0.3", "GHSA-vfj7-8cjw-p6xm"],
-  ]) {
-    vulnerabilities[name] = {
-      via: [{ name, url: `https://github.com/advisories/${id}`, severity: "high" }],
+function fixture(name = "minimatch", version = "3.1.5", id = "GHSA-g3hv-75wg-m249", severity = "moderate") {
+  const vulnerabilities = {
+    [name]: {
+      via: [{ name, url: `https://github.com/advisories/${id}`, severity }],
       nodes: [`node_modules/${name}`],
       fixAvailable: false,
-    };
-    packages[`node_modules/${name}`] = { version };
-  }
-  vulnerabilities.parent = { via: ["braces"] };
-  vulnerabilities.grandparent = { via: ["parent"] };
+    },
+    parent: { via: [name] },
+    grandparent: { via: ["parent"] },
+  };
+  const packages = { [`node_modules/${name}`]: { version } };
   return [{ auditReportVersion: 2, vulnerabilities }, { packages }];
 }
 
-const today = "2026-10-03";
+const today = "2026-11-03";
 
 test("accepts only reviewed advisories and their transitive findings", () => {
   const [report, lock] = fixture();
@@ -32,7 +28,7 @@ test("accepts only reviewed advisories and their transitive findings", () => {
 
 test("rejects a new advisory on an excepted package", () => {
   const [report, lock] = fixture();
-  report.vulnerabilities.braces.via.push({ name: "braces", url: "https://github.com/advisories/GHSA-new" });
+  report.vulnerabilities.minimatch.via.push({ name: "minimatch", url: "https://github.com/advisories/GHSA-new" });
   assert.throws(() => checkAudit(report, lock, today), /Unaccepted/);
 });
 
@@ -68,22 +64,22 @@ test("rejects the removed http-cache-semantics exception", () => {
 });
 
 test("rejects changed and missing locked versions, including nested copies", () => {
-  for (const version of ["3.0.2", undefined]) {
+  for (const version of ["3.1.4", undefined]) {
     const [report, lock] = fixture();
-    report.vulnerabilities.braces.nodes.push("node_modules/parent/node_modules/braces");
-    lock.packages["node_modules/parent/node_modules/braces"] = { version };
+    report.vulnerabilities.minimatch.nodes.push("node_modules/parent/node_modules/minimatch");
+    lock.packages["node_modules/parent/node_modules/minimatch"] = { version };
     assert.throws(() => checkAudit(report, lock, today), /Unaccepted/);
   }
 });
 
 test("rejects expired exceptions, available fixes, and increased severity", () => {
   const [report, lock] = fixture();
-  assert.throws(() => checkAudit(report, lock, "2026-11-03"), /Unaccepted/);
-  assert.throws(() => checkAudit(report, lock, "2026-11-04"), /Unaccepted/);
-  report.vulnerabilities.braces.fixAvailable = true;
+  assert.throws(() => checkAudit(report, lock, "2026-12-03"), /Unaccepted/);
+  assert.throws(() => checkAudit(report, lock, "2026-12-04"), /Unaccepted/);
+  report.vulnerabilities.minimatch.fixAvailable = true;
   assert.throws(() => checkAudit(report, lock, today), /Unaccepted/);
-  report.vulnerabilities.braces.fixAvailable = false;
-  report.vulnerabilities.braces.via[0].severity = "critical";
+  report.vulnerabilities.minimatch.fixAvailable = false;
+  report.vulnerabilities.minimatch.via[0].severity = "high";
   assert.throws(() => checkAudit(report, lock, today), /Unaccepted/);
 });
 
@@ -92,4 +88,67 @@ test("rejects npm errors and unexpected report formats", () => {
   for (const report of [{ error: { code: "E503" } }, {}, { auditReportVersion: 1, vulnerabilities: {} }]) {
     assert.throws(() => checkAudit(report, lock, today), /valid version 2 report/);
   }
+});
+
+test("rejects the withdrawn braces exception", () => {
+  const report = {
+    auditReportVersion: 2,
+    vulnerabilities: {
+      braces: {
+        via: [{ name: "braces", url: "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm", severity: "high" }],
+        nodes: ["node_modules/braces"],
+        fixAvailable: false,
+      },
+    },
+  };
+  const lock = { packages: { "node_modules/braces": { version: "3.0.3" } } };
+  assert.throws(() => checkAudit(report, lock, "2026-10-03"), /Unaccepted/);
+});
+
+test("picomatch exception requires reviewed versions and an unexpired date", () => {
+  const [report, lock] = fixture("picomatch", "2.3.2", "GHSA-fc5q-39xc-vjpf", "high");
+  report.vulnerabilities.picomatch.via[0].range = "<=4.0.7";
+  const reviewDate = "2026-11-18";
+  assert.equal(checkAudit(report, lock, reviewDate, "4.0.7"), 3);
+  assert.throws(() => checkAudit(report, lock, "2026-11-24", "4.0.7"), /Unaccepted/);
+
+  for (const version of ["4.0.7", undefined]) {
+    lock.packages["node_modules/picomatch"].version = version;
+    assert.throws(() => checkAudit(report, lock, reviewDate, "4.0.7"), /Unaccepted/);
+  }
+  lock.packages["node_modules/picomatch"].version = "2.3.2";
+  report.vulnerabilities.picomatch.via[0].severity = "critical";
+  assert.throws(() => checkAudit(report, lock, reviewDate, "4.0.7"), /Unaccepted/);
+});
+
+test("accepts only the reviewed inapplicable picomatch downgrade", () => {
+  const [report, lock] = fixture("picomatch", "2.3.2", "GHSA-fc5q-39xc-vjpf", "high");
+  const finding = report.vulnerabilities.picomatch;
+  finding.via[0].range = "<=4.0.7";
+  finding.fixAvailable = {
+    name: "@cmfcmf/docusaurus-search-local",
+    version: "0.11.0",
+    isSemVerMajor: true,
+  };
+  assert.equal(checkAudit(report, lock, "2026-11-18", "4.0.7"), 3);
+
+  for (const fix of [
+    true,
+    { name: "picomatch", version: "4.0.8", isSemVerMajor: true },
+    { name: "@cmfcmf/docusaurus-search-local", version: "0.11.1", isSemVerMajor: true },
+    { name: "@cmfcmf/docusaurus-search-local", version: "0.11.0", isSemVerMajor: false },
+  ]) {
+    finding.fixAvailable = fix;
+    assert.throws(() => checkAudit(report, lock, "2026-11-18", "4.0.7"), /Unaccepted/);
+  }
+});
+
+test("rejects changed or unverified picomatch registry data", () => {
+  const [report, lock] = fixture("picomatch", "2.3.2", "GHSA-fc5q-39xc-vjpf", "high");
+  report.vulnerabilities.picomatch.via[0].range = "<=4.0.7";
+  for (const latest of ["4.0.8", "2.3.3", undefined, null]) {
+    assert.throws(() => checkAudit(report, lock, "2026-11-18", latest), /Unaccepted/);
+  }
+  report.vulnerabilities.picomatch.via[0].range = "<2.3.2";
+  assert.throws(() => checkAudit(report, lock, "2026-11-18", "4.0.7"), /Unaccepted/);
 });

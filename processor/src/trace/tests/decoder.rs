@@ -15,10 +15,13 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::borrow::BorrowMut;
 
-use miden_air::{
+use miden_air_definitions::vm::{
     CoreCols,
     logup::{BlockHashMsg, BlockStackMsg, OpGroupMsg, StackOverflowMsg},
-    trace::decoder::{OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS},
+    trace::{
+        MainTrace,
+        decoder::{OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS},
+    },
 };
 use miden_core::{
     Felt, ONE, ZERO,
@@ -35,7 +38,7 @@ use super::{
     VmTrace, build_trace_from_ops, build_trace_from_program, build_trace_from_program_with_stack,
     lookup_harness::{Expectations, InteractionLog},
 };
-use crate::{RowIndex, StackInputs, trace::MainTrace};
+use crate::{RowIndex, StackInputs};
 
 // HELPERS
 // ================================================================================================
@@ -100,7 +103,7 @@ fn assert_core_mutation_rejected(
     mutate: impl FnOnce(&mut CoreCols<Felt>),
 ) {
     let (mut core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
-        trace.main_trace().clone_air_matrices();
+        trace.main_trace().clone().into_air_matrices();
     mutate(core_row_mut(&mut core_matrix, row));
     super::lookup::assert_trace_constraints_reject(
         trace,
@@ -986,7 +989,7 @@ fn canonical_op_batch_encodings_satisfy_the_full_air(
 ) {
     let trace = build_trace_from_ops(vec![Operation::Noop; noop_count], &[]);
     batch_row(&trace, encoding);
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(&trace);
     super::lookup::assert_global_lookup_balance(&trace);
 }
 
@@ -1030,7 +1033,7 @@ fn op_batch_encoding_pins_every_unused_hasher_lane(
     let trace = build_trace_from_ops(vec![Operation::Noop; noop_count], &[]);
     let row = batch_row(&trace, encoding);
     let (honest_core, chip_matrix, eidos_compression_matrix, and8_matrix) =
-        trace.main_trace().clone_air_matrices();
+        trace.main_trace().clone().into_air_matrices();
 
     for lane in unused_lanes {
         let mut core_matrix = honest_core.clone();
@@ -1071,7 +1074,7 @@ fn valid_op_batch_encoding_swaps_unbalance_the_op_group_bus(
     let trace = build_trace_from_ops(vec![Operation::Noop; noop_count], &[]);
     let row = batch_row(&trace, original_encoding);
     let (mut core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
-        trace.main_trace().clone_air_matrices();
+        trace.main_trace().clone().into_air_matrices();
     let decoder = &mut core_row_mut(&mut core_matrix, row).decoder;
     decoder.full_batch = replacement_encoding[0];
     decoder.batch_size_code = replacement_encoding[1];
@@ -1297,6 +1300,9 @@ fn system_state_changes_across_end_imply_a_caller_frame_flag() {
     }
 
     let observe_and_check = |label: &str, trace: &VmTrace| {
+        // Every fixture is an honest trace, so it must also satisfy the full AIR, including the
+        // unary-node padding of LOOP, CALL and SYSCALL and DYNCALL's saved-frame lanes.
+        miden_vm_stark::debug::check_constraints(trace);
         let main = trace.main_trace();
         let mut observations = EndObservations::default();
         for row in 0..(main.core_height() - 1) {

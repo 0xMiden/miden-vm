@@ -198,6 +198,8 @@ jobs:
           mv target/${{ matrix.target }}/optimized/miden-vm release-assets/miden-vm-${{ matrix.target }}
           mv target/${{ matrix.target }}/optimized/miden-format release-assets/miden-format-${{ matrix.target }}
           mv target/${{ matrix.target }}/optimized/miden-registry release-assets/miden-registry-${{ matrix.target }}
+          tar -czf release-assets/miden-debug-${{ matrix.target }}.tar.gz \
+            -C target/${{ matrix.target }}/optimized miden-debug
       # Since the MASM packages are triplet independent, we only build them once.
       - name: Build MASM packages
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
@@ -209,7 +211,7 @@ jobs:
           set -euo pipefail
           mv target/packages/miden-core.masp release-assets/core.masp
       - name: Save release artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-binaries-${{ matrix.target }}
           path: release-assets/
@@ -230,7 +232,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: release-binaries-*
           merge-multiple: true
@@ -261,6 +263,11 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Check isolated no-std libraries before publication
+        run: |
+          rustup toolchain install --no-self-update
+          rustup target add wasm32v1-none
+          RUSTFLAGS="-D warnings" make check-no-std
       - uses: ./.github/actions/workspace-release
         if: needs.package-version-gate.outputs.packages != '[]'
         with:
@@ -323,7 +330,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Authenticate with crates.io
-        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
         id: auth
 
       - name: Publish workspace crates

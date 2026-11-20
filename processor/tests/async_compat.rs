@@ -4,7 +4,7 @@ use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, Host,
-    LoadedMastForest, ProcessorState, StackInputs, Word,
+    LoadedMastForest, MastForestLoadError, ProcessorState, StackInputs, Word,
     advice::{AdviceInputs, AdviceMutation},
     event::{EventError, EventName, TraceError},
 };
@@ -33,8 +33,8 @@ impl Host for YieldingAsyncHost {
     fn get_mast_forest(
         &self,
         _node_digest: &Word,
-    ) -> impl FutureMaybeSend<Option<LoadedMastForest>> {
-        async { None }
+    ) -> impl FutureMaybeSend<Result<Option<LoadedMastForest>, MastForestLoadError>> {
+        async { Ok(None) }
     }
 
     fn on_event(
@@ -130,8 +130,16 @@ async fn fast_processor_execute_for_proving_async_matches_sync() {
     assert_eq!(sync_witness.claim().stack_outputs(), async_witness.claim().stack_outputs());
     let (sync_vm_witness, _) = sync_witness.into_parts();
     let (async_vm_witness, _) = async_witness.into_parts();
-    let sync_trace = miden_processor::trace::build_trace(sync_vm_witness).unwrap();
-    let async_trace = miden_processor::trace::build_trace(async_vm_witness).unwrap();
+    let sync_trace = miden_processor::trace::build_trace(
+        sync_vm_witness,
+        &miden_vm_stark::memory::default_budget(),
+    )
+    .unwrap();
+    let async_trace = miden_processor::trace::build_trace(
+        async_vm_witness,
+        &miden_vm_stark::memory::default_budget(),
+    )
+    .unwrap();
 
     assert_eq!(sync_trace.public_inputs(), async_trace.public_inputs());
     assert_eq!(sync_trace.trace_len_summary(), async_trace.trace_len_summary());

@@ -1,11 +1,8 @@
 use alloc::vec::Vec;
 
-use miden_air::{
-    Felt,
-    trace::{RowIndex, chiplets::hasher::HasherState},
-};
+use miden_air_definitions::vm::trace::{RowIndex, chiplets::hasher::HasherState};
 use miden_core::{
-    WORD_SIZE, Word, ZERO,
+    Felt, WORD_SIZE, Word, ZERO,
     chiplets::{eidos_compression, hasher::compress_state},
     crypto::merkle::MerklePath,
     deferred::Digest,
@@ -167,6 +164,13 @@ impl SystemInterface for FastProcessor {
         self.deferred_state
             .log_verified_statement(statement_digest, expected_new_root)
             .map(|_| ())
+            .map_err(OperationError::from)
+    }
+
+    #[inline(always)]
+    fn clear_deferred(&mut self, expected_previous_root: Word) -> Result<(), OperationError> {
+        self.deferred_state
+            .clear_deferred(expected_previous_root)
             .map_err(OperationError::from)
     }
 

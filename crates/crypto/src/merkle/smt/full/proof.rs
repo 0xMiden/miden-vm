@@ -177,4 +177,8 @@ impl Deserializable for SmtProof {
 
         Self::new(path, leaf).map_err(|err| DeserializationError::InvalidValue(err.to_string()))
     }
+
+    fn min_serialized_size() -> usize {
+        SparseMerklePath::min_serialized_size() + SmtLeaf::min_serialized_size()
+    }
 }

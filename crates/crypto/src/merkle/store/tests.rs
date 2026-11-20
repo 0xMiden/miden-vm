@@ -904,6 +904,44 @@ fn find_lone_leaf() {
     assert_eq!(res, None);
 }
 
+#[test]
+fn find_lone_leaf_in_trees_shallower_than_64() {
+    for tree_depth in [1u8, 2, 8, 16, 63] {
+        let mut store = MerkleStore::new();
+        let empty = EmptySubtreeRoots::empty_hashes(tree_depth);
+        let mut root: Word = empty[0];
+
+        // a single leaf at the bottom of the tree is a lone leaf for every one of its ancestors
+        let key = (0b0101_0110_u64 << 8 | 0b1010_0101) & ((1u64 << tree_depth) - 1);
+        let idx = NodeIndex::make(tree_depth, key);
+        let val = Word::from([ONE, ONE, ONE, ONE]);
+        root = store.set_node(root, idx, val).unwrap().root;
+
+        for depth in 0..tree_depth {
+            let parent_index = NodeIndex::make(depth, key >> (tree_depth - depth));
+            let parent = store.get_node(root, parent_index).unwrap();
+            let res = store.find_lone_leaf(parent, parent_index, tree_depth).unwrap();
+            assert_eq!(res, Some((idx, val)), "tree_depth {tree_depth}, depth {depth}");
+        }
+    }
+
+    // a second leaf below the root makes the root's lone-leaf lookup return None
+    let mut store = MerkleStore::new();
+    let empty = EmptySubtreeRoots::empty_hashes(8);
+    let mut root: Word = empty[0];
+    root = store
+        .set_node(root, NodeIndex::make(8, 0b0000_0001), Word::from([ONE, ONE, ONE, ONE]))
+        .unwrap()
+        .root;
+    root = store
+        .set_node(root, NodeIndex::make(8, 0b1000_0001), Word::from([ONE, ONE, ONE, ZERO]))
+        .unwrap()
+        .root;
+    let root_index = NodeIndex::make(0, 0);
+    let node = store.get_node(root, root_index).unwrap();
+    assert_eq!(store.find_lone_leaf(node, root_index, 8).unwrap(), None);
+}
+
 // SUBSET EXTRACTION
 // ================================================================================================
 
@@ -967,12 +1005,50 @@ const STORE_HEADER: &[u8] = b"MRKSTORE\x01";
 #[cfg(feature = "std")]
 #[test]
 fn test_serialization() -> Result<(), Box<dyn Error>> {
-    let mtree = MerkleTree::new(VALUES4)?;
-    let store = MerkleStore::from(&mtree);
-    let bytes = store.to_bytes();
-    assert!(bytes.starts_with(STORE_HEADER));
-    let decoded = MerkleStore::read_from_bytes(&bytes).expect("deserialization failed");
-    assert_eq!(store, decoded);
+    // Equal, non-empty children must not be mistaken for canonical empty nodes.
+    for leaves in [VALUES4, [VALUES4[0]; 4]] {
+        let mtree = MerkleTree::new(leaves)?;
+        let store = MerkleStore::from(&mtree);
+        let bytes = store.to_bytes();
+        let unique_nodes = mtree.inner_nodes().map(|node| node.value).collect::<crate::Set<_>>();
+        assert!(bytes.starts_with(STORE_HEADER));
+        assert_eq!(bytes.len(), STORE_HEADER.len() + 8 + unique_nodes.len() * 96);
+
+        // The optimization must preserve every byte emitted by the original canonical filter.
+        let empty_nodes: crate::Map<_, _> = super::empty_hashes().collect();
+        let nodes = store.nodes.iter().filter(|(key, node)| empty_nodes.get(*key) != Some(*node));
+        let mut expected_bytes = STORE_HEADER.to_vec();
+        (nodes.clone().count() as u64).write_into(&mut expected_bytes);
+        for (key, node) in nodes {
+            key.write_into(&mut expected_bytes);
+            node.write_into(&mut expected_bytes);
+        }
+        assert_eq!(bytes, expected_bytes);
+
+        // The reader also accepts older payloads that explicitly include empty nodes.
+        let mut full_bytes = STORE_HEADER.to_vec();
+        (store.num_internal_nodes() as u64).write_into(&mut full_bytes);
+        for node in store.inner_nodes() {
+            node.value.write_into(&mut full_bytes);
+            node.left.write_into(&mut full_bytes);
+            node.right.write_into(&mut full_bytes);
+        }
+        for payload in [&bytes, &full_bytes] {
+            let mut decoded = MerkleStore::read_from_bytes(payload)?;
+            assert_eq!(store, decoded);
+            for (position, leaf) in leaves.into_iter().enumerate() {
+                let index = NodeIndex::new(2, position as u64)?;
+                let proof = decoded.get_path(mtree.root(), index)?;
+                assert_eq!(proof.value, leaf);
+                assert_eq!(proof.path, mtree.get_path(index)?);
+            }
+
+            let new_root = decoded.set_node(mtree.root(), NodeIndex::new(2, 1)?, VALUES8[7])?.root;
+            let mut updated = mtree.clone();
+            updated.update_leaf(1, VALUES8[7])?;
+            assert_eq!(new_root, updated.root());
+        }
+    }
     Ok(())
 }
 
@@ -1012,6 +1088,44 @@ fn deserialize_accepts_empty_versioned_store() {
     0u64.write_into(&mut bytes);
     assert_eq!(bytes.len(), MerkleStore::min_serialized_size());
     assert_eq!(MerkleStore::read_from_bytes(&bytes).unwrap(), MerkleStore::default());
+}
+
+#[test]
+fn serialization_preserves_noncanonical_children_at_empty_node_keys() {
+    use crate::utils::{ByteReader, SliceReader};
+
+    let key = *EmptySubtreeRoots::entry(64, 0);
+    for right in [VALUES4[0], VALUES4[1]] {
+        let node = super::StoreNode { left: VALUES4[0], right };
+        let mut store = MerkleStore::default();
+        store.nodes.insert(key, node);
+        let bytes = store.to_bytes();
+        let mut expected_bytes = STORE_HEADER.to_vec();
+        (1u64, key, node).write_into(&mut expected_bytes);
+        assert_eq!(bytes, expected_bytes);
+        let mut reader = SliceReader::new(&bytes[STORE_HEADER.len()..]);
+        assert_eq!(reader.read_u64().unwrap(), 1);
+        assert_eq!(Word::read_from(&mut reader).unwrap(), key);
+        assert_eq!(super::StoreNode::read_from(&mut reader).unwrap(), node);
+        assert!(!reader.has_more_bytes());
+    }
+}
+
+#[test]
+fn serialize_omits_canonical_empty_nodes() {
+    let mut bytes = STORE_HEADER.to_vec();
+    0u64.write_into(&mut bytes);
+    assert_eq!(bytes.len(), MerkleStore::min_serialized_size());
+    assert_eq!(MerkleStore::default().to_bytes(), bytes);
+    let decoded = MerkleStore::read_from_bytes(&bytes).unwrap();
+    assert_eq!(decoded, MerkleStore::default());
+    for depth in [1, 64, 255] {
+        let root = *EmptySubtreeRoots::entry(depth, 0);
+        let path_depth = depth.min(SMT_MAX_DEPTH);
+        let proof = decoded.get_path(root, NodeIndex::new(path_depth, 1).unwrap()).unwrap();
+        assert_eq!(proof.value, *EmptySubtreeRoots::entry(depth, path_depth));
+        assert_eq!(proof.path.compute_root(1, proof.value).unwrap(), root);
+    }
 }
 
 #[test]

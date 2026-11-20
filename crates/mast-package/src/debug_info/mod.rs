@@ -69,8 +69,7 @@ pub enum DebugInfoEncodingError {
 /// The [`miden_core::serde::Deserializable::read_from`] and
 /// [`miden_core::serde::Deserializable::read_from_bytes`] implementations apply fixed resource
 /// limits for potentially adversarial input. Tools that deliberately accept the resource cost of
-/// larger debug information can use [`PackageDebugInfo::read_from_unmetered`] or
-/// [`PackageDebugInfo::read_from_bytes_unmetered`].
+/// larger debug information can use [`PackageDebugInfo::read_from_bytes_unmetered`].
 ///
 /// Strings are stored and serialized verbatim, including control characters, and consumers decide
 /// their validity for each use case (see [PR #3460]).
@@ -883,7 +882,7 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
                     });
                 }
                 let new_index = builder
-                    .debug_info_mut()
+                    .debug_info_mut_unindexed()
                     .nodes
                     .push(SourceNode {
                         exec_node,
@@ -929,12 +928,14 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
             }
 
             for root in debug_info.roots().iter().copied() {
-                builder.debug_info_mut().roots.push(remapped_nodes.get(&root).copied().ok_or(
-                    DebugInfoMergeError::MissingSourceNodeMapping {
-                        forest_index,
-                        source_node: root,
-                    },
-                )?);
+                builder.debug_info_mut_unindexed().roots.push(
+                    remapped_nodes.get(&root).copied().ok_or(
+                        DebugInfoMergeError::MissingSourceNodeMapping {
+                            forest_index,
+                            source_node: root,
+                        },
+                    )?,
+                );
             }
 
             for (prev, new) in remapped_nodes.iter() {

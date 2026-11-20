@@ -1,5 +1,6 @@
 mod dsa;
 mod ecdsa_p256;
+mod ecgfp5;
 mod eddsa;
 mod falcon;
 

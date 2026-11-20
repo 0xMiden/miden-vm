@@ -3,7 +3,7 @@
 
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
-use miden_air::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
+use miden_air_definitions::vm::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
 use miden_core::{deferred::PrecompileError, program::MIN_STACK_DEPTH};
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_mast_package::{
@@ -17,6 +17,7 @@ use crate::{
     advice::AdviceError,
     event::{EventError, EventId, EventName},
     fast::SystemEventError,
+    host::MastForestLoadError,
     utils::to_hex,
 };
 
@@ -60,6 +61,18 @@ pub enum ExecutionError {
         event_name: Option<EventName>,
         #[source]
         error: EventError,
+    },
+    /// Failed to load a MAST forest from the host.
+    #[error("failed to load MAST forest for procedure with root digest {root_digest}: {error}")]
+    #[diagnostic()]
+    MastForestError {
+        #[label]
+        label: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        root_digest: Word,
+        #[source]
+        error: MastForestLoadError,
     },
     /// Deferred system event failed while validating or evaluating a committed node.
     #[error("{err}")]
@@ -180,8 +193,13 @@ pub enum AceEvalError {
 pub enum HostError {
     #[error("attempted to add event handler for '{event}' (already registered)")]
     DuplicateEventHandler { event: EventName },
-    #[error("attempted to add event handler for '{event}' (reserved system event)")]
+    #[error(
+        "attempted to add event handler for '{event}' (reserved '{namespace}' namespace)",
+        namespace = EventName::RESERVED_NAMESPACE
+    )]
     ReservedEventNamespace { event: EventName },
+    #[error("attempted to add event handler with an empty event name")]
+    EmptyEventName,
 }
 
 // IO ERROR
@@ -305,6 +323,8 @@ pub enum CryptoError {
 pub enum OperationError {
     #[error("external node with mast root {0} resolved to an external node")]
     CircularExternalNode(Word),
+    #[error("clear_deferred requires root context, but was executed in context {ctx}")]
+    ClearDeferredOutsideRootContext { ctx: ContextId },
     #[error("division by zero: divisor must be non-zero for division or modulo operations")]
     DivideByZero,
     #[error(transparent)]
@@ -595,6 +615,27 @@ pub fn event_error_with_package_source_context(
         event_name,
         error,
     }
+}
+
+/// Creates a `MastForestError` with execution context.
+pub fn mast_forest_error_with_context(
+    root_digest: Word,
+    error: MastForestLoadError,
+) -> ExecutionError {
+    let (label, source_file) = get_label_and_source_file();
+    ExecutionError::MastForestError { label, source_file, root_digest, error }
+}
+
+/// Creates a `MastForestError` with package-owned source-occurrence execution context.
+pub fn mast_forest_error_with_package_source_context(
+    root_digest: Word,
+    error: MastForestLoadError,
+    context: PackageSourceDebugContext<'_>,
+    host: &(dyn BaseHost + '_),
+) -> ExecutionError {
+    let (label, source_file) =
+        label_and_source_file_from_location(context.assembly_location(None).as_ref(), host);
+    ExecutionError::MastForestError { label, source_file, root_digest, error }
 }
 
 /// Creates a `ProcedureNotFound` error with execution context.

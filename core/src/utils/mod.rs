@@ -1,21 +1,21 @@
 use alloc::vec::Vec;
-use core::ops::{Bound, Range};
+#[cfg(test)]
+use core::ops::Bound;
+use core::ops::Range;
 
 // RE-EXPORTS
 // ================================================================================================
 #[cfg(feature = "std")]
 pub use miden_crypto::utils::ReadAdapter;
-pub use miden_crypto::{
-    stark::matrix::{Matrix, RowMajorMatrix},
-    utils::{
-        assume_init_vec, flatten_slice_elements, flatten_vector_elements, group_slice_elements,
-        uninit_vector,
-    },
+pub use miden_crypto::utils::{
+    assume_init_vec, flatten_slice_elements, flatten_vector_elements, group_slice_elements,
+    uninit_vector,
 };
 pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
 pub use miden_utils_indexing::{
     DenseIdMap, Idx, IndexVec, IndexedVecError, LookupByIdx, newtype_id,
 };
+pub use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{Felt, Word, crypto::hash::Blake3_256, field::PrimeCharacteristicRing};
 
@@ -86,7 +86,8 @@ pub const fn range(start: usize, len: usize) -> Range<usize> {
 ///
 /// Returns `None` if the bound cannot be represented as an inclusive `u64` (e.g. an excluded start
 /// bound at `u64::MAX` or an excluded end bound at `0`).
-pub fn bound_into_included_u64<I>(bound: Bound<&I>, is_start: bool) -> Option<u64>
+#[cfg(test)]
+pub(crate) fn bound_into_included_u64<I>(bound: Bound<&I>, is_start: bool) -> Option<u64>
 where
     I: Clone + Into<u64>,
 {

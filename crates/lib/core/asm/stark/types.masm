@@ -31,6 +31,8 @@ pub type VerifierHooks = struct {
 pub type EvaluationPair = struct { current: QuadFelt, next: QuadFelt }
 
 #! Streaming Horner evaluation state in operand-stack order.
+#! The alpha pointer must address an aligned word `[alpha0, alpha1, 0, 0]`; the native Horner
+#! instructions read all four cells. The coefficient cursor advances as blocks are streamed.
 pub type HornerState = struct { coefficients: Address, alpha: ptr<QuadFelt>, accumulator: QuadFelt }
 
 #! A FRI query, including its domain point, index, and extension-field evaluation.

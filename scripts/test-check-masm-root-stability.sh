@@ -70,14 +70,33 @@ check_result 0
 set_version 0.35.1
 check_result 7
 
-set_version 1.0.0
-rm -f "$ROOT_CHECK_STUB_LOG"
-(cd "$test_repo" && ROOT_CHECK_STUB_STATUS=7 \
-    bash scripts/check-masm-root-stability.sh) > "$test_root/output" 2>&1
-if [[ -f "$ROOT_CHECK_STUB_LOG" ]]; then
-    echo 'The 0.x to 1.0.0 transition unexpectedly ran the comparator' >&2
-    exit 1
-fi
+for version in 1.0.0-rc.0 1.0.0-rc.10 1.0.0; do
+    set_version "$version"
+    rm -f "$ROOT_CHECK_STUB_LOG"
+    (cd "$test_repo" && ROOT_CHECK_STUB_STATUS=7 \
+        bash scripts/check-masm-root-stability.sh) > "$test_root/output" 2>&1
+    if [[ -f "$ROOT_CHECK_STUB_LOG" ]]; then
+        echo "The 0.x to $version transition unexpectedly ran the comparator" >&2
+        exit 1
+    fi
+done
+
+set_version 1.0.1-rc.0
+check_result 7
+
+for version in 1.0.0-rc.01 1.0.0-rc. 1.0.0-alpha.0; do
+    set_version "$version"
+    rm -f "$ROOT_CHECK_STUB_LOG"
+    if (cd "$test_repo" && ROOT_CHECK_STUB_STATUS=0 \
+        bash scripts/check-masm-root-stability.sh) > "$test_root/output" 2>&1; then
+        echo "Invalid release version $version unexpectedly passed" >&2
+        exit 1
+    fi
+    if [[ -f "$ROOT_CHECK_STUB_LOG" ]]; then
+        echo "Invalid release version $version unexpectedly ran the comparator" >&2
+        exit 1
+    fi
+done
 
 set_version 1.1.0
 check_result 7

@@ -286,6 +286,7 @@ impl PrettyPrint for Instruction {
             Self::HornerExt => const_text("horner_eval_ext"),
             Self::EvalCircuit => const_text("eval_circuit"),
             Self::LogDeferred => const_text("log_deferred"),
+            Self::ClearDeferred => const_text("clear_deferred"),
 
             // ----- exec / call ------------------------------------------------------------------
             Self::Exec(InvocationTarget::MastRoot(root)) => flatten(

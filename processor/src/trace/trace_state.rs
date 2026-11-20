@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, collections::VecDeque, string::ToString, sync::Arc, vec::Vec};
 
-use miden_air::trace::{
+use miden_air_definitions::vm::trace::{
     RowIndex,
     chiplets::hasher::{HasherState, MERKLE_DEPTH_RANGE_SCALE, STATE_WIDTH},
 };
@@ -113,9 +113,10 @@ pub struct SystemState {
     /// - For SYSCALL contexts: hash remains from the calling function
     pub fn_hash: Word,
 
-    /// Deferred root used for recording `log_deferred` calls.
+    /// Rolling precompile accumulator shared by `log_deferred` and `clear_deferred`.
     /// - Initially [ZERO; 4] (`TRUE_DIGEST`)
     /// - Updated with each deferred statement logged by `log_deferred`
+    /// - Reset to `TRUE_DIGEST` by `clear_deferred` in the root context
     pub deferred_root: Word,
 }
 
@@ -935,7 +936,7 @@ impl IntoIterator for KernelReplay {
     all(feature = "arbitrary", test),
     miden_test_serialization_macros::serialization_test
 )]
-pub struct AceReplay {
+pub(crate) struct AceReplay {
     circuit_evaluations: VecDeque<(RowIndex, CircuitEvaluation)>,
 }
 
@@ -1686,7 +1687,7 @@ mod tests {
 mod arbitrary {
     extern crate alloc;
 
-    use miden_air::trace::RowIndex;
+    use miden_air_definitions::vm::trace::RowIndex;
     use proptest::prelude::*;
 
     use super::{

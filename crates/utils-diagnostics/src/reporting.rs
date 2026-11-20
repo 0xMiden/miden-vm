@@ -16,6 +16,7 @@ pub fn set_panic_hook() {
     // The fancy-no-syscall feature doesn't include panic hook support
 }
 
+#[cfg(feature = "std")]
 pub type ReportHandlerOpts = miette::MietteHandlerOpts;
 
 #[cfg(feature = "std")]

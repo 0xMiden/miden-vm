@@ -40,7 +40,8 @@ Miden VM uses the following virtual-table relations, all enforced by LogUp:
     - [Block hash table](../decoder/index.md#block-hash-table)
     - [Op group table](../decoder/index.md#op-group-table)
 - Core:
-    - [Deferred-root state](../stack/crypto_ops.md#log_deferred)
+    - [Deferred-root state](../stack/crypto_ops.md#deferred-root-state), shared by `log_deferred`
+      and `clear_deferred`.
 - Chiplets:
     - [Hash chiplet sibling table](../chiplets/hasher.md#sibling-table-constraints)
 
@@ -74,7 +75,7 @@ Representative logical relations and physical column groupings include:
   table in [`And8LookupAir`](../range.md#fixed-byte-pair-table). These `RangeCheck` interactions
   share the participating AIRs' LogUp columns with other domain-separated relations.
 
-The `BusId` definition in `air/src/constraints/lookup/messages.rs` defines the complete native VM
+The `BusId` definition in `crates/air/source/src/vm/constraints/lookup/messages.rs` defines the complete native VM
 message-domain inventory. Each AIR's lookup emitters define how those domains are packed into
 physical columns.
 

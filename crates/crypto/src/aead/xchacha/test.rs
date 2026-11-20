@@ -170,18 +170,6 @@ fn test_key_from_bytes_rejects_invalid_length() {
 }
 
 #[test]
-fn test_decrypt_rejects_trailing_ciphertext_bytes() {
-    let seed = [0_u8; 32];
-    let mut rng = ChaCha20Rng::from_seed(seed);
-    let key = SecretKey::with_rng(&mut rng);
-
-    let mut encrypted = XChaCha::encrypt_bytes(&key, &mut rng, b"hello", b"associated").unwrap();
-    encrypted.push(0);
-
-    assert!(XChaCha::decrypt_bytes_with_associated_data(&key, &encrypted, b"associated").is_err());
-}
-
-#[test]
 fn test_secret_key_serialization() {
     let seed = [0_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
@@ -358,6 +346,239 @@ fn test_wrong_nonce_detection() {
     encrypted.nonce = nonce2;
     let result = key.decrypt_bytes_with_associated_data_unchecked(&encrypted, &associated_data);
     assert!(result.is_err());
+}
+
+// DATA TYPE AUTHENTICATION TESTS
+// ================================================================================================
+
+#[test]
+fn test_discriminator_flip_bytes_to_elements_fails_authentication() {
+    let mut rng = ChaCha20Rng::from_seed([0_u8; 32]);
+    let key = SecretKey::with_rng(&mut rng);
+
+    // Empty and nonempty equivalent byte/Felt AAD encodings.
+    let aad_fixtures = [
+        (Vec::<u8>::new(), Vec::<Felt>::new()),
+        (elements_to_bytes(&[Felt::new_unchecked(7)]), vec![Felt::new_unchecked(7)]),
+    ];
+
+    for (ad_bytes, ad_felts) in aad_fixtures {
+        let nonce = Nonce::with_rng(&mut rng);
+
+        // Eight zero bytes are the canonical encoding of the single Felt zero, so the flipped
+        // discriminator still produces a valid field-element plaintext.
+        let encrypted = key.encrypt_bytes_with_nonce(&[0_u8; 8], &ad_bytes, nonce).unwrap();
+        let mut serialized = encrypted.to_bytes();
+        assert_eq!(serialized[0], DataType::Bytes as u8);
+
+        serialized[0] = DataType::Elements as u8;
+        let flipped = EncryptedData::read_from_bytes(&serialized).unwrap();
+
+        // Match the new discriminator and supply the equivalent Felt AAD so neither the
+        // wrong-type precheck nor the field conversion can mask the missing authentication.
+        let result = key.decrypt_elements_with_associated_data(&flipped, &ad_felts);
+        assert!(
+            matches!(result, Err(EncryptionError::FailedOperation)),
+            "expected FailedOperation for AAD byte length {}, got {result:?}",
+            ad_bytes.len()
+        );
+    }
+}
+
+#[test]
+fn test_discriminator_flip_elements_to_bytes_fails_authentication() {
+    let mut rng = ChaCha20Rng::from_seed([0_u8; 32]);
+    let key = SecretKey::with_rng(&mut rng);
+
+    // Empty and nonempty equivalent Felt/byte AAD encodings.
+    let aad_fixtures = [
+        (Vec::<Felt>::new(), Vec::<u8>::new()),
+        (vec![Felt::new_unchecked(9)], elements_to_bytes(&[Felt::new_unchecked(9)])),
+    ];
+
+    for (ad_felts, ad_bytes) in aad_fixtures {
+        let nonce = Nonce::with_rng(&mut rng);
+
+        let plaintext = [Felt::new_unchecked(1), Felt::new_unchecked(2)];
+        let encrypted = key.encrypt_elements_with_nonce(&plaintext, &ad_felts, nonce).unwrap();
+        let mut serialized = encrypted.to_bytes();
+        assert_eq!(serialized[0], DataType::Elements as u8);
+
+        serialized[0] = DataType::Bytes as u8;
+        let flipped = EncryptedData::read_from_bytes(&serialized).unwrap();
+
+        // Match the new discriminator and supply the equivalent byte AAD so neither the
+        // wrong-type precheck nor the field conversion can mask the missing authentication.
+        let result = key.decrypt_bytes_with_associated_data(&flipped, &ad_bytes);
+        assert!(
+            matches!(result, Err(EncryptionError::FailedOperation)),
+            "expected FailedOperation for AAD byte length {}, got {result:?}",
+            ad_bytes.len()
+        );
+    }
+}
+
+#[test]
+fn test_intact_ciphertexts_roundtrip_with_equivalent_aad_encodings() {
+    let mut rng = ChaCha20Rng::from_seed([0_u8; 32]);
+    let key = SecretKey::with_rng(&mut rng);
+
+    // Empty associated data for both representations.
+    let nonce = Nonce::with_rng(&mut rng);
+    let encrypted = key.encrypt_bytes_with_nonce(&[0_u8; 8], &[], nonce).unwrap();
+    assert_eq!(key.decrypt_bytes(&encrypted).unwrap(), vec![0_u8; 8]);
+
+    let nonce = Nonce::with_rng(&mut rng);
+    let elements = vec![Felt::ZERO];
+    let encrypted = key.encrypt_elements_with_nonce(&elements, &[], nonce).unwrap();
+    assert_eq!(key.decrypt_elements(&encrypted).unwrap(), elements);
+
+    // The byte encoding of a Felt associated data is also a valid byte associated data;
+    // both encodings must round-trip through their matching typed APIs.
+    let ad_felts = [Felt::new_unchecked(7)];
+    let ad_bytes = elements_to_bytes(&ad_felts);
+    assert_eq!(ad_bytes.len(), 8);
+
+    let nonce = Nonce::with_rng(&mut rng);
+    let encrypted = key.encrypt_bytes_with_nonce(b"payload", &ad_bytes, nonce).unwrap();
+    assert_eq!(
+        key.decrypt_bytes_with_associated_data(&encrypted, &ad_bytes).unwrap(),
+        b"payload".to_vec()
+    );
+
+    let nonce = Nonce::with_rng(&mut rng);
+    let encrypted = key.encrypt_elements_with_nonce(&elements, &ad_felts, nonce).unwrap();
+    assert_eq!(
+        key.decrypt_elements_with_associated_data(&encrypted, &ad_felts).unwrap(),
+        elements
+    );
+}
+
+#[test]
+fn test_intact_wrong_typed_api_calls_return_invalid_data_type() {
+    let mut rng = ChaCha20Rng::from_seed([0_u8; 32]);
+    let key = SecretKey::with_rng(&mut rng);
+
+    let nonce = Nonce::with_rng(&mut rng);
+    let encrypted_bytes = key.encrypt_bytes_with_nonce(b"payload", &[], nonce).unwrap();
+    let result = key.decrypt_elements(&encrypted_bytes);
+    assert!(
+        matches!(
+            result,
+            Err(EncryptionError::InvalidDataType {
+                expected: DataType::Elements,
+                found: DataType::Bytes,
+            })
+        ),
+        "expected InvalidDataType, got {result:?}"
+    );
+
+    let nonce = Nonce::with_rng(&mut rng);
+    let encrypted_elements = key.encrypt_elements_with_nonce(&[Felt::ZERO], &[], nonce).unwrap();
+    let result = key.decrypt_bytes(&encrypted_elements);
+    assert!(
+        matches!(
+            result,
+            Err(EncryptionError::InvalidDataType {
+                expected: DataType::Bytes,
+                found: DataType::Elements,
+            })
+        ),
+        "expected InvalidDataType, got {result:?}"
+    );
+}
+
+#[test]
+fn test_tampered_ciphertext_returns_failed_operation() {
+    let mut rng = ChaCha20Rng::from_seed([0_u8; 32]);
+    let key = SecretKey::with_rng(&mut rng);
+    let nonce = Nonce::with_rng(&mut rng);
+
+    let mut encrypted = key.encrypt_bytes_with_nonce(b"payload", b"associated", nonce).unwrap();
+    encrypted.ciphertext[0] ^= 1;
+
+    let result = key.decrypt_bytes_with_associated_data(&encrypted, b"associated");
+    assert!(
+        matches!(result, Err(EncryptionError::FailedOperation)),
+        "expected FailedOperation, got {result:?}"
+    );
+}
+
+#[test]
+fn test_aead_scheme_typed_roundtrip_and_trailing_bytes() {
+    let mut rng = ChaCha20Rng::from_seed([0_u8; 32]);
+    let key = XChaCha::key_from_bytes(&[7_u8; SK_SIZE_BYTES]).unwrap();
+
+    let associated_data = b"associated";
+    let mut ciphertext =
+        XChaCha::encrypt_bytes(&key, &mut rng, b"payload", associated_data).unwrap();
+    assert_eq!(EncryptedData::read_from_bytes(&ciphertext).unwrap().data_type, DataType::Bytes);
+    let plaintext =
+        XChaCha::decrypt_bytes_with_associated_data(&key, &ciphertext, associated_data).unwrap();
+    assert_eq!(plaintext.as_slice(), b"payload");
+    ciphertext.push(0);
+    assert!(matches!(
+        XChaCha::decrypt_bytes_with_associated_data(&key, &ciphertext, associated_data),
+        Err(EncryptionError::FailedOperation)
+    ));
+
+    let elements = [Felt::ZERO, Felt::from_u32(42)];
+    let ad_felts = [Felt::from_u32(9)];
+    let mut ciphertext = XChaCha::encrypt_elements(&key, &mut rng, &elements, &ad_felts).unwrap();
+    assert_eq!(
+        EncryptedData::read_from_bytes(&ciphertext).unwrap().data_type,
+        DataType::Elements
+    );
+    let plaintext =
+        XChaCha::decrypt_elements_with_associated_data(&key, &ciphertext, &ad_felts).unwrap();
+    assert_eq!(plaintext.as_slice(), elements.as_slice());
+    ciphertext.push(0);
+    assert!(matches!(
+        XChaCha::decrypt_elements_with_associated_data(&key, &ciphertext, &ad_felts),
+        Err(EncryptionError::FailedOperation)
+    ));
+}
+
+#[test]
+fn test_known_answer_serialized_bytes_ciphertext() {
+    let key = XChaCha::key_from_bytes(&[7_u8; SK_SIZE_BYTES]).unwrap();
+    let nonce = Nonce::from_slice(&[0x11; NONCE_SIZE_BYTES]);
+    let plaintext = b"known-answer-bytes";
+    let associated_data = b"known-answer-aad";
+
+    let encrypted = key.encrypt_bytes_with_nonce(plaintext, associated_data, nonce).unwrap();
+    let serialized = encrypted.to_bytes();
+
+    // Pins the serialized discriminator, ciphertext, tag, and nonce for the fixed inputs.
+    assert_eq!(
+        hex::encode(&serialized),
+        "014589ae8224668175b13b9603bc530fd88bdae53ab6a498e6f4abdd5ed6770d8d03eb02111111111111111111111111111111111111111111111111"
+    );
+    assert_eq!(
+        key.decrypt_bytes_with_associated_data(&encrypted, associated_data).unwrap(),
+        plaintext.to_vec()
+    );
+}
+
+#[test]
+fn test_known_answer_serialized_elements_ciphertext() {
+    let key = XChaCha::key_from_bytes(&[7_u8; SK_SIZE_BYTES]).unwrap();
+    let nonce = Nonce::from_slice(&[0x11; NONCE_SIZE_BYTES]);
+    let plaintext = [Felt::new_unchecked(42), Felt::new_unchecked(1337)];
+    let associated_data = [Felt::new_unchecked(9)];
+
+    let encrypted = key.encrypt_elements_with_nonce(&plaintext, &associated_data, nonce).unwrap();
+    let serialized = encrypted.to_bytes();
+
+    // Pins the serialized discriminator, ciphertext, tag, and nonce for the fixed inputs.
+    assert_eq!(
+        hex::encode(&serialized),
+        "0041c8c0ed5308ac14df71e466ce7e6da1ffef667a0fc67c5fdc672289461d95ff95111111111111111111111111111111111111111111111111"
+    );
+    assert_eq!(
+        key.decrypt_elements_with_associated_data(&encrypted, &associated_data).unwrap(),
+        plaintext.to_vec()
+    );
 }
 
 // SECURITY TESTS

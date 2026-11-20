@@ -11,6 +11,7 @@ mod eval_circuit;
 mod field_ops;
 mod fri_ops;
 mod io_ops;
+mod precompile_ops;
 mod stack_ops;
 mod sys_ops;
 mod u32_ops;
@@ -252,9 +253,13 @@ where
                     )?;
                 OperationHelperRegisters::Empty
             },
-            Operation::LogDeferred => crypto_ops::op_log_deferred(processor, tracer)
-                .map_exec_err_with_package_source_op_idx(package_source_context, host, op_idx)?,
             Operation::CryptoStream => crypto_ops::op_aead_stream(processor, tracer)
+                .map_exec_err_with_package_source_op_idx(package_source_context, host, op_idx)?,
+
+            // ----- precompile accumulator operations --------------------------------------------
+            Operation::LogDeferred => precompile_ops::op_log_deferred(processor, tracer)
+                .map_exec_err_with_package_source_op_idx(package_source_context, host, op_idx)?,
+            Operation::ClearDeferred => precompile_ops::op_clear_deferred(processor)
                 .map_exec_err_with_package_source_op_idx(package_source_context, host, op_idx)?,
         };
 

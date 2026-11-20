@@ -10,11 +10,11 @@ use super::pvm_layout_const;
 use crate::helpers::read_memory_felt;
 
 /// Chiplet instances in `ChipletAir::all()` order.
-const NUM_CHIPLETS: usize = miden_precompiles_air::NUM_CHIPLETS;
+const NUM_CHIPLETS: usize = miden_air::precompiles::NUM_CHIPLETS;
 
 /// Boundary values each chiplet exposes, in canonical instance order.
 ///
-/// `pvm_aux_hook_matches_every_chiplets_boundary_shape` (in `miden-precompiles-verifier`) pins
+/// `pvm_aux_hook_matches_every_chiplets_boundary_shape` (in `miden-core-lib`) pins
 /// this shape against `LiftedAir::num_aux_values`, so a chiplet that started exposing a second
 /// value fails there rather than silently reshaping the fixtures here.
 const BOUNDARY_WIDTHS: [usize; NUM_CHIPLETS] = [1; NUM_CHIPLETS];
@@ -149,7 +149,7 @@ fn source(heights: &[u64]) -> String {
                 format!(" add.{}", 4 * word)
             };
             format!(
-                "    padw adv_loadw\n    exec.layout::aux_bus_boundary_ptr{offset} \
+                "    padw adv_loadw\n    push.AUX_BUS_BOUNDARY_PTR{offset} \
                  mem_storew_le\n    dropw"
             )
         })
@@ -158,8 +158,8 @@ fn source(heights: &[u64]) -> String {
     let tail = if total_values() * SIGMA_FELTS % 4 == 2 {
         let offset = total_values() * SIGMA_FELTS - 2;
         format!(
-            "    adv_push adv_push swap\n    dup exec.layout::aux_bus_boundary_ptr add.{offset} \
-             mem_store\n    dup.1 exec.layout::aux_bus_boundary_ptr add.{} mem_store\n    drop drop",
+            "    adv_push adv_push swap\n    dup push.AUX_BUS_BOUNDARY_PTR add.{offset} \
+             mem_store\n    dup.1 push.AUX_BUS_BOUNDARY_PTR add.{} mem_store\n    drop drop",
             offset + 1
         )
     } else {
@@ -168,7 +168,7 @@ fn source(heights: &[u64]) -> String {
     format!(
         "use {{LOG_AIR_TRACE_LENGTHS_PTR}} from miden::core::stark::constants
 use miden::core::sys::pvm::aux_trace
-use miden::core::sys::pvm::layout
+use {{AUX_BUS_BOUNDARY_PTR}} from miden::core::sys::pvm::layout
 use miden::core::sys::pvm::ood_frames
 
 begin

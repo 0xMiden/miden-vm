@@ -1,6 +1,6 @@
 [package]
 name = "miden-core"
-version = "1.0.0"
+version.workspace = true
 description = "Miden VM core components"
 documentation = "https://docs.rs/miden-core"
 readme = "README.md"
@@ -24,6 +24,16 @@ required-features = ["arbitrary"]
 harness = false
 
 [[bench]]
+name = "mast_forest_subset"
+required-features = ["arbitrary"]
+harness = false
+
+[[bench]]
+name = "mast_forest_extraction"
+required-features = ["arbitrary"]
+harness = false
+
+[[bench]]
 name = "mast_serialization_size"
 required-features = ["arbitrary"]
 harness = false
@@ -31,6 +41,7 @@ harness = false
 [features]
 default = ["std"]
 std = [
+    "derive_more/std",
     "miden-crypto/std",
     "miden-debug-types/std",
     "miden-formatting/std",
@@ -56,6 +67,7 @@ miden-utils-sync.workspace = true
 # External dependencies
 derive_more.workspace = true
 log.workspace = true
+p3-matrix.workspace = true
 proptest = { workspace = true, optional = true }
 thiserror.workspace = true
 
@@ -74,3 +86,6 @@ trybuild.workspace = true
 # `tests/ui/` holds trybuild `compile_fail` fixtures loaded by path at runtime
 # (see core/tests/public_api.rs), so static analysis cannot link them.
 ignored-paths = ["tests/ui/**"]
+
+[lints]
+workspace = true

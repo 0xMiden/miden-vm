@@ -1,0 +1,14 @@
+proc inner
+    push.3 mul
+end
+
+proc outer
+    push.2 add
+    call.inner
+    push.4 add
+end
+
+begin
+    call.outer
+    push.1 add
+end

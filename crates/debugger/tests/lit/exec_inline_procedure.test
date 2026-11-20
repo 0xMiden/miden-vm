@@ -1,0 +1,16 @@
+# Source inline frames remain selectable inside recovered exec frames, with the caller retained.
+#
+# RUN: compile-masm %S/op_histogram_proc.masm -o %t.masp \
+# RUN:   --inline-call fixture::inner,4,1
+# RUN: miden-debug --commands %s %t.masp 2>&1 | filecheck %s
+
+break op_histogram_proc.masm:4
+continue
+backtrace
+frame 1
+
+# CHECK: Backtrace (3 frames):
+# CHECK-NEXT: * #0 [inlined] fixture::inner at {{.*}}op_histogram_proc.masm:4:5
+# CHECK-NEXT:   #1 [inferred] $exec::double at {{.*}}op_histogram_proc.masm:4:1
+# CHECK-NEXT:   #2 $exec::$main at {{.*}}op_histogram_proc.masm:15:5
+# CHECK: at {{.*}}op_histogram_proc.masm:4:1 in [inferred] $exec::double

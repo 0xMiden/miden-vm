@@ -1,0 +1,19 @@
+# Verify that inline-call metadata is presented as selectable logical frames.
+#
+# RUN: compile-masm %S/inline_call.masm -o %t.masp \
+# RUN:   --inline-call fixture::inner,3,1 \
+# RUN:   --inline-call fixture::outer,2,1
+# RUN: miden-debug --commands %s %t.masp 2>&1 | filecheck %s
+
+break inline_call.masm:4
+continue
+backtrace
+frame 1
+frame 2
+
+# CHECK: Backtrace (3 frames):
+# CHECK-NEXT: * #0 [inlined] fixture::inner at {{.*}}inline_call.masm:4:5
+# CHECK-NEXT:   #1 [inlined] fixture::outer at {{.*}}inline_call.masm:3:1
+# CHECK-NEXT:   #2 $exec::$main at {{.*}}inline_call.masm:2:1
+# CHECK: at {{.*}}inline_call.masm:3:1 in [inlined] fixture::outer
+# CHECK: at {{.*}}inline_call.masm:2:1 in $exec::$main

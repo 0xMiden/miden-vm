@@ -43,63 +43,6 @@ pub mod parallel {
     pub use p3_maybe_rayon::prelude::*;
 }
 
-pub mod stark {
-    //! Lifted STARK proving system based on Plonky3.
-    //!
-    //! Sub-modules from `miden-lifted-stark`:
-    //! - [`proof`] — [`proof::StarkProofData`] (wire artifact), [`proof::StarkProof`] (structured
-    //!   view), [`proof::StarkDigest`], [`proof::StarkOutput`], [`proof::TranscriptChallenger`],
-    //!   [`proof::TranscriptData`]
-    //! - [`air`] — AIR traits, builders, symbolic types (includes all of `p3-air`)
-    //! - [`pcs`] — PCS parameters, DEEP + FRI sub-proofs
-    //! - [`lmcs`] — Lifted Merkle commitment scheme
-    //! - [`hasher`] — Stateful hasher primitives
-    //! - [`prover`] — [`ProverInstance::prove`]
-    //! - [`verifier`] — [`VerifierInstance::verify`]
-    //! - [`debug`] — Debug constraint checker for lifted AIRs
-    //!
-    //! Sub-modules from upstream Plonky3:
-    //! - [`challenger`] — Challenge generation (Fiat-Shamir)
-    //! - [`dft`] — DFT implementations
-    //! - [`matrix`] — Dense matrix types
-    //! - [`symmetric`] — Symmetric cryptographic primitives
-
-    // Top-level types from lifted-stark
-    pub use miden_lifted_stark::{
-        GenericStarkConfig, Preprocessed, PreprocessedValidationError, ProverInstance,
-        QuotientRecompositionInputs, StarkConfig, VerifierInstance, log_quotient_degree,
-        quotient_recomposition_inputs,
-    };
-    // Lifted-stark sub-modules (re-exported as-is)
-    pub use miden_lifted_stark::{air, debug, hasher, lmcs, pcs, proof, prover, verifier};
-
-    // Upstream Plonky3: challenger
-    pub mod challenger {
-        pub use p3_challenger::{
-            CanFinalizeDigest, CanObserve, DuplexChallenger, FieldChallenger, GrindingChallenger,
-            HashChallenger, SerializingChallenger64,
-        };
-    }
-
-    // Upstream Plonky3: dft
-    pub mod dft {
-        pub use p3_dft::{Radix2DFTSmallBatch, Radix2DitParallel, TwoAdicSubgroupDft};
-    }
-
-    // Upstream Plonky3: matrix
-    pub mod matrix {
-        pub use p3_matrix::{Matrix, dense::RowMajorMatrix};
-    }
-
-    // Upstream Plonky3: symmetric
-    pub mod symmetric {
-        pub use p3_symmetric::{
-            CompressionFunctionFromHasher, CryptographicPermutation, PaddingFreeSponge,
-            Permutation, SerializingHasher, TruncatedPermutation,
-        };
-    }
-}
-
 // TYPE ALIASES
 // ================================================================================================
 

@@ -280,6 +280,11 @@ impl PrimeCharacteristicRing for Felt {
     }
 
     #[inline]
+    fn square(&self) -> Self {
+        Self(self.0.square())
+    }
+
+    #[inline]
     fn mul_2exp_u64(&self, exp: u64) -> Self {
         Self(self.0.mul_2exp_u64(exp))
     }

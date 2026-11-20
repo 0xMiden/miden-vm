@@ -1,6 +1,6 @@
 [package]
 name = "miden-utils-sync"
-version = "1.0.0"
+version.workspace = true
 description = "no-std compatible locking primitives for the Miden project"
 documentation = "https://docs.rs/miden-utils-sync"
 readme = "README.md"

@@ -1,4 +1,6 @@
-use alloc::vec::Vec;
+use alloc::{collections::BTreeSet, vec::Vec};
+
+use proptest::prelude::*;
 
 use super::{
     Custom, DomainTag, DomainVersion, Eidos, EidosDomain, FeltSequence,
@@ -254,6 +256,23 @@ fn byte_construction_block_boundary_lengths() {
                 lengths[i], lengths[j]
             );
         }
+    }
+}
+
+#[test]
+fn zero_byte_inputs_of_different_lengths_do_not_collide() {
+    let zeroes = [0u8; 254];
+    let mut hashes = BTreeSet::new();
+
+    for len in 0..=zeroes.len() {
+        assert!(hashes.insert(Eidos::hash(&zeroes[..len])), "collision at byte length {len}");
+    }
+}
+
+proptest! {
+    #[test]
+    fn eidos_hash_wont_panic_with_arbitrary_input(ref bytes in any::<Vec<u8>>()) {
+        Eidos::hash(bytes);
     }
 }
 

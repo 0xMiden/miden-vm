@@ -539,6 +539,7 @@ impl Assembler {
             Instruction::HornerExt => block_builder.push_op(HornerExt),
             Instruction::EvalCircuit => block_builder.push_op(EvalCircuit),
             Instruction::LogDeferred => block_builder.push_op(LogDeferred),
+            Instruction::ClearDeferred => block_builder.push_op(ClearDeferred),
 
             // ----- exec/call instructions -------------------------------------------------------
             Instruction::Exec(callee) => {

@@ -1,7 +1,7 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::{borrow::BorrowMut, fmt::Debug};
 
-use miden_air::{
+use miden_air_definitions::vm::{
     MemoryCols,
     trace::{
         RowIndex,
@@ -17,7 +17,7 @@ use super::{
     ChipletTraceFragment, RangeChecker,
 };
 use crate::{
-    ContextId, EMPTY_WORD, Felt, MemoryAddress, MemoryError, ONE, WORD_SIZE, Word, ZERO,
+    ContextId, EMPTY_WORD, Felt, MemoryError, ONE, WORD_SIZE, Word, ZERO,
     field::batch_inversion_allow_zeros,
 };
 
@@ -96,7 +96,7 @@ const INIT_MEM_VALUE: Word = EMPTY_WORD;
 /// For the first row of the trace, `prev_clk` is initialized to `first_clk - 1`, so the delta is
 /// `1`. As a result, `d0` is set to `1`, `d1` to `0`, and `d_inv` to `1`.
 #[derive(Debug, Default)]
-pub struct Memory {
+pub(crate) struct Memory {
     /// Memory segment traces sorted by their execution context ID.
     trace: BTreeMap<ContextId, MemorySegmentTrace>,
 
@@ -113,46 +113,6 @@ impl Memory {
     /// executed on the VM.
     pub fn trace_len(&self) -> usize {
         self.num_trace_rows
-    }
-
-    /// Returns the element located at the specified context/address, or None if the address hasn't
-    /// been accessed previously.
-    ///
-    /// Unlike read() which modifies the memory access trace, this method returns the value at the
-    /// specified address (if one exists) without altering the memory access trace.
-    pub fn get_value(&self, ctx: ContextId, addr: u32) -> Option<Felt> {
-        match self.trace.get(&ctx) {
-            Some(segment) => segment.get_value(addr),
-            None => None,
-        }
-    }
-
-    /// Returns the word located in memory starting at the specified address, which must be word
-    /// aligned.
-    ///
-    /// # Errors
-    /// - Returns an error if `addr` is not word aligned.
-    pub fn get_word(&self, ctx: ContextId, addr: u32) -> Result<Option<Word>, MemoryError> {
-        match self.trace.get(&ctx) {
-            Some(segment) => segment
-                .get_word(addr)
-                .map_err(|_| MemoryError::UnalignedWordAccess { addr, ctx }),
-            None => Ok(None),
-        }
-    }
-
-    /// Returns the entire memory state for the specified execution context at the specified cycle.
-    /// The state is returned as a vector of (address, value) tuples, and includes addresses which
-    /// have been accessed at least once.
-    pub fn get_state_at(&self, ctx: ContextId, clk: RowIndex) -> Vec<(MemoryAddress, Felt)> {
-        if clk == 0 {
-            return vec![];
-        }
-
-        match self.trace.get(&ctx) {
-            Some(segment) => segment.get_state_at(clk),
-            None => vec![],
-        }
     }
 
     // STATE MUTATORS
@@ -326,8 +286,7 @@ impl Memory {
                     let clk = memory_access.clk();
                     let value = memory_access.word();
 
-                    let (mem_slice, aux_slice) = out_rows[row].split_at_mut(MEMORY_TRACE_WIDTH - 2);
-                    let cols: &mut MemoryCols<Felt> = mem_slice.borrow_mut();
+                    let cols: &mut MemoryCols<Felt> = out_rows[row].as_mut_slice().borrow_mut();
 
                     cols.is_read = match memory_access.operation() {
                         MemoryOperation::Read => MEMORY_READ,
@@ -378,8 +337,8 @@ impl Memory {
 
                     // decompose word address into 16-bit limbs of word index
                     let word_index = addr / WORD_SIZE as u32;
-                    aux_slice[0] = Felt::from_u16((word_index & 0xffff) as u16);
-                    aux_slice[1] = Felt::from_u16((word_index >> 16) as u16);
+                    cols.word_addr_lo = Felt::from_u16((word_index & 0xffff) as u16);
+                    cols.word_addr_hi = Felt::from_u16((word_index >> 16) as u16);
 
                     // update values for the next iteration of the loop
                     prev_ctx = ctx;
@@ -392,7 +351,7 @@ impl Memory {
 
         batch_inversion_allow_zeros(&mut deltas);
         for (r, &inv) in deltas.iter().enumerate() {
-            let cols: &mut MemoryCols<Felt> = out_rows[r][..MEMORY_TRACE_WIDTH - 2].borrow_mut();
+            let cols: &mut MemoryCols<Felt> = out_rows[r].as_mut_slice().borrow_mut();
             cols.d_inv = inv;
         }
 
@@ -413,14 +372,5 @@ impl Memory {
         let (&addr, addr_trace) = segment.inner().iter().next().expect("empty memory segment");
 
         Some((ctx, addr, addr_trace[0].clk()))
-    }
-
-    // TEST HELPERS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns the number of words that were accessed at least once across all contexts.
-    #[cfg(test)]
-    fn num_accessed_words(&self) -> usize {
-        self.trace.iter().fold(0, |acc, (_, s)| acc + s.num_accessed_words())
     }
 }

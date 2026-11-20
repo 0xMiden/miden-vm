@@ -1,0 +1,104 @@
+#! Agreement from a preprocessed public key.
+#!
+#! For generator G and recipient point Q, table i contains
+#! T_i[d] = (d * 2^(16*i) * G, d * 2^(16*i) * Q).
+#! The public-key commitment binds the twenty table roots.
+#!
+#! For scalar r and prime subgroup order n, check 0 < r < n and read r = sum_i d_i * 2^(16*i).
+#! Authenticate the selected entries and sum their two points.
+#! Zero digits are skipped; the first nonzero entry initializes both sums.
+#!
+#! Finally, check the R and S encodings and recover Q from table zero, digit one.
+
+use miden::core::crypto::ecdh::ecgfp5::arithmetic
+use miden::core::crypto::ecdh::ecgfp5::scalar
+use miden::core::crypto::ecdh::ecgfp5::tables
+use {PointEncoding} from miden::core::crypto::ecdh::ecgfp5
+use {ROOTS_INIT_CV, ROOTS_PTR} from miden::core::crypto::ecdh::ecgfp5::tables
+use {DIGITS_PTR, NUM_DIGITS} from miden::core::crypto::ecdh::ecgfp5::scalar
+use {
+    ACC_X0, ACC_X4, ACC_Y0, ACC_Y4, R_TERM_X0, R_TERM_X4, R_TERM_Y0, R_X0, R_X4, R_Y0, R_Y4,
+    TERM_X0, TERM_X4, TERM_Y0, TERM_Y1, TERM_Y2, TERM_Y3, TERM_Y4, TWO_THIRDS,
+} from miden::core::crypto::ecdh::ecgfp5::arithmetic
+
+#! Computes R and S from the preprocessed public key and returns the recipient point Q.
+#! Internal procedure; use `ecgfp5::agree_preprocessed` for key agreement.
+#!
+#! Input:  [public_key(4), pad(12)]
+#! Output: [R(5), S(5), Q(5), scratch(1)]
+#! Advice: scalar, table entries, slopes, and encodings from `PreparedPublicKey::advise`.
+#!
+#! Called in a fresh memory context by `agree_preprocessed`. Uses the scalar digits, table roots,
+#! and point workspace defined in the shared helper modules.
+#!
+#! Invocation: call
+pub proc agree_inner(
+    public_key: word,
+    padding: [felt; 12],
+) -> (PointEncoding, PointEncoding, PointEncoding, felt)
+    exec.scalar::prepare
+    # Hash the ordered window roots from advice and compare their digest with public_key.
+    push.ROOTS_PTR push.ROOTS_INIT_CV padw padw
+    repeat.10
+        adv_pipe compress
+    end
+    dropw dropw movup.4 drop
+    assert_eqw.err="window roots"
+    # Visit digits from least to most significant. The `first` flag marks an empty sum.
+    push.1.0
+    do
+        # => [window, first, ...]
+        dup add.DIGITS_PTR mem_load
+        dup neq.0
+        if.true
+            exec.tables::read_entry
+            # The first nonzero digit initializes both accumulators together.
+            dup.1
+            if.true
+                exec.initialize_accumulators
+                swap drop push.0 swap
+            else
+                exec.arithmetic::add_generator
+                exec.arithmetic::add_point
+            end
+        else
+            drop
+        end
+        add.1
+    while
+        dup neq.NUM_DIGITS
+    end
+    drop drop
+    exec.arithmetic::encode_agreement
+    # Window zero, digit one contains (G, Q). Authenticate Q independently of the scalar digits.
+    push.0.1 exec.tables::read_entry drop
+    adv_pushw adv_push movdn.4
+    # => [Q(5), R(5), S(5), scratch(6)]
+    repeat.5 dup.4 end
+    mem_load.TERM_X4 padw mem_loadw_le.TERM_X0 sub.TWO_THIRDS
+    exec.arithmetic::mul_fp5
+    mem_load.TERM_Y0 add assertz.err="recipient encoding"
+    mem_load.TERM_Y1 add assertz.err="recipient encoding"
+    mem_load.TERM_Y2 add assertz.err="recipient encoding"
+    mem_load.TERM_Y3 add assertz.err="recipient encoding"
+    mem_load.TERM_Y4 add assertz.err="recipient encoding"
+    repeat.5 movup.15 drop end
+    repeat.10 movup.14 end
+end
+
+#! Initializes R and the second accumulator from the two points in the selected table entry.
+#!
+#! Input:  [...]
+#! Output: [...]
+#!
+#! Reads arithmetic::R_TERM_X/Y and arithmetic::TERM_X/Y; writes arithmetic::R_X/Y and
+#! arithmetic::ACC_X/Y. The caller selects a nonzero digit, so both points are nonidentity.
+proc initialize_accumulators()
+    padw
+    mem_loadw_le.R_TERM_X0 mem_storew_le.R_X0
+    mem_loadw_le.R_TERM_Y0 mem_storew_le.R_Y0
+    mem_loadw_le.TERM_X0 mem_storew_le.ACC_X0
+    mem_loadw_le.TERM_Y0 mem_storew_le.ACC_Y0
+    mem_loadw_le.R_TERM_X4
+    mem_store.R_X4 mem_store.R_Y4 mem_store.ACC_X4 mem_store.ACC_Y4
+end

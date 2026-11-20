@@ -1,14 +1,22 @@
-use std::{path::PathBuf, time::Instant};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    time::Instant,
+};
 
 use clap::Parser;
-use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
+use miden_assembly::diagnostics::{Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor};
-use miden_vm::{HashFunction, Prover, internal::InputFile};
+use miden_vm::{HashFunction, PrecompileLimits, PrecompileStatus, Prover, internal::InputFile};
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},
-    utils::{get_masm_program, get_masp_program, parse_byte_size},
+    precompile_limits::PrecompileArgs,
+    utils::{
+        get_masm_program, get_masp_package, load_package_with_handlers,
+        load_program_package_with_handlers, parse_byte_size,
+    },
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -34,15 +42,38 @@ pub struct ProveCmd {
     #[arg(short = 'm', long = "max-cycles", default_value_t = ExecutionOptions::MAX_CYCLES)]
     max_cycles: u32,
 
-    /// Maximum modelled peak memory for VM trace proving (accepts suffixes: 512M, 32Gi)
+    /// Maximum combined logical advice size in bytes, also bounding witness loading
+    #[arg(long = "max-advice-size", default_value_t = ExecutionOptions::DEFAULT_MAX_ADVICE_SIZE_BYTES)]
+    max_advice_size: usize,
+
+    /// Maximum modelled peak memory for each enabled proving stage (512M, 32Gi)
     ///
-    /// Excludes fixed preprocessed setup and precompile proving.
+    /// Sets the same budget for VM and precompile proving; --deferred omits the precompile stage.
+    /// When omitted, each stage retains its library default. This is a modelled
+    /// budget, not a total allocation cap; precompile witness preparation/import are excluded.
     #[arg(
         long = "max-prover-memory",
-        default_value_t = Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES,
         value_parser = parse_byte_size
     )]
-    max_prover_memory: u64,
+    max_prover_memory: Option<u64>,
+
+    #[command(flatten)]
+    precompile_limits: PrecompileArgs,
+
+    /// Generate a complete proof, including a STARK for any precompile work (the default)
+    ///
+    /// Complete proofs do not export a raw precompile witness. Cannot be combined with --deferred.
+    #[arg(long = "complete", conflicts_with = "deferred")]
+    complete: bool,
+
+    /// Export a deferred proof containing the raw precompile witness
+    ///
+    /// The witness includes raw precompile inputs and can reveal inputs from private advice.
+    /// Use this option only when that disclosure is intended. By default, generate a complete
+    /// STARK-backed proof without exporting the witness. Without precompile work, either mode
+    /// produces a complete proof.
+    #[arg(long = "deferred", conflicts_with = "complete")]
+    deferred: bool,
 
     /// Number of outputs
     #[arg(short = 'n', long = "num-outputs", default_value = "16")]
@@ -57,7 +88,7 @@ pub struct ProveCmd {
     proof_file: Option<PathBuf>,
 
     /// Specifies the hash function to be used
-    /// Valid options: blake3-256, rpo, rpx, poseidon2, keccak, eidos
+    /// Valid options: blake3-256, keccak, eidos
     #[arg(long = "hasher", default_value = "blake3-256")]
     hasher: String,
 
@@ -72,12 +103,26 @@ pub struct ProveCmd {
 
 impl ProveCmd {
     pub fn get_execution_options(&self) -> Result<ExecutionOptions, Report> {
-        ExecutionOptions::new(
+        let options = ExecutionOptions::new(
             Some(self.max_cycles),
             self.expected_cycles,
             ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
         )
-        .map_err(|err| Report::msg(format!("{err}")))
+        .map(|options| options.with_max_advice_size_bytes(self.max_advice_size))
+        .map_err(|err| Report::msg(format!("{err}")))?;
+        Ok(self.precompile_limits.apply_to(options))
+    }
+
+    fn prover(&self, hash_fn: HashFunction, verification_limits: PrecompileLimits) -> Prover {
+        let mut prover = Prover::new()
+            .with_hash_fn(hash_fn)
+            .with_verification_precompile_limits(verification_limits);
+        if let Some(bytes) = self.max_prover_memory {
+            prover = prover
+                .with_max_prover_memory_bytes(bytes)
+                .with_max_precompile_prover_memory_bytes(bytes);
+        }
+        prover
     }
 
     pub fn get_hash_fn(&self) -> Result<HashFunction, Report> {
@@ -91,6 +136,9 @@ impl ProveCmd {
         HashFunction::try_from(self.hasher.as_str()).map_err(|err| Report::msg(format!("{err}")))
     }
     pub fn execute(&self) -> Result<(), Report> {
+        // Resolve every policy before loading inputs or executing the program.
+        let execution_options = self.get_execution_options()?;
+        let verification_limits = execution_options.verification_precompile_limits().clone();
         println!("===============================================================================");
         println!("Prove program: {}", self.program_file.display());
         println!("-------------------------------------------------------------------------------");
@@ -121,20 +169,41 @@ impl ProveCmd {
 
         let input_data = InputFile::read(&self.input_file, &self.program_file)?;
 
-        let host = DefaultHost::default().with_library(&CoreLibrary::default())?;
+        let mut host = DefaultHost::default().with_library(&CoreLibrary::default())?;
         // Use a single match expression to load the program.
-        let (program, package_debug_info, entrypoint_source_node, mut host) = match ext.as_str() {
-            "masp" => (get_masp_program(&self.program_file)?, None, None, host),
-            "masm" => {
-                let (program, package_debug_info, entrypoint_source_node, source_manager) =
-                    get_masm_program(&self.program_file, &libraries, self.kernel_file.as_deref())?;
-                let mut host = host.with_source_manager(source_manager);
-                for library in libraries.libraries.iter().cloned() {
-                    host.load_library(library)
-                        .into_diagnostic()
-                        .wrap_err("Failed to load library")?;
+        let (program, package_debug_info, entrypoint_source_node) = match ext.as_str() {
+            "masp" => {
+                if self.kernel_file.is_some() {
+                    return Err(Report::msg(
+                        "The `--kernel` option does not apply to a `.masp` package: the package fixes its own kernel.",
+                    ));
                 }
-                (program, package_debug_info, entrypoint_source_node, host)
+                let package = get_masp_package(&self.program_file)?;
+                let program = package.try_into_program()?;
+                load_program_package_with_handlers(&mut host, &package, &mut Vec::new())?;
+                (program, None, None)
+            },
+            "masm" => {
+                let (
+                    program,
+                    package_debug_info,
+                    entrypoint_source_node,
+                    source_manager,
+                    kernel_package,
+                ) = get_masm_program(&self.program_file, &libraries, self.kernel_file.as_deref())?;
+                host = host.with_source_manager(source_manager);
+                let mut loaded_handler_sections = Vec::new();
+                for library in &libraries.libraries {
+                    load_package_with_handlers(&mut host, library, &mut loaded_handler_sections)?;
+                }
+                if let Some(kernel_package) = &kernel_package {
+                    load_package_with_handlers(
+                        &mut host,
+                        kernel_package,
+                        &mut loaded_handler_sections,
+                    )?;
+                }
+                (program, package_debug_info, entrypoint_source_node)
             },
             _ => unreachable!("program file extension was validated above"),
         };
@@ -145,9 +214,10 @@ impl ProveCmd {
 
         // fetch the stack and program inputs from the arguments
         let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
-        let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
+        let advice_inputs = input_data
+            .parse_advice_inputs_with_options(&execution_options)
+            .map_err(Report::msg)?;
 
-        let execution_options = self.get_execution_options()?;
         let hash_fn = self.get_hash_fn()?;
 
         // execute program and generate proof
@@ -171,33 +241,317 @@ impl ProveCmd {
                 .wrap_err("Failed to execute program")?,
         };
         let stack_outputs = *witness.claim().stack_outputs();
-        let proof = Prover::new()
-            .with_hash_fn(hash_fn)
-            .with_max_prover_memory_bytes(self.max_prover_memory)
-            .prove_full(witness)
-            .map_err(|err| Report::msg(format!("Failed to prove program: {err}")))?;
+        let prover = self.prover(hash_fn, verification_limits);
+        let proof = if self.complete || !self.deferred {
+            prover.prove_full(witness)
+        } else {
+            prover.prove(witness)
+        }
+        .map_err(|err| Report::msg(format!("Failed to prove program: {err}")))?;
 
         println!("Program proved in {} ms", now.elapsed().as_millis());
+        if matches!(proof.precompile(), PrecompileStatus::Deferred(_)) {
+            println!("Proof status: deferred");
+            println!("Precompile witness: exported; may reveal private advice inputs");
+            println!("Precompile STARK: not supplied");
+            println!("Outstanding precompile root: {}", proof.vm().precompile_root);
+        } else {
+            println!("Proof status: complete");
+        }
 
         // write proof to file
         ProofFile::write(proof, &self.proof_file, &self.program_file).map_err(Report::msg)?;
 
-        // provide outputs
-        if let Some(output_path) = &self.output_file {
-            // write all outputs to specified file.
-            OutputFile::write(&stack_outputs, output_path).map_err(Report::msg)?;
-        } else {
-            // if no output path was provided, get the stack outputs for printing to the screen.
+        // Whether the outputs path names the proof is a question only the filesystem can answer,
+        // and only now that the proof exists: comparing file identity sees through symlinks, `..`
+        // components, case-insensitive names, Unicode normalization and hard links in one step.
+        let proof_path = self.resolved_proof_path();
+        let output_path = self.output_file.clone().unwrap_or_else(|| self.default_output_path());
+        let collides = resolve_to_same_file(&output_path, &proof_path).map_err(|err| {
+            Report::msg(format!(
+                "Could not tell whether the outputs file `{}` is the proof file `{}`: {err}. The \
+                 proof was kept; re-run with a different --proof or --output path to get the \
+                 outputs.",
+                output_path.display(),
+                proof_path.display()
+            ))
+        })?;
+        if collides {
+            return Err(Report::msg(format!(
+                "The outputs file `{}` would overwrite the proof file `{}`. The proof was kept; \
+                 re-run with a different --proof or --output path to get the outputs.",
+                output_path.display(),
+                proof_path.display()
+            )));
+        }
+
+        OutputFile::write(&stack_outputs, &output_path).map_err(Report::msg)?;
+
+        // without --output the outputs file is not where the user is looking, so print the stack
+        if self.output_file.is_none() {
             let stack = stack_outputs.get_num_elements(self.num_outputs).to_vec();
-
-            // write all outputs to default location if none was provided
-            let default_output_path = self.program_file.with_extension("outputs");
-            OutputFile::write(&stack_outputs, &default_output_path).map_err(Report::msg)?;
-
-            // print stack outputs to screen.
             println!("Output: {stack:?}");
         }
 
         Ok(())
+    }
+
+    /// Resolves the proof path the same way as ProofFile::write.
+    fn resolved_proof_path(&self) -> PathBuf {
+        ProofFile::resolve_path(&self.proof_file, &self.program_file)
+    }
+
+    /// Derives verify's default outputs path from the resolved proof path.
+    fn default_output_path(&self) -> PathBuf {
+        self.resolved_proof_path().with_extension("outputs")
+    }
+}
+
+/// Returns true when writing outputs would replace the proof file.
+///
+/// This runs after the proof has been written, so the proof side always exists. An outputs path
+/// that does not exist yet cannot be the proof, and neither can a FIFO or device. Identity is
+/// taken from each path's metadata, so neither file is opened: opening a FIFO blocks until a
+/// writer appears, and opening for reading fails on a write-only file that is still a valid
+/// destination. A final output symlink is replaced atomically without touching its target.
+/// Other metadata errors leave the question unanswered and are returned.
+fn resolve_to_same_file(output_path: &Path, proof_path: &Path) -> io::Result<bool> {
+    let output_metadata = match fs::symlink_metadata(output_path) {
+        Ok(metadata) if metadata.is_symlink() => return Ok(false),
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(err),
+    };
+    let proof_metadata = fs::metadata(proof_path)?;
+    if !output_metadata.is_file() || !proof_metadata.is_file() {
+        return Ok(false);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        Ok(output_metadata.dev() == proof_metadata.dev()
+            && output_metadata.ino() == proof_metadata.ino())
+    }
+    // `is_same_file` opens with no access rights on Windows, so permissions do not get in the way.
+    #[cfg(not(unix))]
+    {
+        same_file::is_same_file(output_path, proof_path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, sync::Arc};
+
+    use miden_core::deferred::{DeferredState, Node, PrecompileRegistry, TRUE_DIGEST};
+    use miden_vm::{ProverError, default_verification_precompile_limits};
+
+    use super::*;
+
+    fn prove_cmd(program_file: &str, proof_file: Option<&str>) -> ProveCmd {
+        let mut command = ProveCmd::try_parse_from(["prove", program_file]).unwrap();
+        command.proof_file = proof_file.map(PathBuf::from);
+        command
+    }
+
+    #[test]
+    fn default_output_path_follows_the_program_when_no_proof_is_given() {
+        assert_eq!(
+            prove_cmd("dir/program.masm", None).default_output_path(),
+            PathBuf::from("dir/program.outputs")
+        );
+    }
+
+    #[test]
+    fn default_output_path_follows_a_custom_proof_path() {
+        assert_eq!(
+            prove_cmd("dir/program.masm", Some("out/custom.proof")).default_output_path(),
+            PathBuf::from("out/custom.outputs")
+        );
+    }
+
+    #[test]
+    fn default_output_path_handles_an_extensionless_proof_path() {
+        assert_eq!(
+            prove_cmd("dir/program.masm", Some("out/custom")).default_output_path(),
+            PathBuf::from("out/custom.outputs")
+        );
+    }
+
+    #[test]
+    fn default_output_path_collides_with_a_proof_path_that_is_already_an_outputs_path() {
+        assert_eq!(
+            prove_cmd("dir/program.masm", Some("out/custom.outputs")).default_output_path(),
+            PathBuf::from("out/custom.outputs")
+        );
+    }
+
+    #[test]
+    fn resolve_to_same_file_distinguishes_final_and_parent_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let proof_path = dir.path().join("same.proof");
+        fs::write(&proof_path, "proof").unwrap();
+
+        #[cfg(unix)]
+        {
+            let alias_path = dir.path().join("alias.proof");
+            std::os::unix::fs::symlink(&proof_path, &alias_path).unwrap();
+            assert!(!resolve_to_same_file(&alias_path, &proof_path).unwrap());
+
+            let parent_alias = dir.path().join("parent");
+            std::os::unix::fs::symlink(dir.path(), &parent_alias).unwrap();
+            assert!(resolve_to_same_file(&parent_alias.join("same.proof"), &proof_path).unwrap());
+        }
+
+        // negative control: with `sub` missing there is nothing to resolve `..` against
+        assert!(
+            !resolve_to_same_file(&dir.path().join("./sub/../same.proof"), &proof_path).unwrap()
+        );
+
+        fs::create_dir(dir.path().join("sub")).unwrap();
+        assert!(
+            resolve_to_same_file(&dir.path().join("./sub/../same.proof"), &proof_path).unwrap()
+        );
+    }
+
+    #[test]
+    fn resolve_to_same_file_sees_through_a_hard_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let proof_path = dir.path().join("same.proof");
+        fs::write(&proof_path, "proof").unwrap();
+
+        // negative control: a copy has the same contents but is a different file
+        let copy_path = dir.path().join("copy.proof");
+        fs::copy(&proof_path, &copy_path).unwrap();
+        assert!(!resolve_to_same_file(&copy_path, &proof_path).unwrap());
+
+        let link_path = dir.path().join("link.proof");
+        fs::hard_link(&proof_path, &link_path).unwrap();
+        assert!(resolve_to_same_file(&link_path, &proof_path).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_to_same_file_sees_through_a_hard_link_it_cannot_read() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let proof_path = dir.path().join("same.proof");
+        fs::write(&proof_path, "proof").unwrap();
+        let link_path = dir.path().join("link.proof");
+        fs::hard_link(&proof_path, &link_path).unwrap();
+        fs::set_permissions(&proof_path, fs::Permissions::from_mode(0o200)).unwrap();
+
+        assert!(resolve_to_same_file(&link_path, &proof_path).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_to_same_file_accepts_a_distinct_file_it_cannot_read() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let proof_path = dir.path().join("same.proof");
+        fs::write(&proof_path, "proof").unwrap();
+        let output_path = dir.path().join("same.outputs");
+        fs::write(&output_path, "stale outputs").unwrap();
+        fs::set_permissions(&output_path, fs::Permissions::from_mode(0o200)).unwrap();
+
+        assert!(!resolve_to_same_file(&output_path, &proof_path).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_to_same_file_does_not_open_a_fifo() {
+        let dir = tempfile::tempdir().unwrap();
+        let proof_path = dir.path().join("same.proof");
+        fs::write(&proof_path, "proof").unwrap();
+        let fifo_path = dir.path().join("same.outputs");
+        let status = std::process::Command::new("mkfifo").arg(&fifo_path).status().unwrap();
+        assert!(status.success());
+
+        // opening the FIFO would block this thread forever, so run the check where it can time out
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || tx.send(resolve_to_same_file(&fifo_path, &proof_path).unwrap()));
+        let same = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("the check blocked");
+        assert!(!same);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_to_same_file_distinguishes_final_and_parent_symlink_loops() {
+        let dir = tempfile::tempdir().unwrap();
+        let proof_path = dir.path().join("same.proof");
+        fs::write(&proof_path, "proof").unwrap();
+
+        let output_path = dir.path().join("same.outputs");
+        std::os::unix::fs::symlink("same.outputs", &output_path).unwrap();
+        assert!(!resolve_to_same_file(&output_path, &proof_path).unwrap());
+
+        let parent_path = dir.path().join("parent");
+        std::os::unix::fs::symlink("parent", &parent_path).unwrap();
+        assert!(resolve_to_same_file(&parent_path.join("same.outputs"), &proof_path).is_err());
+    }
+
+    #[test]
+    fn resolve_to_same_file_ignores_an_outputs_path_that_does_not_exist_yet() {
+        let dir = tempfile::tempdir().unwrap();
+        let proof_path = dir.path().join("same.proof");
+        fs::write(&proof_path, "proof").unwrap();
+
+        assert!(!resolve_to_same_file(&dir.path().join("same.outputs"), &proof_path).unwrap());
+    }
+
+    #[test]
+    fn memory_budget_preserves_defaults_or_overrides_both_stages() {
+        for (args, vm, precompile) in [
+            (
+                vec![],
+                Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES,
+                Prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES,
+            ),
+            (vec!["--max-prover-memory", "2Mi"], 2 << 20, 2 << 20),
+        ] {
+            let cmd = ProveCmd::try_parse_from(["prove", "program.masm"].into_iter().chain(args))
+                .unwrap();
+            let options = cmd.get_execution_options().unwrap();
+            let prover = cmd
+                .prover(HashFunction::Blake3_256, options.verification_precompile_limits().clone());
+            assert_eq!(prover.max_prover_memory_bytes(), vm);
+            assert_eq!(prover.max_precompile_prover_memory_bytes(), precompile);
+        }
+    }
+
+    #[test]
+    fn prover_receives_verification_admission_and_memory_policies() {
+        let mut state = DeferredState::new(
+            Arc::new(PrecompileRegistry::new()),
+            PrecompileLimits::new(u64::MAX),
+        )
+        .unwrap();
+        let statement = state.register(Node::and(TRUE_DIGEST, TRUE_DIGEST)).unwrap();
+        state.log_statement(statement).unwrap();
+        let witness =
+            state.into_witness(&default_verification_precompile_limits()).unwrap().unwrap();
+        for args in [["--max-prover-memory", "1"], ["--max-precompile-elements", "0"]] {
+            let cmd =
+                ProveCmd::try_parse_from(["prove", "program.masm", args[0], args[1]]).unwrap();
+            let options = cmd.get_execution_options().unwrap();
+            let error = cmd
+                .prover(HashFunction::Blake3_256, options.verification_precompile_limits().clone())
+                .prove_precompiles(vec![witness.clone()])
+                .unwrap_err();
+            assert!(matches!(error, ProverError::PrecompileProofGeneration(_)));
+            let message = format!("{error:?}");
+            assert!(
+                message.contains(if args[0] == "--max-prover-memory" {
+                    "MemoryBudgetExceeded"
+                } else {
+                    "Preparation"
+                }),
+                "{message}"
+            );
+        }
     }
 }

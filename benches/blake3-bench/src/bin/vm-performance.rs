@@ -20,7 +20,7 @@ struct Args {
     /// Number of Blake3 invocations in the MASM program.
     #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u32).range(1..))]
     iterations: u32,
-    #[arg(long, default_value = "eidos", value_parser = ["eidos", "blake3-256", "poseidon2"])]
+    #[arg(long, default_value = "eidos", value_parser = ["eidos", "blake3-256"])]
     hash: String,
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     threads: u32,

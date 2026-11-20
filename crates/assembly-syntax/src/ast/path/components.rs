@@ -48,7 +48,7 @@ impl<'a> PathComponent<'a> {
     }
 
     /// Returns true if this path component is a quoted string
-    pub fn is_quoted(&self) -> bool {
+    pub(crate) fn is_quoted(&self) -> bool {
         matches!(self, Self::Normal(component) if component.starts_with('"') && component.ends_with('"'))
     }
 

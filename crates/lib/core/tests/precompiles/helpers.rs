@@ -84,11 +84,9 @@ fn log_deferred_wrapper_consumes_digest_and_preserves_tail() {
         .expect("log_deferred wrapper should accept TRUE_DIGEST");
 
     assert_eq!(read_stack_felts(&output, tail.len()), tail);
-    let witness = output
-        .precompile_witness
-        .as_ref()
-        .expect("log_deferred leaves a precompile witness");
-    assert_ne!(witness.root_unchecked(), TRUE_DIGEST);
+    assert!(output.precompile_witness.is_some(), "log_deferred leaves a precompile witness");
+    assert_ne!(output.precompile_root(), TRUE_DIGEST);
+    assert_precompile_witness_round_trips(&output);
 }
 
 pub fn expect_precompile_trap(source: &str) -> ExecutionError {

@@ -14,14 +14,15 @@
 //! 4. **Constraint agreement**: the trace and its prover-built auxiliary columns satisfy the AIR.
 
 use alloc::{boxed::Box, vec::Vec};
+use core::borrow::BorrowMut;
 use std::collections::HashMap;
 
-use miden_air::{
-    BaseAir, MidenAir, MidenMultiAir, ProverStatement, StarkConfig, Statement, config, debug,
+use miden_air::vm::{MidenMultiAir, config};
+use miden_air_definitions::vm::{
+    AeadStreamCols, ControllerCols, MidenAir,
     logup::{BusId, HasherCompressionLinkMsg, MIDEN_MAX_MESSAGE_WIDTH},
-    lookup::{Challenges, LookupFractions, LookupMessage, accumulate, build_lookup_fractions},
     trace::{
-        CHIPLETS_MODE_COL, CHIPLETS_STREAM_MODE_COL,
+        CHIPLETS_WIDTH, RowIndex,
         and8_lookup::{
             AND8_TABLE_ROWS, BYTE_PAIR_RELATION_COUNT, BytePairRelation, NUM_AND8_LOOKUP_COLS,
             RANGE_CHECK_LOOKUP_COL,
@@ -41,6 +42,13 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
+use miden_stark::{
+    StarkConfig,
+    air::{BaseAir, ProverStatement, Statement},
+    debug,
+    lookup::{Challenges, LookupFractions, LookupMessage, accumulate, build_lookup_fractions},
+};
+use miden_vm_stark::setup::config::eidos_config;
 
 use super::{
     Felt, VmTrace, build_trace_from_ops, build_trace_from_ops_with_inputs,
@@ -49,8 +57,8 @@ use super::{
 use crate::{AdviceInputs, StackInputs, operation::Operation};
 
 const EIDOS_COMPRESSION_NARROW_COLUMN_CAPACITY: usize = 2;
-const EIDOS_COMPRESSION_NARROW_LOOKUP_COLUMNS: usize = 18;
-const EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE: [usize; 2] = [2, 2];
+const EIDOS_COMPRESSION_NARROW_LOOKUP_COLUMNS: usize = 16;
+const EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE: [usize; 2] = [1, 2];
 const EIDOS_COMPRESSION_LOOKUP_COLUMNS: usize =
     EIDOS_COMPRESSION_NARROW_LOOKUP_COLUMNS + EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE.len();
 const AND8_COLUMN_SHAPE: [usize; 4] = [1, 2, 2, 2];
@@ -59,20 +67,6 @@ const AND8_PAIRED_MAIN_COLUMNS: [(usize, usize); 3] = [
     (BytePairRelation::Rot7Pos2 as usize, BytePairRelation::Rot12Pos3 as usize),
     (BytePairRelation::Rot7Pos3 as usize, RANGE_CHECK_LOOKUP_COL),
 ];
-const AEAD_STREAM_PAYLOAD_BASE_COL: usize = 2;
-const AEAD_STREAM_MODE_COL: usize = CHIPLETS_STREAM_MODE_COL;
-const AEAD_READ_LANE_BASE_OFFSET: usize = 3;
-const AEAD_LOW_SECOND_SRC_PTR_OFFSET: usize = 2;
-const CONTROLLER_S_CTRL_COL: usize = 0;
-const CONTROLLER_BASE_COL: usize = 1;
-const CONTROLLER_SELECTOR_COUNT: usize = 3;
-const CONTROLLER_STATE_WIDTH: usize = 12;
-const CONTROLLER_ROW_DATA_BASE_COL: usize =
-    CONTROLLER_BASE_COL + CONTROLLER_SELECTOR_COUNT + CONTROLLER_STATE_WIDTH;
-const CONTROLLER_S0_COL: usize = CONTROLLER_BASE_COL;
-const CONTROLLER_S2_COL: usize = CONTROLLER_BASE_COL + 2;
-const CONTROLLER_IS_START_COL: usize = CONTROLLER_ROW_DATA_BASE_COL + 2;
-const CONTROLLER_MERKLE_OR_PADDING_COL: usize = CHIPLETS_MODE_COL;
 static PANIC_HOOK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Pad/Add/Mul/Drop inside a span — same kind of ops the decoder/stack tests use, with
@@ -254,13 +248,13 @@ fn and8_aux_column_constraint_holds_at(
 #[test]
 fn lookup_constraints_close_for_tiny_span() {
     let trace = build_trace_from_ops(tiny_span(), &[]);
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(&trace);
 }
 
 #[test]
 fn lookup_constraints_close_for_compress() {
     let trace = build_trace_from_ops(vec![Operation::Compress], &[1, 2, 3, 4, 5, 6, 7, 8]);
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(&trace);
 }
 
 #[test]
@@ -277,7 +271,8 @@ fn deduplicated_compress_keeps_unit_controller_multiplicity() {
         ],
         &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 9, 10, 11, 12],
     );
-    let (_, chip_matrix, eidos_compression_matrix, _) = trace.main_trace().clone_air_matrices();
+    let (_, chip_matrix, eidos_compression_matrix, _) =
+        trace.main_trace().clone().into_air_matrices();
     let log = InteractionLog::new(&trace);
 
     let block = [1, 2, 3, 4, 5, 6, 7, 8].map(Felt::new_unchecked);
@@ -319,19 +314,19 @@ fn deduplicated_compress_keeps_unit_controller_multiplicity() {
 
     // The aggregate provider cancels both unit controller emissions in the complete four-AIR
     // ledger, and the composed constraints close as well.
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(&trace);
 }
 
 #[test]
 fn lookup_constraints_close_for_aead_stream() {
     let trace = aead_stream_trace();
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(&trace);
 }
 
 #[test]
 fn lookup_constraints_close_for_mixed_bitwise_aead_stream() {
     let trace = mixed_bitwise_aead_stream_trace();
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(&trace);
 }
 
 #[test]
@@ -341,7 +336,7 @@ fn lookup_constraints_close_for_fibonacci_span() {
         ops.extend([Operation::Swap, Operation::Dup1, Operation::Add]);
     }
     let trace = build_trace_from_ops(ops, &[0, 1]);
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(&trace);
 }
 
 #[test]
@@ -351,7 +346,7 @@ fn eidos_compression_lookup_row_shape_matches_expected_interactions() {
     const BYTE_LOOKUP_REQUESTS_PER_EIDOS_COMPRESSION_BLOCK: u64 = 964;
 
     let trace = build_trace_from_ops(tiny_span(), &[]);
-    let (_, _, eidos_compression_matrix, and8_matrix) = trace.main_trace().clone_air_matrices();
+    let (_, _, eidos_compression_matrix, and8_matrix) = trace.into_air_matrices();
 
     assert_eq!(
         eidos_compression_matrix.height() % EIDOS_COMPRESSION_CYCLE_LEN,
@@ -452,17 +447,16 @@ fn eidos_compression_lookup_row_shape_matches_expected_interactions() {
 
 fn expected_eidos_compression_narrow_interactions_at_cycle_row(cycle_row: usize) -> usize {
     match cycle_row {
-        0..=27 => 36,
-        28..=31 => 29,
+        0..=27 => 32,
+        28..=31 => 25,
         _ => unreachable!("cycle row must be in 0..{EIDOS_COMPRESSION_CYCLE_LEN}"),
     }
 }
 
 fn expected_eidos_compression_footer_interactions_at_cycle_row(cycle_row: usize) -> usize {
     match cycle_row {
-        0 => 1,
-        31 => 2,
-        1..=30 => 0,
+        31 => 1,
+        0..=30 => 0,
         _ => unreachable!("cycle row must be in 0..{EIDOS_COMPRESSION_CYCLE_LEN}"),
     }
 }
@@ -473,14 +467,13 @@ fn expected_eidos_compression_fraction_entry_range_at_cycle_row(
     compression_multiplicity: Felt,
 ) -> core::ops::RangeInclusive<usize> {
     match cycle_row {
-        0 => 37..=37,
         28..=31 if is_aead => {
             let expected = expected_eidos_compression_narrow_interactions_at_cycle_row(cycle_row)
-                + if cycle_row == 31 { 4 } else { 2 };
+                + if cycle_row == 31 { 3 } else { 2 };
             expected..=expected
         },
-        31 if compression_multiplicity != Felt::ZERO => 31..=31,
-        31 => 30..=30,
+        31 if compression_multiplicity != Felt::ZERO => 26..=26,
+        31 => 25..=25,
         _ => {
             let expected = expected_eidos_compression_narrow_interactions_at_cycle_row(cycle_row);
             expected..=expected
@@ -491,10 +484,10 @@ fn expected_eidos_compression_fraction_entry_range_at_cycle_row(
 #[test]
 fn eidos_compression_lookup_ledger_fits_narrow_slot_cap() {
     const SLOTS_PER_BATCH_COLUMN: usize = 2;
-    const COMPRESSION_DENOMINATORS_PER_BLOCK: usize = 1127;
+    const COMPRESSION_DENOMINATORS_PER_BLOCK: usize = 997;
 
     let trace = build_trace_from_ops(tiny_span(), &[]);
-    let (_, _, eidos_compression_matrix, _) = trace.main_trace().clone_air_matrices();
+    let (_, _, eidos_compression_matrix, _) = trace.into_air_matrices();
     let raw = rand::random::<[Felt; 4]>();
     let alpha = QuadFelt::new([raw[0], raw[1]]);
     let beta = QuadFelt::new([raw[2], raw[3]]);
@@ -539,18 +532,14 @@ fn eidos_compression_lookup_ledger_fits_narrow_slot_cap() {
 fn lookup_constraints_reject_tampered_aead_output_pair_lane() {
     let trace = aead_stream_trace();
     let (core_matrix, mut chip_matrix, eidos_compression_matrix, and8_matrix) =
-        trace.main_trace().clone_air_matrices();
+        trace.main_trace().clone().into_air_matrices();
 
-    let first_stream_row = aead_stream_rows(&chip_matrix)
-        .into_iter()
+    let first_stream_row = aead_stream_rows(&trace)
         .next()
         .expect("AEAD stream trace should contain stream rows");
-    mutate_chip_cell(
-        &mut chip_matrix,
-        first_stream_row,
-        AEAD_STREAM_PAYLOAD_BASE_COL + AEAD_READ_LANE_BASE_OFFSET,
-        Felt::ONE,
-    );
+    let row = &mut chip_matrix.values.as_chunks_mut::<CHIPLETS_WIDTH>().0[first_stream_row];
+    let stream: &mut AeadStreamCols<Felt> = row[3..23].borrow_mut();
+    stream.read_mut().lane_base += Felt::ONE;
 
     assert_trace_constraints_reject(
         &trace,
@@ -565,17 +554,14 @@ fn lookup_constraints_reject_tampered_aead_output_pair_lane() {
 fn lookup_constraints_reject_tampered_aead_request_source_pointer() {
     let trace = aead_stream_trace();
     let (core_matrix, mut chip_matrix, eidos_compression_matrix, and8_matrix) =
-        trace.main_trace().clone_air_matrices();
+        trace.main_trace().clone().into_air_matrices();
 
-    let stream_rows = aead_stream_rows(&chip_matrix);
-    assert!(stream_rows.len() >= 3, "AEAD stream trace should contain low-second rows");
-    let first_low_second_row = stream_rows[2];
-    mutate_chip_cell(
-        &mut chip_matrix,
-        first_low_second_row,
-        AEAD_STREAM_PAYLOAD_BASE_COL + AEAD_LOW_SECOND_SRC_PTR_OFFSET,
-        Felt::ONE,
-    );
+    let first_low_second_row = aead_stream_rows(&trace)
+        .nth(2)
+        .expect("AEAD stream trace should contain low-second rows");
+    let row = &mut chip_matrix.values.as_chunks_mut::<CHIPLETS_WIDTH>().0[first_low_second_row];
+    let stream: &mut AeadStreamCols<Felt> = row[3..23].borrow_mut();
+    stream.low_second_mut().src_ptr += Felt::ONE;
 
     assert_trace_constraints_reject(
         &trace,
@@ -590,13 +576,26 @@ fn lookup_constraints_reject_tampered_aead_request_source_pointer() {
 fn lookup_constraints_reject_tampered_merkle_start_flag() {
     let trace = mpverify_trace();
     let (core_matrix, mut chip_matrix, eidos_compression_matrix, and8_matrix) =
-        trace.main_trace().clone_air_matrices();
+        trace.main_trace().clone().into_air_matrices();
 
-    let first_merkle_start = merkle_start_rows(&chip_matrix)
-        .into_iter()
-        .next()
+    let main = trace.main_trace();
+    let first_merkle_start = (0..main.chiplets_height())
+        .map(RowIndex::from)
+        .find(|&row| {
+            if !main.is_controller_row(row) {
+                return false;
+            }
+            let controller = main.chiplet_cols(row).controller_cols();
+            controller.merkle_or_padding == Felt::ONE
+                && controller.s0 == Felt::ONE
+                && controller.s2 == Felt::ONE
+                && controller.merkle_is_start() == Felt::ONE
+        })
         .expect("MPVERIFY trace should contain a Merkle start row");
-    mutate_chip_cell(&mut chip_matrix, first_merkle_start, CONTROLLER_IS_START_COL, -Felt::ONE);
+    let row =
+        &mut chip_matrix.values.as_chunks_mut::<CHIPLETS_WIDTH>().0[first_merkle_start.as_usize()];
+    let controller: &mut ControllerCols<Felt> = row[1..].borrow_mut();
+    controller.row_data[2] -= Felt::ONE;
 
     assert_trace_constraints_reject(
         &trace,
@@ -718,7 +717,7 @@ fn assert_eidos_compression_oracle_coverage(
 
 /// Checks the honest trace against the complete composed AIR, including global lookup closure.
 pub(super) fn assert_global_lookup_balance(trace: &VmTrace) {
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(trace);
 }
 
 /// Checks that caller-supplied matrices change the prover-emitted lookup multiset.
@@ -736,7 +735,7 @@ pub(super) fn assert_global_lookup_balance_rejects(
     expected_bus: &str,
 ) {
     let (honest_core, honest_chiplets, honest_eidos, honest_and8) =
-        trace.main_trace().clone_air_matrices();
+        trace.main_trace().clone().into_air_matrices();
     let raw = rand::random::<[Felt; 4]>();
     let challenges = Challenges::<QuadFelt>::new(
         QuadFelt::new([raw[0], raw[1]]),
@@ -812,35 +811,9 @@ fn lookup_multiplicities(
     }
     totals
 }
-fn aead_stream_rows(chip_matrix: &RowMajorMatrix<Felt>) -> Vec<usize> {
-    let width = chip_matrix.width();
-    (0..chip_matrix.height())
-        .filter(|&row| {
-            let base = row * width;
-            chip_matrix.values[base] == Felt::ZERO
-                && chip_matrix.values[base + 1] == Felt::ZERO
-                && chip_matrix.values[base + AEAD_STREAM_MODE_COL] == Felt::ONE
-        })
-        .collect()
-}
-
-fn merkle_start_rows(chip_matrix: &RowMajorMatrix<Felt>) -> Vec<usize> {
-    let width = chip_matrix.width();
-    (0..chip_matrix.height())
-        .filter(|&row| {
-            let base = row * width;
-            chip_matrix.values[base + CONTROLLER_S_CTRL_COL] == Felt::ONE
-                && chip_matrix.values[base + CONTROLLER_MERKLE_OR_PADDING_COL] == Felt::ONE
-                && chip_matrix.values[base + CONTROLLER_S0_COL] == Felt::ONE
-                && chip_matrix.values[base + CONTROLLER_S2_COL] == Felt::ONE
-                && chip_matrix.values[base + CONTROLLER_IS_START_COL] == Felt::ONE
-        })
-        .collect()
-}
-
-fn mutate_chip_cell(chip_matrix: &mut RowMajorMatrix<Felt>, row: usize, col: usize, delta: Felt) {
-    let width = chip_matrix.width();
-    chip_matrix.values[row * width + col] += delta;
+fn aead_stream_rows(trace: &VmTrace) -> impl Iterator<Item = usize> + '_ {
+    let main = trace.main_trace();
+    (0..main.chiplets_height()).filter(move |&row| main.is_aead_stream_row(row.into()))
 }
 
 /// Asserts that caller-supplied Eidos per-AIR matrices violate at least one AIR constraint.
@@ -856,16 +829,19 @@ pub(super) fn assert_trace_constraints_reject(
     and8_matrix: RowMajorMatrix<Felt>,
 ) {
     let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
-    let statement =
-        Statement::<Felt, QuadFelt, _>::new(MidenMultiAir::new(), public_values, aux_inputs)
-            .expect("valid statement inputs");
+    let statement = Statement::<Felt, QuadFelt, _>::new(
+        MidenMultiAir::new(),
+        vec![(0, public_values)],
+        aux_inputs,
+    )
+    .expect("valid statement inputs");
     let prover_statement = ProverStatement::new(
         statement,
         vec![core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix],
     )
     .expect("valid trace shapes");
 
-    let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+    let config = eidos_config(config::pcs_params(), config::RELATION_DIGEST);
     let _guard = PANIC_HOOK_LOCK.lock().expect("panic hook lock poisoned");
     let panic_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
@@ -897,7 +873,7 @@ fn build_lookup_fractions_run_for_mixed_bitwise_aead_stream() {
 #[test]
 fn and8_columns_bind_every_aux_column_through_the_cyclic_wrap() {
     let trace = build_trace_from_ops(tiny_span(), &[]);
-    let (_, _, _, and8_matrix) = trace.main_trace().clone_air_matrices();
+    let (_, _, _, and8_matrix) = trace.into_air_matrices();
     let preprocessed = MidenAir::AND8_LOOKUP
         .preprocessed_trace()
         .expect("And8 AIR must declare its fixed byte-pair table");
@@ -947,7 +923,7 @@ fn and8_columns_bind_every_aux_column_through_the_cyclic_wrap() {
 fn and8_paired_columns_reject_opposite_multiplicity_deltas_across_domains() {
     let trace = build_trace_from_ops(tiny_span(), &[]);
     let (core_matrix, chip_matrix, eidos_compression_matrix, honest_and8_matrix) =
-        trace.main_trace().clone_air_matrices();
+        trace.main_trace().clone().into_air_matrices();
     let preprocessed = MidenAir::AND8_LOOKUP
         .preprocessed_trace()
         .expect("And8 AIR must declare its fixed byte-pair table");
@@ -1015,7 +991,7 @@ fn and8_paired_columns_reject_opposite_multiplicity_deltas_across_domains() {
 
 fn assert_lookup_fractions_run(label: &str, trace: &VmTrace) {
     let (core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
-        trace.main_trace().clone_air_matrices();
+        trace.main_trace().clone().into_air_matrices();
     // Core has no periodic columns.
     let chip_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::CHIPLETS);
     let eidos_compression_periodic =
@@ -1088,5 +1064,5 @@ fn assert_lookup_fractions_run(label: &str, trace: &VmTrace) {
     );
     let _ = accumulate(&and8_fractions);
 
-    trace.check_constraints();
+    miden_vm_stark::debug::check_constraints(trace);
 }

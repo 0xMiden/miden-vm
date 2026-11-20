@@ -1,7 +1,7 @@
 use crate::{
     mast::{
-        BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastForestContributor,
-        MastForestError, MastNode, MastNodeBuilder, MastNodeId, node::MastNodeExt,
+        BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastForestContributor, MastNode,
+        MastNodeBuilder, MastNodeId, node::MastNodeExt,
     },
     utils::LookupByIdx,
 };
@@ -15,14 +15,14 @@ pub fn build_node_with_remapped_ids<NMap>(
     node: MastNode,
     source_forest: &MastForest,
     node_remapping: &NMap,
-) -> Result<MastNodeBuilder, MastForestError>
+) -> MastNodeBuilder
 where
     NMap: LookupByIdx<MastNodeId, MastNodeId>,
 {
     let _ = node_id;
 
     // Build node-specific builder with remapped children.
-    let builder = match node {
+    match node {
         MastNode::Join(join_node) => {
             let builder = join_node.to_builder(source_forest).remap_children(node_remapping);
             MastNodeBuilder::Join(builder)
@@ -56,7 +56,5 @@ where
             let builder = ExternalNodeBuilder::new(external_node.digest());
             MastNodeBuilder::External(builder)
         },
-    };
-
-    Ok(builder)
+    }
 }

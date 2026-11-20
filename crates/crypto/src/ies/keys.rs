@@ -3,7 +3,9 @@ use core::fmt;
 
 use rand::CryptoRng;
 
-use super::{IesError, IesScheme, crypto_box::CryptoBox, message::SealedMessage};
+use super::{
+    IesError, IesScheme, crypto_box::CryptoBox, ecgfp5_eidos::adapter, message::SealedMessage,
+};
 use crate::{
     Felt,
     aead::{aead_eidos::AeadEidos, xchacha::XChaCha},
@@ -11,7 +13,7 @@ use crate::{
         ecdsa_k256_keccak::PUBLIC_KEY_BYTES as K256_PUBLIC_KEY_BYTES,
         eddsa_25519_sha512::PUBLIC_KEY_BYTES as X25519_PUBLIC_KEY_BYTES,
     },
-    ecdh::{KeyAgreementScheme, k256::K256, x25519::X25519},
+    ecdh::{KeyAgreementScheme, ecgfp5, k256::K256, x25519::X25519},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -45,6 +47,9 @@ macro_rules! impl_seal_bytes_with_associated_data {
             associated_data: &[u8],
         ) -> Result<SealedMessage, IesError> {
             match self {
+                SealingKey::Ecgfp5Eidos(key) => {
+                    adapter::seal_bytes(key, rng, plaintext, associated_data)
+                },
                 $(
                     $variant(key) => {
                         let scheme = self.scheme();
@@ -82,6 +87,9 @@ macro_rules! impl_seal_elements_with_associated_data {
             associated_data: &[Felt],
         ) -> Result<SealedMessage, IesError> {
             match self {
+                SealingKey::Ecgfp5Eidos(key) => {
+                    adapter::seal_elements(key, rng, plaintext, associated_data)
+                },
                 $(
                     $variant(key) => {
                         let scheme = self.scheme();
@@ -131,6 +139,9 @@ macro_rules! impl_unseal_bytes_with_associated_data {
             let SealedMessage { ephemeral_key, ciphertext } = sealed_message;
 
             match (self, ephemeral_key) {
+                (UnsealingKey::Ecgfp5Eidos(key), EphemeralPublicKey::Ecgfp5Eidos(ephemeral)) => {
+                    adapter::open_bytes(key, ephemeral, &ciphertext, associated_data)
+                },
                 $(
                     ($variant(key), $ephemeral_variant(ephemeral)) => {
                         <$crypto_box>::unseal_bytes_with_associated_data(
@@ -175,6 +186,9 @@ macro_rules! impl_unseal_elements_with_associated_data {
             let SealedMessage { ephemeral_key, ciphertext } = sealed_message;
 
             match (self, ephemeral_key) {
+                (UnsealingKey::Ecgfp5Eidos(key), EphemeralPublicKey::Ecgfp5Eidos(ephemeral)) => {
+                    adapter::open_elements(key, ephemeral, &ciphertext, associated_data)
+                },
                 $(
                     ($variant(key), $ephemeral_variant(ephemeral)) => {
                         <$crypto_box>::unseal_elements_with_associated_data(
@@ -206,6 +220,7 @@ pub enum SealingKey {
     X25519XChaCha20Poly1305(crate::dsa::eddsa_25519_sha512::PublicKey),
     K256AeadEidos(crate::dsa::ecdsa_k256_keccak::PublicKey),
     X25519AeadEidos(crate::dsa::eddsa_25519_sha512::PublicKey),
+    Ecgfp5Eidos(ecgfp5::PublicKey),
 }
 
 impl SealingKey {
@@ -216,6 +231,7 @@ impl SealingKey {
             SealingKey::X25519XChaCha20Poly1305(_) => IesScheme::X25519XChaCha20Poly1305,
             SealingKey::K256AeadEidos(_) => IesScheme::K256AeadEidos,
             SealingKey::X25519AeadEidos(_) => IesScheme::X25519AeadEidos,
+            SealingKey::Ecgfp5Eidos(_) => IesScheme::Ecgfp5Eidos,
         }
     }
 
@@ -273,6 +289,7 @@ impl Serializable for SealingKey {
             SealingKey::X25519XChaCha20Poly1305(key) => key.write_into(target),
             SealingKey::K256AeadEidos(key) => key.write_into(target),
             SealingKey::X25519AeadEidos(key) => key.write_into(target),
+            SealingKey::Ecgfp5Eidos(key) => key.write_into(target),
         }
     }
 }
@@ -299,6 +316,9 @@ impl Deserializable for SealingKey {
                 let key = crate::dsa::eddsa_25519_sha512::PublicKey::read_from(source)?;
                 Ok(SealingKey::X25519AeadEidos(key))
             },
+            IesScheme::Ecgfp5Eidos => {
+                Ok(SealingKey::Ecgfp5Eidos(ecgfp5::PublicKey::read_from(source)?))
+            },
         }
     }
 }
@@ -312,6 +332,7 @@ pub enum UnsealingKey {
     X25519XChaCha20Poly1305(crate::dsa::eddsa_25519_sha512::KeyExchangeKey),
     K256AeadEidos(crate::dsa::ecdsa_k256_keccak::KeyExchangeKey),
     X25519AeadEidos(crate::dsa::eddsa_25519_sha512::KeyExchangeKey),
+    Ecgfp5Eidos(ecgfp5::SecretKey),
 }
 
 impl UnsealingKey {
@@ -322,6 +343,7 @@ impl UnsealingKey {
             UnsealingKey::X25519XChaCha20Poly1305(_) => IesScheme::X25519XChaCha20Poly1305,
             UnsealingKey::K256AeadEidos(_) => IesScheme::K256AeadEidos,
             UnsealingKey::X25519AeadEidos(_) => IesScheme::X25519AeadEidos,
+            UnsealingKey::Ecgfp5Eidos(_) => IesScheme::Ecgfp5Eidos,
         }
     }
 
@@ -376,6 +398,7 @@ impl Serializable for UnsealingKey {
             UnsealingKey::X25519XChaCha20Poly1305(key) => key.write_into(target),
             UnsealingKey::K256AeadEidos(key) => key.write_into(target),
             UnsealingKey::X25519AeadEidos(key) => key.write_into(target),
+            UnsealingKey::Ecgfp5Eidos(key) => key.write_into(target),
         }
     }
 }
@@ -402,6 +425,9 @@ impl Deserializable for UnsealingKey {
                 let key = crate::dsa::eddsa_25519_sha512::KeyExchangeKey::read_from(source)?;
                 Ok(UnsealingKey::X25519AeadEidos(key))
             },
+            IesScheme::Ecgfp5Eidos => {
+                Ok(UnsealingKey::Ecgfp5Eidos(ecgfp5::SecretKey::read_from(source)?))
+            },
         }
     }
 }
@@ -416,6 +442,7 @@ pub(super) enum EphemeralPublicKey {
     X25519XChaCha20Poly1305(crate::ecdh::x25519::EphemeralPublicKey),
     K256AeadEidos(crate::ecdh::k256::EphemeralPublicKey),
     X25519AeadEidos(crate::ecdh::x25519::EphemeralPublicKey),
+    Ecgfp5Eidos(ecgfp5::PublicKey),
 }
 
 impl EphemeralPublicKey {
@@ -426,6 +453,7 @@ impl EphemeralPublicKey {
             EphemeralPublicKey::X25519XChaCha20Poly1305(_) => IesScheme::X25519XChaCha20Poly1305,
             EphemeralPublicKey::K256AeadEidos(_) => IesScheme::K256AeadEidos,
             EphemeralPublicKey::X25519AeadEidos(_) => IesScheme::X25519AeadEidos,
+            EphemeralPublicKey::Ecgfp5Eidos(_) => IesScheme::Ecgfp5Eidos,
         }
     }
 
@@ -436,6 +464,7 @@ impl EphemeralPublicKey {
             EphemeralPublicKey::X25519XChaCha20Poly1305(key) => key.to_bytes(),
             EphemeralPublicKey::K256AeadEidos(key) => key.to_bytes(),
             EphemeralPublicKey::X25519AeadEidos(key) => key.to_bytes(),
+            EphemeralPublicKey::Ecgfp5Eidos(key) => key.to_bytes().to_vec(),
         }
     }
 
@@ -446,6 +475,7 @@ impl EphemeralPublicKey {
             IesScheme::X25519XChaCha20Poly1305 | IesScheme::X25519AeadEidos => {
                 X25519_PUBLIC_KEY_BYTES
             },
+            IesScheme::Ecgfp5Eidos => 40,
         };
 
         if bytes.len() != expected_len {
@@ -453,6 +483,14 @@ impl EphemeralPublicKey {
         }
 
         match scheme {
+            IesScheme::Ecgfp5Eidos => {
+                let bytes = bytes
+                    .try_into()
+                    .map_err(|_| IesError::EphemeralPublicKeyDeserializationFailed)?;
+                let key = ecgfp5::PublicKey::from_bytes(bytes)
+                    .map_err(|_| IesError::EphemeralPublicKeyDeserializationFailed)?;
+                Ok(EphemeralPublicKey::Ecgfp5Eidos(key))
+            },
             IesScheme::K256XChaCha20Poly1305 => {
                 let key =
                     <K256 as KeyAgreementScheme>::EphemeralPublicKey::read_from_bytes_with_budget(
@@ -522,14 +560,17 @@ mod key_arbitrary {
         k256_key_exchange_key(seed).public_key()
     }
 
+    fn ecgfp5_public_key(seed: [u8; 32]) -> crate::ecdh::ecgfp5::PublicKey {
+        let mut rng = ChaCha20Rng::from_seed(seed);
+        crate::ecdh::ecgfp5::SecretKey::with_rng(&mut rng).public_key()
+    }
+
     impl Arbitrary for SealingKey {
         type Parameters = ();
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            // All four scheme arms wrap public keys that must survive point decompression on
-            // read: K256 keys are derived from a seeded key-exchange key, X25519 keys reuse the
-            // eddsa PublicKey strategy (derived from a generated secret).
+            // Derive public keys from valid secrets so they pass point validation on read.
             prop_oneof![
                 (0u64..)
                     .prop_map(|a| Self::K256XChaCha20Poly1305(k256_public_key(seed32(a))))
@@ -537,6 +578,7 @@ mod key_arbitrary {
                 any::<Ed25519PublicKey>().prop_map(Self::X25519XChaCha20Poly1305).boxed(),
                 (0u64..).prop_map(|a| Self::K256AeadEidos(k256_public_key(seed32(a)))).boxed(),
                 any::<Ed25519PublicKey>().prop_map(Self::X25519AeadEidos).boxed(),
+                (0u64..).prop_map(|a| Self::Ecgfp5Eidos(ecgfp5_public_key(seed32(a)))).boxed(),
             ]
             .boxed()
         }
@@ -547,8 +589,6 @@ mod key_arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            // Both per-scheme keys are derived from deterministically seeded ephemeral secrets, so
-            // they survive the reader's point validation.
             prop_oneof![
                 any::<crate::ecdh::k256::EphemeralPublicKey>()
                     .prop_map(Self::K256XChaCha20Poly1305)
@@ -562,6 +602,7 @@ mod key_arbitrary {
                 any::<crate::ecdh::x25519::EphemeralPublicKey>()
                     .prop_map(Self::X25519AeadEidos)
                     .boxed(),
+                (0u64..).prop_map(|a| Self::Ecgfp5Eidos(ecgfp5_public_key(seed32(a)))).boxed(),
             ]
             .boxed()
         }

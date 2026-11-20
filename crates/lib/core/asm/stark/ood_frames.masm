@@ -1,40 +1,32 @@
 use {
     DEEP_ALPHA_ADVICE_PTR,
     HOOK_PROCESS_ROW_OOD_EVALUATIONS_PTR,
-    OOD_EVALUATIONS_ADDRESS_PTR,
+    OOD_EVALUATIONS_PTR,
     OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR,
+    OOD_NEXT_FIXED_TERM_C0_PTR,
+    OOD_NEXT_FIXED_TERM_C1_PTR,
     RANDOM_COIN_CV_PTR,
     RANDOM_COIN_INPUT_LENGTH_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::types
 use miden::core::stark::random_coin
 
-#! Loads the execution trace and the quotient trace evaluation frames.
+#! Loads, absorbs and Horner-folds the current and next OOD rows from advice.
 #!
-#! This also computes Q^z(alpha) and Q^gz(alpha) where:
+#! Each row contains preprocessed, main, auxiliary and quotient evaluations in the relation's
+#! transcript order. For row values r[0..w), its accumulator is
+#! `Q(alpha) = sum_{i=0}^{w-1} r[i] * alpha^(w-1-i)`.
+#! Stores `[-Q_current(alpha), -Q_next(alpha)]` as two extension values at
+#! `OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR`.
 #!
-#! Q^z(alpha) = (q_z_0, q_z_1) = \sum_{i=0}^{n+m+l} S_i * alpha^{n+m+l-i}
+#! The row hook scatters the evaluations to the relation's canonical ACE addresses while
+#! retaining transcript order for hashing and folding. Its digest and dispatch table must be staged.
+#! The first row starts at `OOD_EVALUATIONS_PTR`; the second follows it.
+#! The transcript absorb buffer must be empty. The advised alpha is stored as a padded word at
+#! `DEEP_ALPHA_ADVICE_PTR` and later checked against the transcript-derived column challenge.
 #!
-#! and
-#!
-#! Q^gz(alpha) = (q_gz_0, q_gz_1) = \sum_{i=0}^{n+m+l} T_i * alpha^{n+m+l-i}
-#!
-#! where:
-#!
-#! 1. n, m and l are the widths of the main segment, auxiliary segment and constraint composition
-#!    traces, respectively.
-#! 2. S_i are the evaluations of columns in the main segment, auxiliary segment and constraint
-#!    composition at the out-of-domain point z.
-#! 3. T_i are the evaluations of columns in the main segment, auxiliary segment and constraint
-#!    composition at the out-of-domain point gz.
-#! 4. alpha is the DEEP composition challenge.
-#!
-#! The negated evaluations are stored as one word at OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR.
-#!
-#! Inputs:  []
-#! Outputs: []
-#!
-#! Invocation: exec
+#! Inputs:  [...]
+#! Outputs: [...]
 pub proc load_and_horner_eval_ood_frames()
     # --- Load the random challenge used in computing the DEEP polynomial -----
 
@@ -42,92 +34,84 @@ pub proc load_and_horner_eval_ood_frames()
     # in one pass. random_coin::generate_deep_composition_random_coefficients checks it against
     # the challenge drawn from the transcript.
 
-    ## Load the random challenge non-deterministically
     adv_push adv_push
-    # => [alpha_0, alpha_1]
+    # => [alpha_0, alpha_1, ...]
 
-    # Save the random challenge
+    # Native Horner reads alpha as an aligned word with two zero padding cells.
     push.0.0 movup.3 movup.3
     mem_storew_le.DEEP_ALPHA_ADVICE_PTR dropw
-    # => []
+    # => [...]
 
     # --- Compute Q^z(alpha) --------------------------------------------------
 
-    ## 1) Set up the stack for `horner_eval_ext` to compute Q^z(alpha)
-
-    ### a) Set up the initial accumulator and the pointers to alpha and a pointer to some memory
-    ###    region to which we save the OOD.
+    # Initialize the destination cursor and zero accumulator for the current row.
     push.0.0
     push.DEEP_ALPHA_ADVICE_PTR
-    mem_load.OOD_EVALUATIONS_ADDRESS_PTR
-    # => [ood_evaluations_ptr, deep_alpha_advice_ptr, 0, 0]
+    push.OOD_EVALUATIONS_PTR
+    # => [ood_evaluations_ptr, deep_alpha_advice_ptr, 0, 0, ...]
 
-    ## 2) Process the fully aligned OOD `current` evaluations at z of the execution trace
-    ##    and constraints polynomial evaluations. The three zero words are scratch slots; the
-    ##    concrete row processor overwrites the first two words with each OOD block and
-    ##    updates the transcript CV kept in the third word.
+    # The hook overwrites the two rate words with each advice block. The third word carries
+    # the live transcript CV across both rows.
     mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     assertz.err="OOD row absorption requires an empty transcript buffer"
     padw mem_loadw_le.RANDOM_COIN_CV_PTR
     padw padw
-    # => [0, 0, cv, ood_frame_ptr, alpha_ptr, 0, 0]
+    # => [scratch(8), cv(4), ood_frame_ptr, alpha_ptr, 0, 0, ...]
 
     ### a) Process the `current` OOD evaluations
     exec.process_row_ood_evaluations
-    # => [Y, Y, cv, ood_frame_ptr, alpha_ptr, acc0, acc1]
+    # => [rate(8), cv(4), next_row_ptr, alpha_ptr, acc0, acc1, ...]
 
     ### b) Save -Q^z(alpha)
     swapw.3
-    # => [ood_frame_ptr, alpha_ptr, acc0, acc1, Y, cv, Y]
+    # => [next_row_ptr, alpha_ptr, acc0, acc1, scratch(4), cv(4), scratch(4), ...]
     movup.3 neg
     movup.3 neg
     push.0.0
-    movup.2
-    movup.3
-    swap.1
+    movdn.3 movdn.3
     mem_storew_le.OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR
     dropw
     push.0.0
     movdn.3
     movdn.3
-    # => [ood_frame_ptr, alpha_ptr, 0, 0, Y, cv, Y]
+    # => [next_row_ptr, alpha_ptr, 0, 0, scratch(4), cv(4), scratch(4), ...]
 
     # --- Compute Q^gz(alpha) -------------------------------------------------
 
     # Load the `next` trace polynomials OOD evaluations.
     swapw.3
-    # => [Y, Y, cv, ood_frame_ptr, alpha_ptr, 0, 0]
+    # => [scratch(8), cv(4), next_row_ptr, alpha_ptr, 0, 0, ...]
     exec.process_row_ood_evaluations
-    # => [Y, Y, cv, ood_frame_ptr, alpha_ptr, acc0, acc1]
+    # => [rate(8), cv(4), row_end_ptr, alpha_ptr, acc0, acc1, ...]
 
     # Save the transcript CV and remove the row-processing scratch words.
     swapw.2
     mem_storew_le.RANDOM_COIN_CV_PTR
     dropw dropw dropw
-    # => [ood_frame_ptr, alpha_ptr, acc0, acc1]
+    # => [rows_end_ptr, alpha_ptr, acc0, acc1, ...]
 
     exec.random_coin::eidos_clear_buffer
     exec.random_coin::eidos_enter_absorbing
 
     # Negate Q^gz(alpha) and save it
     drop drop
-    # => [acc0, acc1]
+    # => [acc0, acc1, ...]
     neg
-    push.OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR add.2 mem_store
-    # => [acc1]
+    mem_store.OOD_NEXT_FIXED_TERM_C0_PTR
+    # => [acc1, ...]
     neg
-    push.OOD_FIXED_TERM_HORNER_EVALUATIONS_PTR add.3 mem_store
-    # => []
+    mem_store.OOD_NEXT_FIXED_TERM_C1_PTR
+    # => [...]
 end
 
-#! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
+#! Dispatches one complete OOD row to the relation's row processor.
 #!
-#! Takes scratch words, a pointer, and a Horner accumulator. The concrete verifier loads the OOD
-#! evaluations from advice, stores them at `ptr`, absorbs them into the transcript, and updates
-#! the accumulator.
+#! The hook consumes row advice, scatters it to canonical addresses, and advances ptr past the
+#! row. Hashing and Horner folding follow advice order. The supplied CV is live state, and
+#! alpha_ptr addresses the padded column challenge. Returns the updated CV and Horner accumulator.
 #!
-#! Inputs:  [scratch0, scratch1, scratch2, ptr, alpha_ptr, acc0, acc1]
-#! Outputs: [scratch0, scratch1, scratch2, ptr, alpha_ptr, acc0', acc1']
+#! Inputs:  [scratch(8), cv(4), ptr, alpha_ptr, acc0, acc1, ...]
+#! Outputs: [rate(8), cv'(4), row_end_ptr, alpha_ptr, acc0', acc1', ...]
 proc process_row_ood_evaluations(
     state: types::EidosState,
     horner: types::HornerState,

@@ -15,6 +15,8 @@ use crate::{
 };
 
 mod serialization;
+mod witness;
+pub use witness::SmtWitness;
 #[cfg(test)]
 mod tests;
 
@@ -99,6 +101,9 @@ mod arbitrary {
 
 pub use serialization::UniqueNodes;
 
+/// Complete inner nodes on a path from a leaf to the root, ordered leaf-to-root.
+type PathNodes = [InnerNode; SMT_DEPTH as usize];
+
 /// A partial version of an [`super::Smt`].
 ///
 /// This type can track a subset of the key-value pairs of a full [`super::Smt`] and allows for
@@ -177,13 +182,12 @@ impl PartialSmt {
             return Ok(Self::default());
         };
 
-        // Add the first path to an empty partial SMT without checking that the existing root
-        // matches the new one. This sets the expected root to the root of the first proof and all
-        // subsequently added proofs must match it.
-        let mut partial_smt = Self::default();
+        // Add the first path to a fresh partial SMT. Its computed root becomes the expected root,
+        // and all subsequently added proofs must match it.
         let (path, leaf) = first_proof.into_parts();
-        let path_root = partial_smt.add_path_unchecked(leaf, path);
-        partial_smt.root = path_root;
+        let (path_nodes, path_root) = Self::compute_path_nodes(&leaf, &path)?;
+        let mut partial_smt = Self::new(path_root);
+        partial_smt.commit_path(leaf, &path_nodes);
 
         for proof in proofs {
             partial_smt.add_proof(proof)?;
@@ -246,7 +250,7 @@ impl PartialSmt {
 
     /// Returns an iterator over the [`InnerNode`] and the respective [`NodeIndex`] of the
     /// [`PartialSmt`].
-    pub fn inner_node_indices(&self) -> impl Iterator<Item = (NodeIndex, InnerNode)> + '_ {
+    pub(crate) fn inner_node_indices(&self) -> impl Iterator<Item = (NodeIndex, InnerNode)> + '_ {
         self.inner_nodes.iter().map(|(idx, inner)| (*idx, inner.clone()))
     }
 
@@ -289,7 +293,8 @@ impl PartialSmt {
     /// Note that if a partial SMT does not track leaves, its root is not necessarily the empty SMT
     /// root, since it could have been constructed from a different root but without tracking any
     /// leaves.
-    pub fn tracks_leaves(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn tracks_leaves(&self) -> bool {
         !self.leaves.is_empty()
     }
 
@@ -363,20 +368,24 @@ impl PartialSmt {
     /// # Errors
     ///
     /// Returns an error if:
+    /// - the path does not have [`SMT_DEPTH`] nodes.
     /// - the new root after the insertion of the leaf and the path does not match the existing
-    ///   root. If an error is returned, the tree is left in an inconsistent state.
+    ///   root.
+    ///
+    /// If an error is returned, the tree is unchanged.
     pub fn add_path(&mut self, leaf: SmtLeaf, path: SparseMerklePath) -> Result<(), MerkleError> {
-        let path_root = self.add_path_unchecked(leaf, path);
+        let (path_nodes, path_root) = Self::compute_path_nodes(&leaf, &path)?;
 
         // Check if the newly added merkle path is consistent with the existing tree. If not, the
-        // merkle path was invalid or computed against another tree.
-        if self.root() != path_root {
+        // merkle path was invalid or computed against another tree. Nothing has been mutated yet.
+        if self.root != path_root {
             return Err(MerkleError::ConflictingRoots {
-                expected_root: self.root(),
+                expected_root: self.root,
                 actual_root: path_root,
             });
         }
 
+        self.commit_path(leaf, &path_nodes);
         Ok(())
     }
 
@@ -503,8 +512,17 @@ impl PartialSmt {
     /// # Errors
     ///
     /// - [`DeserializationError::InvalidValue`] if a leaf's map key does not match its embedded
-    ///   index, or the reconstructed tree fails validation.
+    ///   index, a frontier node overlaps a supplied descendant, or the reconstructed tree fails
+    ///   validation.
     pub fn from_unique_nodes(unique_nodes: UniqueNodes) -> Result<Self, DeserializationError> {
+        Self::from_unique_nodes_with_limit(unique_nodes, usize::MAX)
+    }
+
+    /// Limits reconstructed parents, including canonical empty parents which are not retained.
+    fn from_unique_nodes_with_limit(
+        unique_nodes: UniqueNodes,
+        mut remaining_nodes: usize,
+    ) -> Result<Self, DeserializationError> {
         unique_nodes.validate()?;
 
         let mut smt = Self::new(unique_nodes.root);
@@ -533,7 +551,22 @@ impl PartialSmt {
             // next layer is built.
             let parents = active_nodes.into_iter().map(NodeIndex::parent).collect::<BTreeSet<_>>();
 
+            remaining_nodes = remaining_nodes.checked_sub(parents.len()).ok_or_else(|| {
+                DeserializationError::InvalidValue(
+                    "SMT witness reconstruction limit exceeded".into(),
+                )
+            })?;
+
             for parent in &parents {
+                // A frontier hash must not mask reconstructed descendants, including empty
+                // parents that insertion would discard before the next layer's hash lookup.
+                if unique_nodes.nodes.contains_key(parent) {
+                    return Err(DeserializationError::InvalidValue(format!(
+                        "SMT frontier node at depth {} position {} overlaps a descendant",
+                        parent.depth(),
+                        parent.position(),
+                    )));
+                }
                 // A child is either a leaf, a node rebuilt on the prior pass, a stored sparse node,
                 // or an omitted empty subtree root. The lookup helpers handle the last two cases.
                 let [left, right] = [parent.left_child(), parent.right_child()].map(|child| {
@@ -545,7 +578,15 @@ impl PartialSmt {
                             .unwrap_or_else(|| unique_nodes.get_node_hash(child))
                     }
                 });
-                smt.insert_inner_node(*parent, InnerNode { left, right });
+                let inner_node = InnerNode { left, right };
+                // Check before insertion: canonical empty parents are not retained, so the
+                // later validation cannot compare an empty reconstructed root to the claimed root.
+                if parent.is_root() && inner_node.hash() != smt.root {
+                    return Err(DeserializationError::InvalidValue(
+                        "reconstructed SMT root does not match expected root".into(),
+                    ));
+                }
+                smt.insert_inner_node(*parent, inner_node);
             }
 
             if child_depth > 1 {
@@ -555,8 +596,11 @@ impl PartialSmt {
         }
 
         for (position, leaf) in unique_nodes.leaves {
-            smt.num_entries += leaf.num_entries();
-            smt.leaves.insert(position, leaf);
+            let num_entries = leaf.num_entries();
+            if num_entries > 0 {
+                smt.num_entries += num_entries;
+                smt.leaves.insert(position, leaf);
+            }
         }
 
         smt.validate()?;
@@ -567,16 +611,47 @@ impl PartialSmt {
     // PRIVATE HELPERS
     // --------------------------------------------------------------------------------------------
 
-    /// Adds a leaf and its sparse merkle path to this [`PartialSmt`] and returns the root of the
-    /// inserted path.
+    /// Computes the complete inner nodes and the root that `leaf` and `path` imply, without
+    /// mutating `self`.
     ///
-    /// This does not check that the path root matches the existing root of the tree and if so, the
-    /// tree is left in an inconsistent state. This state can be made consistent again by setting
-    /// the root of the SMT to the path root.
-    fn add_path_unchecked(&mut self, leaf: SmtLeaf, path: SparseMerklePath) -> Word {
-        let mut current_index = leaf.index().index;
+    /// Returns the inner nodes on the path, ordered leaf-to-root, and the resulting root. The path
+    /// must have exactly [`SMT_DEPTH`] nodes.
+    fn compute_path_nodes(
+        leaf: &SmtLeaf,
+        path: &SparseMerklePath,
+    ) -> Result<(PathNodes, Word), MerkleError> {
+        if path.depth() != SMT_DEPTH {
+            return Err(MerkleError::InvalidPathLength(SMT_DEPTH as usize));
+        }
 
-        let mut node_hash_at_current_index = leaf.hash();
+        let mut current_index = leaf.index().index;
+        let mut node_hash = leaf.hash();
+        let mut path_nodes: PathNodes = core::array::from_fn(|_| InnerNode::default());
+
+        for (path_node, sibling_hash) in path_nodes.iter_mut().zip(path.iter()) {
+            // Find the index of the sibling node and compute whether it is a left or right child.
+            let is_sibling_right = current_index.sibling().is_position_odd();
+
+            // Move the index up so it points to the parent of the current index and the sibling.
+            current_index.move_up();
+
+            // Construct the new parent node from the child that was updated and the sibling from
+            // the merkle path.
+            *path_node = if is_sibling_right {
+                InnerNode { left: node_hash, right: sibling_hash }
+            } else {
+                InnerNode { left: sibling_hash, right: node_hash }
+            };
+
+            node_hash = path_node.hash();
+        }
+
+        Ok((path_nodes, node_hash))
+    }
+
+    /// Writes a leaf and its precomputed inner nodes into the tree. Cannot fail.
+    fn commit_path(&mut self, leaf: SmtLeaf, path_nodes: &PathNodes) {
+        let mut current_index = leaf.index().index;
 
         let prev_entries = self
             .leaves
@@ -594,33 +669,13 @@ impl PartialSmt {
         // Guaranteed not to over/underflow. All variables are <= MAX_LEAF_ENTRIES and result > 0.
         self.num_entries = self.num_entries + current_entries - prev_entries;
 
-        for sibling_hash in path {
-            // Find the index of the sibling node and compute whether it is a left or right child.
-            let is_sibling_right = current_index.sibling().is_position_odd();
-
-            // Move the index up so it points to the parent of the current index and the sibling.
+        for path_node in path_nodes.iter() {
+            // Move the index up so it points to the parent of the current index.
             current_index.move_up();
 
-            // Construct the new parent node from the child that was updated and the sibling from
-            // the merkle path.
-            let new_parent_node = if is_sibling_right {
-                InnerNode {
-                    left: node_hash_at_current_index,
-                    right: sibling_hash,
-                }
-            } else {
-                InnerNode {
-                    left: sibling_hash,
-                    right: node_hash_at_current_index,
-                }
-            };
-
-            node_hash_at_current_index = new_parent_node.hash();
-
-            self.insert_inner_node(current_index, new_parent_node);
+            // Insert the precomputed parent node without rebuilding it from the path.
+            self.insert_inner_node(current_index, path_node.clone());
         }
-
-        node_hash_at_current_index
     }
 
     /// Returns the leaf for a key if it can be tracked.
@@ -824,5 +879,9 @@ impl Deserializable for PartialSmt {
         let unique_rep = UniqueNodes::read_from(source)?;
         PartialSmt::from_unique_nodes(unique_rep)
             .map_err(|e| DeserializationError::InvalidValue(format!("{e}")))
+    }
+
+    fn min_serialized_size() -> usize {
+        UniqueNodes::min_serialized_size()
     }
 }

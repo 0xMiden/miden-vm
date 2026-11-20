@@ -60,13 +60,14 @@ pub use errors::{
 };
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use executor::ProgramExecutor;
+pub(crate) use fast::BreakReason;
 pub use fast::{
-    BreakReason, DebugCallFrame, DebugCallFrameResolver, DebugFrameOrigin, ExecutionOutput,
-    FastProcessor, ResumeContext,
+    DebugCallFrame, DebugCallFrameResolver, DebugFrameOrigin, ExecutionOutput, FastProcessor,
+    ResumeContext,
 };
 pub use host::{
-    BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestStore, MemMastForestStore,
-    SyncHost,
+    BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestLoadError, MastForestStore,
+    MemMastForestStore, SyncHost,
     debug::{StdoutWriter, format_value, write_interval, write_stack},
     default::{DefaultHost, HostLibrary},
 };
@@ -174,6 +175,12 @@ impl<'a> ProcessorState<'a> {
         self.processor.stack().iter().rev().copied().collect()
     }
 
+    /// Returns the current depth of the stack, including overflow entries.
+    #[inline(always)]
+    pub fn stack_depth(&self) -> u32 {
+        self.processor.stack_depth()
+    }
+
     /// Returns the element located at the specified context/address, or None if the address hasn't
     /// been accessed previously.
     #[inline(always)]
@@ -268,7 +275,7 @@ impl<'a> ProcessorState<'a> {
 /// through execution (see [`crate::FastProcessor::step`]) or limiting execution to a certain number
 /// of clock cycles (used in parallel trace generation to fill the trace for a predetermined trace
 /// fragment).
-pub trait Stopper {
+pub(crate) trait Stopper {
     type Processor;
 
     /// The forest representation used by the executor this stopper is paired with.

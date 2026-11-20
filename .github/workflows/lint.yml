@@ -11,6 +11,9 @@ on:
     branches: [main, next]
   pull_request:
     types: [opened, reopened, synchronize]
+  merge_group:
+    branches: [main, next]
+    types: [checks_requested]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -52,7 +55,7 @@ jobs:
       # install-action commit and set tool explicitly, or zizmor's
       # impostor-commit audit can flag stale shortcut-tag hashes.
       - name: Install cargo-binstall
-        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-binstall
       - name: Install workspace inheritance checker
@@ -71,6 +74,10 @@ jobs:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - uses: ./.github/actions/setup-protoc
       - name: Clippy
         run: |
           rustup update --no-self-update stable
@@ -100,6 +107,10 @@ jobs:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - uses: ./.github/actions/setup-protoc
       - name: Build docs
         run: |
           rustup +stable update --no-self-update

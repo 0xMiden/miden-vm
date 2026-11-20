@@ -1,13 +1,12 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 use miden_debug_types::{DefaultSourceManager, SourceFile, SourceManager};
-use miden_utils_diagnostics::{
-    Report,
-    reporting::{ReportHandlerOpts, set_hook},
-};
+use miden_utils_diagnostics::{Report, reporting::set_hook};
 
+#[cfg(not(feature = "std"))]
+use crate::diagnostics::reporting::DefaultReportHandler;
 #[cfg(feature = "std")]
-use crate::diagnostics::reporting::set_panic_hook;
+use crate::diagnostics::reporting::{ReportHandlerOpts, set_panic_hook};
 use crate::{
     Path,
     ast::{Form, Module, ModuleKind},
@@ -51,7 +50,7 @@ impl SyntaxTestContext {
 
         #[cfg(not(feature = "std"))]
         {
-            let _ = set_hook(Box::new(|_| Box::new(ReportHandlerOpts::new().build())));
+            let _ = set_hook(Box::new(|_| Box::new(DefaultReportHandler::default())));
         }
         let source_manager = Arc::new(DefaultSourceManager::default());
         Self {
@@ -75,7 +74,7 @@ impl SyntaxTestContext {
     /// This does not run semantic analysis, or construct a [Module] from the parsed
     /// forms, and is largely intended for low-level testing of the parser.
     #[track_caller]
-    pub fn parse_forms(&self, source: Arc<SourceFile>) -> Result<Vec<Form>, Report> {
+    pub(crate) fn parse_forms(&self, source: Arc<SourceFile>) -> Result<Vec<Form>, Report> {
         crate::parser::parse_forms(source)
     }
 
@@ -84,7 +83,7 @@ impl SyntaxTestContext {
     /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
     /// valid.
     #[track_caller]
-    pub fn parse_program(&self, source: &str) -> Result<Box<Module>, Report> {
+    pub(crate) fn parse_program(&self, source: &str) -> Result<Box<Module>, Report> {
         let mut parser = Module::parser(Some(ModuleKind::Executable));
         parser.set_warnings_as_errors(self.warnings_as_errors);
         parser.parse_str(Some(Path::EXEC), source, self.source_manager())
@@ -95,24 +94,13 @@ impl SyntaxTestContext {
     /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
     /// valid.
     #[track_caller]
-    pub fn parse_program_source_file(
+    pub(crate) fn parse_program_source_file(
         &self,
         source_file: Arc<SourceFile>,
     ) -> Result<Box<Module>, Report> {
         let mut parser = Module::parser(Some(ModuleKind::Executable));
         parser.set_warnings_as_errors(self.warnings_as_errors);
         parser.parse(None, source_file, self.source_manager())
-    }
-
-    /// Parse the given source file into a kernel [Module].
-    ///
-    /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
-    /// valid.
-    #[track_caller]
-    pub fn parse_kernel(&self, source: &str) -> Result<Box<Module>, Report> {
-        let mut parser = Module::parser(Some(ModuleKind::Kernel));
-        parser.set_warnings_as_errors(self.warnings_as_errors);
-        parser.parse_str(None, source, self.source_manager())
     }
 
     /// Parse the given source file into an anonymous library [Module].
@@ -131,7 +119,7 @@ impl SyntaxTestContext {
     /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
     /// valid.
     #[track_caller]
-    pub fn parse_module_source_file(
+    pub(crate) fn parse_module_source_file(
         &self,
         source_file: Arc<SourceFile>,
     ) -> Result<Box<Module>, Report> {

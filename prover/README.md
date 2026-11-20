@@ -74,12 +74,13 @@ worker uses compact buffered replay. Proof generation remains configured on `Pro
 ## STARK Backend
 
 The prover uses [Plonky3](https://github.com/0xMiden/Plonky3), a modular STARK proving framework.
-STARK configurations are defined in the `miden-air` crate and shared between the prover and
-verifier, ensuring consistency across the system.
+Relation configuration and runtime setup live in `miden-vm-stark::setup` and
+`miden-precompiles-stark::setup`. Import those backends directly for relation proving or setup;
+`miden-prover` owns complete/deferred proof orchestration and application proving policy.
 
 ### Hash Function Selection
 
-The prover defaults to Eidos. BLAKE3, Keccak, RPO256, Poseidon2, and RPX256 are also selectable for
+The prover defaults to Eidos. BLAKE3 and Keccak are also selectable for
 non-recursive proofs. Recursive Miden VM verification accepts only Eidos proofs.
 
 ## Crate features

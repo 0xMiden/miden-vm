@@ -116,6 +116,23 @@ fn assert_recursive_verify(
 }
 
 #[test]
+fn test_clear_deferred_prove_verify() {
+    // Exercise proof plumbing for the unsafe opcode. A production kernel epilogue must
+    // recursively verify the top stack root before executing clear_deferred.
+    assert_prove_verify(
+        "begin
+            padw log_deferred dropw
+            adv.push_deferred_root padw adv_loadw
+            clear_deferred dropw
+        end",
+        HashFunction::Eidos,
+        "Eidos",
+        false,
+        false,
+    );
+}
+
+#[test]
 fn test_all_hash_functions_prove_verify() {
     let source = "
         begin
@@ -131,9 +148,6 @@ fn test_all_hash_functions_prove_verify() {
         (HashFunction::Blake3_256, "Blake3_256"),
         (HashFunction::Keccak, "Keccak"),
         (HashFunction::Eidos, "Eidos"),
-        (HashFunction::Rpo256, "RPO"),
-        (HashFunction::Poseidon2, "Poseidon2"),
-        (HashFunction::Rpx256, "RPX"),
     ] {
         assert_prove_verify(source, hash_fn, hash_name, false, false);
     }
@@ -347,9 +361,9 @@ mod prover_api_lifecycle {
     use miden_precompiles::{UintDomain, UintPrecompile};
     use miden_vm::{
         DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionProof, ExecutionWitness,
-        FastProcessor, HashFunction, PrecompileProof, PrecompileStatus, PrecompileWitness, Program,
-        Prover, StackInputs, StackOutputs, StarkProof, VerificationError, VerificationOutcome,
-        Verifier, advice::AdviceInputs, prove_sync,
+        FastProcessor, HashFunction, PrecompileLimits, PrecompileProof, PrecompileStatus,
+        PrecompileWitness, Program, Prover, ProverError, StackInputs, StackOutputs, StarkProof,
+        VerificationError, VerificationOutcome, Verifier, advice::AdviceInputs, prove_sync,
     };
 
     use super::minimum_conjectured_security_level;
@@ -489,7 +503,7 @@ mod prover_api_lifecycle {
             .prove_vm_witness(vm_witness)
             .expect_err("VM witness with precompile work should be rejected");
 
-        assert!(matches!(error, miden_vm::ProverError::VmWitnessHasPrecompiles));
+        assert!(matches!(error, ProverError::VmWitnessHasPrecompiles));
     }
 
     #[test]
@@ -508,7 +522,7 @@ mod prover_api_lifecycle {
                 stack_inputs,
                 AdviceInputs::default(),
                 &mut buffered_host,
-                execution_options.with_overlapped_trace_build(false),
+                execution_options.clone().with_overlapped_trace_build(false),
             )
             .expect("buffered execute-and-prove should succeed");
 
@@ -519,7 +533,7 @@ mod prover_api_lifecycle {
                 stack_inputs,
                 AdviceInputs::default(),
                 &mut overlapped_host,
-                execution_options.with_overlapped_trace_build(true),
+                execution_options.clone().with_overlapped_trace_build(true),
             )
             .expect("overlapped execute-and-prove should succeed");
 
@@ -548,6 +562,12 @@ mod prover_api_lifecycle {
         assert_eq!(deferred_outcome.outstanding_precompile_root(), Some(one_root));
         assert!(deferred_outcome.precompile_security_parameters().is_none());
         assert_execution_security_levels(&one_claim, &one_deferred, &deferred_outcome);
+        assert!(matches!(
+            Verifier::new()
+                .with_verification_precompile_limits(PrecompileLimits::new(0))
+                .verify(&one_claim, &one_deferred),
+            Err(VerificationError::DeferredWitnessPreparation(_))
+        ));
 
         // This unrelated witness would fail evaluation because its final node is data, not TRUE.
         // Reject its root mismatch before reaching that evaluation failure.
@@ -595,6 +615,12 @@ mod prover_api_lifecycle {
         let PrecompileStatus::Deferred(two_precompile) = two_transported.precompile() else {
             panic!("transported root-two proof should remain deferred");
         };
+        assert!(matches!(
+            Prover::new()
+                .with_verification_precompile_limits(PrecompileLimits::new(0))
+                .prove_precompiles(vec![one_precompile.clone()]),
+            Err(ProverError::PrecompileProofGeneration(_))
+        ));
         let two_root = two_transported.vm().precompile_root;
         let ordered_roots = vec![one_root, two_root, one_root];
 
@@ -732,12 +758,13 @@ mod execution_witness_serialization {
             BasicBlockNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastForest, MastNodeExt,
         },
         operations::Operation,
+        serde::Serializable,
     };
     use miden_processor::{
         DefaultHost, FastProcessor, HostLibrary, StackInputs, advice::AdviceInputs,
         trace::build_trace,
     };
-    use miden_prover::{HashFunction, Prover, serde::Serializable};
+    use miden_prover::{HashFunction, Prover};
     #[cfg(feature = "arbitrary")]
     use miden_utils_testing::proptest::prelude::*;
     use miden_verifier::Verifier;
@@ -855,9 +882,9 @@ mod execution_witness_serialization {
             let (original_vm, _) = witness.into_parts();
             let (restored_vm, _) = restored.into_parts();
             let original_trace =
-                build_trace(original_vm).expect("original generated witness should build a trace");
+                build_trace(original_vm, &miden_vm_stark::memory::default_budget()).expect("original generated witness should build a trace");
             let restored_trace =
-                build_trace(restored_vm).expect("restored generated witness should build a trace");
+                build_trace(restored_vm, &miden_vm_stark::memory::default_budget()).expect("restored generated witness should build a trace");
             prop_assert_eq!(restored_trace.stack_outputs(), original_trace.stack_outputs());
             prop_assert_eq!(restored_trace.program_info(), original_trace.program_info());
             prop_assert_eq!(
@@ -906,8 +933,10 @@ mod execution_witness_serialization {
         );
 
         let (vm, _) = witness.into_parts();
-        let original_trace = build_trace(vm).expect("original witness builds trace");
-        let restored_trace = build_trace(restored_vm).expect("restored witness builds trace");
+        let original_trace = build_trace(vm, &miden_vm_stark::memory::default_budget())
+            .expect("original witness builds trace");
+        let restored_trace = build_trace(restored_vm, &miden_vm_stark::memory::default_budget())
+            .expect("restored witness builds trace");
         assert_eq!(restored_trace.stack_outputs(), original_trace.stack_outputs());
         assert_eq!(restored_trace.program_info(), original_trace.program_info());
         assert_eq!(restored_trace.trace_len_summary(), original_trace.trace_len_summary());
@@ -951,9 +980,9 @@ mod execution_witness_serialization {
         let witness_bytes = witness.to_bytes();
         let inspected =
             ExecutionWitness::read_from_bytes(&witness_bytes).expect("witness round trip");
-        let (_, precompile) = inspected.into_parts();
+        let (vm, precompile) = inspected.into_parts();
+        let expected_deferred_root = vm.precompile_root();
         let precompile = precompile.expect("deferred execution should carry a precompile witness");
-        let expected_deferred_root = precompile.root_unchecked();
         let expected_witness = precompile;
 
         let proving =

@@ -4,51 +4,47 @@
 
 ### Hash Functions
 
-The hash benchmarks include conventional functions such as BLAKE3, optimized for native execution,
-and algebraic functions such as Rescue Prime, designed for efficient use inside a STARK:
+The hash benchmarks cover Eidos and conventional functions optimized for native execution:
 
 * **BLAKE3** as specified [here](https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf) and implemented [here](https://github.com/BLAKE3-team/BLAKE3) (with a wrapper exposed via this crate).
 * **SHA3** as specified [here](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.202.pdf) and implemented [here](https://github.com/novifinancial/winterfell/blob/46dce1adf0/crypto/src/hash/sha/mod.rs).
 * **Keccak256** as specified [here](https://keccak.team/specifications.html) and implemented [here](https://github.com/RustCrypto/hashes/tree/master/sha3) (with a wrapper exposed via this crate).
-* **Rescue Prime Optimized (RPO)** as specified [here](https://eprint.iacr.org/2022/1577) and implemented in this crate.
-* **Rescue Prime Extended (RPX)** a variant of the [xHash](https://eprint.iacr.org/2023/1045) hash function as implemented in this crate.
-* **Poseidon2** as specified [here](https://eprint.iacr.org/2023/323) and implemented in this crate.
 * **Eidos** as implemented in this crate.
 
 We benchmark 2-to-1 hashing $(a,b)\mapsto h(a,b)$, where $a$, $b$, and $h(a,b)$ are digests,
 and hashing 100 field elements into one digest. Digests contain four elements in the field with
-modulus $2^{64}-2^{32}+1$ for Poseidon2, Eidos, RPO, and RPX, and 32 bytes for SHA3, BLAKE3,
+modulus $2^{64}-2^{32}+1$ for Eidos, and 32 bytes for SHA3, BLAKE3,
 and Keccak256. The BLAKE3 column uses BLAKE3-256; SHA3 uses the external harness described below.
 
 ### Scenario 1: 2-to-1 hashing `h(a,b)`
 
-| Hardware            | BLAKE3  | SHA3 | Keccak256 | Poseidon2 | RPO_256 | RPX_256 | Eidos   |
-| ------------------- | :-----: | :--: | :-------: | :-------: | :-----: | :-----: | :-----: |
-| Apple M1 Pro        |         |      |           |           |         |         |         |
-| Apple M2 Max        |         |      |           |           |         |         |         |
-| Apple M4 Pro        | 48.5 ns |      | 124 ns    | 745 ns    | 2.69 µs | 1.45 µs | 47.4 ns |
-| Apple M4 Max        |         |      |           |           |         |         |         |
-| Amazon Graviton 3   |         |      |           |           |         |         |         |
-| Amazon Graviton 4   |         |      |           |           |         |         |         |
-| AMD Ryzen 9 9950X   | 57.3 ns |      | 193 ns    | 544 ns    | 3.13 µs | 2.00 µs | 68.4 ns |
-| AMD EPYC 9R14       |         |      |           |           |         |         |         |
-| Intel Core i5-8279U |         |      |           |           |         |         |         |
-| Intel Xeon 8375C    |         |      |           |           |         |         |         |
+| Hardware            | BLAKE3  | SHA3 | Keccak256 | Eidos   |
+| ------------------- | :-----: | :--: | :-------: | :-----: |
+| Apple M1 Pro        |         |      |           |         |
+| Apple M2 Max        |         |      |           |         |
+| Apple M4 Pro        | 48.5 ns |      | 124 ns    | 47.4 ns |
+| Apple M4 Max        |         |      |           |         |
+| Amazon Graviton 3   |         |      |           |         |
+| Amazon Graviton 4   |         |      |           |         |
+| AMD Ryzen 9 9950X   | 57.3 ns |      | 193 ns    | 68.4 ns |
+| AMD EPYC 9R14       |         |      |           |         |
+| Intel Core i5-8279U |         |      |           |         |
+| Intel Xeon 8375C    |         |      |           |         |
 
 ### Scenario 2: Sequential hashing of 100 elements `h([a_0,...,a_99])`
 
-| Hardware            | BLAKE3 | SHA3 | Keccak256 | Poseidon2 | RPO_256 | RPX_256 | Eidos  |
-| ------------------- | :----: | :--: | :-------: | :-------: | :-----: | :-----: | :----: |
-| Apple M1 Pro        |        |      |           |           |         |         |        |
-| Apple M2 Max        |        |      |           |           |         |         |        |
-| Apple M4 Pro        | 692 ns |      | 788 ns    | 9.68 µs   | 35.2 µs | 18.8 µs | 708 ns |
-| Apple M4 Max        |        |      |           |           |         |         |        |
-| Amazon Graviton 3   |        |      |           |           |         |         |        |
-| Amazon Graviton 4   |        |      |           |           |         |         |        |
-| AMD Ryzen 9 9950X   | 801 ns |      | 1.24 µs   | 7.16 µs   | 41.3 µs | 29.9 µs | 916 ns |
-| AMD EPYC 9R14       |        |      |           |           |         |         |        |
-| Intel Core i5-8279U |        |      |           |           |         |         |        |
-| Intel Xeon 8375C    |        |      |           |           |         |         |        |
+| Hardware            | BLAKE3 | SHA3 | Keccak256 | Eidos  |
+| ------------------- | :----: | :--: | :-------: | :----: |
+| Apple M1 Pro        |        |      |           |        |
+| Apple M2 Max        |        |      |           |        |
+| Apple M4 Pro        | 692 ns |      | 788 ns    | 708 ns |
+| Apple M4 Max        |        |      |           |        |
+| Amazon Graviton 3   |        |      |           |        |
+| Amazon Graviton 4   |        |      |           |        |
+| AMD Ryzen 9 9950X   | 801 ns |      | 1.24 µs   | 916 ns |
+| AMD EPYC 9R14       |        |      |           |        |
+| Intel Core i5-8279U |        |      |           |        |
+| Intel Xeon 8375C    |        |      |           |        |
 
 ### Digital Signature Algorithms (DSA)
 

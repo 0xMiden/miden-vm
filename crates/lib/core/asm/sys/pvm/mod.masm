@@ -1,33 +1,52 @@
 use {
-    AUXILIARY_ACE_INPUTS_ADDRESS_PTR,
-    AUX_RAND_ELEM_ADDRESS_PTR,
-    CURRENT_TRACE_ROW_ADDRESS_PTR,
     LOG_AIR_TRACE_LENGTHS_PTR,
     LOG_TRACE_LENGTH_PTR,
-    OOD_EVALUATIONS_ADDRESS_PTR,
     PREPROCESSED_TRACE_COM_PTR,
     RELATION_DIGEST_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::types
-pub mod aux_trace
-pub mod constraints_eval
-pub mod deep_queries
-pub mod layout
-pub mod ood_frames
-pub mod public_inputs
-
+use {
+    FIXED_LOOKUP_ERROR_TERMS,
+    LOOKUP_FRACTIONS_PER_ROW,
+    MAX_CONSTRAINT_DEGREE,
+    MAX_MESSAGE_WIDTH,
+    MIN_LOG_HEIGHT_0,
+    MIN_LOG_HEIGHT_1,
+    MIN_LOG_HEIGHT_2,
+    MIN_LOG_HEIGHT_4,
+    MIN_LOG_HEIGHT_5,
+    MIN_LOG_HEIGHT_6,
+    MIN_LOG_HEIGHT_7,
+    MIN_LOG_HEIGHT_8,
+    MIN_LOG_HEIGHT_9,
+    MIN_LOG_HEIGHT_10,
+    MIN_LOG_HEIGHT_11,
+    NUM_COMPOSED_CONSTRAINTS,
+    NUM_DEEP_TERMS,
+    PREPROCESSED_COMMITMENT_0,
+    PREPROCESSED_COMMITMENT_1,
+    PREPROCESSED_COMMITMENT_2,
+    PREPROCESSED_COMMITMENT_3,
+    PREPROCESSED_TRACE_LOG_HEIGHT,
+    RELATION_DIGEST_0,
+    RELATION_DIGEST_1,
+    RELATION_DIGEST_2,
+    RELATION_DIGEST_3,
+} from miden::core::sys::pvm::parameters
 use miden::core::stark::utils
 use miden::core::stark::verifier
 
-# Relation constants returned with the transcript-bound proof parameters. `LOOKUP_POW_BITS` is
-# zero because Lifted STARK does not grind lookup challenges.
+pub mod aux_trace
+pub mod constraints_eval
+pub mod deep_queries
+pub mod fixed_boundary
+pub mod layout
+pub mod ood_frames
+pub mod parameters
+pub mod public_inputs
+
+# Lifted STARK does not grind lookup challenges.
 const LOOKUP_POW_BITS = 0
-const MAX_MESSAGE_WIDTH = 18
-const NUM_COMPOSED_CONSTRAINTS = 857
-const MAX_CONSTRAINT_DEGREE = 5
-const NUM_DEEP_TERMS = 914
-const LOOKUP_FRACTIONS_PER_ROW = 291
-const FIXED_BOUNDARY_LOOKUP_TERMS = 19
 
 # Inclusive upper bound used by the PVM shape checks.
 const LOG_HEIGHT_MAX = 29
@@ -38,40 +57,10 @@ const LOG_HEIGHT_MAX = 29
 # The host request used to obtain a PVM proof package for the deferred root on the operand stack.
 const PROOF_REQUEST_EVENT = event("miden::core::sys::pvm::request_proof")
 
-# Minimum log2 trace height for each ChipletAir::all() instance. These are derived from the
-# AIR's two-row floor, maximum periodic-column length, and fixed preprocessed-trace height.
-# BytePairLut (instance 3) commits at exactly its bound, so it is checked as an equality.
-const MIN_LOG_HEIGHT_0 = 5
-const MIN_LOG_HEIGHT_1 = 5
-const MIN_LOG_HEIGHT_2 = 7
-const FIXED_LOG_HEIGHT_3 = 16
-const MIN_LOG_HEIGHT_4 = 1
-const MIN_LOG_HEIGHT_5 = 3
-const MIN_LOG_HEIGHT_6 = 1
-const MIN_LOG_HEIGHT_7 = 1
-const MIN_LOG_HEIGHT_8 = 2
-const MIN_LOG_HEIGHT_9 = 1
-const MIN_LOG_HEIGHT_10 = 7
-const MIN_LOG_HEIGHT_11 = 7
-
-# PVM_RELATION_DIGEST = Eidos(PVM_PROTOCOL_ID || PVM_ACE_CIRCUIT_DIGEST).
-const RELATION_DIGEST_0 = 5618632176883261929
-const RELATION_DIGEST_1 = 5091169848121332946
-const RELATION_DIGEST_2 = 9110857118546866548
-const RELATION_DIGEST_3 = 100418585322354598
-
-# Trusted commitment to the PVM preprocessed trace tree under the native Eidos configuration;
-# `random_coin::init_seed` binds it into the Fiat-Shamir transcript.
-const PREPROCESSED_COMMITMENT_0 = 1070440981155119101
-const PREPROCESSED_COMMITMENT_1 = 2022626773377316756
-const PREPROCESSED_COMMITMENT_2 = 6941685244114430330
-const PREPROCESSED_COMMITMENT_3 = 5172579525468662096
-
 #! Loads the fixed PVM relation context.
 #!
 #! Stores the twelve AIR heights in `ChipletAir::all()` order, their maximum, both inverse maps of
-#! the height-sorted proof order, the out-of-domain scatter table, relation commitments, and fixed
-#! OOD/query-row addresses.
+#! the height-sorted proof order, the out-of-domain scatter table, and relation commitments.
 #!
 #! Advice order: [h0, ..., h11].
 #! Inputs:  [...]
@@ -84,7 +73,8 @@ pub proc load_air_context()
     push.MIN_LOG_HEIGHT_0 exec.load_air_height
     push.MIN_LOG_HEIGHT_1 exec.load_air_height
     push.MIN_LOG_HEIGHT_2 exec.load_air_height
-    push.FIXED_LOG_HEIGHT_3 exec.load_fixed_air_height
+    # BytePairLut must match its fixed setup height.
+    push.PREPROCESSED_TRACE_LOG_HEIGHT exec.load_fixed_air_height
     push.MIN_LOG_HEIGHT_4 exec.load_air_height
     push.MIN_LOG_HEIGHT_5 exec.load_air_height
     push.MIN_LOG_HEIGHT_6 exec.load_air_height
@@ -98,7 +88,7 @@ pub proc load_air_context()
     mem_store.LOG_TRACE_LENGTH_PTR
 
     # The heights are stored above and unchanged from here on. Derive both inverse maps once: the
-    # ingest scatters use pos_by_id, and fold-coefficient staging uses id_by_pos.
+    # ingest scatters use pos_by_id; selector setup and fold-coefficient staging use id_by_pos.
     exec.ood_frames::stage_proof_order_maps
 
     # Route each chiplet's canonical out-of-domain destination to its proof-order stream position.
@@ -106,14 +96,6 @@ pub proc load_air_context()
 
     exec.store_relation_digest
     exec.store_preprocessed_commitment
-    exec.layout::preprocessed_current_ptr
-    mem_store.OOD_EVALUATIONS_ADDRESS_PTR
-    exec.layout::current_trace_row_ptr
-    mem_store.CURRENT_TRACE_ROW_ADDRESS_PTR
-    exec.layout::auxiliary_ace_inputs_ptr
-    mem_store.AUXILIARY_ACE_INPUTS_ADDRESS_PTR
-    exec.layout::aux_rand_elem_ptr
-    mem_store.AUX_RAND_ELEM_ADDRESS_PTR
 end
 
 #! Loads, validates, stores, and folds one instance's log height into the running maximum.
@@ -181,8 +163,7 @@ end
 #! by the generic STARK verifier and the PVM relation data.
 #!
 #! The relation fields are fixed except for the maximum trace height, which the proof transcript
-#! binds. `FIXED_BOUNDARY_LOOKUP_TERMS` counts the fixed `UintVal` and `EcGroup` boundary messages
-#! included by the native AIR.
+#! binds. `FIXED_LOOKUP_ERROR_TERMS` counts the fixed boundary fractions.
 #!
 #! Inputs:  [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 #! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
@@ -191,7 +172,7 @@ end
 proc build_security_descriptor(parameters: types::StackProofParameters) -> types::StackSecurityDescriptor
     mem_load.LOG_TRACE_LENGTH_PTR
     push.LOOKUP_FRACTIONS_PER_ROW
-    push.FIXED_BOUNDARY_LOOKUP_TERMS
+    push.FIXED_LOOKUP_ERROR_TERMS
     push.MAX_MESSAGE_WIDTH
     push.NUM_DEEP_TERMS
     push.MAX_CONSTRAINT_DEGREE
@@ -201,8 +182,7 @@ end
 
 proc store_preprocessed_commitment
     push.PREPROCESSED_COMMITMENT_3.PREPROCESSED_COMMITMENT_2.PREPROCESSED_COMMITMENT_1.PREPROCESSED_COMMITMENT_0
-    dupw mem_storew_le.PREPROCESSED_TRACE_COM_PTR dropw
-    exec.layout::preprocessed_com_ptr mem_storew_le dropw
+    mem_storew_le.PREPROCESSED_TRACE_COM_PTR dropw
 end
 
 #! Requests and stages a PVM proof package for the deferred root.
@@ -240,10 +220,21 @@ end
 #!
 #! The deferred root is the relation's four public base-field values, supplied by the caller as the
 #! obligation being settled. The advice stream provides the proof data, four security parameters,
-#! and AIR heights. Successful verification authenticates the root. The returned descriptor
-#! combines those transcript-bound parameters and the maximum AIR height with relation-shape
-#! constants compiled into this verifier. The caller passes all twelve elements unchanged to
-#! `stark::security::compute_conjectured_security_level`, then applies its own acceptance policy.
+#! and AIR heights. The proof must satisfy the PVM relation with that root as its public input.
+#!
+#! For a batch proof, the recursive program must establish that `D` includes every deferred root
+#! it needs to settle. Compute `D` from the roots returned by the execution verifiers, or check that
+#! every required root appears in a supplied list and compute `D` as that list's ordered aggregate.
+#! This procedure verifies the PVM relation for `D`; it does not perform those inclusion checks.
+#!
+#! `PvmRecursiveVerifierInputs::for_request` uses the proof's own aggregate root when packaging
+#! advice. Its claim commitment does not establish that the proof includes the required roots.
+#! See the [batch settlement example](../../tests/stark/pvm_settlement/batch.masm).
+#!
+#! The returned descriptor combines those transcript-bound parameters and the maximum AIR height
+#! with relation-shape constants compiled into this verifier. The caller passes all twelve elements
+#! unchanged to `stark::security::compute_conjectured_security_level` or
+#! `stark::security::compute_proven_security_level`, then applies its own acceptance policy.
 #! Changing only the formula therefore changes the estimator root without changing this verifier's
 #! root. A change to the proof format or to any value supplied by the verifier still changes this
 #! procedure.
@@ -261,7 +252,7 @@ end
 #! Verification runs in an isolated execution context, preserving caller memory and stack elements
 #! below D.
 #!
-#! Inputs:  [D, ...]
+#! Inputs:  [D(4), ...]
 #! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
 #!           max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
 #!           log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
@@ -270,9 +261,9 @@ end
 pub proc verify_proof(deferred_root: types::Digest) -> types::StackSecurityDescriptor
     # Reserve the callee's 16-element argument/result window above the caller's live stack.
     padw padw padw
-    # => [pad(12), D, ...]
+    # => [pad(12), D(4), ...]
     swapw.3
-    # => [D, pad(12), ...]
+    # => [D(4), pad(12), ...]
 
     call.verify_proof_inner
     # => [security_descriptor(12), scratch(4), ...]
@@ -286,7 +277,7 @@ end
 
 #! Verifies a PVM proof against the supplied deferred root.
 #!
-#! Inputs:  [D, pad(12)]
+#! Inputs:  [D(4), pad(12)]
 #! Outputs: [security_descriptor(12), scratch(4)]
 #!
 #! Invocation: call
@@ -294,7 +285,7 @@ proc verify_proof_inner(deferred_root: types::Digest) -> types::StackSecurityDes
     # --- Prepare PVM verifier state --------------------------------------------------------------
 
     exec.utils::load_security_params
-    # => [D, pad(12)]
+    # => [D(4), pad(12)]
 
     # Consuming D leaves scratch at the VM's minimum stack depth of 16.
     exec.public_inputs::stage_public_root
@@ -311,7 +302,7 @@ proc verify_proof_inner(deferred_root: types::Digest) -> types::StackSecurityDes
     procref.ood_frames::process_row_ood_evaluations
     procref.public_inputs::process_public_inputs
     procref.aux_trace::observe_aux_trace
-    # => [D0, D1, D2, D3, D4, scratch(16)]
+    # => [D0(4), D1(4), D2(4), D3(4), D4(4), scratch(16)]
 
     exec.verifier::verify
     # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, scratch(16)]

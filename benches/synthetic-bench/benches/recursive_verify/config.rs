@@ -5,135 +5,97 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use miden_vm::HashFunction;
+use miden_vm::{HashFunction, Prover};
 
-const DEFAULT_PROOF_COUNTS: [usize; 7] = [2, 3, 4, 5, 6, 7, 8];
-const PVM_PROOF_COUNT: usize = 1;
+const DEFAULT_PROOF_COUNTS: [usize; 5] = [3, 4, 5, 6, 7];
 
 #[derive(Clone, Copy)]
 pub(super) struct ProofComposition {
     mvm: usize,
-    pvm: usize,
 }
 
 impl ProofComposition {
-    pub(super) const fn mvm(proof_count: usize) -> Self {
-        Self { mvm: proof_count, pvm: 0 }
-    }
-
-    const fn mixed(mvm_proof_count: usize) -> Self {
-        Self {
-            mvm: mvm_proof_count,
-            pvm: PVM_PROOF_COUNT,
-        }
-    }
-
     pub(super) const fn mvm_count(self) -> usize {
         self.mvm
     }
 
     pub(super) const fn pvm_count(self) -> usize {
-        self.pvm
-    }
-
-    pub(super) const fn is_mixed(self) -> bool {
-        self.pvm != 0
+        1
     }
 
     pub(super) fn label(self) -> String {
-        if self.is_mixed() {
-            format!("{} mvm + {} pvm", self.mvm, self.pvm)
-        } else {
-            format!("{} proofs", self.mvm)
-        }
+        format!("{} mvm + 1 pvm ({} ecdsa)", self.mvm, self.mvm)
     }
 
     pub(super) fn machine_fields(self) -> String {
-        if self.is_mixed() {
-            format!("mvm_proofs={} pvm_proofs={}", self.mvm, self.pvm)
-        } else {
-            format!("proofs={}", self.mvm)
-        }
+        format!(
+            "mvm_proofs={} pvm_proofs=1 pvm_ecdsas={} pvm_keccaks={}",
+            self.mvm, self.mvm, self.mvm
+        )
     }
 }
 
-const PVM_COMPARISON_COMPOSITIONS: [ProofComposition; 4] = [
-    ProofComposition::mixed(4),
-    ProofComposition::mvm(7),
-    ProofComposition::mixed(5),
-    ProofComposition::mvm(8),
-];
-
 pub(super) struct BenchConfig {
-    outer_hash_fn: HashFunction,
     compositions: Vec<ProofComposition>,
-    tx_masm_path: PathBuf,
-    tx_proof_cache_dir: Option<PathBuf>,
-    pvm_proof_cache_dir: Option<PathBuf>,
+    tx_proof_cache_dir: PathBuf,
+    pvm_proof_cache_dir: PathBuf,
     write_recursive_masm: bool,
     base_stack_values: Vec<u64>,
+    hash_lde_blocks: bool,
 }
 
 impl BenchConfig {
-    pub(super) fn from_env() -> Option<Self> {
-        let tx_masm_path = env_path("RECURSION_BENCH_MASM")?;
-        let tx_masm_path = resolve_masm_path(tx_masm_path);
-        let hash_name =
-            std::env::var("RECURSION_BENCH_HASH").unwrap_or_else(|_| "eidos".to_string());
-        let outer_hash_fn = HashFunction::try_from(hash_name.as_str())
-            .unwrap_or_else(|_| panic!("unsupported RECURSION_BENCH_HASH={hash_name:?}"));
-        let base_stack_values = stack_values_from_env("RECURSION_BENCH_STACK", "0,1");
-        let pvm_comparison = std::env::var_os("RECURSION_PVM_COMPARISON").is_some();
-        assert!(
-            !base_stack_values.is_empty(),
-            "RECURSION_BENCH_STACK must contain at least one value"
-        );
-
-        let compositions = if pvm_comparison {
-            assert!(
-                std::env::var_os("RECURSION_PROOF_COUNTS").is_none(),
-                "RECURSION_PROOF_COUNTS cannot be combined with RECURSION_PVM_COMPARISON"
-            );
-            PVM_COMPARISON_COMPOSITIONS.to_vec()
-        } else {
-            proof_counts_from_env(&DEFAULT_PROOF_COUNTS)
-                .into_iter()
-                .map(ProofComposition::mvm)
-                .collect()
+    pub(super) fn from_env() -> Self {
+        let hash_lde_blocks = match std::env::var("RECURSION_HASH_LDE_BLOCKS") {
+            Ok(value) if value == "0" => false,
+            Ok(value) if value == "1" => true,
+            Err(std::env::VarError::NotPresent) => false,
+            _ => panic!("RECURSION_HASH_LDE_BLOCKS must be 0 or 1"),
         };
-
-        Some(Self {
-            outer_hash_fn,
-            compositions,
-            tx_masm_path,
-            tx_proof_cache_dir: cache_path_from_env("RECURSION_BENCH_TX_PROOF_CACHE_DIR"),
-            pvm_proof_cache_dir: cache_path_from_env("RECURSION_BENCH_PVM_PROOF_CACHE_DIR"),
+        println!("BENCH_RECURSION_CONFIG hash_lde_blocks={}", u8::from(hash_lde_blocks));
+        let base_stack_values = stack_values_from_env("RECURSION_BENCH_STACK", "0,1");
+        assert!(!base_stack_values.is_empty(), "RECURSION_BENCH_STACK must contain a value");
+        let cache_root = env_path("CARGO_TARGET_DIR")
+            .unwrap_or_else(|| workspace_root().join("target"))
+            .join("recursive-bench-cache");
+        Self {
+            compositions: proof_counts_from_env(&DEFAULT_PROOF_COUNTS)
+                .into_iter()
+                .map(|mvm| ProofComposition { mvm })
+                .collect(),
+            tx_proof_cache_dir: cache_path_from_env(
+                "RECURSION_BENCH_TX_PROOF_CACHE_DIR",
+                cache_root.join("tx"),
+            ),
+            pvm_proof_cache_dir: cache_path_from_env(
+                "RECURSION_BENCH_PVM_PROOF_CACHE_DIR",
+                cache_root.join("pvm"),
+            ),
             write_recursive_masm: std::env::var_os("RECURSION_MASM_WRITE").is_some(),
             base_stack_values,
-        })
+            hash_lde_blocks,
+        }
     }
 
-    pub(super) const fn outer_hash_fn(&self) -> HashFunction {
-        self.outer_hash_fn
+    pub(super) fn outer_prover(&self) -> Prover {
+        Prover::new()
+            .with_hash_fn(HashFunction::Eidos)
+            .with_hash_lde_blocks(self.hash_lde_blocks)
     }
 
     pub(super) fn compositions(&self) -> &[ProofComposition] {
         &self.compositions
     }
 
-    pub(super) fn tx_masm_path(&self) -> &Path {
-        &self.tx_masm_path
+    pub(super) fn tx_proof_cache_dir(&self) -> &Path {
+        &self.tx_proof_cache_dir
     }
 
-    pub(super) fn tx_proof_cache_dir(&self) -> Option<&Path> {
-        self.tx_proof_cache_dir.as_deref()
+    pub(super) fn pvm_proof_cache_dir(&self) -> &Path {
+        &self.pvm_proof_cache_dir
     }
 
-    pub(super) fn pvm_proof_cache_dir(&self) -> Option<&Path> {
-        self.pvm_proof_cache_dir.as_deref()
-    }
-
-    pub(super) const fn write_recursive_masm(&self) -> bool {
+    pub(super) fn write_recursive_masm(&self) -> bool {
         self.write_recursive_masm
     }
 
@@ -141,12 +103,8 @@ impl BenchConfig {
         let mut values = self.base_stack_values.clone();
         values[0] = values[0]
             .checked_add(proof_index as u64)
-            .expect("distinct stack input overflow");
+            .expect("recursive proof input overflow");
         values
-    }
-
-    pub(super) fn requires_pvm(&self) -> bool {
-        self.compositions.iter().copied().any(ProofComposition::is_mixed)
     }
 }
 
@@ -157,31 +115,14 @@ fn env_path(name: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-fn cache_path_from_env(name: &str) -> Option<PathBuf> {
-    env_path(name).map(|path| {
+fn cache_path_from_env(name: &str, default: PathBuf) -> PathBuf {
+    env_path(name).map_or(default, |path| {
         if path.is_absolute() {
             path
         } else {
             workspace_root().join(path)
         }
     })
-}
-
-fn resolve_masm_path(path: PathBuf) -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace_root = workspace_root();
-    let requested = path.display().to_string();
-
-    let candidates = if path.is_absolute() {
-        vec![path]
-    } else {
-        vec![path.clone(), manifest_dir.join(&path), workspace_root.join(&path)]
-    };
-
-    candidates
-        .into_iter()
-        .find(|candidate| candidate.is_file())
-        .unwrap_or_else(|| panic!("RECURSION_BENCH_MASM must point to a MASM file: {requested}"))
 }
 
 pub(super) fn workspace_root() -> PathBuf {
@@ -202,7 +143,7 @@ fn proof_counts_from_env(default: &[usize]) -> Vec<usize> {
     let mut seen = HashSet::new();
     for entry in raw.split(',').map(str::trim).filter(|s| !s.is_empty()) {
         let value = entry.parse::<usize>().expect("RECURSION_PROOF_COUNTS entries must be usize");
-        assert!(value > 0, "RECURSION_PROOF_COUNTS entries must be non-zero");
+        assert!((3..=7).contains(&value), "RECURSION_PROOF_COUNTS must be between 3 and 7");
         assert!(seen.insert(value), "duplicate RECURSION_PROOF_COUNTS entry: {value}");
         counts.push(value);
     }

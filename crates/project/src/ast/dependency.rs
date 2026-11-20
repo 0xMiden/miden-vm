@@ -13,7 +13,7 @@ pub struct DependencySpec {
         feature = "serde",
         serde(rename = "version", alias = "digest", skip_serializing_if = "Option::is_none")
     )]
-    pub version_or_digest: Option<VersionRequirement>,
+    pub(crate) version_or_digest: Option<VersionRequirement>,
     /// Whether or not the version requirement is inherited from the containing workspace
     #[cfg_attr(
         feature = "serde",
@@ -58,12 +58,12 @@ impl DependencySpec {
     }
 
     /// Returns true if this dependency inherits its version requirement from a parent workspace
-    pub fn inherits_workspace_version(&self) -> bool {
+    pub(crate) fn inherits_workspace_version(&self) -> bool {
         self.workspace
     }
 
     /// Returns true if this dependency must be resolved using a host-provided resolver
-    pub fn is_host_resolved(&self) -> bool {
+    pub(crate) fn is_host_resolved(&self) -> bool {
         self.git.is_none() && self.path.is_none()
     }
 

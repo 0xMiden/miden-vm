@@ -93,8 +93,8 @@ end
                 TestResult::Acceptable => {
                     acceptable += 1;
                     // Wycheproof permits either outcome for policy-sensitive vectors. The MASM
-                    // contract follows dalek's strict policy: canonical encodings and no
-                    // small-order A/R are required, so only strict verification may succeed.
+                    // contract requires dalek's strict verification and canonical public-key
+                    // encodings, matching the Rust verifier.
                     let pk_bytes: [u8; 32] =
                         group.key.pk.as_ref().try_into().expect("checked key length");
                     let sig_bytes: [u8; 64] =
@@ -128,10 +128,17 @@ end
                     .precompile_witness
                     .as_ref()
                     .unwrap_or_else(|| panic!("tcId {id}: missing deferred work"));
-                let root = witness
-                    .compute_root(Arc::clone(&registry))
+                let prepared = witness
+                    .clone()
+                    .prepare(
+                        Arc::clone(&registry),
+                        &miden_precompiles::default_verification_precompile_limits(),
+                    )
                     .unwrap_or_else(|err| panic!("tcId {id}: invalid deferred relation: {err}"));
-                assert_eq!(root, output.precompile_root(), "tcId {id}: root changed");
+                assert_eq!(prepared.root(), output.precompile_root(), "tcId {id}: root changed");
+                prepared
+                    .evaluate()
+                    .unwrap_or_else(|err| panic!("tcId {id}: deferred evaluation failed: {err}"));
             }
         }
     }

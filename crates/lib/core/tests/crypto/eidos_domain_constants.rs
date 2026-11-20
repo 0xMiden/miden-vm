@@ -8,8 +8,10 @@ use miden_core::{
 use miden_crypto::hash::eidos::{
     BLOCK_LEN as EIDOS_BLOCK_WIDTH, Eidos,
     domains::{
-        AEAD_CTR_KEY, AEAD_MAC_KEY, FALCON_HASH_TO_POINT, FALCON_PUBLIC_KEY, GENERIC_FELT_SEQUENCE,
-        LMCS_LEAF, MMR_PEAKS, SMT_BUCKET_LEAF,
+        AEAD_CTR_KEY, AEAD_MAC_KEY, ECGFP5_PREPROCESSED_PUBLIC_KEY, ECGFP5_PUBLIC_KEY,
+        ECGFP5_SEAL_CONTEXT, ECGFP5_SEAL_EXTRACT, ECGFP5_SEAL_KEY, ECGFP5_SEAL_NONCE,
+        FALCON_HASH_TO_POINT, FALCON_PUBLIC_KEY, GENERIC_FELT_SEQUENCE, LMCS_LEAF, MMR_PEAKS,
+        SMT_BUCKET_LEAF,
     },
 };
 use miden_precompiles::{Keccak256Precompile, Sha256Precompile, Sha512Precompile};
@@ -21,7 +23,10 @@ const FALCON: &str = include_str!("../../asm/crypto/dsa/falcon512_eidos.masm");
 const ECDSA_K256_KECCAK: &str = include_str!("../../asm/crypto/dsa/ecdsa_k256_keccak.masm");
 const ECDSA_P256_SHA256: &str = include_str!("../../asm/crypto/dsa/ecdsa_p256_sha256.masm");
 const EDDSA_25519_SHA512: &str = include_str!("../../asm/crypto/dsa/eddsa_25519_sha512.masm");
-const AEAD: &str = include_str!("../../asm/crypto/aead_eidos.masm");
+const AEAD: &str = include_str!("../../asm/crypto/aead_eidos/primitives.masm");
+const ECGFP5_IES: &str = include_str!("../../asm/crypto/ies/ecgfp5_eidos.masm");
+const ECGFP5_TABLES: &str = include_str!("../../asm/crypto/ecdh/ecgfp5/tables.masm");
+const ECGFP5_DIRECT: &str = include_str!("../../asm/crypto/ecdh/ecgfp5/direct.masm");
 const PRECOMPILES: &str = include_str!("../../asm/precompiles/mod.masm");
 const KECCAK: &str = include_str!("../../asm/precompiles/hashes/keccak256.masm");
 const SHA256: &str = include_str!("../../asm/precompiles/hashes/sha256.masm");
@@ -31,8 +36,8 @@ const SYS: &str = include_str!("../../asm/sys/mod.masm");
 const VM: &str = include_str!("../../asm/sys/vm/mod.masm");
 const CLAIM: &str = include_str!("../../asm/sys/vm/claim.masm");
 const FRI: &str = include_str!("../../asm/pcs/fri/frie2f4.masm");
-const VM_DEEP_QUERIES: &str = include_str!("../../asm/sys/vm/deep_queries.masm");
-const PVM_DEEP_QUERIES: &str = include_str!("../../asm/sys/pvm/deep_queries.masm");
+const VM_PARAMETERS: &str = include_str!("../../asm/sys/vm/parameters.masm");
+const PVM_PARAMETERS: &str = include_str!("../../asm/sys/pvm/parameters.masm");
 
 fn parse_u64(value: &str) -> u64 {
     let value = value.trim().trim_end_matches(',');
@@ -50,6 +55,7 @@ fn masm_scalar(source: &str, name: &str) -> u64 {
         .lines()
         .find_map(|line| {
             let line = line.trim();
+            let line = line.strip_prefix("pub ").unwrap_or(line);
             line.strip_prefix(&prefix).or_else(|| line.strip_prefix(&metadata_prefix))
         })
         .map(|value| parse_u64(value.split('#').next().expect("constant value")))
@@ -103,6 +109,10 @@ fn assert_indexed_word(source: &str, prefix: &str, expected: Word) {
 #[test]
 fn masm_domain_tags_match_rust_registries() {
     assert_eq!(
+        masm_scalar(ECGFP5_IES, "ECGFP5_SEAL_CONTEXT"),
+        domain_tag(ECGFP5_SEAL_CONTEXT).as_canonical_u64(),
+    );
+    assert_eq!(
         masm_scalar(EIDOS, "GENERIC_FELT_SEQUENCE_DOMAIN_TAG"),
         domain_tag(GENERIC_FELT_SEQUENCE).as_canonical_u64(),
     );
@@ -135,7 +145,39 @@ fn masm_domain_tags_match_rust_registries() {
 }
 
 #[test]
+fn ecgfp5_generator_commitment_matches_rust() {
+    use miden_crypto::ecdh::ecgfp5::SecretKey;
+
+    let mut bytes = [0; 40];
+    bytes[0] = 1;
+    let secret = SecretKey::from_bytes(&bytes).unwrap();
+    let advice = secret.public_key().advise(&secret);
+    // The direct advice starts with Q(5) and the scalar's ten u32 limbs, then the twenty roots.
+    let roots: Vec<_> = advice.elements().skip(5 + 10).take(80).collect();
+    assert_word(
+        ECGFP5_DIRECT,
+        "GENERATOR_COMMITMENT",
+        Eidos::hash_elements_in_domain(&roots, ECGFP5_PREPROCESSED_PUBLIC_KEY),
+    );
+}
+
+#[test]
 fn masm_initial_chaining_words_match_rust() {
+    assert_word(
+        ECGFP5_DIRECT,
+        "PUBLIC_KEY_INIT_CV",
+        Eidos::init_chaining_word(ECGFP5_PUBLIC_KEY, 5),
+    );
+    assert_word(
+        ECGFP5_TABLES,
+        "ROOTS_INIT_CV",
+        Eidos::init_chaining_word(ECGFP5_PREPROCESSED_PUBLIC_KEY, 80),
+    );
+    assert_word(
+        ECGFP5_TABLES,
+        "LEAF_INIT_CV",
+        Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, 24),
+    );
     let merkle_cv = Eidos::merkle_node_init_chaining_word();
     assert_eq!(masm_base_word(EIDOS, "EIDOS_INIT_CV"), merkle_cv);
     assert_eq!(masm_base_word(PRECOMPILES, "EIDOS_INIT_CV"), merkle_cv);
@@ -197,6 +239,13 @@ fn masm_initial_chaining_words_match_rust() {
     );
     assert_indexed_word(AEAD, "AEAD_CTR_INIT_CV", Eidos::init_chaining_word(AEAD_CTR_KEY, 0));
     assert_indexed_word(AEAD, "AEAD_MAC_INIT_CV", Eidos::init_chaining_word(AEAD_MAC_KEY, 0));
+    assert_word(
+        ECGFP5_IES,
+        "EXTRACT_INIT_CV",
+        Eidos::init_chaining_word(ECGFP5_SEAL_EXTRACT, 24),
+    );
+    assert_word(ECGFP5_IES, "KEY_INIT_CV", Eidos::init_chaining_word(ECGFP5_SEAL_KEY, 8));
+    assert_word(ECGFP5_IES, "NONCE_INIT_CV", Eidos::init_chaining_word(ECGFP5_SEAL_NONCE, 8));
 
     for (name, len) in [
         ("DEFERRED_CHUNKS_INIT_CV_1", 8),
@@ -245,25 +294,19 @@ fn masm_initial_chaining_words_match_rust() {
     assert_word(CLAIM, "CLAIM_INIT_CV", Eidos::init_chaining_word(EXECUTION_CLAIM, 40));
 
     assert_word(FRI, "FRI_ROW_HASH_INIT_CV", Eidos::init_chaining_word(LMCS_LEAF, 8));
-    for (name, len) in [
-        ("EIDOS_LMCS_INIT_CV_8", 8),
-        ("EIDOS_LMCS_INIT_CV_16", 16),
-        ("EIDOS_LMCS_INIT_CV_64", 64),
-        ("EIDOS_LMCS_INIT_CV_192", 192),
-    ] {
-        assert_word(VM_DEEP_QUERIES, name, Eidos::init_chaining_word(LMCS_LEAF, len));
-    }
-    for (cv_name, blocks_name) in [
-        ("PREPROCESSED_LMCS_INIT_CV", "PREPROCESSED_ROW_DOUBLE_WORDS"),
-        ("MAIN_LMCS_INIT_CV", "MAIN_ROW_DOUBLE_WORDS"),
-        ("AUX_LMCS_INIT_CV", "AUX_ROW_DOUBLE_WORDS"),
-        ("QUOTIENT_LMCS_INIT_CV", "QUOTIENT_ROW_DOUBLE_WORDS"),
-    ] {
-        let blocks = u32::try_from(masm_scalar(PVM_DEEP_QUERIES, blocks_name))
-            .expect("PVM LMCS block count exceeds u32");
-        let encoded_len = blocks
-            .checked_mul(EIDOS_BLOCK_WIDTH as u32)
-            .expect("PVM LMCS encoded length exceeds u32");
-        assert_word(PVM_DEEP_QUERIES, cv_name, Eidos::init_chaining_word(LMCS_LEAF, encoded_len));
+    for parameters in [VM_PARAMETERS, PVM_PARAMETERS] {
+        for (cv_name, blocks_name) in [
+            ("PREPROCESSED_LMCS_INIT_CV", "PREPROCESSED_ROW_DOUBLE_WORDS"),
+            ("MAIN_LMCS_INIT_CV", "MAIN_ROW_DOUBLE_WORDS"),
+            ("AUX_LMCS_INIT_CV", "AUX_ROW_DOUBLE_WORDS"),
+            ("QUOTIENT_LMCS_INIT_CV", "QUOTIENT_ROW_DOUBLE_WORDS"),
+        ] {
+            let blocks = u32::try_from(masm_scalar(parameters, blocks_name))
+                .expect("LMCS block count exceeds u32");
+            let encoded_len = blocks
+                .checked_mul(EIDOS_BLOCK_WIDTH as u32)
+                .expect("LMCS encoded length exceeds u32");
+            assert_word(parameters, cv_name, Eidos::init_chaining_word(LMCS_LEAF, encoded_len));
+        }
     }
 }

@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_air::PublicInputs;
+use miden_air_definitions::vm::PublicInputs;
 use miden_core::{
     deferred::TRUE_DIGEST,
     mast::{BasicBlockNodeBuilder, MastForest},
@@ -8,9 +8,10 @@ use miden_core::{
     program::Program,
 };
 
-use super::{Felt, VmTrace};
+use super::VmTrace;
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, StackInputs, trace::build_trace,
+    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, Felt, StackInputs,
+    trace::build_trace,
 };
 
 mod chiplets;
@@ -29,7 +30,7 @@ const TEST_TRACE_FRAGMENT_SIZE: usize = 1 << 10;
 // ================================================================================================
 
 /// Builds a sample trace by executing the provided code block against the provided stack inputs.
-pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> VmTrace {
+pub(crate) fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> VmTrace {
     let stack_inputs = stack_inputs.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<Felt>>();
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new_with_options(
@@ -42,7 +43,7 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> VmTr
     .expect("processor advice inputs should fit advice map limits");
     let execution_witness = processor.execute_for_proving_sync(program, &mut host).unwrap();
     let (vm_witness, _) = execution_witness.into_parts();
-    build_trace(vm_witness).unwrap()
+    build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
 }
 
 /// Builds a sample trace by executing the provided program with pre-built `StackInputs`.
@@ -50,7 +51,7 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> VmTr
 /// Unlike [`build_trace_from_program`], this helper accepts a `StackInputs` value directly so
 /// that callers can supply `Felt` elements (e.g. a procedure hash word) without having to
 /// convert them through `u64` first.
-pub fn build_trace_from_program_with_stack(
+pub(crate) fn build_trace_from_program_with_stack(
     program: &Program,
     stack_inputs: StackInputs,
 ) -> VmTrace {
@@ -65,12 +66,12 @@ pub fn build_trace_from_program_with_stack(
     .expect("processor advice inputs should fit advice map limits");
     let execution_witness = processor.execute_for_proving_sync(program, &mut host).unwrap();
     let (vm_witness, _) = execution_witness.into_parts();
-    build_trace(vm_witness).unwrap()
+    build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
 }
 
 /// Builds a sample trace by executing a span block containing the specified operations. This
 /// results in 1 additional hash cycle (8 rows) at the beginning of the hash chiplet.
-pub fn build_trace_from_ops(operations: Vec<Operation>, stack: &[u64]) -> VmTrace {
+pub(crate) fn build_trace_from_ops(operations: Vec<Operation>, stack: &[u64]) -> VmTrace {
     let mut mast_forest = MastForest::new();
 
     let basic_block_id =
@@ -86,7 +87,7 @@ pub fn build_trace_from_ops(operations: Vec<Operation>, stack: &[u64]) -> VmTrac
 /// [`build_trace_from_ops`], this variant accepts the full [`AdviceInputs`] object, so the
 /// program can run against an initialised advice provider (e.g. to seed a Merkle tree for the
 /// sibling-table tests).
-pub fn build_trace_from_ops_with_inputs(
+pub(crate) fn build_trace_from_ops_with_inputs(
     operations: Vec<Operation>,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
@@ -108,7 +109,7 @@ pub fn build_trace_from_ops_with_inputs(
     .expect("processor advice inputs should fit advice map limits");
     let execution_witness = processor.execute_for_proving_sync(&program, &mut host).unwrap();
     let (vm_witness, _) = execution_witness.into_parts();
-    build_trace(vm_witness).unwrap()
+    build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
 }
 
 #[test]
@@ -133,12 +134,11 @@ fn non_empty_execution_witness_splits_with_matching_precompile_root() {
 
     let precompile_witness = precompile_witness.expect("logged statement must be retained");
     assert_eq!(vm_witness.claim(), claim);
-    assert_eq!(precompile_witness.root_unchecked(), precompile_root);
     let output = FastProcessor::new(stack_inputs).execute_sync(&program, &mut host).unwrap();
     assert_eq!(output.precompile_root(), precompile_root);
     assert_eq!(output.precompile_witness.as_ref(), Some(&precompile_witness));
 
-    let trace = build_trace(vm_witness).unwrap();
+    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
     assert_eq!(trace.precompile_root(), precompile_root);
 }
 
@@ -175,8 +175,53 @@ fn empty_execution_witness_splits_and_replays_with_explicit_stack_inputs() {
     assert_eq!(output.precompile_root(), TRUE_DIGEST);
     assert!(output.precompile_witness.is_none());
 
-    let trace = build_trace(vm_witness).unwrap();
+    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
     assert_eq!(trace.init_stack_state(), stack_inputs);
     assert_eq!(trace.precompile_root(), TRUE_DIGEST);
     assert_eq!(trace.to_public_values(), expected_public_inputs.to_elements());
+}
+
+#[test]
+fn clear_deferred_replays_across_fragments_and_retains_new_obligations() {
+    use miden_core::{deferred::Node, serde::Serializable};
+
+    use crate::ExecutionWitness;
+
+    // Read the logged root after one fragment boundary, then read the cleared root after another.
+    let source = alloc::format!(
+        "begin
+            log_deferred dropw
+            repeat.{TEST_TRACE_FRAGMENT_SIZE} nop end
+            adv.push_deferred_root adv_loadw
+            clear_deferred
+            repeat.{TEST_TRACE_FRAGMENT_SIZE} nop end
+            adv.push_deferred_root padw adv_loadw
+            assertz assertz assertz assertz
+            log_deferred
+        end"
+    );
+    let program = miden_assembly::Assembler::default()
+        .assemble_program("program", &source)
+        .unwrap()
+        .unwrap_program();
+    let witness = FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
+            .unwrap(),
+    )
+    .unwrap()
+    .execute_for_proving_sync(&program, &mut DefaultHost::default())
+    .unwrap();
+    let restored = ExecutionWitness::read_from_bytes(&witness.to_bytes()).unwrap();
+    let (vm_witness, precompile_witness) = restored.into_parts();
+    let first_root = Node::and(TRUE_DIGEST, TRUE_DIGEST).digest();
+    let expected_root = Node::and(TRUE_DIGEST, first_root).digest();
+    assert_eq!(vm_witness.precompile_root, expected_root);
+    assert!(precompile_witness.is_some());
+    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
+    assert_eq!(trace.stack_outputs().get_word(0), Some(expected_root));
+    assert_eq!(trace.precompile_root(), expected_root);
+    miden_vm_stark::debug::check_constraints(&trace);
 }

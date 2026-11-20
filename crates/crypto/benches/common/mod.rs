@@ -14,8 +14,8 @@
 //! # Naming Conventions
 //!
 //! ## Benchmark Functions
-//! - `hash_<algorithm>_<operation>_<data_type>` (e.g., `hash_rpo256_single_byte`,
-//!   `hash_rpo256_sequential_felt`)
+//! - `hash_<algorithm>_<operation>_<data_type>` (e.g., `hash_eidos_merge`,
+//!   `hash_eidos_sequential_felt`)
 //! - `merkle_<structure>_<operation>_<parameter>` (e.g., `merkle_smt_update_sparse`,
 //!   `merkle_mmr_proof_generation`)
 //!
