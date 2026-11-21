@@ -35,6 +35,16 @@ pub enum InvalidEnumTypeError {
          previous discriminant"
     )]
     DuplicateDiscriminantValue { variant: Arc<str>, value: u128 },
+    #[error("invalid enum: size exceeds u32::MAX bytes")]
+    SizeOverflow,
+}
+
+impl From<InvalidStructTypeError> for InvalidEnumTypeError {
+    fn from(err: InvalidStructTypeError) -> Self {
+        match err {
+            InvalidStructTypeError::SizeOverflow => Self::SizeOverflow,
+        }
+    }
 }
 
 /// An enum type is a special type that takes one of two forms:
@@ -167,49 +177,38 @@ impl EnumType {
             }
         }
 
-        // Compute the offsets of each variant and identify the largest variant for later
+        // Compute the offsets of each variant. The enum must hold every variant's tagged layout,
+        // so its size and alignment are the largest of those layouts' sizes and alignments, taken
+        // independently: the variant that reaches furthest need not be the most aligned one.
         let mut offsets: SmallVec<[_; 4]> = smallvec![0u32; variants.len()];
-        let mut largest_variant = None::<Type>;
+        let mut size = discriminant.size_in_bytes();
+        let mut align = discriminant.min_alignment();
         for (i, variant) in variants.iter().enumerate() {
             if let Some(value_ty) = variant.value.as_ref() {
-                let layout = StructType::new([discriminant.clone(), value_ty.clone()]);
+                let layout = StructType::try_from_parts(
+                    None,
+                    TypeRepr::Default,
+                    [discriminant.clone(), value_ty.clone()],
+                )?;
                 offsets[i] = layout.fields()[1].offset;
-                match largest_variant.as_mut() {
-                    Some(largest_variant)
-                        if value_ty.aligned_size_in_bytes()
-                            > largest_variant.aligned_size_in_bytes() =>
-                    {
-                        *largest_variant = value_ty.clone();
-                    },
-                    Some(_) => (),
-                    None => {
-                        largest_variant = Some(value_ty.clone());
-                    },
-                }
+                size = size.max(layout.size());
+                align = align.max(layout.min_alignment());
             }
         }
 
-        // Derive the size and alignment of this enum type from the largest variant we found
-        let (size, align) = match largest_variant {
-            Some(ty) => {
-                let struct_ty = StructType::new([discriminant.clone(), ty]);
-                let size = struct_ty.size();
-                let align = struct_ty.min_alignment();
-                (size, align)
-            },
-            None => {
-                let size = discriminant.size_in_bytes();
-                let align = discriminant.min_alignment();
-                (size, align)
-            },
-        };
+        // Pad the size to the alignment, as a struct's size is, so that it is also the stride of
+        // an array of this enum.
+        let size = u32::try_from(size)
+            .ok()
+            .and_then(|size| size.checked_next_multiple_of(align as u32))
+            .ok_or(InvalidEnumTypeError::SizeOverflow)?;
 
         Ok(Self {
             name,
             discriminant,
             variants,
             offsets,
-            size: size as u32,
+            size,
             align: align as u32,
         })
     }
@@ -594,6 +593,68 @@ mod tests {
             [Variant::c_like("A".into(), Some(1)), Variant::c_like("B".into(), Some(1))],
         )
         .unwrap_or_else(|err| panic!("{err}"));
+    }
+
+    #[test]
+    fn enum_type_rejects_variant_payload_that_overflows_u32_size() {
+        // The payload alone fits in u32::MAX bytes; the discriminant in front of it does not.
+        let payload = Type::from(ArrayType::new(Type::U8, u32::MAX as usize));
+        let err = EnumType::new("T".into(), Type::U8, [Variant::new("A".into(), payload, None)])
+            .unwrap_err();
+        assert!(matches!(err, InvalidEnumTypeError::SizeOverflow), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn enum_type_holds_every_variant_in_either_order() {
+        let check = |tag: Type, a: Type, b: Type, expected: (usize, usize)| {
+            for (first, second) in [(&a, &b), (&b, &a)] {
+                let variants = [
+                    Variant::new("A".into(), first.clone(), None),
+                    Variant::new("B".into(), second.clone(), None),
+                ];
+                let ty = EnumType::new("T".into(), tag.clone(), variants).unwrap();
+                assert_eq!((ty.size_in_bytes(), ty.min_alignment()), expected);
+            }
+        };
+        let bytes = |n| Type::from(ArrayType::new(Type::U8, n));
+
+        // With a `u32` tag, `[u8; 5]` reaches byte 9 (12 once padded) while `u32` ends at byte 8,
+        // although `u32` is the larger payload.
+        check(Type::U32, bytes(5), Type::U32, (12, 4));
+        // With a `u8` tag, `[u8; 7]` and `u32` both end at byte 8, but only `u32` needs
+        // alignment 4.
+        check(Type::U8, bytes(7), Type::U32, (8, 4));
+        // `[u8; 9]` reaches byte 10 at alignment 1 and `u32` sets alignment 4, so the size pads
+        // to 12, the stride of an array of this enum.
+        check(Type::U8, bytes(9), Type::U32, (12, 4));
+    }
+
+    #[test]
+    fn enum_type_compares_variant_sizes_in_bytes() {
+        // A 2^29-byte payload is 2^32 bits, so comparing the variants through their bit sizes
+        // overflows a 32-bit `usize` (such as on wasm32), although the enum fits in u32::MAX
+        // bytes.
+        let payload = Type::from(ArrayType::new(Type::U8, 1 << 29));
+        let ty = EnumType::new(
+            "T".into(),
+            Type::U8,
+            [
+                Variant::new("A".into(), Type::U8, None),
+                Variant::new("B".into(), payload, None),
+            ],
+        )
+        .unwrap();
+        assert_eq!(ty.size_in_bytes(), (1 << 29) + 1);
+    }
+
+    #[test]
+    fn enum_type_rejects_variant_payload_whose_size_overflows_usize() {
+        // `[[felt; 2^30]; 2^29]` is 2^64 bits; sizing it must fail cleanly instead of overflowing.
+        let inner = Type::from(ArrayType::new(Type::Felt, 1 << 30));
+        let payload = Type::from(ArrayType::new(inner, 1 << 29));
+        let err = EnumType::new("T".into(), Type::U8, [Variant::new("A".into(), payload, None)])
+            .unwrap_err();
+        assert!(matches!(err, InvalidEnumTypeError::SizeOverflow), "unexpected error: {err}");
     }
 
     #[test]
