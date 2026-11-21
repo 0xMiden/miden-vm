@@ -25,7 +25,7 @@ mod tests {
     use miden_field::{PackedValue, PrimeCharacteristicRing};
 
     use super::*;
-    use crate::Felt;
+    use crate::{Felt, hash::poseidon2::Poseidon2};
 
     const LANES: usize = PackedFelt::WIDTH;
 
@@ -70,9 +70,7 @@ mod tests {
 
     #[test]
     fn poseidon2_packed_permutation_matches_scalar() {
-        check(Poseidon2Permutation256::apply_permutation, |s| {
-            Poseidon2Permutation256.permute_mut(s)
-        });
+        check(Poseidon2::apply_permutation, |s| Poseidon2Permutation256.permute_mut(s));
     }
 
     /// Canonical values (`< ORDER`) that stress the wraparound corrections in
@@ -83,7 +81,7 @@ mod tests {
     fn poseidon2_packed_permutation_edge_values() {
         for rotation in 0..EDGE_VALS.len() {
             check_with(
-                Poseidon2Permutation256::apply_permutation,
+                Poseidon2::apply_permutation,
                 |s| Poseidon2Permutation256.permute_mut(s),
                 |i, lane| {
                     Felt::new_unchecked(EDGE_VALS[(i + 3 * lane + rotation) % EDGE_VALS.len()])
@@ -116,7 +114,7 @@ mod tests {
             (1 << 63) - 1,
         ];
         check_with(
-            Poseidon2Permutation256::apply_permutation,
+            Poseidon2::apply_permutation,
             |s| Poseidon2Permutation256.permute_mut(s),
             |i, _lane| Felt::new_unchecked(S[i]),
         );
@@ -138,7 +136,7 @@ mod tests {
                 core::array::from_fn(|_| Felt::new_unchecked(next() % Felt::ORDER))
             });
             check_with(
-                Poseidon2Permutation256::apply_permutation,
+                Poseidon2::apply_permutation,
                 |s| Poseidon2Permutation256.permute_mut(s),
                 |i, lane| state[lane][i],
             );

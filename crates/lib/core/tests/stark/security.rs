@@ -166,7 +166,7 @@ fn vm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 6]) {
         max_constraint_degree = vm_metadata::AIR_SHAPE.max_constraint_degree,
         num_deep_terms = vm_metadata::AIR_SHAPE.num_deep_terms.unwrap(),
         fractions_per_row = vm_metadata::LOOKUP_SHAPE.fractions_per_row,
-        core_boundary_terms = vm_metadata::CORE_BOUNDARY_LOOKUP_TERMS,
+        core_boundary_terms = vm_metadata::FIXED_LOOKUP_ERROR_TERMS,
     );
     let levels = run_sweep_grid(&adapter, &push_args, outer_bound, inner_bound);
     for outer in 0..outer_bound {
@@ -263,7 +263,7 @@ fn vm_security_descriptor(
         num_deep_terms: u64::from(vm_metadata::AIR_SHAPE.num_deep_terms.unwrap()),
         lookup_fractions_per_row: u64::from(vm_metadata::LOOKUP_SHAPE.fractions_per_row),
         num_lookup_boundary_terms: u64::from(
-            vm_metadata::CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures,
+            vm_metadata::FIXED_LOOKUP_ERROR_TERMS + num_kernel_procedures,
         ),
     }
     .into_stack()
@@ -686,7 +686,7 @@ fn recursive_verifier_ranges_fit_security_estimator_envelope() {
             "MVM",
             u64::from(vm::LOOKUP_SHAPE.max_message_width),
             u64::from(vm::LOOKUP_SHAPE.fractions_per_row),
-            u64::from(vm::CORE_BOUNDARY_LOOKUP_TERMS)
+            u64::from(vm::FIXED_LOOKUP_ERROR_TERMS)
                 + miden_core::program::KernelDescriptor::MAX_NUM_PROCEDURES as u64,
             MVM_LOG_HEIGHT_MIN,
         ),
@@ -694,7 +694,7 @@ fn recursive_verifier_ranges_fit_security_estimator_envelope() {
             "PVM",
             u64::from(pvm::testing::LOOKUP_SHAPE.max_message_width),
             u64::from(pvm::testing::LOOKUP_SHAPE.fractions_per_row),
-            u64::from(pvm::FIXED_BOUNDARY_LOOKUP_TERMS),
+            u64::from(pvm::FIXED_LOOKUP_ERROR_TERMS),
             PVM_LOG_HEIGHT_MIN,
         ),
     ] {
@@ -832,7 +832,7 @@ fn pvm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 5]) {
         max_constraint_degree = air_shape.max_constraint_degree,
         num_deep_terms = air_shape.num_deep_terms.unwrap(),
         fractions_per_row = security::testing::LOOKUP_SHAPE.fractions_per_row,
-        boundary_terms = security::FIXED_BOUNDARY_LOOKUP_TERMS,
+        boundary_terms = security::FIXED_LOOKUP_ERROR_TERMS,
     );
     let levels = run_sweep_grid(&adapter, &push_args, outer_bound, inner_bound);
     let pcs_params = precompile_pcs_params();

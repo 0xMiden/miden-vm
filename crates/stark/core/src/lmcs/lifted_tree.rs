@@ -12,7 +12,7 @@ use p3_matrix::{
 use p3_maybe_rayon::{iter, prelude::*};
 use p3_symmetric::{Hash, PseudoCompressionFunction};
 use p3_util::{log2_strict_usize, reverse_bits_len};
-use tracing::info_span;
+use tracing::trace_span;
 
 use crate::{
     lmcs::{
@@ -106,7 +106,7 @@ pub struct LiftedMerkleTree<F, D, M, const DIGEST_ELEMS: usize, const SALT_ELEMS
     ///
     /// Openings read their rows from these matrices and rehash them to rebuild the digest
     /// layers the tree does not store.
-    pub(crate) leaves: Vec<M>,
+    leaves: Vec<M>,
 
     /// Stored hash layers (digest arrays) in top-down order: index 0 is the root (one hash).
     ///
@@ -114,13 +114,13 @@ pub struct LiftedMerkleTree<F, D, M, const DIGEST_ELEMS: usize, const SALT_ELEMS
     /// `digest_layers[d]` has `2^d` entries, so `digest_layers[node.depth()][node.position()]`
     /// gives direct access. The lowest `min(PRUNED_LAYERS, depth)` layers, leaf hashes included,
     /// are not stored; openings rebuild the parts they need from `leaves` and `salt`.
-    pub(crate) digest_layers: Vec<Vec<[D; DIGEST_ELEMS]>>,
+    digest_layers: Vec<Vec<[D; DIGEST_ELEMS]>>,
 
     /// Salt matrix for hiding commitment. Each row contains `SALT_ELEMS` random field elements.
     /// `None` when `SALT_ELEMS = 0` (non-hiding mode).
-    pub(crate) salt: Option<RowMajorMatrix<F>>,
+    salt: Option<RowMajorMatrix<F>>,
     /// Column alignment used for transcript proofs.
-    pub(crate) alignment: usize,
+    alignment: usize,
 }
 
 impl<F, D, M, const DIGEST_ELEMS: usize, const SALT_ELEMS: usize>
@@ -339,7 +339,7 @@ where
         let leaves: Vec<M> =
             leaves.into_iter().map(BitReversibleMatrix::bit_reverse_rows).collect();
 
-        let leaf_digests = info_span!("hash leaves").in_scope(|| {
+        let leaf_digests = trace_span!(target: "miden::vm::prove", "hash leaves").in_scope(|| {
             let states = build_leaf_states_upsampled::<PF, PD, M, H, WIDTH, DIGEST_ELEMS>(
                 &leaves,
                 h,
@@ -367,26 +367,27 @@ where
         // Build digest layers by repeatedly compressing until we reach the root,
         // then reverse so index 0 = root, matching the top-down NodeId convention.
         // The lowest `PRUNED_LAYERS` layers are dropped as soon as their parents exist.
-        let digest_layers = info_span!("compress tree layers").in_scope(|| {
-            let pruned_layers = PRUNED_LAYERS.min(log2_strict_usize(leaf_digests.len()));
-            let mut lowest_stored = leaf_digests;
-            for _ in 0..pruned_layers {
-                lowest_stored = compress_uniform::<PD, C, DIGEST_ELEMS>(&lowest_stored, c);
-            }
-
-            let mut digest_layers = vec![lowest_stored];
-            loop {
-                let prev_layer = digest_layers.last().unwrap();
-                if prev_layer.len() == 1 {
-                    break;
+        let digest_layers = trace_span!(target: "miden::vm::prove", "compress tree layers")
+            .in_scope(|| {
+                let pruned_layers = PRUNED_LAYERS.min(log2_strict_usize(leaf_digests.len()));
+                let mut lowest_stored = leaf_digests;
+                for _ in 0..pruned_layers {
+                    lowest_stored = compress_uniform::<PD, C, DIGEST_ELEMS>(&lowest_stored, c);
                 }
 
-                let next_layer = compress_uniform::<PD, C, DIGEST_ELEMS>(prev_layer, c);
-                digest_layers.push(next_layer);
-            }
-            digest_layers.reverse();
-            digest_layers
-        });
+                let mut digest_layers = vec![lowest_stored];
+                loop {
+                    let prev_layer = digest_layers.last().unwrap();
+                    if prev_layer.len() == 1 {
+                        break;
+                    }
+
+                    let next_layer = compress_uniform::<PD, C, DIGEST_ELEMS>(prev_layer, c);
+                    digest_layers.push(next_layer);
+                }
+                digest_layers.reverse();
+                digest_layers
+            });
 
         Self {
             leaves,
@@ -411,14 +412,14 @@ where
         if let Some(salt) = salt {
             debug_assert_eq!(salt.height(), states.len());
             debug_assert_eq!(salt.width(), SALT_ELEMS);
-            info_span!("absorb salt", height = salt.height(), width = SALT_ELEMS).in_scope(|| {
+            trace_span!(target: "miden::vm::prove", "absorb salt", height = salt.height(), width = SALT_ELEMS).in_scope(|| {
                 absorb_matrix::<PF, PD, _, _, WIDTH, DIGEST_ELEMS>(&mut states, salt, h);
             });
         }
         let n = states.len();
         let log_n = log2_strict_usize(n);
         // Digest i uses state bitrev(i), placing tree leaves in domain order.
-        info_span!("squeeze leaves", n).in_scope(|| {
+        trace_span!(target: "miden::vm::prove", "squeeze leaves", n).in_scope(|| {
             (0..n)
                 .into_par_iter()
                 .map(|i| h.squeeze(&states[reverse_bits_len(i, log_n)]))
@@ -598,45 +599,46 @@ where
             encoded_len,
         );
 
-        let leaf_digests = info_span!("produce and hash leaves").in_scope(|| {
-            let mut states = build_leaf_states_upsampled::<PF, PD, _, H, WIDTH, DIGEST_ELEMS>(
-                &leaves,
-                h,
-                dimensions.height,
-                initial_state,
-            );
-            let mut slots = Vec::new();
-            let make_consumer: BlockConsumerFactory<'_, F> = Box::new(|block_rows| {
-                assert!(block_rows.is_power_of_two(), "block height must be a power of two");
-                assert!(block_rows <= dimensions.height, "block exceeds final matrix height");
-                slots = states
-                    .chunks_exact_mut(block_rows)
-                    .map(|block| RwLock::new(Some(block)))
-                    .collect();
-                let slots = &slots;
-                Box::new(move |row: usize, block: RowMajorMatrixView<'_, F>| {
-                    assert_eq!(row % block_rows, 0, "misaligned block offset");
-                    assert_eq!(block.height(), block_rows, "wrong block height");
-                    assert_eq!(block.width(), dimensions.width, "wrong block width");
-                    // Release the lock before hashing the disjoint state slice.
-                    let states = slots
-                        .get(row / block_rows)
-                        .expect("block offset out of range")
-                        .write()
-                        .take()
-                        .expect("duplicate block");
-                    absorb_matrix::<PF, PD, _, H, WIDTH, DIGEST_ELEMS>(states, &block, h);
-                })
+        let leaf_digests = trace_span!(target: "miden::vm::prove", "produce and hash leaves")
+            .in_scope(|| {
+                let mut states = build_leaf_states_upsampled::<PF, PD, _, H, WIDTH, DIGEST_ELEMS>(
+                    &leaves,
+                    h,
+                    dimensions.height,
+                    initial_state,
+                );
+                let mut slots = Vec::new();
+                let make_consumer: BlockConsumerFactory<'_, F> = Box::new(|block_rows| {
+                    assert!(block_rows.is_power_of_two(), "block height must be a power of two");
+                    assert!(block_rows <= dimensions.height, "block exceeds final matrix height");
+                    slots = states
+                        .chunks_exact_mut(block_rows)
+                        .map(|block| RwLock::new(Some(block)))
+                        .collect();
+                    let slots = &slots;
+                    Box::new(move |row: usize, block: RowMajorMatrixView<'_, F>| {
+                        assert_eq!(row % block_rows, 0, "misaligned block offset");
+                        assert_eq!(block.height(), block_rows, "wrong block height");
+                        assert_eq!(block.width(), dimensions.width, "wrong block width");
+                        // Release the lock before hashing the disjoint state slice.
+                        let states = slots
+                            .get(row / block_rows)
+                            .expect("block offset out of range")
+                            .write()
+                            .take()
+                            .expect("duplicate block");
+                        absorb_matrix::<PF, PD, _, H, WIDTH, DIGEST_ELEMS>(states, &block, h);
+                    })
+                });
+                let matrix = produce(Some(make_consumer));
+                assert!(
+                    !slots.is_empty() && slots.into_iter().all(|slot| slot.into_inner().is_none()),
+                    "missing block"
+                );
+                assert_eq!(matrix.dimensions(), dimensions, "producer returned wrong dimensions");
+                leaves.push(matrix);
+                Self::finish_leaf_states::<PF, PD, H, WIDTH>(h, states, salt.as_ref())
             });
-            let matrix = produce(Some(make_consumer));
-            assert!(
-                !slots.is_empty() && slots.into_iter().all(|slot| slot.into_inner().is_none()),
-                "missing block"
-            );
-            assert_eq!(matrix.dimensions(), dimensions, "producer returned wrong dimensions");
-            leaves.push(matrix);
-            Self::finish_leaf_states::<PF, PD, H, WIDTH>(h, states, salt.as_ref())
-        });
         Self::from_leaf_digests::<PD, C>(c, leaves, salt, alignment, leaf_digests)
     }
 }
@@ -662,16 +664,18 @@ where
     const { assert!(PF::WIDTH.is_power_of_two()) };
     const { assert!(PD::WIDTH.is_power_of_two()) };
     let final_height = validate_heights(matrices.iter().map(Matrix::height).chain([final_height]));
-    let mut states = info_span!("alloc states", final_height, width = WIDTH)
-        .in_scope(|| iter::repeat_n(initial_state, final_height).collect::<Vec<_>>());
+    let mut states =
+        trace_span!(target: "miden::vm::prove", "alloc states", final_height, width = WIDTH)
+            .in_scope(|| iter::repeat_n(initial_state, final_height).collect::<Vec<_>>());
     let mut scratch = Vec::new();
     let mut active_height = matrices.first().map_or(final_height, Matrix::height);
     for matrix in matrices {
         let height = matrix.height();
         upsample_states(&mut states, &mut scratch, active_height, height);
-        info_span!("absorb matrix", height, width = matrix.width()).in_scope(|| {
-            absorb_matrix::<PF, PD, _, _, _, _>(&mut states[..height], matrix, sponge)
-        });
+        trace_span!(target: "miden::vm::prove", "absorb matrix", height, width = matrix.width())
+            .in_scope(|| {
+                absorb_matrix::<PF, PD, _, _, _, _>(&mut states[..height], matrix, sponge)
+            });
         active_height = height;
     }
     upsample_states(&mut states, &mut scratch, active_height, final_height);
@@ -689,10 +693,10 @@ fn upsample_states<D: Copy + Default + Send + Sync, const WIDTH: usize>(
     }
     if scratch.is_empty() {
         let final_height = states.len();
-        *scratch = info_span!("alloc scratch", final_height)
+        *scratch = trace_span!(target: "miden::vm::prove", "alloc scratch", final_height)
             .in_scope(|| iter::repeat_n([D::default(); WIDTH], final_height).collect());
     }
-    info_span!("upsample states", from, to).in_scope(|| {
+    trace_span!(target: "miden::vm::prove", "upsample states", from, to).in_scope(|| {
         scratch[..to]
             .par_chunks_mut(to / from)
             .zip(states[..from].par_iter())

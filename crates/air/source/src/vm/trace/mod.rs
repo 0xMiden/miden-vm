@@ -60,32 +60,29 @@ pub mod log_deferred {
     pub const STACK_STATE_NEW_RANGE: Range<usize> = BLOCK_LO_RANGE;
 }
 
-// Chiplets trace
-// 23 shared chiplet cells + chip_clk = 24.
-// `chip_clk` is the chiplet-trace row counter (value `row_index + 1`); it sources the
-// hasher responder address on the chiplet side.
-pub const CHIPLETS_DATA_WIDTH: usize = 23;
-pub const CHIPLETS_MODE_COL: usize = CHIPLETS_DATA_WIDTH - 1;
-pub const CHIPLETS_STREAM_MODE_COL: usize = CHIPLETS_MODE_COL;
-pub const CHIPLETS_CLK_COL: usize = CHIPLETS_MODE_COL + 1;
-pub const CHIPLETS_WIDTH: usize = CHIPLETS_CLK_COL + 1;
+// Chiplets trace: 24 shared cells, interpreted through each chiplet's row overlay.
+// Controller rows occupy column 0 for the top-level selector and columns 1..24 for their payload.
+pub const CHIPLETS_WIDTH: usize = 24;
 
 pub mod eidos_compression {
-    pub use crate::vm::constraints::eidos_compression::{
-        layout::{
-            BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, BYTES_PER_WORD, F_C_CANON_INV_COL,
-            F_C_CANON_Z_COL, F_COMPRESSION_CYCLE_ID_COL, F_COMPRESSION_MULTIPLICITY_COL,
-            F_HIGH_EVEN_SLOT_BASE, F_HIGH_ODD_SLOT_BASE, F_MODE_COL, F_R_CANON_INV_BASE_COL,
-            F_R_CANON_Z_BASE_COL, F_TOP_BIT_SLOT_BASE_COL, FOOTER_ROWS, FOOTER_START, FUSED_G_ROWS,
-            G_K2_BASE_COL, NUM_COLS as NUM_EIDOS_COMPRESSION_COLS, NUM_G, RowKind,
-            footer_future_w_col, footer_interface_tail_col, footer_msg_word_col, footer_r_col,
-            footer_xor_slot_col, g_ac_byte_slot_col, g_bd_rot_result_col, g_bd_rot_slot_col,
-            g_k3_col, g_msg_word_col, row_kind,
-        },
-        trace::{
-            ByteLookupRecorder, EidosCompressionByteLookup, EidosCompressionFeltRow, TraceMode,
-            generate_felt_trace_block, retag_felt_trace_block_cycle_id, write_felt_trace_block,
-            write_felt_trace_block_into_zeroed_with_lookups,
+    pub use crate::{
+        shared::eidos::{footer_cv_word, footer_message_word},
+        vm::constraints::eidos_compression::{
+            layout::{
+                BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, BYTES_PER_WORD, F_C_CANON_INV_COL,
+                F_C_CANON_Z_COL, F_COMPRESSION_CYCLE_ID_COL, F_COMPRESSION_MULTIPLICITY_COL,
+                F_HIGH_EVEN_SLOT_BASE, F_HIGH_ODD_SLOT_BASE, F_MODE_COL, F_R_CANON_INV_BASE_COL,
+                F_R_CANON_Z_BASE_COL, F_TOP_BIT_SLOT_BASE_COL, FOOTER_ROWS, FOOTER_START,
+                FUSED_G_ROWS, G_K2_BASE_COL, NUM_COLS as NUM_EIDOS_COMPRESSION_COLS, NUM_G,
+                RowKind, footer_future_w_col, footer_interface_tail_col, footer_r_col,
+                footer_xor_slot_col, g_ac_byte_slot_col, g_bd_rot_result_col, g_bd_rot_slot_col,
+                g_k3_col, row_kind,
+            },
+            trace::{
+                ByteLookupRecorder, EidosCompressionByteLookup, EidosCompressionFeltRow, TraceMode,
+                generate_felt_trace_block, retag_felt_trace_block_cycle_id, write_felt_trace_block,
+                write_felt_trace_block_into_zeroed_with_lookups,
+            },
         },
     };
 }

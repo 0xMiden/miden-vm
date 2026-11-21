@@ -34,32 +34,34 @@ clock-tagged AEAD input/output relations rather than an ordinary controller comp
 
 ## Chiplet selector prefix
 
-The first physical selector is `s_ctrl = chiplets[0]`, which is one on controller rows. The
-remaining regions use the virtual selector `s0 = 1 - s_ctrl` and the physical selectors `s1..s4`:
+Each chiplet row starts with a selector prefix. Its payload follows the prefix in the same
+24-column trace. Column indices below are zero-based and inclusive.
 
-| Region                | Active when               |
-|-----------------------|---------------------------|
-| Hash controller       | `!s0`                     |
-| Bitwise / AEAD stream | `s0 * !s1`                |
-| Memory                | `s0 * s1 * !s2`           |
-| ACE                   | `s0 * s1 * s2 * !s3`      |
-| Kernel ROM            | `s0 * s1 * s2 * s3 * !s4` |
-| Padding               | `s0 * s1 * s2 * s3 * s4`  |
+| Region          | Prefix  | Payload columns |
+|-----------------|---------|-----------------|
+| Hash controller | `0`     | 1–23            |
+| AEAD stream     | `100`   | 3–22            |
+| Bitwise         | `101`   | 3–15            |
+| Memory          | `110`   | 3–19            |
+| ACE             | `1110`  | 4–19            |
+| Kernel ROM      | `11110` | 5–9             |
+| Padding         | `11111` | —               |
 
-The controller region is padded to an 8-row boundary before the bitwise/AEAD-stream region so its
-8-row entries remain phase-aligned.
+The producer packs the sections in this order. It pads the controller to an 8-row boundary so
+AEAD entries start on phase zero. The AIR permits AEAD and bitwise rows to alternate within
+prefix `10` at complete AEAD cycle boundaries.
 
 ## Single-row controller
 
-Every compression request occupies one controller row. The 19-column controller overlay is:
+Every compression request occupies one controller row. The 23-column controller payload contains
+the internal row-kind selectors, compression data, and operation metadata.
 
 ```text
-| cs0 cs1 cs2 | state[12]                                | row_data[4]   |
-|             | block_lo[4] | block_hi[4] | cv/digest[4] | row-kind data |
+| cs0 cs1 cs2 | state[12] | row_data[4] | op_final | mrupdate_id | merkle_or_padding | addr |
 ```
 
-Two additional controller cells carry `op_final` and `mrupdate_id`; a shared chiplet-mode cell
-distinguishes Merkle/padding rows from ordinary hash rows.
+`merkle_or_padding` marks Merkle and controller padding rows. `addr` is the controller row address.
+It starts at one and increments through controller padding.
 
 The overlay depends on row kind:
 
@@ -111,21 +113,20 @@ internal computation provider connected by lookup arguments.
 
 ## Eidos compression AIR
 
-The MVM's `EidosCompressionAir` uses 108 main columns and 20 auxiliary columns, with one 32-row
-block per physical compression:
+The MVM's `EidosCompressionAir` uses 104 main columns and 19 auxiliary columns. Each physical
+compression occupies one 32-row block:
 
 | Rows  | Role                                                                                                               |
 |-------|--------------------------------------------------------------------------------------------------------------------|
 | 0–27  | Seven Eidos compression rounds, represented as 28 fused G-function rows                                            |
 | 28–31 | Footer rows assembling the message, input chaining value, output chaining value, XOF lanes, and external relations |
 
-Periodic selectors identify the G-function phase, diagonal steps, message-schedule indices, and
-each footer row. The fused rows prove u32 additions, XOR witnesses, and rotations. Their input
-`a` and `c` words are reconstructed from the output words and constrained carry witnesses, then
-anchored to the initial state or preceding fused row. Footer rows reconstruct the original block
-and chaining word, perform feed-forward XOR, enforce canonical field encodings, and expose the result.
-The eight raw chaining-value words cross the cycle in one atomic, cycle-tagged internal relation;
-the sixteen message words remain independently cycle-tagged.
+Periodic selectors identify the G-function phase, diagonal steps, and each footer row. The fused
+rows prove u32 additions, XOR witnesses, and rotations. Their `c` inputs are reconstructed from
+the output words and constrained carries, then anchored to the initial state or preceding fused
+row. Consistency checks bind the rounds to the message schedule and initial chaining value.
+Footer rows reconstruct the original block and chaining word, perform feed-forward XOR, enforce
+canonical field encodings, and expose the result.
 
 The compression AIR has two external interfaces:
 
@@ -144,15 +145,10 @@ Every 32-row block carries a canonical `compression_cycle_id`:
 - the ID is constant throughout the block;
 - it increments exactly once between blocks, including padding blocks.
 
-The ID occupies one shared main column throughout the 32-row block rather than being duplicated in
-every message tuple. All internal message-word and chaining-value LogUp relations include the
-physical ID. The chaining-value relation carries `(cycle_id, h[0], ..., h[7])` atomically, while
-each message-word relation carries the cycle ID directly.
+The ID occupies one shared main column throughout the block.
 
-This binding is security-critical. Without it, internal inputs from two valid compression cycles
-could be swapped and still cancel as anonymous multisets. With it, every internal witness is tied
-to one physical cycle, while the footer-3 compression-link relation ties that cycle's complete
-`(block, cv_in, cv_out)` tuple to the controller.
+The footer-3 compression-link relation binds the cycle's complete `(block, cv_in, cv_out)` tuple
+to the controller.
 
 ## Byte lookups and the And8 AIR
 
@@ -194,10 +190,10 @@ The shared `v_wiring` column links each non-padding controller row to
 contributes the same tuple with the fixed Eidos two-to-one chaining value. Footer row 3 of the
 matching physical compression receives the tuple with its provider multiplicity.
 
-### Internal Eidos compression buses
+### Eidos byte and range buses
 
-Cycle-tagged relations connect fused computation rows to footer reconstruction for the message and
-input chaining value. Separate byte-table relations prove XOR, rotation, and range witnesses.
+Typed byte-table and range-check relations prove the compression's XOR, rotation, and range
+witnesses.
 
 ### Merkle sibling table {#sibling-table-constraints}
 
@@ -224,7 +220,7 @@ fixed.
 ## Implementation map
 
 - `crates/air/source/src/vm/constraints/chiplets/selectors.rs`
-  Top-level chiplet selector prefix, booleanity, ordering, and precomputed `ChipletFlags`.
+  Top-level chiplet selector prefixes, ordering, and precomputed `ChipletSelectors`.
 - `crates/air/source/src/vm/constraints/chiplets/hasher_control/`
   Single-row controller lifecycle, sequential-hash continuity, Merkle index shifting, and digest
   routing.

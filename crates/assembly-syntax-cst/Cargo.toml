@@ -28,3 +28,6 @@ rowan = { package = "miden-rowan", version = "0.16", default-features = false }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true, features = ["alloc"] }
+
+[lints]
+workspace = true

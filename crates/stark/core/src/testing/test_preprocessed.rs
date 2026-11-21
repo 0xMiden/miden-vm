@@ -5,24 +5,26 @@
 //! constraint folders. Preprocessed content is served through
 //! [`BaseAir::preprocessed_trace`]; the prover bundles it via
 //! [`Preprocessed::build`] + [`ProverInstance::new`], and the verifier receives
-//! only the commitment via [`VerifierInstance::new`].
+//! the commitment via [`VerifierInstance::new`] and native table heights from the AIRs.
 
 use alloc::{sync::Arc, vec, vec::Vec};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{Algebra, Field, PackedValue, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    Preprocessed, PreprocessedValidationError, ProverInstance, VerifierInstance,
+    Preprocessed, PreprocessedValidationError, ProverInstance, ShapeError, VerifierError,
+    VerifierInstance,
     air::{
         AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder, MultiAir,
-        ProverStatement, Statement, WindowAccess,
+        ProverStatement, Statement, WindowAccess, log2_strict_u8,
     },
+    check_constraints,
     pcs::params::PcsParams,
     proof::{StarkOutput, StarkProof},
     testing::configs::goldilocks_poseidon2::{
-        Felt, Lmcs, QuadFelt, TestConfig, test_challenger, test_config,
+        Felt, Lmcs, PackedFelt, PackedQuadFelt, QuadFelt, TestConfig, test_challenger, test_config,
     },
 };
 
@@ -39,6 +41,18 @@ use crate::{
 #[derive(Clone, Debug)]
 struct RowCounterAir {
     preprocessed: RowMajorMatrix<Felt>,
+    declared_width: usize,
+    declared_log_height: Option<u8>,
+}
+
+impl RowCounterAir {
+    fn new(preprocessed: RowMajorMatrix<Felt>) -> Self {
+        Self {
+            declared_width: preprocessed.width(),
+            declared_log_height: Some(log2_strict_u8(preprocessed.height())),
+            preprocessed,
+        }
+    }
 }
 
 impl BaseAir<Felt> for RowCounterAir {
@@ -52,11 +66,17 @@ impl BaseAir<Felt> for RowCounterAir {
         Some(self.preprocessed.clone())
     }
     fn preprocessed_width(&self) -> usize {
-        1
+        self.declared_width
     }
 }
 
 impl LiftedAir<Felt, QuadFelt> for RowCounterAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
+    fn log_preprocessed_height(&self) -> Option<u8> {
+        self.declared_log_height
+    }
+
     fn aux_width(&self) -> usize {
         1
     }
@@ -77,7 +97,7 @@ impl LiftedAir<Felt, QuadFelt> for RowCounterAir {
         build_aux(main.height(), challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         let main = builder.main();
         let local_main: AB::Expr = main.current_slice()[0].into();
         let next_main: AB::Expr = main.next_slice()[0].into();
@@ -112,6 +132,8 @@ impl BaseAir<Felt> for ConstantAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for ConstantAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
     fn aux_width(&self) -> usize {
         1
     }
@@ -132,7 +154,7 @@ impl LiftedAir<Felt, QuadFelt> for ConstantAir {
         build_aux(main.height(), challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         let main = builder.main();
         let local: AB::Expr = main.current_slice()[0].into();
         let next: AB::Expr = main.next_slice()[0].into();
@@ -175,6 +197,15 @@ impl BaseAir<Felt> for MixedAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for MixedAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
+    fn log_preprocessed_height(&self) -> Option<u8> {
+        match self {
+            Self::Constant(a) => a.log_preprocessed_height(),
+            Self::RowCounter(a) => a.log_preprocessed_height(),
+        }
+    }
+
     fn aux_width(&self) -> usize {
         1
     }
@@ -198,68 +229,11 @@ impl LiftedAir<Felt, QuadFelt> for MixedAir {
         }
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         match self {
-            Self::Constant(a) => a.eval(builder),
-            Self::RowCounter(a) => a.eval(builder),
+            Self::Constant(a) => a.eval(builder, &()),
+            Self::RowCounter(a) => a.eval(builder, &()),
         }
-    }
-}
-
-/// AIR that declares a wider preprocessed trace (`preprocessed_width() == 2`)
-/// than the matrix it serves (width 1), to drive the width-mismatch check.
-#[derive(Clone, Debug)]
-struct WrongWidthAir {
-    preprocessed: RowMajorMatrix<Felt>,
-}
-
-impl BaseAir<Felt> for WrongWidthAir {
-    fn width(&self) -> usize {
-        1
-    }
-    fn num_public_values(&self) -> usize {
-        0
-    }
-    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
-        Some(self.preprocessed.clone())
-    }
-    fn preprocessed_width(&self) -> usize {
-        2
-    }
-}
-
-impl LiftedAir<Felt, QuadFelt> for WrongWidthAir {
-    fn aux_width(&self) -> usize {
-        1
-    }
-    fn num_randomness(&self) -> usize {
-        1
-    }
-    fn num_aux_values(&self) -> usize {
-        0
-    }
-
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        build_aux(main.height(), challenges)
-    }
-
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        // Well-formed degree-2 constraint; never reached because validation
-        // rejects the bundle before proving.
-        let main = builder.main();
-        let local: AB::Expr = main.current_slice()[0].into();
-        let next: AB::Expr = main.next_slice()[0].into();
-        let aux = builder.permutation();
-        let aux_local: AB::ExprEF = aux.current_slice()[0].into();
-        let challenge: AB::ExprEF = builder.permutation_randomness()[0].into();
-        builder.when_transition().assert_eq(next, local.clone() * local);
-        builder.when_first_row().assert_eq_ext(aux_local, challenge);
     }
 }
 
@@ -305,13 +279,26 @@ fn build_aux(height: usize, challenges: &[QuadFelt]) -> (RowMajorMatrix<QuadFelt
     (RowMajorMatrix::new(vec![challenges[0]; height], 1), Vec::new())
 }
 
-/// Build a no-public-input prover statement for `airs` + `traces`.
+/// Build a prover statement with fixed public inputs for the fixture AIRs.
 fn prover_statement<A: LiftedAir<Felt, QuadFelt>>(
     airs: Vec<A>,
     traces: Vec<RowMajorMatrix<Felt>>,
 ) -> ProverStatement<Felt, QuadFelt, PreprocMultiAir<A>> {
-    let statement = Statement::new(PreprocMultiAir { airs }, vec![], vec![]).expect("statement");
+    let inputs = airs
+        .iter()
+        .enumerate()
+        .filter(|(_, air)| air.num_public_values() != 0)
+        .map(|(i, air)| (i, vec![Felt::from_usize(i + 3); air.num_public_values()]))
+        .collect();
+    let statement = Statement::new(PreprocMultiAir { airs }, inputs, vec![]).expect("statement");
     ProverStatement::new(statement, traces).expect("prover statement")
+}
+
+fn row_counter_statement(
+    traces: Vec<RowMajorMatrix<Felt>>,
+) -> ProverStatement<Felt, QuadFelt, PreprocMultiAir<RowCounterAir>> {
+    let airs = traces.iter().cloned().map(RowCounterAir::new).collect();
+    prover_statement(airs, traces)
 }
 
 type TestOutput = StarkOutput<Felt, QuadFelt, TestConfig>;
@@ -323,6 +310,7 @@ fn prove_with_preprocessed<MA>(
 ) -> (TestOutput, TestPreprocessed, Statement<Felt, QuadFelt, MA>)
 where
     MA: MultiAir<Felt, QuadFelt>,
+    <MA::Air as LiftedAir<Felt, QuadFelt>>::EvalData<PackedFelt, PackedQuadFelt>: Sync,
 {
     let preprocessed = Preprocessed::build(ps.statement(), config).expect("has preprocessed");
     let prover_instance =
@@ -356,6 +344,7 @@ fn verify_and_reparse<MA>(
 fn prove_verify_reparse<MA>(ps: ProverStatement<Felt, QuadFelt, MA>)
 where
     MA: MultiAir<Felt, QuadFelt>,
+    <MA::Air as LiftedAir<Felt, QuadFelt>>::EvalData<PackedFelt, PackedQuadFelt>: Sync,
 {
     let config = test_config();
     let (output, preprocessed, statement) = prove_with_preprocessed(&config, ps);
@@ -369,10 +358,7 @@ where
 #[test]
 fn single_air_with_preprocessed() {
     let height = 8;
-    let ps = prover_statement(
-        vec![RowCounterAir { preprocessed: row_index_trace(height) }],
-        vec![row_index_trace(height)],
-    );
+    let ps = row_counter_statement(vec![row_index_trace(height)]);
     let config = test_config();
     let (output, preprocessed, statement) = prove_with_preprocessed(&config, ps);
     verify_and_reparse(&config, &statement, &output, &preprocessed);
@@ -393,7 +379,7 @@ fn mixed_airs_preprocessed_at_index_1() {
     let ps = prover_statement(
         vec![
             MixedAir::Constant(ConstantAir),
-            MixedAir::RowCounter(RowCounterAir { preprocessed: row_index_trace(height) }),
+            MixedAir::RowCounter(RowCounterAir::new(row_index_trace(height))),
         ],
         vec![squaring_trace(height), row_index_trace(height)],
     );
@@ -404,10 +390,9 @@ fn mixed_airs_preprocessed_at_index_1() {
 #[test]
 fn rejects_width_mismatch() {
     let height = 8;
-    let ps = prover_statement(
-        vec![WrongWidthAir { preprocessed: row_index_trace(height) }],
-        vec![row_index_trace(height)],
-    );
+    let mut air = RowCounterAir::new(row_index_trace(height));
+    air.declared_width = 2;
+    let ps = prover_statement(vec![air], vec![row_index_trace(height)]);
     let config = test_config();
 
     let preprocessed = Preprocessed::build(ps.statement(), &config).expect("has preprocessed");
@@ -424,10 +409,8 @@ fn rejects_width_mismatch() {
 #[test]
 fn rejects_height_mismatch() {
     // Preprocessed matrix height (4) differs from the main trace height (8).
-    let ps = prover_statement(
-        vec![RowCounterAir { preprocessed: row_index_trace(4) }],
-        vec![row_index_trace(8)],
-    );
+    let ps =
+        prover_statement(vec![RowCounterAir::new(row_index_trace(4))], vec![row_index_trace(8)]);
     let config = test_config();
 
     let preprocessed = Preprocessed::build(ps.statement(), &config).expect("has preprocessed");
@@ -435,19 +418,33 @@ fn rejects_height_mismatch() {
     assert!(
         matches!(
             result,
-            Err(PreprocessedValidationError::HeightMismatch { main: 8, preprocessed: 4, .. })
+            Err(PreprocessedValidationError::Shape(ShapeError::PreprocessedHeightMismatch {
+                air: 0,
+                log_trace_height: 3,
+                log_preprocessed_height: 2,
+            }))
         ),
-        "expected HeightMismatch {{ main: 8, preprocessed: 4 }}",
+        "main trace height must match the AIR's fixed preprocessing height",
     );
+}
+
+#[test]
+fn rejects_setup_with_different_preprocessed_height() {
+    let config = test_config();
+    let setup_statement = row_counter_statement(vec![row_index_trace(4)]);
+    let setup =
+        Preprocessed::build(setup_statement.statement(), &config).expect("has preprocessed");
+    let ps = row_counter_statement(vec![row_index_trace(8)]);
+    assert!(matches!(
+        ProverInstance::new(&config, ps, Some(&setup)),
+        Err(PreprocessedValidationError::HeightMismatch { air: 0, main: 8, preprocessed: 4 })
+    ));
 }
 
 #[test]
 fn rejects_log_blowup_mismatch() {
     let height = 8;
-    let ps = prover_statement(
-        vec![RowCounterAir { preprocessed: row_index_trace(height) }],
-        vec![row_index_trace(height)],
-    );
+    let ps = row_counter_statement(vec![row_index_trace(height)]);
     let build_config = test_config();
     let preprocessed =
         Preprocessed::build(ps.statement(), &build_config).expect("has preprocessed");
@@ -470,21 +467,101 @@ fn rejects_log_blowup_mismatch() {
 }
 
 #[test]
+fn rejects_reassigned_preprocessed_tables() {
+    let config = test_config();
+    let intended = row_counter_statement(vec![row_index_trace(4), row_index_trace(8)]);
+    let intended_setup =
+        Preprocessed::build(intended.statement(), &config).expect("has preprocessed");
+    let reassigned = row_counter_statement(vec![row_index_trace(8), row_index_trace(4)]);
+    let (output, reassigned_setup, statement) = prove_with_preprocessed(&config, reassigned);
+
+    // Sorting by height gives the same committed tree, although the AIR owners differ.
+    assert_eq!(intended_setup.commitment(), reassigned_setup.commitment());
+    verify_and_reparse(&config, &statement, &output, &reassigned_setup);
+
+    let verifier =
+        VerifierInstance::new(&config, intended.statement(), Some(intended_setup.commitment()))
+            .expect("valid intended setup");
+    for result in [
+        verifier.verify(&output.proof, test_challenger()).map(|_| ()),
+        StarkProof::from_data(&verifier, &output.proof, test_challenger()).map(|_| ()),
+    ] {
+        assert!(matches!(
+            result,
+            Err(VerifierError::Shape(ShapeError::PreprocessedHeightMismatch {
+                air: 0,
+                log_trace_height: 3,
+                log_preprocessed_height: 2,
+            }))
+        ));
+    }
+}
+
+#[test]
+fn rejects_reassigned_equal_height_preprocessed_tables() {
+    let config = test_config();
+    let tables = [row_index_trace(4), shifted_row_index_trace(4)];
+    let intended = row_counter_statement(tables.to_vec());
+    let intended_setup =
+        Preprocessed::build(intended.statement(), &config).expect("has preprocessed");
+    let reassigned = row_counter_statement(tables.into_iter().rev().collect());
+    let (output, reassigned_setup, statement) = prove_with_preprocessed(&config, reassigned);
+
+    // Equal heights preserve AIR-index order, so exchanging table contents changes the root.
+    assert_ne!(intended_setup.commitment(), reassigned_setup.commitment());
+    verify_and_reparse(&config, &statement, &output, &reassigned_setup);
+
+    let verifier =
+        VerifierInstance::new(&config, intended.statement(), Some(intended_setup.commitment()))
+            .expect("valid intended setup");
+    assert!(matches!(
+        verifier.verify(&output.proof, test_challenger()),
+        Err(VerifierError::Pcs(_))
+    ));
+}
+
+#[test]
+#[should_panic(expected = "preprocessed matrix height for AIR 0 differs from its declaration")]
+fn setup_rejects_incorrect_declared_height() {
+    let mut air = RowCounterAir::new(row_index_trace(4));
+    air.declared_log_height = Some(3);
+    let statement =
+        Statement::new(PreprocMultiAir { airs: vec![air] }, vec![], vec![]).expect("statement");
+    Preprocessed::build(&statement, &test_config());
+}
+
+#[test]
+fn reuses_setup_with_equal_table_heights_and_variable_main_height() {
+    let config = test_config();
+    let airs = vec![
+        MixedAir::Constant(ConstantAir),
+        MixedAir::RowCounter(RowCounterAir::new(row_index_trace(4))),
+        MixedAir::RowCounter(RowCounterAir::new(shifted_row_index_trace(4))),
+    ];
+    let statement =
+        Statement::new(PreprocMultiAir { airs: airs.clone() }, vec![], vec![]).expect("statement");
+    let setup = Preprocessed::build(&statement, &config).expect("has preprocessed");
+    for height in [2, 4, 8] {
+        let ps = prover_statement(
+            airs.clone(),
+            vec![squaring_trace(height), row_index_trace(4), shifted_row_index_trace(4)],
+        );
+        let (output, statement) = ProverInstance::new(&config, ps, Some(&setup))
+            .expect("valid setup")
+            .prove(test_challenger())
+            .expect("prove succeeds");
+        verify_and_reparse(&config, &statement, &output, &setup);
+    }
+}
+
+#[test]
 fn rejects_wrong_trusted_preprocessed_commitment() {
     let height = 8;
-    let ps = prover_statement(
-        vec![RowCounterAir { preprocessed: row_index_trace(height) }],
-        vec![row_index_trace(height)],
-    );
+    let ps = row_counter_statement(vec![row_index_trace(height)]);
     let config = test_config();
     let (output, _preprocessed, statement) = prove_with_preprocessed(&config, ps);
 
-    let wrong_ps = prover_statement(
-        vec![RowCounterAir {
-            preprocessed: shifted_row_index_trace(height),
-        }],
-        vec![row_index_trace(height)],
-    );
+    let wrong_ps = row_counter_statement(vec![shifted_row_index_trace(height)]);
     let wrong_preprocessed =
         Preprocessed::build(wrong_ps.statement(), &config).expect("has preprocessed");
     let verifier_instance =
@@ -504,7 +581,7 @@ fn preprocessed_with_short_nonlinear_air() {
     let ps = prover_statement(
         vec![
             MixedAir::Constant(ConstantAir),
-            MixedAir::RowCounter(RowCounterAir { preprocessed: row_index_trace(8) }),
+            MixedAir::RowCounter(RowCounterAir::new(row_index_trace(8))),
         ],
         vec![squaring_trace(2), row_index_trace(8)],
     );
@@ -520,7 +597,7 @@ fn preprocessed_shorter_than_max_trace() {
     let ps = prover_statement(
         vec![
             MixedAir::Constant(ConstantAir),
-            MixedAir::RowCounter(RowCounterAir { preprocessed: row_index_trace(4) }),
+            MixedAir::RowCounter(RowCounterAir::new(row_index_trace(4))),
         ],
         vec![squaring_trace(8), row_index_trace(4)],
     );
@@ -535,7 +612,7 @@ fn preprocessed_much_shorter_than_max_trace() {
     let ps = prover_statement(
         vec![
             MixedAir::Constant(ConstantAir),
-            MixedAir::RowCounter(RowCounterAir { preprocessed: row_index_trace(2) }),
+            MixedAir::RowCounter(RowCounterAir::new(row_index_trace(2))),
         ],
         vec![squaring_trace(8), row_index_trace(2)],
     );
@@ -551,8 +628,8 @@ fn preprocessed_multiple_heights_below_max() {
     let ps = prover_statement(
         vec![
             MixedAir::Constant(ConstantAir),
-            MixedAir::RowCounter(RowCounterAir { preprocessed: row_index_trace(4) }),
-            MixedAir::RowCounter(RowCounterAir { preprocessed: row_index_trace(2) }),
+            MixedAir::RowCounter(RowCounterAir::new(row_index_trace(4))),
+            MixedAir::RowCounter(RowCounterAir::new(row_index_trace(2))),
         ],
         vec![squaring_trace(8), row_index_trace(4), row_index_trace(2)],
     );
@@ -560,16 +637,42 @@ fn preprocessed_multiple_heights_below_max() {
     prove_verify_reparse(ps);
 }
 
-/// Instrument the real prover dispatch without changing the existing fallback AIR fixtures.
+/// Record auxiliary-builder and evaluator calls during proving and constraint checks.
 #[derive(Clone, Debug)]
 struct CountedAir {
     inner: MixedAir,
     materializations: Arc<AtomicUsize>,
     aux_calls: Arc<AtomicUsize>,
     borrowed_address: Arc<AtomicUsize>,
+    preparations: Arc<AtomicUsize>,
+    prepared_evaluations: Arc<AtomicUsize>,
+    max_batch_evaluations: Arc<AtomicUsize>,
+}
+
+impl CountedAir {
+    fn new(inner: MixedAir) -> Self {
+        Self {
+            inner,
+            materializations: Arc::new(AtomicUsize::new(0)),
+            aux_calls: Arc::new(AtomicUsize::new(0)),
+            borrowed_address: Arc::new(AtomicUsize::new(0)),
+            preparations: Arc::new(AtomicUsize::new(0)),
+            prepared_evaluations: Arc::new(AtomicUsize::new(0)),
+            max_batch_evaluations: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+}
+
+#[derive(Default)]
+struct CountedEvalData<E> {
+    value: E,
+    evaluations: AtomicUsize,
 }
 
 impl BaseAir<Felt> for CountedAir {
+    fn num_public_values(&self) -> usize {
+        1
+    }
     fn width(&self) -> usize {
         self.inner.width()
     }
@@ -583,6 +686,12 @@ impl BaseAir<Felt> for CountedAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for CountedAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = CountedEvalData<E>;
+
+    fn log_preprocessed_height(&self) -> Option<u8> {
+        self.inner.log_preprocessed_height()
+    }
+
     fn aux_width(&self) -> usize {
         self.inner.aux_width()
     }
@@ -590,7 +699,7 @@ impl LiftedAir<Felt, QuadFelt> for CountedAir {
         self.inner.num_randomness()
     }
     fn num_aux_values(&self) -> usize {
-        self.inner.num_aux_values()
+        1
     }
     fn build_aux_trace(
         &self,
@@ -599,7 +708,7 @@ impl LiftedAir<Felt, QuadFelt> for CountedAir {
         _aux_inputs: &[Felt],
         _challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        panic!("the prover must dispatch the borrowed setup hook")
+        panic!("use the auxiliary builder that accepts the preprocessed trace")
     }
     fn build_aux_trace_with_preprocessed(
         &self,
@@ -619,33 +728,54 @@ impl LiftedAir<Felt, QuadFelt> for CountedAir {
             Ordering::Relaxed,
         );
         self.aux_calls.fetch_add(1, Ordering::Relaxed);
-        self.inner.build_aux_trace(main, air_inputs, aux_inputs, challenges)
+        let (trace, _) = self.inner.build_aux_trace(main, air_inputs, aux_inputs, challenges);
+        (trace, vec![challenges[0].double() + QuadFelt::from_usize(main.height())])
     }
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        self.inner.eval(builder)
+    fn prepare<B: Algebra<Felt>, E: Algebra<B>>(
+        &self,
+        inputs: crate::air::EvalInputs<'_, B, E>,
+    ) -> Self::EvalData<B, E> {
+        self.preparations.fetch_add(1, Ordering::Relaxed);
+        CountedEvalData {
+            value: inputs.challenges[0].square()
+                + inputs.aux_values[0].clone() * inputs.public_values[0].clone(),
+            evaluations: AtomicUsize::new(0),
+        }
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(
+        &self,
+        builder: &mut AB,
+        data: &Self::EvalData<AB::Expr, AB::ExprEF>,
+    ) {
+        self.prepared_evaluations.fetch_add(1, Ordering::Relaxed);
+        let count = data.evaluations.fetch_add(1, Ordering::Relaxed) + 1;
+        self.max_batch_evaluations.fetch_max(count, Ordering::Relaxed);
+        let challenge: AB::ExprEF = builder.permutation_randomness()[0].into();
+        let public: AB::Expr = builder.public_values()[0].into();
+        let aux: AB::ExprEF = builder.permutation_values()[0].clone().into();
+        // Compare cached inputs with the builder's values independently of preparation.
+        builder.assert_eq_ext(data.value.clone(), challenge.square() + aux * public);
+        self.inner.eval(builder, &());
     }
 }
 
 #[test]
-fn auxiliary_construction_reuses_one_preprocessed_bundle_across_proofs() {
+fn prover_reuses_setup_and_evaluation_data() {
     // Include a missing table and different heights in an instance order unlike proof order.
+    // The largest trace spans multiple parallel row batches.
     let airs: Vec<_> = [
         MixedAir::Constant(ConstantAir),
-        MixedAir::RowCounter(RowCounterAir { preprocessed: row_index_trace(4) }),
-        MixedAir::RowCounter(RowCounterAir { preprocessed: row_index_trace(2) }),
+        MixedAir::RowCounter(RowCounterAir::new(row_index_trace(4))),
+        MixedAir::RowCounter(RowCounterAir::new(row_index_trace(2))),
     ]
     .into_iter()
-    .map(|inner| CountedAir {
-        inner,
-        materializations: Arc::new(AtomicUsize::new(0)),
-        aux_calls: Arc::new(AtomicUsize::new(0)),
-        borrowed_address: Arc::new(AtomicUsize::new(0)),
-    })
+    .map(CountedAir::new)
     .collect();
     let make_statement = || {
         prover_statement(
             airs.clone(),
-            vec![squaring_trace(8), row_index_trace(4), row_index_trace(2)],
+            vec![squaring_trace(1024), row_index_trace(4), row_index_trace(2)],
         )
     };
     let config = test_config();
@@ -668,8 +798,37 @@ fn auxiliary_construction_reuses_one_preprocessed_bundle_across_proofs() {
             );
         }
     }
-    for air in airs {
+    for (air, height) in airs.iter().zip([1024usize, 4, 2]) {
         assert_eq!(air.materializations.load(Ordering::Relaxed), 1, "generate only during setup");
         assert_eq!(air.aux_calls.load(Ordering::Relaxed), 2, "both proofs build auxiliary traces");
+        let quotient_rows = height << crate::log_quotient_degree(air);
+        let packed_rows = quotient_rows.div_ceil(<Felt as Field>::Packing::WIDTH);
+        assert_eq!(
+            air.max_batch_evaluations.load(Ordering::Relaxed),
+            packed_rows,
+            "all packed rows must share one prepared value",
+        );
+    }
+}
+
+#[test]
+fn constraint_checker_uses_prover_hooks() {
+    for (inner, main) in [
+        (MixedAir::Constant(ConstantAir), squaring_trace(4)),
+        (MixedAir::RowCounter(RowCounterAir::new(row_index_trace(4))), row_index_trace(4)),
+    ] {
+        let height = main.height();
+        let air = CountedAir::new(inner);
+        let statement = prover_statement(vec![air.clone()], vec![main]);
+        check_constraints(&statement, test_challenger());
+
+        assert_eq!(air.materializations.load(Ordering::Relaxed), 1, "reuse one setup trace");
+        assert_eq!(air.aux_calls.load(Ordering::Relaxed), 1, "use the cached setup hook");
+        assert_eq!(air.preparations.load(Ordering::Relaxed), 2, "prepare once per checking pass");
+        assert_eq!(
+            air.prepared_evaluations.load(Ordering::Relaxed),
+            2 * height,
+            "both the base and full passes must use the prepared evaluator",
+        );
     }
 }

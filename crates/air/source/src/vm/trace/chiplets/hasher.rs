@@ -60,7 +60,7 @@ pub const NUM_SELECTORS: usize = 3;
 pub const CONTROLLER_TRACE_ALIGNMENT: usize = 8;
 
 /// Number of columns in the hasher-controller trace.
-pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + 7;
+pub const TRACE_WIDTH: usize = size_of::<crate::vm::ControllerCols<u8>>();
 
 /// Number of controller rows per compression request.
 pub const CONTROLLER_ROWS_PER_HASHER_OP: usize = 1;

@@ -86,7 +86,7 @@ end
 #! # Lookup term
 #!
 #! Let A = (max_message_width + 2) * fractions_per_row, q = ceil(log2(A)), and
-#! R = r_w * FP_ONE + r_f be the Q16 correction for one-time boundary fractions. Define
+#! R = r_w * FP_ONE + r_f be the Q16 correction for boundary fractions. Define
 #!
 #!   s = q * FP_ONE - ceil(FP_ONE * log2(A)).
 #!
@@ -102,10 +102,10 @@ end
 #!   b = t1 + floor(t1 * g / (2 * P)) <= s.
 #!
 #! The procedure subtracts one when b < r_f. Because b <= s, it cannot overstate the native
-#! bound and can understate it by at most one bit. For MVM, A = (16 + 2) * 78 = 1404 gives
-#! b = 34405, while R is at most 4887 (258 boundary terms at height 6). For PVM,
-#! A = (18 + 2) * 314 = 6280 gives b = 24642 and R = 1 at every supported height. Hence
-#! b >= r_f for both deployed shapes, so this decision is exact throughout their ranges.
+#! bound and can understate it by at most one bit. For MVM, A = (16 + 2) * 73 = 1314 gives
+#! b = 39958, while R is at most 5222 (258 fixed/kernel boundary fractions at height 6). For PVM,
+#! A = (18 + 2) * 215 = 4300 gives b = 55590 and R <= 131 (19 boundary fractions at height 6).
+#! Thus b >= r_f for both deployed shapes throughout the accepted height range.
 #!
 #! The accepted coefficient range is 257..=65536. Each factor is also limited to 65536 so their
 #! product cannot wrap. At widths 16 and 18, the upper bound permits 3640 and 3276 fractions per
@@ -130,7 +130,8 @@ end
 #! - out-of-domain: log_blowup = 3 permits at most eight quotient chunks, and both verifiers reject
 #!   AIRs of degree greater than nine. With local and next openings, the DEEP-ALI identity degree
 #!   is at most max(9 * (H + 1) + H - 1, 9 * H + 1) <= 11 * H for H = 2^height >= 64.
-#!   OOD sampling rejects base-field points, costing one Q16 unit in the native bound. Since
+#!   OOD sampling rejects zero and points in the trace subgroup or LDE coset. These are base-field
+#!   points; conditioning on acceptance costs at most one Q16 unit in the native bound. Since
 #!   ceil(FP_ONE * log2(11)) + 1 < 4 * FP_ONE, the term still exceeds 122 - height;
 #! - FRI folding: FRI_FOLDING_BASE_BITS - height + folding_pow >= 120 - height;
 #! - composition: composed <= 8192 gives at least 126 - log2(8192) = 113 bits;
@@ -142,22 +143,23 @@ end
 #!
 #! # Contract
 #!
-#! Every descriptor field is checked before it is used or discarded. The lower bounds on height
-#! and the lookup coefficient support the proof that the other terms cannot determine the result.
+#! The input must be the unmodified descriptor returned by a successful MVM or PVM recursive
+#! verifier. This is not a general-purpose estimator for caller-assembled parameters.
+#!
+#! Every descriptor field is checked against the estimator envelope before it is used or discarded.
+#! The lower bounds on height and the lookup coefficient support the proof that the other terms
+#! cannot determine the result.
 #! The upper bounds on height, coefficient, and boundary terms keep the arithmetic in range, and
 #! the explicit `base >= 1` check validates the lookup subtraction after applying the correction.
-#! Requiring zero lookup grinding keeps the native cap irrelevant to the lookup term. An
-#! unsupported input traps instead of returning a security level.
+#! Requiring zero lookup grinding keeps the native cap irrelevant to the lookup term. The procedure
+#! traps for descriptors outside this envelope instead of returning a security level.
 #!
-#! This is not a general-purpose estimator for caller-assembled parameters. Its input must be the
-#! descriptor returned by a successful MVM or PVM recursive verifier, without modification. The
-#! procedure is loop-free and has bounded execution cost for every accepted descriptor.
+#! The procedure is loop-free and has bounded execution cost for every accepted descriptor.
 #!
-#! The meaning of `num_lookup_boundary_terms` is the same for both relations even though its source
-#! differs. The MVM adds the kernel-procedure count to three fixed core-boundary terms. The PVM
-#! uses the number of fixed `UintVal` and `EcGroup` messages added at its verifier boundary. The
-#! estimator needs only the resulting count. It does not enforce an acceptance policy; the caller
-#! compares the returned level with the threshold required by its application.
+#! `num_lookup_boundary_terms` counts boundary fractions in addition to the per-row fractions.
+#! Each fraction contributes `(max_message_width + 2) / |S|`, where `S` is the lookup challenge's
+#! sampling support. The caller compares the returned security level with the threshold required
+#! by its application.
 #!
 #! Inputs:  [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
 #!          max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
@@ -166,8 +168,8 @@ end
 #!
 #! Invocation: exec
 pub proc compute_conjectured_security_level(descriptor: types::StackSecurityDescriptor) -> u32
-    # Assert the validity envelope documented above. Each comparison also range-checks its
-    # operand as a u32. Inputs not used by query, lookup, or DEEP are consumed after validation.
+    # Check the estimator envelope for the u32 fields supplied by a successful MVM or PVM
+    # verifier. These comparisons do not establish the u32 ranges themselves.
     # Lifted STARK has no grinding step before lookup-challenge sampling.
     assertz.err="lookup grinding must be zero"
     dup eq.0 assertz.err="num_composed_constraints must be positive"

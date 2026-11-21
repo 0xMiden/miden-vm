@@ -73,10 +73,10 @@ pub struct InputFile {
     /// elements.
     pub advice_stack: Option<Vec<String>>,
     /// Optional map of 32 byte hex strings to vectors of u64s representing the initial advice map.
-    pub advice_map: Option<HashMap<String, Vec<u64>>>,
+    pub(crate) advice_map: Option<HashMap<String, Vec<u64>>>,
     /// Optional vector of merkle data which will be loaded into the initial merkle store. Merkle
     /// data is represented as 32 byte hex strings and node indexes are represented as u64s.
-    pub merkle_store: Option<Vec<MerkleData>>,
+    pub(crate) merkle_store: Option<Vec<MerkleData>>,
 }
 
 impl Default for InputFile {
@@ -97,7 +97,7 @@ impl InputFile {
 
     /// Reads input JSON from a regular file of at most [`Self::MAX_FILE_SIZE`] bytes.
     /// Symlinks to regular files are accepted.
-    #[instrument(name = "read_input_file", skip_all)]
+    #[instrument(target = "miden::cli", level = "trace", name = "read_input_file", skip_all)]
     pub fn read(inputs_path: &Option<PathBuf>, program_path: &Path) -> Result<Self, Report> {
         // If inputs_path has been provided then use this as path. Alternatively we will
         // replace the program_path extension with .inputs and use this as a default.
@@ -311,7 +311,7 @@ impl InputFile {
     }
 
     /// Parse a `Word` from a hex string.
-    pub fn parse_word(word_hex: &str) -> Result<Word, String> {
+    pub(crate) fn parse_word(word_hex: &str) -> Result<Word, String> {
         let Some(word_value) = word_hex.strip_prefix("0x") else {
             return Err(format!("failed to decode `Word` from hex {word_hex} - missing 0x prefix"));
         };
@@ -801,7 +801,7 @@ mod tests {
         let err = InputFile::read(&Some(file.path().to_path_buf()), file.path()).unwrap_err();
         let message = format!("{err:?}");
         assert!(message.contains("size limit of 67108864 bytes"), "{message}");
-        assert!(message.contains(&file.path().display().to_string()), "{message}");
+        assert!(err.to_string().contains(&file.path().display().to_string()), "{message}");
 
         // The exact limit reaches the JSON parser, which rejects the sparse file's zero bytes.
         file.as_file().set_len(InputFile::MAX_FILE_SIZE as u64).unwrap();

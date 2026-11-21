@@ -13,8 +13,8 @@ mod math;
 
 pub use codec::{chunks_to_bytes_exact, n_chunks};
 pub use hash::{
-    HashAssertNode, HashFunction, HashPrecompile, keccak256::Keccak256Precompile,
-    sha256::Sha256Precompile, sha512::Sha512Precompile,
+    HashFunction, HashPrecompile, keccak256::Keccak256Precompile, sha256::Sha256Precompile,
+    sha512::Sha512Precompile,
 };
 pub use math::{
     curve::{
@@ -57,9 +57,9 @@ pub const MSM_WORK: WorkClass = WorkClass::new("msm");
 /// Maximum number of terms in one MSM admitted by the default policy.
 ///
 /// This is an operator admission limit, not a supported-input ceiling of the proving relation.
-pub const DEFAULT_MAX_MSM_TERMS: u32 = 32;
+pub(crate) const DEFAULT_MAX_MSM_TERMS: u32 = 32;
 /// Maximum total MSM terms in one accounting scope admitted by the default policy.
-pub const DEFAULT_MAX_TOTAL_MSM_TERMS: u64 = 256;
+pub(crate) const DEFAULT_MAX_TOTAL_MSM_TERMS: u64 = 256;
 
 // Admission policy is independent of the hard transport/allocation ceiling, even though their
 // structural element limits currently have the same value.
@@ -223,7 +223,7 @@ mod tests {
                 matches!(error.root(), PrecompileError::Limit(actual) if *actual == expected),
                 "unexpected admission error for {class}: {error:?}",
             );
-            if matches!(expected, ItemSize { class: HASH_WORK, .. }) {
+            if matches!(&expected, ItemSize { class, .. } if *class == HASH_WORK) {
                 // A valid input above the default remains supported when the operator raises
                 // only the individual admission allowance.
                 state

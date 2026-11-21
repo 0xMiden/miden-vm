@@ -85,8 +85,8 @@ See the "Mathematical background" in `src/prover/README.md` and
 ### Verifier (`verify`)
 
 1. **Validate and bind instance shape** — Validate proof heights against the
-   AIRs, call `Statement::observe`, then observe the instance count and log
-   trace heights in instance order.
+   AIRs, including their fixed preprocessing heights, call `Statement::observe`, then
+   observe the instance count and log trace heights in instance order.
 2. **Receive commitments** — Main, auxiliary, and quotient roots from transcript.
 3. **Re-derive challenges** — Same `alpha`, `beta`, `z` via Fiat-Shamir.
 4. **Verify PCS openings** — At `[z, z_next]` where `z_next = z * omega_H`.

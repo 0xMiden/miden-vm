@@ -2,9 +2,12 @@
 
 pub use crate::shared::eidos::layout::*;
 
+/// Number of LogUp columns, including the input and output relations.
+pub const NUM_LOGUP_COLS: usize = NARROW_AUX_COLS + 2;
+/// Auxiliary register column, immediately after the LogUp prefix.
+pub const AUX_REGISTER_COL: usize = NUM_LOGUP_COLS;
 /// Number of auxiliary columns used by the complete MVM compression AIR.
-pub const AUX_COLS: usize = 20;
-const _: () = assert!(AUX_COLS == NARROW_AUX_COLS + 2);
+pub const AUX_COLS: usize = AUX_REGISTER_COL + 1;
 
 pub const F_INTERFACE_TAIL_BASE_COL: usize = F_OUTPUT_BASE_COL;
 pub const F_INTERFACE_TAIL0_COL: usize = F_INTERFACE_TAIL_BASE_COL;

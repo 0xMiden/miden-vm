@@ -21,12 +21,9 @@
 //! gate is `chiplet_active.controller`, the ACE row gate is `chiplet_active.ace`, stream rows
 //! use the derived AEAD stream flag, and the memory row gate is `chiplet_active.memory`. Hasher
 //! sub-selectors, hasher state, `node_index`, and `mrupdate_id` come from the typed
-//! [`local.controller()`](crate::vm::constraints::columns::ChipletCols::controller) overlay;
-//! memory delta limbs come from
-//! [`local.memory()`](crate::vm::constraints::columns::ChipletCols::memory).
-//! `w0` / `w1` are not in the typed `MemoryCols` view (their physical columns live in
-//! `chiplets[18..20]`, past the end of the memory overlay, shared with the ACE chiplet
-//! column space), so they are read directly from the raw chiplet slice.
+//! [`ChipletCols::controller_cols`](crate::vm::ChipletCols::controller_cols) overlay; memory delta
+//! limbs and word-address limbs come from the
+//! [`ChipletCols::memory_cols`](crate::vm::ChipletCols::memory_cols) overlay.
 
 use core::borrow::Borrow;
 
@@ -80,7 +77,7 @@ pub(in crate::vm::constraints::lookup) fn emit_hash_kernel_table<LB>(
     // --- ACE memory-read setup ---
 
     // Typed ACE chiplet overlay.
-    let ace = local.ace();
+    let ace = local.ace_cols();
     let block_sel: LB::Expr = ace.s_block.into();
 
     // ACE row gate comes from the shared `chiplet_active` snapshot; per-mode split by
@@ -97,17 +94,17 @@ pub(in crate::vm::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let ace_id_1 = ace.id_1;
     let ace_id_2 = ace.eval().id_2;
     let ace_eval_op = ace.eval_op;
-    let bitwise = local.bitwise();
+    let bitwise = local.bitwise_cols();
     let normal_bitwise_gate = ctx.chiplet_active.bitwise.clone();
 
     // --- Memory-side range-check setup ---
 
     let mem_active = ctx.chiplet_active.memory.clone();
-    let mem = local.memory();
+    let mem = local.memory_cols();
     let mem_d0 = mem.d0;
     let mem_d1 = mem.d1;
-    let mem_w0 = local.memory_word_addr_lo();
-    let mem_w1 = local.memory_word_addr_hi();
+    let mem_w0 = mem.word_addr_lo;
+    let mem_w1 = mem.word_addr_hi;
 
     builder.next_column(
         |col| {

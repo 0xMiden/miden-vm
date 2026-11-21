@@ -80,8 +80,9 @@ where
 ///
 /// The matrix has `main.height()` rows and `aux_width` columns. LogUp columns occupy the prefix
 /// `0..air.column_shape().len()`. Any trailing columns are zero-filled and excluded from the
-/// LogUp recurrence and its normalized sum. The return value, setup trace and challenges
-/// follow [`build_logup_aux_trace_with_preprocessed`].
+/// LogUp recurrence and its normalized sum. The caller fills any trailing registers, and the
+/// owning AIR supplies their constraints. The return value, setup trace and challenges follow
+/// [`build_logup_aux_trace_with_preprocessed`].
 ///
 /// # Panics
 ///
@@ -99,7 +100,7 @@ where
     A: LiftedAir<F, EF>,
     for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
 {
-    let _span = tracing::info_span!("build_aux_trace_logup").entered();
+    let _span = tracing::trace_span!(target: "miden::vm::prove", "build_aux_trace_logup").entered();
 
     debug_assert!(
         challenges.len() >= 2,
@@ -212,7 +213,7 @@ where
     /// `num_rows` rows. The flat fraction capacity is `num_rows * Σ shape`, so the row loop
     /// does not re-allocate as long as each row stays within its declared bound. The flat
     /// count capacity is `num_rows * shape.len()`.
-    pub fn from_shape(shape: Vec<usize>, num_rows: usize) -> Self {
+    pub(crate) fn from_shape(shape: Vec<usize>, num_rows: usize) -> Self {
         let num_cols = shape.len();
         let total_fraction_capacity: usize = num_rows * shape.iter().sum::<usize>();
         let fractions = Vec::with_capacity(total_fraction_capacity);

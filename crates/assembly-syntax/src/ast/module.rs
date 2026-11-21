@@ -324,7 +324,7 @@ impl Module {
     }
 
     #[inline]
-    pub(crate) fn get_submodule_declaration(&self, name: &str) -> Option<&SubmoduleDecl> {
+    fn get_submodule_declaration(&self, name: &str) -> Option<&SubmoduleDecl> {
         self.submodules.iter().find(|decl| decl.name.as_str() == name)
     }
 

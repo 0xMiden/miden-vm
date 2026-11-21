@@ -446,7 +446,7 @@ impl MastForestBuilder {
         Ok(Some(index))
     }
 
-    pub(super) fn import_static_debug_tables(
+    fn import_static_debug_tables(
         &mut self,
         forest_idx: usize,
         package_debug_info: &PackageDebugInfo,

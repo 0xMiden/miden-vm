@@ -27,9 +27,6 @@ fn selectors_read_periodic_row_values() {
         for footer in 0..FOOTER_ROWS {
             assert_eq!(selectors.is_footer_row(footer), values[footer_cols[footer]]);
         }
-        for lane in 0..NUM_G {
-            assert_eq!(selectors.sigma_msg_index(lane), values[P_SIGMA_MSG_0 + lane]);
-        }
     }
 }
 
@@ -44,5 +41,4 @@ fn selectors_support_nonzero_periodic_offset() {
     assert_eq!(selectors.is_ab(), Felt::ONE);
     assert_eq!(selectors.is_cd(), Felt::ZERO);
     assert_eq!(selectors.is_first_fused(), Felt::ONE);
-    assert_eq!(selectors.sigma_msg_index(0), columns[P_SIGMA_MSG_0][0]);
 }

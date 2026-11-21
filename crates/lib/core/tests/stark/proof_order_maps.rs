@@ -6,19 +6,14 @@
 //! the Rust stable sort by `(height, instance index)` and against each other as inverses, for every
 //! VM order, the PVM structured sample, seeded random heights, and tied heights.
 
-use miden_ace::{
-    MAX_ORDER_AIRS,
-    compiler::{ProofOrderMapsConfig, render_proof_order_maps},
-};
+use miden_ace::{MAX_ORDER_AIRS, compiler::render_proof_order_maps};
 use miden_core::Felt;
 
 use super::{
-    pvm_layout_const,
     pvm_sigma_scatter::{heights_for_order as pvm_heights_for_order, structured_orders},
-    vm_layout_const,
     vm_sigma_scatter::{heights_for_order, permutations},
 };
-use crate::helpers::read_memory_felt;
+use crate::helpers::{read_memory_felt, stark_constant};
 
 /// Values parked under the pass so its stack-neutrality is observable.
 const SENTINELS: [u64; 4] = [7_001, 7_002, 7_003, 7_004];
@@ -27,43 +22,30 @@ const SENTINEL_PTR: u32 = 1_000;
 /// Written immediately around the two maps and into any alignment padding between them.
 const MAP_MEMORY_SENTINEL: u64 = 0xcafe_f00d;
 
-/// Literal, word-aligned regions used to execute non-production renderer configurations.
-const GENERIC_HEIGHTS_PTR: u32 = 2_000;
-const GENERIC_POSITIONS_PTR: u32 = 2_100;
-const GENERIC_IDS_PTR: u32 = 2_120;
-
 /// Mixed heights with frequent ties; each generic configuration uses the required prefix.
 const GENERIC_HEIGHTS: [u64; MAX_ORDER_AIRS] = [12, 8, 12, 6, 9, 6, 10, 9, 11, 7, 11, 8];
 
 struct Relation {
     module: &'static str,
     num_airs: usize,
-    layout_const: fn(&str) -> u32,
 }
 
 impl Relation {
     fn vm() -> Self {
-        Self {
-            module: "vm",
-            num_airs: 4,
-            layout_const: vm_layout_const,
-        }
+        Self { module: "vm", num_airs: 4 }
     }
 
     fn pvm() -> Self {
         Self {
             module: "pvm",
             num_airs: miden_air::precompiles::NUM_CHIPLETS,
-            layout_const: pvm_layout_const,
         }
     }
 
-    /// Every non-map cell directly bordering the allocation. PVM's twelve-entry and VM's four-entry
-    /// `pos_by_id` tables are adjacent to their `id_by_pos` tables, so neither has internal
-    /// padding.
+    /// Guards the live map extents and the unused cells between them.
     fn map_guard_addresses(&self) -> Vec<u32> {
-        let positions = (self.layout_const)("PROOF_ORDER_POSITIONS_PTR");
-        let ids = (self.layout_const)("PROOF_ORDER_IDS_PTR");
+        let positions = stark_constant("PROOF_ORDER_POSITIONS_PTR");
+        let ids = stark_constant("PROOF_ORDER_IDS_PTR");
         let positions_end = positions + self.num_airs as u32;
         assert!(positions > 0, "{}: positions table cannot be guarded below zero", self.module);
         assert!(positions_end <= ids, "{}: pos_by_id overlaps id_by_pos", self.module);
@@ -75,8 +57,7 @@ impl Relation {
     }
 
     /// Stores the heights and runs the pass under the sentinels.
-    fn source(&self, heights: &[u64]) -> String {
-        let module = self.module;
+    fn source(&self, heights: &[u64], prelude: &str, call: &str) -> String {
         let stores = heights
             .iter()
             .enumerate()
@@ -94,13 +75,13 @@ impl Relation {
             .join("\n");
         format!(
             "use {{LOG_AIR_TRACE_LENGTHS_PTR}} from miden::core::stark::constants
-use miden::core::sys::{module}::ood_frames
+{prelude}
 
 begin
 {stores}
 {memory_guards}
     push.{s3}.{s2}.{s1}.{s0}
-    exec.ood_frames::stage_proof_order_maps
+    {call}
     push.{SENTINEL_PTR} mem_storew_le dropw
 end",
             s0 = SENTINELS[0],
@@ -111,7 +92,12 @@ end",
     }
 
     fn check(&self, heights: &[u64]) {
-        let source = self.source(heights);
+        let prelude = format!("use miden::core::sys::{}::ood_frames", self.module);
+        let source = self.source(heights, &prelude, "exec.ood_frames::stage_proof_order_maps");
+        self.check_source(heights, source);
+    }
+
+    fn check_source(&self, heights: &[u64], source: String) {
         let test = build_test!(source.as_str(), &[]);
         let (output, _) = test.execute_for_output().unwrap_or_else(|err| {
             panic!("{}: the proof-order pass must execute for {heights:?}: {err}", self.module)
@@ -138,8 +124,8 @@ end",
         let mut order: Vec<usize> = (0..self.num_airs).collect();
         order.sort_by_key(|&air| (heights[air], air));
 
-        let positions = (self.layout_const)("PROOF_ORDER_POSITIONS_PTR");
-        let ids = (self.layout_const)("PROOF_ORDER_IDS_PTR");
+        let positions = stark_constant("PROOF_ORDER_POSITIONS_PTR");
+        let ids = stark_constant("PROOF_ORDER_IDS_PTR");
         for (position, &air) in order.iter().enumerate() {
             assert_eq!(
                 read_memory_felt(&output, positions + air as u32).as_canonical_u64(),
@@ -157,105 +143,22 @@ end",
     }
 }
 
-/// Executes one renderer configuration as a local MASM procedure and checks its complete contract.
-fn check_generic_renderer_config(num_airs: usize, word_load_heights: bool, word_store_ids: bool) {
-    let heights = &GENERIC_HEIGHTS[..num_airs];
-    let heights_ptr = format!("push.{GENERIC_HEIGHTS_PTR}");
-    let pos_by_id_ptr = format!("push.{GENERIC_POSITIONS_PTR}");
-    let id_by_pos_ptr = format!("push.{GENERIC_IDS_PTR}");
-    let procedure = render_proof_order_maps(&ProofOrderMapsConfig {
-        num_airs,
-        heights_ptr: &heights_ptr,
-        pos_by_id_ptr: &pos_by_id_ptr,
-        id_by_pos_ptr: &id_by_pos_ptr,
-        word_load_heights,
-        word_store_ids,
-    })
-    .expect("every supported generic configuration must render")
-    .replacen("pub proc stage_proof_order_maps", "proc stage_proof_order_maps", 1);
-
-    let height_stores = heights
-        .iter()
-        .enumerate()
-        .map(|(air, height)| {
-            format!("    push.{height} push.{} mem_store", GENERIC_HEIGHTS_PTR + air as u32)
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let positions_end = GENERIC_POSITIONS_PTR + num_airs as u32;
-    let guard_addresses = core::iter::once(GENERIC_POSITIONS_PTR - 1)
-        .chain(positions_end..GENERIC_IDS_PTR)
-        .chain(core::iter::once(GENERIC_IDS_PTR + num_airs as u32))
-        .collect::<Vec<_>>();
-    let memory_guards = guard_addresses
-        .iter()
-        .map(|addr| format!("    push.{MAP_MEMORY_SENTINEL} push.{addr} mem_store"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let source = format!(
-        "{procedure}\n\
-         begin\n\
-         {height_stores}\n\
-         {memory_guards}\n    \
-         push.{s3}.{s2}.{s1}.{s0}\n    \
-         exec.stage_proof_order_maps\n    \
-         push.{SENTINEL_PTR} mem_storew_le dropw\n\
-         end",
-        s0 = SENTINELS[0],
-        s1 = SENTINELS[1],
-        s2 = SENTINELS[2],
-        s3 = SENTINELS[3],
-    );
-    let test = build_test!(source.as_str(), &[]);
-    let (output, _) = test.execute_for_output().unwrap_or_else(|err| {
-        panic!(
-            "generic {num_airs}-AIR pass (word load {word_load_heights}, word store \
-             {word_store_ids}) must execute: {err}"
-        )
-    });
-
-    for (i, sentinel) in SENTINELS.iter().enumerate() {
-        assert_eq!(
-            read_memory_felt(&output, SENTINEL_PTR + i as u32),
-            Felt::new_unchecked(*sentinel),
-            "generic {num_airs}-AIR pass disturbed operand-stack slot {i}"
-        );
-    }
-    for addr in guard_addresses {
-        assert_eq!(
-            read_memory_felt(&output, addr),
-            Felt::new_unchecked(MAP_MEMORY_SENTINEL),
-            "generic {num_airs}-AIR pass wrote outside its maps at address {addr}"
-        );
-    }
-
-    let mut order: Vec<usize> = (0..num_airs).collect();
-    order.sort_by_key(|&air| (heights[air], air));
-    for (position, &air) in order.iter().enumerate() {
-        assert_eq!(
-            read_memory_felt(&output, GENERIC_POSITIONS_PTR + air as u32).as_canonical_u64(),
-            position as u64,
-            "generic {num_airs}-AIR pos_by_id[{air}] is wrong"
-        );
-        assert_eq!(
-            read_memory_felt(&output, GENERIC_IDS_PTR + position as u32).as_canonical_u64(),
-            air as u64,
-            "generic {num_airs}-AIR id_by_pos[{position}] is wrong"
-        );
-    }
-}
-
-/// The renderer supports every AIR count from two through twelve. This test executes every
-/// supported count and each load/store mode.
+/// Covers scalar tails as well as complete word loads and stores for every supported AIR count.
 #[test]
-fn generic_renderer_executes_every_supported_count_and_access_mode() {
+fn generic_renderer_executes_every_supported_count() {
     for num_airs in 2..=MAX_ORDER_AIRS {
-        for word_store_ids in [false, true] {
-            check_generic_renderer_config(num_airs, false, word_store_ids);
-        }
-    }
-    for word_store_ids in [false, true] {
-        check_generic_renderer_config(4, true, word_store_ids);
+        let relation = Relation { module: "generated", num_airs };
+        let heights = &GENERIC_HEIGHTS[..num_airs];
+        let procedure = render_proof_order_maps(num_airs).expect("supported AIR count").replacen(
+            "pub proc ",
+            "proc ",
+            1,
+        );
+        let prelude = format!(
+            "use {{PROOF_ORDER_POSITIONS_PTR, PROOF_ORDER_IDS_PTR}} from miden::core::stark::constants\n{procedure}"
+        );
+        let source = relation.source(heights, &prelude, "exec.stage_proof_order_maps");
+        relation.check_source(heights, source);
     }
 }
 

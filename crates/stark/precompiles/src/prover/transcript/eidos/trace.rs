@@ -11,16 +11,13 @@ use super::compression::{
     layout::{BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, NUM_COLS as NUM_EIDOS_COMPRESSION_COLS},
     trace::{
         ByteLookupRecorder, EidosCompressionByteLookup, retag_felt_trace_block_cycle_id,
-        set_footer_output_multiplicity, write_felt_trace_block_into_zeroed_with_lookups,
+        set_cycle_metadata, write_felt_trace_block_into_zeroed_with_lookups,
     },
 };
 use crate::prover::{
     primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp},
     relations::ProvideMult,
-    transcript::eidos::{
-        COL_CHAIN_HEAD_ID, COL_IN_MULTIPLICITY, COL_IS_CONTINUATION, NUM_MAIN_COLS,
-        digest::EidosDigest,
-    },
+    transcript::eidos::{NUM_MAIN_COLS, digest::EidosDigest},
 };
 
 #[cfg(test)]
@@ -200,18 +197,6 @@ struct CompressionCycle {
     chain_head_id: u32,
     block: [Felt; 8],
     cv_in: Word,
-}
-
-impl CompressionCycle {
-    fn append_metadata(&self, row: &mut Vec<Felt>) {
-        let start = row.len();
-        row.resize(start + (NUM_MAIN_COLS - NUM_EIDOS_COMPRESSION_COLS), Felt::ZERO);
-        let meta = &mut row[start..];
-        let col = |absolute: usize| absolute - NUM_EIDOS_COMPRESSION_COLS;
-        meta[col(COL_IN_MULTIPLICITY)] = Felt::from(self.in_mult);
-        meta[col(COL_IS_CONTINUATION)] = Felt::from_u8(self.is_continuation as u8);
-        meta[col(COL_CHAIN_HEAD_ID)] = Felt::from(self.chain_head_id);
-    }
 }
 
 struct EidosCompressionLookupCounter<'a> {
@@ -471,34 +456,44 @@ pub(crate) fn generate_trace_with_byte_lookups(
         debug_assert_eq!(EidosDigest(cv.into_elements()), rec.digest);
     }
 
-    let eidos_compression = build_eidos_compression_trace(&cycles, height, byte_pairs);
+    let mut eidos_compression = build_eidos_compression_trace(&cycles, height, byte_pairs);
     let height = eidos_compression.values.len() / eidos_compression.width;
     debug_assert_eq!(height % EIDOS_COMPRESSION_CYCLE_LEN, 0);
     debug_assert!(cycles.len() * EIDOS_COMPRESSION_CYCLE_LEN <= height);
 
-    let mut values = Vec::with_capacity(height * NUM_MAIN_COLS);
-    for (row_idx, base_row) in
-        eidos_compression.values.chunks_exact(eidos_compression.width).enumerate()
+    for (cycle_idx, rows) in eidos_compression
+        .values
+        .as_chunks_mut::<{ EIDOS_COMPRESSION_CYCLE_LEN * NUM_MAIN_COLS }>()
+        .0
+        .iter_mut()
+        .enumerate()
     {
-        let start = values.len();
-        values.extend_from_slice(base_row);
-        let cycle_idx = row_idx / EIDOS_COMPRESSION_CYCLE_LEN;
+        let outgoing = cycles.get(cycle_idx + 1).is_some_and(|cycle| cycle.is_continuation);
         if let Some(cycle) = cycles.get(cycle_idx) {
-            if row_idx % EIDOS_COMPRESSION_CYCLE_LEN == EIDOS_COMPRESSION_CYCLE_LEN - 1 {
-                set_footer_output_multiplicity(&mut values[start..], Felt::from(cycle.out_mult));
-            }
-            cycle.append_metadata(&mut values);
+            set_cycle_metadata(
+                rows,
+                Felt::from(cycle.in_mult),
+                Felt::from(cycle.out_mult),
+                Felt::from_u8(cycle.is_continuation as u8),
+                Felt::from_u8(outgoing as u8),
+                Felt::from(cycle.chain_head_id),
+            );
         } else {
-            let start = values.len();
-            values.resize(start + (NUM_MAIN_COLS - NUM_EIDOS_COMPRESSION_COLS), Felt::ZERO);
             let physical_cycle_id =
                 u32::try_from(cycle_idx).expect("Eidos compression cycle ID must fit in u32");
-            values[start + COL_CHAIN_HEAD_ID - NUM_EIDOS_COMPRESSION_COLS] =
-                Felt::from(physical_cycle_id);
+            set_cycle_metadata(
+                rows,
+                Felt::ZERO,
+                Felt::ZERO,
+                Felt::ZERO,
+                Felt::ZERO,
+                Felt::from(physical_cycle_id),
+            );
         }
     }
 
-    RowMajorMatrix::new(values, NUM_MAIN_COLS)
+    eidos_compression
 }
 
 const _: () = assert!(EIDOS_COMPRESSION_CYCLE_LEN == 32);
+const _: () = assert!(NUM_MAIN_COLS == NUM_EIDOS_COMPRESSION_COLS);

@@ -4,9 +4,13 @@ use {
     RANDOM_COIN_OUTPUT_LENGTH_PTR,
 } from miden::core::stark::constants
 use miden::core::stark::types
-use miden::core::stark::public_inputs
 use miden::core::stark::random_coin
-use miden::core::sys::pvm::layout
+use {
+    PUBLIC_INPUTS_PTR,
+    PUBLIC_INPUT_1_C0_PTR,
+    PUBLIC_INPUT_2_C0_PTR,
+    PUBLIC_INPUT_3_C0_PTR,
+} from miden::core::sys::pvm::layout
 
 # Statement schema derived from ChipletMultiAir and SessionTraces::air_inputs.
 const NUM_PUBLIC_VALUES = 4
@@ -27,15 +31,10 @@ const BUFFERED_SHAPE_VALUE_COUNT = 0
 #! Inputs:  [D0, D1, D2, D3, ...]
 #! Outputs: [...]
 pub proc stage_public_root(root: types::Digest)
-    exec.layout::public_inputs_ptr mem_store
-    exec.layout::public_inputs_ptr add.2 mem_store
-    exec.layout::public_inputs_ptr add.4 mem_store
-    exec.layout::public_inputs_ptr add.6 mem_store
-
-    push.0 exec.layout::public_inputs_ptr add.1 mem_store
-    push.0 exec.layout::public_inputs_ptr add.3 mem_store
-    push.0 exec.layout::public_inputs_ptr add.5 mem_store
-    push.0 exec.layout::public_inputs_ptr add.7 mem_store
+    padw movdn.7 movdn.5 movdn.3 swap
+    # => [D0, 0, D1, 0, D2, 0, D3, 0, ...]
+    mem_storew_le.PUBLIC_INPUTS_PTR dropw
+    mem_storew_le.PUBLIC_INPUT_2_C0_PTR dropw
 end
 
 #! Observes the PVM statement and instance shape (step I of the verifier).
@@ -60,22 +59,20 @@ pub proc process_public_inputs()
     mem_load.RANDOM_COIN_INPUT_LENGTH_PTR
     push.4 assert_eq.err="PVM process_public_inputs: preprocessed commitment is not buffered"
 
-    # Publish the dense ACE READ public-input start through the generic verifier cell.
+    # Observe consecutive words of the statement-and-shape stream through the streaming API.
+    mem_load.PUBLIC_INPUT_2_C0_PTR
+    mem_load.PUBLIC_INPUT_1_C0_PTR
+    mem_load.PUBLIC_INPUTS_PTR
     push.NUM_PUBLIC_VALUES
-    exec.layout::aux_rand_elem_ptr
-    exec.public_inputs::compute_and_store_public_inputs_address
+    # => [num_public_values, D0, D1, D2, ...]
+    exec.random_coin::observe_word
 
-    # Statement encoding: `[4, D0, D1, D2, D3, 0, 0]`.
-    push.NUM_PUBLIC_VALUES exec.random_coin::observe_felt
-    exec.layout::public_inputs_ptr mem_load exec.random_coin::observe_felt
-    exec.layout::public_inputs_ptr add.2 mem_load exec.random_coin::observe_felt
-    exec.layout::public_inputs_ptr add.4 mem_load exec.random_coin::observe_felt
-    exec.layout::public_inputs_ptr add.6 mem_load exec.random_coin::observe_felt
-    push.MAX_AUX_INPUTS exec.random_coin::observe_felt
-    push.NUM_AUX_INPUTS exec.random_coin::observe_felt
+    push.NUM_CHIPLETS.NUM_AUX_INPUTS.MAX_AUX_INPUTS
+    mem_load.PUBLIC_INPUT_3_C0_PTR
+    # => [D3, max_aux_inputs, num_aux_inputs, num_chiplets, ...]
+    exec.random_coin::observe_word
 
-    # Instance shape: `[12, h0, ..., h11]`.
-    push.NUM_CHIPLETS exec.random_coin::observe_felt
+    # Instance heights in canonical ChipletAir order.
     push.LOG_AIR_TRACE_LENGTHS_PTR
     repeat.NUM_CHIPLETS
         dup mem_load exec.random_coin::observe_felt

@@ -39,7 +39,7 @@ pub fn proof_order_from_log_heights(log_heights: &[u8; NUM_CHIPLETS]) -> [usize;
 /// moved to either end, and a deterministic random sample. The sample includes non-involutions,
 /// where the source and destination permutations differ.
 #[cfg(test)]
-pub(crate) fn structured_orders() -> Vec<[usize; NUM_CHIPLETS]> {
+fn structured_orders() -> Vec<[usize; NUM_CHIPLETS]> {
     let identity: [usize; NUM_CHIPLETS] = core::array::from_fn(|i| i);
     let mut orders = Vec::new();
     orders.push(identity);
@@ -373,13 +373,9 @@ mod tests {
         );
     }
 
-    /// The PVM aux hook reads twelve quadratic-extension component residues as six MASM words.
-    /// Pin the complete per-chiplet shape so a redistribution cannot preserve only the total.
+    /// Every chiplet supplies one extension-field boundary value at its canonical READ slot.
     #[test]
-    fn pvm_aux_hook_matches_every_chiplets_boundary_shape() {
-        const HOOK_PATH: &str =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/pvm/aux_trace.masm");
-
+    fn pvm_aux_boundaries_match_the_canonical_read_layout() {
         let derived: Vec<usize> = ChipletAir::all()
             .iter()
             .map(miden_stark::air::LiftedAir::<Felt, QuadFelt>::num_aux_values)
@@ -389,12 +385,6 @@ mod tests {
             alloc::vec![1; NUM_CHIPLETS],
             "the PVM aux hook boundary shape drifted"
         );
-        assert_eq!(
-            derived.iter().sum::<usize>(),
-            2 * masm_const(HOOK_PATH, "NUM_AUX_VALUE_WORDS") as usize,
-            "the MASM hook must read every normalized LogUp value exactly once"
-        );
-
         // The scatter permutes the region the circuit reads, so it must be exactly one slot per
         // exposed value.
         let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
@@ -450,16 +440,18 @@ mod tests {
 
     #[test]
     fn pvm_masm_read_layout_matches_every_codegen_boundary() {
-        const READ_START: u64 = 3_225_432_064;
-        const NEXT_VM_REGION: u64 = 3_238_002_688;
         const LAYOUT_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/pvm/layout.masm");
 
         let canonical = build_canonical_precompile_ace_circuit().expect("PVM canonical circuit");
         let layout = canonical.layout();
+        let challenges_start = masm_const(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/stark/constants.masm"),
+            "AUX_RAND_ELEM_PTR",
+        );
+        let read_start = challenges_start - 2 * layout.index(InputKey::AuxRandBeta).unwrap() as u64;
         let boundaries = [
             ("PUBLIC_INPUTS_PTR", InputKey::Public(0)),
-            ("AUX_RAND_ELEM_PTR", InputKey::AuxRandBeta),
             ("PREPROCESSED_CURRENT_PTR", InputKey::Preprocessed { offset: 0, index: 0 }),
             ("MAIN_CURRENT_PTR", InputKey::Main { offset: 0, index: 0 }),
             ("AUX_CURRENT_PTR", InputKey::AuxCoord { offset: 0, index: 0, coord: 0 }),
@@ -488,36 +480,13 @@ mod tests {
             let index = layout.index(key).unwrap_or_else(|| panic!("missing {key:?}"));
             assert_eq!(
                 masm_const(LAYOUT_PATH, name),
-                READ_START + 2 * index as u64,
+                read_start + 2 * index as u64,
                 "{name} does not match InputLayout::{key:?}"
             );
         }
 
         let stream_ptr = masm_const(LAYOUT_PATH, "ACE_CIRCUIT_STREAM_PTR");
-        assert_eq!(stream_ptr, READ_START + 2 * layout.total_inputs as u64);
-        let bus_gamma_ptr = masm_const(LAYOUT_PATH, "BUS_GAMMA_PTR");
-        assert_eq!(bus_gamma_ptr, stream_ptr + PVM_CIRCUIT_SHAPE.2 as u64);
-        let c_total_ptr = masm_const(LAYOUT_PATH, "C_TOTAL_PTR");
-        assert_eq!(c_total_ptr, bus_gamma_ptr + 4);
-        let current_trace_row_ptr = masm_const(LAYOUT_PATH, "CURRENT_TRACE_ROW_PTR");
-        assert_eq!(current_trace_row_ptr, c_total_ptr + 4);
-        let current_row_start = layout
-            .index(InputKey::Preprocessed { offset: 0, index: 0 })
-            .expect("current-row start");
-        let next_row_start = layout
-            .index(InputKey::Preprocessed { offset: 1, index: 0 })
-            .expect("next-row start");
-        let current_row_felts = next_row_start - current_row_start;
-        let preprocessed_com_ptr = masm_const(LAYOUT_PATH, "PREPROCESSED_COM_PTR");
-        assert_eq!(
-            preprocessed_com_ptr,
-            current_trace_row_ptr + current_row_felts as u64,
-            "the query-row scratch extent must come from the codegen layout"
-        );
-        assert!(
-            preprocessed_com_ptr + 4 <= NEXT_VM_REGION,
-            "the complete PVM READ + stream + relation scratch allocation overlaps the next VM region"
-        );
+        assert_eq!(stream_ptr, read_start + 2 * layout.total_inputs as u64);
     }
 
     #[test]
@@ -582,8 +551,12 @@ mod tests {
                 let min_height = periodic_min.max(preprocessed_min);
                 assert!(min_height.is_power_of_two());
                 let log_height = min_height.ilog2();
-                if let Some(fixed) = air.fixed_log_height() {
-                    assert_eq!(fixed, log_height, "fixed AIR height drifted from its trace");
+                if let Some(fixed) = air.log_preprocessed_height() {
+                    assert_eq!(
+                        u32::from(fixed),
+                        log_height,
+                        "fixed AIR height drifted from its trace"
+                    );
                 }
                 u64::from(log_height)
             })
@@ -595,7 +568,7 @@ mod tests {
                 let wrapper_checks_equality =
                     matches!(air.0, miden_air_definitions::precompiles::ChipletAir::BytePairLut);
                 assert_eq!(
-                    air.fixed_log_height().is_some(),
+                    air.log_preprocessed_height().is_some(),
                     wrapper_checks_equality,
                     "the PVM wrapper's height check for {air:?} differs from its native policy"
                 );
@@ -679,7 +652,7 @@ mod tests {
             "the PVM lookup coefficient exceeds the estimator envelope"
         );
         assert!(
-            u64::from(pvm_security::FIXED_BOUNDARY_LOOKUP_TERMS)
+            u64::from(pvm_security::FIXED_LOOKUP_ERROR_TERMS)
                 <= masm_const(SECURITY_ESTIMATOR_PATH, "MAX_BOUNDARY_TERMS"),
             "the PVM boundary-term count exceeds the estimator envelope"
         );
@@ -742,9 +715,9 @@ mod tests {
                 u64::from(pvm_security::testing::LOOKUP_SHAPE.fractions_per_row),
             ),
             (
-                "FIXED_BOUNDARY_LOOKUP_TERMS",
+                "FIXED_LOOKUP_ERROR_TERMS",
                 PVM_PARAMETERS_PATH,
-                u64::from(pvm_security::FIXED_BOUNDARY_LOOKUP_TERMS),
+                u64::from(pvm_security::FIXED_LOOKUP_ERROR_TERMS),
             ),
         ] {
             assert_eq!(

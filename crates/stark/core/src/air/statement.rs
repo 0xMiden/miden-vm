@@ -91,7 +91,7 @@ where
         })
     }
 
-    pub fn multi_air(&self) -> &MA {
+    pub(crate) fn multi_air(&self) -> &MA {
         &self.multi_air
     }
 
@@ -104,7 +104,7 @@ where
         &self.air_inputs
     }
 
-    pub fn aux_inputs(&self) -> &[F] {
+    pub(crate) fn aux_inputs(&self) -> &[F] {
         &self.aux_inputs
     }
 
@@ -158,6 +158,8 @@ where
     /// }
     ///
     /// impl LiftedAir<Felt, Felt> for ExampleAir {
+    ///     type EvalData<B: p3_field::Algebra<Felt>, E: p3_field::Algebra<B>> = ();
+    ///
     ///     fn num_randomness(&self) -> usize {
     ///         0
     ///     }
@@ -180,7 +182,7 @@ where
     ///         (RowMajorMatrix::new(vec![Felt::ZERO; main.height()], 1), Vec::new())
     ///     }
     ///
-    ///     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, _builder: &mut AB) {}
+    ///     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, _builder: &mut AB, _data: &()) {}
     /// }
     ///
     /// struct ExampleMultiAir {
@@ -321,7 +323,7 @@ where
     }
 
     /// Split this value into the verifier-side statement and owned main traces.
-    pub fn into_parts(self) -> (Statement<F, EF, MA>, Vec<RowMajorMatrix<F>>) {
+    pub(crate) fn into_parts(self) -> (Statement<F, EF, MA>, Vec<RowMajorMatrix<F>>) {
         (self.statement, self.traces)
     }
 }

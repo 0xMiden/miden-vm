@@ -10,6 +10,7 @@ use miden_crypto::{
     },
     utils::Deserializable,
 };
+use miden_crypto_fuzz::check_falcon_paths;
 
 fuzz_target!(|data: &[u8]| {
     // Split input data for different uses
@@ -86,27 +87,19 @@ fuzz_target!(|data: &[u8]| {
     let _ = Vec::<FalconSignature>::read_from_bytes(data);
     let _ = Option::<FalconSignature>::read_from_bytes(data);
 
-    // Falcon512 PublicKey is 56 bytes (header + 14-bit packed coefficients)
+    // Falcon512 PublicKey is PK_LEN bytes (header + 14-bit packed coefficients).
     let _ = FalconPublicKey::read_from_bytes(data);
     let _ = Vec::<FalconPublicKey>::read_from_bytes(data);
     let _ = Option::<FalconPublicKey>::read_from_bytes(data);
 
-    // Verify path - Falcon signatures are complex, just test deserialization paths
-    // The actual verify is tested in crypto.rs target
-    if let (Ok(_pk), Ok(sig)) = (
-        FalconPublicKey::read_from_bytes(&sig_key_bytes.get(0..56).unwrap_or(&[])),
-        FalconSignature::read_from_bytes(sig_key_bytes.get(56..).unwrap_or(&[])),
-    ) {
-        if let Some(msg) = message {
-            // Note: verify internally uses signature.verify(message, pk)
-            // which may access signature fields - ensure no panics
-            let _ = sig.verify(msg, &_pk);
-        }
-    }
+    // The shared helper exercises the coefficient constructor, the PK_LEN key split, and
+    // verification. A valid seed is message || public key || signature.
+    let _ = check_falcon_paths(data);
 
-    // Falcon public key recovery from signature
+    // Falcon public key recovery from signature, and verification against the embedded key.
     if let Ok(sig) = FalconSignature::read_from_bytes(data) {
         if let Some(msg) = message {
+            let _ = sig.verify(msg, sig.public_key());
             let _ = FalconPublicKey::recover_from(msg, &sig);
         }
     }

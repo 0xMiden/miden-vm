@@ -17,6 +17,7 @@ use crate::vm::{
             enforce_footer_rows, enforce_fused_rows, enforce_inactive_footer_input_aux,
             enforce_inactive_footer_output_aux,
         },
+        layout::{AUX_COLS, AUX_REGISTER_COL},
         lookup::{
             EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, EidosCompressionLookupBuilder,
             emit_lookup_columns,
@@ -44,7 +45,7 @@ impl EidosCompressionAir {
     }
 
     pub(super) fn aux_width(self) -> usize {
-        EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len()
+        AUX_COLS
     }
 
     pub(super) fn boundary_correction<EF: ExtensionField<Felt>>(
@@ -75,6 +76,7 @@ impl EidosCompressionAir {
             enforce_footer_rows(builder, local, next, &selectors);
             enforce_inactive_footer_input_aux(builder, &selectors);
             enforce_inactive_footer_output_aux(builder, local, &selectors);
+            crate::shared::eidos::enforce_register_constraints(builder, AUX_REGISTER_COL);
         }
         let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::EidosCompression);
         self.lookup_eval(&mut lb);

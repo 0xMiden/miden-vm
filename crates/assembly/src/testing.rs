@@ -2,7 +2,7 @@
 use alloc::vec::Vec;
 use alloc::{boxed::Box, sync::Arc};
 
-#[cfg(feature = "std")]
+#[cfg(all(test, feature = "std"))]
 use miden_assembly_syntax::Word;
 #[cfg(any(test, feature = "testing"))]
 pub use miden_assembly_syntax::parser;
@@ -10,10 +10,7 @@ use miden_assembly_syntax::{
     Parse, Path,
     ast::{Module, ModuleKind},
     debuginfo::{DefaultSourceManager, SourceManager},
-    diagnostics::{
-        Report,
-        reporting::{ReportHandlerOpts, set_hook},
-    },
+    diagnostics::{Report, reporting::set_hook},
 };
 pub use miden_assembly_syntax::{
     assert_diagnostic, assert_diagnostic_lines, parse_module, regex, source_file, testing::Pattern,
@@ -22,12 +19,14 @@ pub use miden_assembly_syntax::{
 use miden_assembly_syntax::{ast::Form, debuginfo::SourceFile};
 use miden_core::program::Program;
 use miden_mast_package::PackageId;
-#[cfg(feature = "std")]
+#[cfg(all(test, feature = "std"))]
 use miden_project::TargetType;
 
 use crate::assembler::Assembler;
+#[cfg(not(feature = "std"))]
+use crate::diagnostics::reporting::DefaultReportHandler;
 #[cfg(feature = "std")]
-use crate::diagnostics::reporting::set_panic_hook;
+use crate::diagnostics::reporting::{ReportHandlerOpts, set_panic_hook};
 
 /// A [TestContext] provides common functionality for all tests which interact with an [Assembler].
 ///
@@ -68,7 +67,7 @@ impl TestContext {
 
         #[cfg(not(feature = "std"))]
         {
-            let _ = set_hook(Box::new(|_| Box::new(ReportHandlerOpts::new().build())));
+            let _ = set_hook(Box::new(|_| Box::new(DefaultReportHandler::default())));
         }
         let source_manager = Arc::new(DefaultSourceManager::default());
         let assembler = Assembler::new(source_manager.clone()).with_warnings_as_errors(true);
@@ -125,15 +124,6 @@ impl TestContext {
         parser::parse_forms(source)
     }
 
-    /// Parse the given source file into an executable [Module].
-    ///
-    /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
-    /// valid.
-    #[track_caller]
-    pub fn parse_program(&self, source: Arc<SourceFile>) -> Result<Box<Module>, Report> {
-        source.parse(self.assembler.warnings_as_errors(), self.source_manager())
-    }
-
     /// Parse the given source file into a kernel [Module].
     ///
     /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
@@ -157,13 +147,18 @@ impl TestContext {
     /// Add `module` to the [Assembler] constructed by this context, making it available to
     /// other modules.
     #[track_caller]
-    pub fn add_module(&mut self, module: impl Parse) -> Result<(), Report> {
+    #[cfg(all(test, feature = "std"))]
+    pub(crate) fn add_module(&mut self, module: impl Parse) -> Result<(), Report> {
         self.assembler.compile_and_statically_link(module).map(|_| ())
     }
 
     /// Add the modules of `library` to the [Assembler] constructed by this context.
     #[track_caller]
-    pub fn add_library(&mut self, package: Arc<miden_mast_package::Package>) -> Result<(), Report> {
+    #[cfg(all(test, feature = "std"))]
+    pub(crate) fn add_library(
+        &mut self,
+        package: Arc<miden_mast_package::Package>,
+    ) -> Result<(), Report> {
         self.assembler.link_package(package, miden_project::Linkage::Dynamic)
     }
 
@@ -224,25 +219,30 @@ mod package_features {
     }
 
     impl TestRegistry {
-        pub fn add_package(&mut self, package: Arc<Package>) -> Version {
+        #[cfg(test)]
+        pub(crate) fn add_package(&mut self, package: Arc<Package>) -> Version {
             let version = Version::new(package.version.clone(), package.dependency_commitment());
             self.publish_package(package).expect("failed to add test package");
             version
         }
 
-        pub fn loaded_packages(&self) -> Vec<String> {
+        #[cfg(test)]
+        pub(crate) fn loaded_packages(&self) -> Vec<String> {
             self.loads.lock().unwrap().clone()
         }
 
-        pub fn cached_packages(&self) -> Vec<String> {
+        #[cfg(test)]
+        pub(crate) fn cached_packages(&self) -> Vec<String> {
             self.caches.lock().unwrap().clone()
         }
 
-        pub fn clear_loaded_packages(&self) {
+        #[cfg(test)]
+        pub(crate) fn clear_loaded_packages(&self) {
             self.loads.lock().unwrap().clear();
         }
 
-        pub fn remove_package(
+        #[cfg(test)]
+        pub(crate) fn remove_package(
             &mut self,
             package: &PackageId,
             version: &Version,
@@ -250,7 +250,8 @@ mod package_features {
             self.packages.remove(&(package.clone(), version.clone()))
         }
 
-        pub fn replace_semver_package(&mut self, package: Arc<Package>) -> Version {
+        #[cfg(test)]
+        pub(crate) fn replace_semver_package(&mut self, package: Arc<Package>) -> Version {
             let version = Version::new(package.version.clone(), package.dependency_commitment());
             self.packages.retain(|(name, existing), _| {
                 name != &package.name || existing.version != package.version
@@ -367,11 +368,13 @@ mod package_features {
             &self.registry
         }
 
-        pub fn registry_mut(&mut self) -> &mut TestRegistry {
+        #[cfg(test)]
+        pub(crate) fn registry_mut(&mut self) -> &mut TestRegistry {
             &mut self.registry
         }
 
-        pub fn project_assembler_for_path<'a>(
+        #[cfg(test)]
+        pub(crate) fn project_assembler_for_path<'a>(
             &'a mut self,
             manifest_path: impl AsRef<std::path::Path>,
         ) -> Result<crate::ProjectAssembler<'a, TestRegistry>, Report> {
@@ -436,7 +439,8 @@ mod package_features {
         ///     add
         /// end
         /// ```
-        pub fn assemble_library_package_with_export<'a>(
+        #[cfg(test)]
+        pub(crate) fn assemble_library_package_with_export<'a>(
             &self,
             name: &str,
             version: &str,

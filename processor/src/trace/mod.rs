@@ -1,4 +1,4 @@
-use alloc::format;
+use alloc::{format, string::ToString};
 
 use miden_core::{
     deferred::{Digest, TRUE_DIGEST},
@@ -9,7 +9,7 @@ use miden_core::{
     },
 };
 
-use crate::{ProgramInfo, StackInputs, StackOutputs, fast::ExecutionOutput};
+use crate::{AdviceProvider, ProgramInfo, StackInputs, StackOutputs, fast::ExecutionOutput};
 
 pub(crate) mod utils;
 use utils::ChipletTraceFragment;
@@ -30,7 +30,9 @@ mod tests;
 // ================================================================================================
 
 pub(crate) use execution_tracer::TraceReplay;
-pub use miden_air_definitions::vm::{ChipletsLengths, TraceLenSummary, VmTrace, trace::RowIndex};
+pub use miden_air_definitions::vm::{
+    ChipletsLengths, TraceLenSummary, TraceLenSummaryError, VmTrace, trace::RowIndex,
+};
 pub use miden_core::deferred::PrecompileWitness;
 pub use parallel::{CORE_TRACE_WIDTH, build_trace};
 // Re-exported for the streaming trace-build path
@@ -60,10 +62,10 @@ impl ExecutionWitness {
         stack_inputs: StackInputs,
         execution_output: ExecutionOutput,
         trace: TraceReplay,
-    ) -> Self {
+    ) -> (Self, AdviceProvider) {
         let ExecutionOutput {
             stack: stack_outputs,
-            advice: _,
+            advice,
             memory: _,
             precompile_root,
             precompile_witness: precompile,
@@ -76,7 +78,7 @@ impl ExecutionWitness {
             precompile_root,
         };
 
-        Self { vm, precompile }
+        (Self { vm, precompile }, advice)
     }
 
     /// Returns the public claim associated with this witness.
@@ -100,7 +102,7 @@ impl ExecutionWitness {
     /// Decodes one execution witness from a potentially adversarial byte slice.
     ///
     /// The reader applies an input-proportional limit to byte consumption and collection
-    /// preallocation, then rejects trailing bytes. These checks establish safe transport syntax.
+    /// preallocation, checks available sparse node hashes, and rejects trailing bytes.
     /// They do not prove that the sparse MAST replay is a subset of a particular source forest
     /// because the witness wire does not carry such a proof.
     ///
@@ -128,7 +130,7 @@ impl ExecutionWitness {
     pub fn read_from_bytes_trusted(bytes: &[u8]) -> Result<Self, DeserializationError> {
         let budget = bytes.len().saturating_mul(EXECUTION_WITNESS_BYTE_READ_BUDGET_MULTIPLIER);
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
-        <Self as Deserializable>::read_from(&mut reader)
+        Self::read_from_inner(&mut reader)
     }
 }
 
@@ -157,6 +159,22 @@ impl Serializable for ExecutionWitness {
 
 impl Deserializable for ExecutionWitness {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let witness = Self::read_from_inner(source)?;
+        for forest in &witness.vm.trace.mast_forest_store {
+            forest
+                .validate()
+                .map_err(|error| DeserializationError::InvalidValue(error.to_string()))?;
+        }
+        Ok(witness)
+    }
+
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        ExecutionWitness::read_from_bytes(bytes)
+    }
+}
+
+impl ExecutionWitness {
+    fn read_from_inner<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let version = u8::read_from(source)?;
         if version != EXECUTION_WITNESS_WIRE_VERSION {
             return Err(DeserializationError::InvalidValue(format!(
@@ -191,10 +209,6 @@ impl Deserializable for ExecutionWitness {
             },
         };
         Ok(Self { vm, precompile })
-    }
-
-    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
-        ExecutionWitness::read_from_bytes(bytes)
     }
 }
 
@@ -248,14 +262,14 @@ impl VmWitness {
     /// Returns the replay data captured during execution.
     #[cfg(any(test, feature = "testing"))]
     #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
-    pub(crate) fn trace_replay(&self) -> &TraceReplay {
+    fn trace_replay(&self) -> &TraceReplay {
         &self.trace
     }
 
     // Kept for tests that force invalid replay data without widening the public API.
     #[cfg(any(test, feature = "testing"))]
     #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
-    pub(crate) fn trace_replay_mut(&mut self) -> &mut TraceReplay {
+    fn trace_replay_mut(&mut self) -> &mut TraceReplay {
         &mut self.trace
     }
 
@@ -264,7 +278,6 @@ impl VmWitness {
     /// Available under the `testing` feature for external tests that check which replay data a
     /// serialized witness preserves.
     #[cfg(any(test, feature = "testing"))]
-    #[allow(dead_code)]
     pub fn mast_forest_count(&self) -> usize {
         self.trace.mast_forest_store.len()
     }
@@ -394,6 +407,39 @@ mod wire_tests {
     }
 
     #[test]
+    fn witness_reader_checks_sparse_hashes_and_preserves_trusted_path() {
+        use miden_core::{Word, mast::SparseMastForest, serde::ByteReader};
+
+        let mut witness = execution_witness("begin push.1 drop end");
+        let forest = &mut witness.vm.trace.mast_forest_store[0];
+        let mut sparse_bytes = forest.to_bytes();
+        let mut reader = std::io::Cursor::new(sparse_bytes.as_slice());
+        let root_count = reader.read_usize().unwrap();
+        for _ in 0..root_count {
+            reader.read_u32().unwrap();
+        }
+        assert!(reader.read_usize().unwrap() > 0);
+        reader.read_u32().unwrap();
+        reader.read_u8().unwrap();
+        let hash_offset = reader.position() as usize;
+        sparse_bytes[hash_offset..hash_offset + Word::SERIALIZED_SIZE]
+            .copy_from_slice(&Word::default().to_bytes());
+        *forest = alloc::sync::Arc::new(
+            SparseMastForest::read_from_bytes_trusted(&sparse_bytes).unwrap(),
+        );
+
+        let bytes = witness.to_bytes();
+        assert!(ExecutionWitness::read_from_bytes(&bytes).is_err());
+        assert!(
+            <ExecutionWitness as super::Deserializable>::read_from(&mut std::io::Cursor::new(
+                &bytes
+            ),)
+            .is_err()
+        );
+        assert!(ExecutionWitness::read_from_bytes_trusted(&bytes).is_ok());
+    }
+
+    #[test]
     fn witness_wire_accepts_large_minimally_encoded_continuation_stack() {
         let mut witness = deferred_witness();
         let continuation = &mut witness
@@ -434,10 +480,7 @@ mod wire_tests {
 
         assert_eq!(restored_trace.public_inputs(), original_trace.public_inputs());
         assert_eq!(restored_trace.trace_len_summary(), original_trace.trace_len_summary());
-        assert_eq!(
-            restored_trace.main_trace().clone_air_matrices(),
-            original_trace.main_trace().clone_air_matrices()
-        );
+        assert_eq!(restored_trace.into_air_matrices(), original_trace.into_air_matrices());
     }
 
     #[rstest]

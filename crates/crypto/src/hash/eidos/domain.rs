@@ -78,7 +78,7 @@ pub struct NamespaceDescriptor {
     /// Numeric namespace prefix.
     pub namespace: DomainNamespace,
     /// Repository responsible for the namespace's local registry.
-    pub maintainer: &'static str,
+    pub(crate) maintainer: &'static str,
 }
 
 /// The central Eidos namespace registry.
@@ -144,7 +144,7 @@ impl DomainVersion {
     }
 
     /// Returns true when the authenticated payload carries the object version.
-    pub const fn is_delegated(self) -> bool {
+    pub(crate) const fn is_delegated(self) -> bool {
         self.0 == 0
     }
 
@@ -257,6 +257,7 @@ pub trait EidosEncoding: 'static {
 
 /// Type marker for the standard exact-length Felt-sequence construction.
 #[derive(Debug)]
+#[allow(clippy::empty_enums, reason = "type-level marker with no runtime values")]
 pub enum FeltSequence {}
 
 impl EidosEncoding for FeltSequence {
@@ -265,6 +266,7 @@ impl EidosEncoding for FeltSequence {
 
 /// Type marker for the standard exact-length byte-string construction.
 #[derive(Debug)]
+#[allow(clippy::empty_enums, reason = "type-level marker with no runtime values")]
 pub enum ByteString {}
 
 impl EidosEncoding for ByteString {
@@ -273,6 +275,7 @@ impl EidosEncoding for ByteString {
 
 /// Type marker for the Eidos Fiat-Shamir transcript seed construction.
 #[derive(Debug)]
+#[allow(clippy::empty_enums, reason = "type-level marker with no runtime values")]
 pub enum Transcript {}
 
 impl EidosEncoding for Transcript {
@@ -281,6 +284,7 @@ impl EidosEncoding for Transcript {
 
 /// Type marker for a domain-specific Eidos schedule.
 #[derive(Debug)]
+#[allow(clippy::empty_enums, reason = "type-level marker with no runtime values")]
 pub enum Custom {}
 
 impl EidosEncoding for Custom {

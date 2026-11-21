@@ -60,7 +60,7 @@ struct EvaluatingType {
 pub struct ResolverCache {
     pub types: BTreeMap<GlobalItemIndex, types::Type>,
     pub constants: BTreeMap<GlobalItemIndex, ast::ConstantValue>,
-    pub evaluating_constants: BTreeMap<GlobalItemIndex, SourceSpan>,
+    pub(crate) evaluating_constants: BTreeMap<GlobalItemIndex, SourceSpan>,
     /// Aggregate declarations collected while resolving one outermost type expression.
     ///
     /// These are handed to the recursive type builder together, so that a group spanning several

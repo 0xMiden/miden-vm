@@ -48,12 +48,17 @@ impl SessionTraces {
 
     /// Checks each AIR and the cross-chiplet assertion with the lightweight test configuration.
     #[cfg(test)]
-    pub fn check(&self) {
+    pub(crate) fn check(&self) {
         check_constraints(&self.prover_statement(), test_challenger());
     }
 
     /// Proves the whole chiplet stack with the requested hash function.
-    #[tracing::instrument("prove_stark", skip_all)]
+    #[tracing::instrument(
+        target = "miden::vm::prove",
+        level = "trace",
+        name = "prove_stark",
+        skip_all
+    )]
     pub(crate) fn prove_stark(self, hash_fn: HashFunction) -> Result<StarkProof, ProveError> {
         let params = precompile_pcs_params();
         match hash_fn {

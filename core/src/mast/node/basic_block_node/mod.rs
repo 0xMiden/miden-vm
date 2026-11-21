@@ -187,7 +187,7 @@ impl BasicBlockNode {
     /// 6. OpBatch padding semantics (no padding on empty groups; padded groups end with NOOP)
     ///
     /// Returns an error string describing which invariant was violated if validation fails.
-    pub fn validate_batch_invariants(&self) -> Result<(), String> {
+    pub(crate) fn validate_batch_invariants(&self) -> Result<(), String> {
         // Check invariant 1: Power-of-two groups in each batch
         self.validate_power_of_two_groups()?;
 

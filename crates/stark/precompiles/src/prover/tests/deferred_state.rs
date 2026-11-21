@@ -678,9 +678,8 @@ fn chain_head_distinguishes_a_crossed_terminal_digest_request() {
 
     let compression = mains[1];
     let old_tail_idx = new_head_idx - 1;
-    let old_head = compression.values
-        [old_tail_idx * EIDOS_COMPRESSION_CYCLE_LEN * EIDOS_NUM_MAIN_COLS + COL_CHAIN_HEAD_ID];
     let old_footer = (old_tail_idx + 1) * EIDOS_COMPRESSION_CYCLE_LEN - 1;
+    let old_head = compression.values[old_footer * EIDOS_NUM_MAIN_COLS + COL_CHAIN_HEAD_ID];
     let old_digest = core::array::from_fn(|idx| {
         compression.values[old_footer * EIDOS_NUM_MAIN_COLS + footer_digest_col(idx)]
     });

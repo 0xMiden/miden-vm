@@ -1,4 +1,4 @@
-//! Test-only typed views for the 32-row x 108-column Eidos compression layout.
+//! Test-only typed views for the 32-row x 104-column Eidos compression layout.
 
 use super::layout::*;
 
@@ -65,11 +65,6 @@ impl<'a, T> FusedGRow<'a, T> {
         }
     }
 
-    pub fn msg_word(&self, g: usize) -> &'a T {
-        debug_assert!(g < NUM_G);
-        self.col(g_msg_word_col(g))
-    }
-
     pub fn compression_cycle_id(&self) -> &'a T {
         self.col(G_COMPRESSION_CYCLE_ID_COL)
     }
@@ -109,11 +104,6 @@ impl<'a, T> FooterOverlayRow<'a, T> {
 
     pub fn top_bit_slot(&self) -> LookupSlot<'a, T> {
         LookupSlot::new(self.cols, F_TOP_BIT_SLOT_BASE_COL)
-    }
-
-    pub fn msg_word(&self, word: usize) -> &'a T {
-        debug_assert!(word < F_MSG_WORD_SLOTS);
-        self.col(footer_msg_word_col(word))
     }
 
     pub fn range_slot(&self, limb: usize) -> LookupSlot<'a, T> {

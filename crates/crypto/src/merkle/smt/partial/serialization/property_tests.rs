@@ -20,7 +20,7 @@ fn arbitrary_valid_felt() -> impl Strategy<Value = Felt> {
 }
 
 /// Generates an arbitrary [`Word`] that is guaranteed to consist of only valid `Felt`s.
-pub fn arbitrary_valid_word() -> impl Strategy<Value = Word> {
+pub(crate) fn arbitrary_valid_word() -> impl Strategy<Value = Word> {
     prop::array::uniform4(arbitrary_valid_felt()).prop_map(Word::new)
 }
 
@@ -99,7 +99,7 @@ fn arbitrary_leaf() -> impl Strategy<Value = SmtLeaf> {
 }
 
 /// Generates an arbitrary number of leaves.
-pub fn arbitrary_leaves() -> impl Strategy<Value = BTreeMap<u64, SmtLeaf>> {
+pub(crate) fn arbitrary_leaves() -> impl Strategy<Value = BTreeMap<u64, SmtLeaf>> {
     prop::collection::vec(arbitrary_leaf(), 0..100).prop_map(|leaves| {
         leaves
             .into_iter()
@@ -112,7 +112,7 @@ pub fn arbitrary_leaves() -> impl Strategy<Value = BTreeMap<u64, SmtLeaf>> {
 }
 
 /// Generates arbitrary value-only leaves.
-pub fn arbitrary_value_only_leaves() -> impl Strategy<Value = BTreeMap<u64, Word>> {
+pub(crate) fn arbitrary_value_only_leaves() -> impl Strategy<Value = BTreeMap<u64, Word>> {
     prop::collection::vec((any::<u64>(), arbitrary_valid_word()), 0..100)
         .prop_map(|entries| entries.into_iter().collect())
 }

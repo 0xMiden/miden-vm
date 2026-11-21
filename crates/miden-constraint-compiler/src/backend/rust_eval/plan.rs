@@ -61,7 +61,11 @@ pub(super) struct Plan<'g> {
 }
 
 impl<'g> Plan<'g> {
-    pub fn new(graph: &'g Graph, constraints: &CapturedConstraints) -> Self {
+    pub fn new(
+        graph: &'g Graph,
+        constraints: &CapturedConstraints,
+        materialized: &[NodeId],
+    ) -> Self {
         let mut uses = vec![0; graph.len()];
         for (_, node) in graph.iter() {
             match node {
@@ -77,6 +81,11 @@ impl<'g> Plan<'g> {
         }
         for root in constraints.base_roots.iter().chain(&constraints.ext_roots) {
             uses[root.index()] += 1;
+        }
+        // Cached terms are inputs to row evaluation, even when used by only one graph node.
+        // Parent specializations must not expand their products or sums back into the row.
+        for id in materialized {
+            uses[id.index()] = uses[id.index()].max(2);
         }
         Self { graph, uses }
     }

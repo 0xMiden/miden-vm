@@ -25,9 +25,7 @@ fn fused_g_view_exposes_all_column_bands() {
     let missing = row.bd_rot_inputs(MISSING_ROTATION_G, MISSING_ROTATION_BYTE);
     assert_eq!(*missing.field0, 93);
     assert_eq!(*missing.field1, 94);
-    assert_eq!(*row.msg_word(0), 95);
-    assert_eq!(*row.msg_word(3), 98);
-    assert_eq!(*row.compression_cycle_id(), 99);
+    assert_eq!(*row.compression_cycle_id(), 95);
 
     for g in 0..NUM_G {
         assert_eq!(*row.k3(g), G_K3_BASE_COL + g);
@@ -44,8 +42,6 @@ fn footer_overlay_view_exposes_footer_and_message_surface() {
     assert_slot(row.xor_slot(0), 0);
     assert_slot(row.xor_slot(15), 45);
     assert_slot(row.top_bit_slot(), F_TOP_BIT_SLOT_BASE_COL);
-    assert_eq!(*row.msg_word(0), G_MSG_WORD_BASE_COL);
-    assert_eq!(*row.msg_word(3), G_MSG_WORD_BASE_COL + 3);
     assert_slot(row.range_slot(0), footer_range_slot_col(0, 0));
     assert_slot(row.range_slot(7), footer_range_slot_col(7, 0));
 

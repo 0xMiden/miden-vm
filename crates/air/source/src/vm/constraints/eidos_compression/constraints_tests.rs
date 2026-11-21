@@ -49,10 +49,10 @@ fn handwritten_constraint_degree_remains_three() {
 }
 
 #[test]
-fn fused_rows_share_fifteen_word_transition_assertions() {
+fn fused_rows_share_eleven_word_transition_assertions() {
     let row = [Felt::ZERO; NUM_COLS];
     for row_idx in 0..BLOCK_PERIOD {
-        assert_eq!(eval_fused_row(&row, &row, row_idx).len(), 33, "row {row_idx}");
+        assert_eq!(eval_fused_row(&row, &row, row_idx).len(), 29, "row {row_idx}");
     }
 }
 
@@ -69,8 +69,7 @@ fn transition_words(
             .map(|byte| row[column(byte)] * Felt::from_u64(1 << (8 * byte)))
             .sum::<Felt>()
     };
-    for (g, &[a, b, c, d]) in step.lane_map.iter().enumerate() {
-        let a_out = pack(&|byte| g_ac_byte_slot_col(g, byte, 1));
+    for (g, &[_a, b, c, d]) in step.lane_map.iter().enumerate() {
         let b_in = pack(&|byte| g_bd_rot_slot_col(g, byte, 0));
         let c_out = pack(&|byte| g_bd_rot_slot_col(g, byte, 1));
         let d_in = pack(&|byte| g_ac_byte_slot_col(g, byte, 0));
@@ -82,12 +81,9 @@ fn transition_words(
                 xor * Felt::from_u64(1 << shift)
             })
             .sum::<Felt>();
-        inputs[a] =
-            a_out + Felt::from_u64(1 << 32) * row[g_k3_col(g)] - b_in - row[g_msg_word_col(g)];
         inputs[b] = b_in;
         inputs[c] = c_out + Felt::from_u64(1 << 32) * row[G_K2_BASE_COL + g] - d_out;
         inputs[d] = d_in;
-        outputs[a] = Some(a_out);
         if g != MISSING_ROTATION_G {
             outputs[b] = Some((0..4).map(|byte| row[g_bd_rot_result_col(g, byte).unwrap()]).sum());
         }
@@ -121,7 +117,7 @@ fn shared_transitions_equal_the_independent_word_equations_on_every_row() {
                         .filter_map(|&word| outputs[word].map(|output| output - inputs[word]))
                         .collect::<Vec<_>>()
                 },
-                _ => alloc::vec![Felt::ZERO; 15],
+                _ => alloc::vec![Felt::ZERO; 11],
             };
             assert_eq!(&actual[18..], expected, "row {row_idx}, coordinate {coordinate}");
         }
@@ -129,7 +125,7 @@ fn shared_transitions_equal_the_independent_word_equations_on_every_row() {
 }
 
 #[test]
-fn footer_input_aux_is_pinned_outside_full_cv_rows() {
+fn footer_input_aux_is_pinned_outside_footer_three() {
     let row = [Felt::ZERO; NUM_COLS];
 
     for row_idx in 0..BLOCK_PERIOD {
@@ -141,7 +137,7 @@ fn footer_input_aux_is_pinned_outside_full_cv_rows() {
         enforce_inactive_footer_input_aux(&mut builder, &selectors);
 
         assert_eq!(builder.extension_evaluations.len(), 1);
-        let expected = if row_idx == 0 || row_idx == BLOCK_PERIOD - 1 {
+        let expected = if row_idx == BLOCK_PERIOD - 1 {
             QuadFelt::ZERO
         } else {
             QuadFelt::ONE
@@ -192,7 +188,7 @@ fn inactive_footer_aux_pins_close_zero_denominator_rows() {
     lookup_builder.finish();
 
     // Column zero emits its anchor and recurrence; every later column emits one constraint.
-    assert_eq!(builder.extension_evaluations.len(), AUX_COLS + 1);
+    assert_eq!(builder.extension_evaluations.len(), NUM_LOGUP_COLS + 1);
     assert_eq!(builder.extension_evaluations[FOOTER_INPUT_COLUMN + 1], QuadFelt::ZERO);
     assert_eq!(builder.extension_evaluations[FOOTER_OUTPUT_COLUMN + 1], QuadFelt::ZERO);
 
@@ -200,7 +196,10 @@ fn inactive_footer_aux_pins_close_zero_denominator_rows() {
     enforce_inactive_footer_input_aux(&mut builder, &selectors);
     enforce_inactive_footer_output_aux(&mut builder, &row, &selectors);
 
-    assert_eq!(&builder.extension_evaluations[AUX_COLS + 1..], &[QuadFelt::ONE, QuadFelt::ONE]);
+    assert_eq!(
+        &builder.extension_evaluations[NUM_LOGUP_COLS + 1..],
+        &[QuadFelt::ONE, QuadFelt::ONE]
+    );
 }
 
 impl ConstraintEvalBuilder {
@@ -463,7 +462,6 @@ fn air_constraint_mutation_matrix_rejects_each_witness_family() {
         ("footer xor duplicate", FOOTER_START, footer_xor_slot_col(8, 1), FOOTER_START),
         ("footer top byte", FOOTER_START, F_TOP_BIT_SLOT_BASE_COL, FOOTER_START),
         ("footer CV correction", FOOTER_START, F_CV_STORAGE_COLS[0], FOOTER_START),
-        ("footer message word", FOOTER_START, footer_msg_word_col(0), FOOTER_START),
         ("footer range limb", FOOTER_START, footer_range_slot_col(0, 0), FOOTER_START),
         ("footer range padding", FOOTER_START, footer_range_slot_col(0, 1), FOOTER_START),
         (
@@ -679,7 +677,7 @@ fn air_fused_constraints_pin_both_initial_iv_halves() {
 #[test]
 fn air_fused_constraints_reject_bad_transition() {
     let mut trace = generate_felt_trace_block(test_block(), test_h(), TraceMode::Compression);
-    trace.rows[1][g_ac_byte_slot_col(0, 0, 1)] += Felt::ONE;
+    trace.rows[1][g_ac_byte_slot_col(0, 0, 0)] += Felt::ONE;
 
     assert_any_nonzero(&eval_fused_row(&trace.rows[0], &trace.rows[1], 0));
 }
@@ -700,17 +698,14 @@ fn air_missing_b_transition_is_replaced_by_the_total_b_relation() {
             .position(|lane| lane[1] == affected_word)
             .expect("the affected word remains in a B lane");
 
-        // Compensating the B input in reconstructed A isolates the intentionally omitted direct
-        // B transition. The total-B lookup remains responsible for rejecting this mutation.
+        // The direct B transition is omitted here. Its total-B lookup detects this change.
         next[g_bd_rot_slot_col(affected_next_g, 0, 0)] += Felt::ONE;
-        next[g_msg_word_col(affected_next_g)] -= Felt::ONE;
         assert_all_zero(&eval_fused_row(local, &next, row));
 
         // Preserving the total with another B lane cannot float both values: that lane's direct
         // transition remains and rejects the compensated mutation.
         let anchored_next_g = (affected_next_g + 1) % NUM_G;
         next[g_bd_rot_slot_col(anchored_next_g, 0, 0)] -= Felt::ONE;
-        next[g_msg_word_col(anchored_next_g)] += Felt::ONE;
         assert_any_nonzero(&eval_fused_row(local, &next, row));
     }
 }
@@ -734,26 +729,12 @@ fn air_last_fused_total_b_bridge_accepts_only_equal_two_sided_changes() {
 }
 
 #[test]
-fn air_reconstructed_inputs_are_anchored_on_every_fused_row() {
+fn air_reconstructed_c_is_anchored_on_every_fused_row() {
     let trace = generate_felt_trace_block(test_block(), test_h(), TraceMode::Compression);
 
-    // Row zero's reconstructed `a` is anchored by the atomic cycle-tagged CV relation. Every
-    // later row's reconstructed `a` and `c` must be anchored by the immediately preceding
-    // transition. Change only a locally valid carry encoding so no booleanity constraint can mask
-    // a missing transition anchor.
+    // A locally valid carry change must fail the preceding C transition.
     for row_idx in 1..FUSED_G_ROWS {
         for g in 0..NUM_G {
-            let mut forged = trace.rows[row_idx];
-            let k3 = forged[g_k3_col(g)].as_canonical_u64();
-            let alternate_k3 = (k3 + 1) % 3;
-            forged[g_k3_col(g)] = Felt::new_unchecked(alternate_k3);
-
-            let evaluations = eval_fused_row(&trace.rows[row_idx - 1], &forged, row_idx - 1);
-            assert!(
-                evaluations.iter().any(|&value| value != Felt::ZERO),
-                "reconstructed a[{g}] floated on fused row {row_idx}",
-            );
-
             let mut forged = trace.rows[row_idx];
             forged[G_K2_BASE_COL + g] = Felt::ONE - forged[G_K2_BASE_COL + g];
 
@@ -890,12 +871,10 @@ fn air_footer_constraints_reject_bad_current_cv_binding() {
 }
 
 #[test]
-fn air_footer_constraints_pin_current_message_cv_and_tail_values() {
+fn air_footer_constraints_pin_current_cv_and_tail_values() {
     for footer in 0..FOOTER_ROWS {
         let origin = FOOTER_START + footer;
         let columns = [
-            footer_msg_word_col(0),
-            footer_msg_word_col(1),
             F_CV_STORAGE_COLS[2 * footer],
             F_CV_STORAGE_COLS[2 * footer + 1],
             footer_interface_tail_col(footer),
@@ -1208,4 +1187,31 @@ fn air_footer_constraints_reject_bad_multiplicity_transition() {
         &trace.rows[FOOTER_START + 1],
         FOOTER_START,
     ));
+}
+
+/// Evaluate the production fingerprint constraints, including the physical last-to-first window.
+pub(super) fn fingerprint_evaluations(
+    rows: &[[Felt; NUM_COLS]],
+    aux: &RowMajorMatrix<QuadFelt>,
+    rho: QuadFelt,
+) -> Vec<[QuadFelt; 2]> {
+    (0..rows.len())
+        .map(|row| {
+            let next = (row + 1) % rows.len();
+            let mut builder = ConstraintEvalBuilder::new(
+                &rows[row],
+                &rows[next],
+                periodic_row(row),
+                row,
+                rows.len(),
+            );
+            builder.aux.values[..AUX_COLS]
+                .copy_from_slice(&aux.values[row * AUX_COLS..(row + 1) * AUX_COLS]);
+            builder.aux.values[AUX_COLS..]
+                .copy_from_slice(&aux.values[next * AUX_COLS..(next + 1) * AUX_COLS]);
+            builder.randomness[1] = rho;
+            super::fingerprint::enforce_register_constraints(&mut builder, AUX_REGISTER_COL);
+            builder.extension_evaluations.try_into().unwrap()
+        })
+        .collect()
 }

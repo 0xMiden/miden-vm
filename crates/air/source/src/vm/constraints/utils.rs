@@ -50,3 +50,20 @@ where
 
     b0 + shift8 * b1 + shift16 * b2 + shift24 * b3
 }
+
+/// Recomposes a u32 XOR from little-endian byte witnesses `[a[4], b[4], a_and_b[4]]`.
+#[inline]
+pub(crate) fn pack_u32_xor_bytes_le<T, E>(bytes: [T; 12]) -> E
+where
+    T: Copy + Into<E>,
+    E: PrimeCharacteristicRing,
+    Felt: Into<E>,
+{
+    let xor_bytes: [E; 4] = core::array::from_fn(|i| {
+        let lhs: E = bytes[i].into();
+        let rhs: E = bytes[i + 4].into();
+        let and: E = bytes[i + 8].into();
+        lhs + rhs - and.double()
+    });
+    pack_u32_bytes_le::<_, E>(xor_bytes)
+}

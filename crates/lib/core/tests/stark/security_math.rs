@@ -92,7 +92,7 @@ fn lookup_slack_bound_is_conservative_at_every_transition() {
     for log_height in 6..=29 {
         for num_kernel_procedures in 0..=KernelDescriptor::MAX_NUM_PROCEDURES as u64 {
             let boundary_terms =
-                u64::from(metadata::CORE_BOUNDARY_LOOKUP_TERMS) + num_kernel_procedures;
+                u64::from(metadata::FIXED_LOOKUP_ERROR_TERMS) + num_kernel_procedures;
             let correction = (boundary_terms * metadata::LOG2_E)
                 .div_ceil(u64::from(mvm_shape.fractions_per_row))
                 .div_ceil(1 << log_height);
@@ -110,7 +110,7 @@ fn lookup_slack_bound_is_conservative_at_every_transition() {
         (u64::from(pvm_shape.max_message_width) + 2) * u64::from(pvm_shape.fractions_per_row);
     let (_, _, pvm_bound) = bound(pvm_coefficient);
     for log_height in 16..=29 {
-        let correction = (u64::from(pvm::FIXED_BOUNDARY_LOOKUP_TERMS) * metadata::LOG2_E)
+        let correction = (u64::from(pvm::FIXED_LOOKUP_ERROR_TERMS) * metadata::LOG2_E)
             .div_ceil(u64::from(pvm_shape.fractions_per_row))
             .div_ceil(1 << log_height);
         assert_eq!(correction, 1, "PVM correction moved at height {log_height}");

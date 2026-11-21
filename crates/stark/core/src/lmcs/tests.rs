@@ -24,7 +24,10 @@ use crate::{testing::configs::goldilocks_poseidon2 as gl, util::align::aligned_l
 type OpenedRows = BTreeMap<usize, RowList<Felt>>;
 
 /// Build leaf hashes for a single matrix (used for equivalence testing).
-pub fn build_leaves_single(matrix: &RowMajorMatrix<Felt>, sponge: &Sponge) -> Vec<[Felt; DIGEST]> {
+pub(crate) fn build_leaves_single(
+    matrix: &RowMajorMatrix<Felt>,
+    sponge: &Sponge,
+) -> Vec<[Felt; DIGEST]> {
     matrix
         .rows()
         .map(|row| {
@@ -56,7 +59,7 @@ where
     result
 }
 
-pub fn roundtrip_open_batch<C, M>(
+pub(crate) fn roundtrip_open_batch<C, M>(
     lmcs: &C,
     tree: &C::Tree<M>,
     indices: &[usize],

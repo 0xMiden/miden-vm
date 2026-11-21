@@ -1,8 +1,8 @@
 //! Integration tests for the Keccak-round miniVM chiplet.
 //!
-//! Drives [`generate_trace`] + [`extract_output`] against a reference
-//! Keccak-f[1600] implementation, and runs `check_constraints` on the
-//! resulting AIR/witness pair.
+//! Drives the production [`generate_trace`] against a reference Keccak-f[1600]
+//! implementation, reading the lane outputs back from the trace, and runs
+//! `check_constraints` on the resulting AIR/witness pair.
 
 use std::{vec, vec::Vec};
 
@@ -25,12 +25,13 @@ use crate::prover::{
         reference::{KECCAK_RC, keccak_f1600, keccak_round},
         round::{
             A_BYTES_RANGE, B_BYTES_RANGE, COL_ACT, KeccakRoundAir, NUM_AUX_COLS, NUM_LANES,
-            NUM_MAIN_COLS, NUM_ROUNDS, PERM_CYCLE, R_BYTES_RANGE, ROT_MASK_XOR_RANGE,
-            extract_output, extract_outputs, generate_trace_from_states, lane_base,
-            program::SLOT_D_ROL_BEGIN,
+            NUM_MAIN_COLS, NUM_ROUNDS, PERM_CYCLE, R_BYTES_RANGE, ROT_MASK_XOR_RANGE, ROUND_PERIOD,
+            RoundRequires, generate_trace, lane_base,
+            program::{self, SLOT_D_ROL_BEGIN},
         },
     },
     logup::{Challenges, NUM_LOGUP_VALUES, NUM_RANDOMNESS},
+    primitives::byte_pair_lut::BytePairLutRequires,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::{ChipletAir, Session},
     tests::{bus_balance::session_stack_residual, lookup_column_folds},
@@ -59,91 +60,54 @@ fn fractions_at(
 // TESTS
 // ================================================================================================
 
-/// Run a single Keccak round through the chiplet simulator and read
-/// back the state after that one round.
-fn chiplet_one_round(state: [u64; 25], rc: u64) -> [u64; 25] {
-    // Pad RCs with zeros for the remaining 23 rounds; the chiplet still
-    // computes them but we only read out round 0's outputs.
-    let mut rcs = [0u64; NUM_ROUNDS];
-    rcs[0] = rc;
-
-    extract_output_one_round(&state, &rcs)
-}
-
-/// Extract state after exactly one round by running the chiplet
-/// simulation and reading lane outputs at slots 103..128 of round 0.
-/// Sponge inputs use natural row-major addressing: `state[i]` at
-/// addr `i`.
-fn extract_output_one_round(state: &[u64; 25], rcs: &[u64; NUM_ROUNDS]) -> [u64; 25] {
-    use crate::prover::hash::keccak::round::{
-        IP_BOUNDARY, ROUND_PERIOD,
-        program::{SLOT_CHI_XOR_BEGIN, SLOT_IOTA},
-        slots,
-    };
-
-    let program = slots();
-    // Size memory to cover the highest seeded address: the last RC
-    // (RC[NUM_ROUNDS − 1]) sits at IP `IP_BOUNDARY + (NUM_ROUNDS − 1)·ROUND_PERIOD`.
-    let mut memory = vec![0u64; IP_BOUNDARY as usize + NUM_ROUNDS * ROUND_PERIOD];
-    for (idx, &lane) in state.iter().enumerate() {
-        memory[idx] = lane;
-    }
-    for r in 0..NUM_ROUNDS {
-        memory[(IP_BOUNDARY + (r * ROUND_PERIOD) as u64) as usize] = rcs[r];
-    }
-
-    // Step one full round.
-    for row in 0..ROUND_PERIOD {
-        let slot = row;
-        let ip = IP_BOUNDARY + row as u64;
-        let spec = program[slot];
-        let reads_a = !matches!(spec.op, crate::prover::hash::keccak::round::Op::Nop);
-        let reads_b = matches!(
-            spec.op,
-            crate::prover::hash::keccak::round::Op::Xor
-                | crate::prover::hash::keccak::round::Op::Andnot
-                | crate::prover::hash::keccak::round::Op::XorRol(_)
-        );
-        let a = if reads_a {
-            memory[ip.wrapping_sub(spec.back_a) as usize]
-        } else {
-            0
-        };
-        let b = if reads_b {
-            memory[ip.wrapping_sub(spec.back_b) as usize]
-        } else {
-            0
-        };
-        let (_, c) = simulate_for_debug(spec.op, a, b);
-        if spec.dst_mult > 0 {
-            memory[ip as usize] = c;
+/// The round ledger for `states`: the production generator seeds each permutation from its
+/// round-0 state and derives the later rounds itself, so the remaining entries are unused.
+fn round_requires(states: &[[u64; 25]]) -> RoundRequires {
+    let mut requires = RoundRequires::new();
+    for state in states {
+        for round in 0..NUM_ROUNDS {
+            requires.require_round(if round == 0 { *state } else { [0u64; 25] });
         }
     }
-
-    let mut out = [0u64; 25];
-    for (idx, value) in out.iter_mut().enumerate() {
-        let slot = if idx == 0 {
-            SLOT_IOTA
-        } else {
-            SLOT_CHI_XOR_BEGIN + (idx - 1)
-        };
-        *value = memory[(IP_BOUNDARY + slot as u64) as usize];
-    }
-    out
+    requires
 }
 
-fn simulate_for_debug(op: crate::prover::hash::keccak::round::Op, a: u64, b: u64) -> (u64, u64) {
-    use crate::prover::hash::keccak::round::Op;
-    let r = match op {
-        Op::Nop | Op::Rol(_) => a,
-        Op::Xor | Op::XorRol(_) => a ^ b,
-        Op::Andnot => (!a) & b,
+/// Builds the production round trace for `states`, with the cycle's byte lookups in a scratch
+/// ledger: these fixtures check row-local constraints and read lane values, not bus balance.
+fn trace_for(states: &[[u64; 25]]) -> RowMajorMatrix<Felt> {
+    generate_trace(round_requires(states), &mut BytePairLutRequires::new())
+}
+
+/// Reads the 25 output lanes of `perm` after `round` from `main`.
+///
+/// Every lane's output is the `x` operand of its producer row: the iota row for lane 0, and the
+/// chi-XOR rows for the rest. The rows of a permutation start at its offset in the lane that
+/// holds it, and each round takes `ROUND_PERIOD` rows.
+fn trace_lanes(
+    main: &RowMajorMatrix<Felt>,
+    num_perms: usize,
+    perm: usize,
+    round: usize,
+) -> [u64; 25] {
+    let perms_per_lane = num_perms.max(1).div_ceil(NUM_LANES);
+    let lane = perm / perms_per_lane;
+    let perm_rows = (perm % perms_per_lane) * PERM_CYCLE;
+    let width = main.width();
+    let read = |slot: usize| -> u64 {
+        let row = perm_rows + round * ROUND_PERIOD + slot;
+        let start = row * width + lane_base(lane) + R_BYTES_RANGE.start;
+        main.values[start..start + 8]
+            .iter()
+            .enumerate()
+            .fold(0u64, |value, (i, byte)| value | (byte.as_canonical_u64() << (8 * i)))
     };
-    let c = match op {
-        Op::Nop | Op::Xor | Op::Andnot => r,
-        Op::Rol(s) | Op::XorRol(s) => r.rotate_left(s),
-    };
-    (r, c)
+
+    let mut lanes = [0u64; 25];
+    lanes[0] = read(program::SLOT_IOTA);
+    for (idx, lane_value) in lanes.iter_mut().enumerate().skip(1) {
+        *lane_value = read(program::SLOT_CHI_XOR_BEGIN + idx - 1);
+    }
+    lanes
 }
 
 #[test]
@@ -151,7 +115,8 @@ fn chiplet_one_round_matches_reference_zero_input() {
     let state = [0u64; 25];
     let mut expected = state;
     keccak_round(&mut expected, KECCAK_RC[0]);
-    let got = chiplet_one_round(state, KECCAK_RC[0]);
+    let main = trace_for(&[state]);
+    let got = trace_lanes(&main, 1, 0, 0);
     for (i, (g, e)) in got.iter().zip(expected.iter()).enumerate() {
         assert_eq!(g, e, "lane {i} (x={}, y={})", i % 5, i / 5);
     }
@@ -162,16 +127,15 @@ fn chiplet_one_round_matches_reference_zero_input() {
 /// reference round by round.
 #[test]
 fn chiplet_two_rounds_match_reference_zero_input() {
-    let mut state = [0u64; 25];
+    let state = [0u64; 25];
+    let main = trace_for(&[state]);
     let mut expected = state;
     for (r, &rc) in KECCAK_RC.iter().enumerate().take(2) {
-        let prev = state;
         keccak_round(&mut expected, rc);
-        let got = chiplet_one_round(prev, rc);
+        let got = trace_lanes(&main, 1, 0, r);
         for (i, (g, e)) in got.iter().zip(expected.iter()).enumerate() {
             assert_eq!(g, e, "round {r}, lane {i} (x={}, y={})", i % 5, i / 5);
         }
-        state = got;
     }
 }
 
@@ -184,7 +148,8 @@ fn chiplet_full_permutation_matches_reference_zero_input_internal() {
     for &rc in KECCAK_RC.iter().take(NUM_ROUNDS) {
         keccak_round(&mut expected, rc);
     }
-    let got = extract_output(&state, &KECCAK_RC);
+    let main = trace_for(&[state]);
+    let got = trace_lanes(&main, 1, 0, NUM_ROUNDS - 1);
     assert_eq!(got, expected);
 }
 
@@ -192,7 +157,8 @@ fn chiplet_full_permutation_matches_reference_zero_input_internal() {
 fn extract_output_matches_reference_keccak_zero_input() {
     let state = [0u64; 25];
     let expected = keccak_f1600(state);
-    let got = extract_output(&state, &KECCAK_RC);
+    let main = trace_for(&[state]);
+    let got = trace_lanes(&main, 1, 0, NUM_ROUNDS - 1);
     assert_eq!(got, expected, "all-zero input");
 }
 
@@ -204,7 +170,8 @@ fn extract_output_matches_reference_keccak_canonical_test_vectors() {
         *lane = (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
     }
     let expected = keccak_f1600(state);
-    let got = extract_output(&state, &KECCAK_RC);
+    let main = trace_for(&[state]);
+    let got = trace_lanes(&main, 1, 0, NUM_ROUNDS - 1);
     assert_eq!(got, expected, "patterned input");
 }
 
@@ -212,7 +179,7 @@ fn extract_output_matches_reference_keccak_canonical_test_vectors() {
 fn keccak_round_constraints_hold_on_canonical_input() {
     let state = [0u64; 25];
 
-    let main = generate_trace_from_states(&[state], &KECCAK_RC);
+    let main = trace_for(&[state]);
     assert_eq!(main.height(), PERM_CYCLE.next_power_of_two());
 
     crate::prover::tests::check_local(KeccakRoundAir, &main);
@@ -247,7 +214,7 @@ fn keccak_round_shape_and_degree_match_design() {
 #[test]
 fn pure_rol_raw_b_affects_every_byte_and_lane() {
     let states = [[0x0123_4567_89ab_cdef; 25], [0xfedc_ba98_7654_3210; 25]];
-    let main = generate_trace_from_states(&states, &KECCAK_RC);
+    let main = trace_for(&states);
     let row = SLOT_D_ROL_BEGIN;
     let air = KeccakRoundAir;
     let one_row = RowMajorMatrix::new(
@@ -338,7 +305,7 @@ fn pure_rol_nonzero_b_unbalances_the_full_chiplet_stack() {
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn pure_rol_passthrough_rejects_bpl_valid_nonzero_b() {
-    let mut main = generate_trace_from_states(&[[0u64; 25]], &KECCAK_RC);
+    let mut main = trace_for(&[[0u64; 25]]);
     let row_start = SLOT_D_ROL_BEGIN * NUM_MAIN_COLS;
 
     for col in [A_BYTES_RANGE.start, B_BYTES_RANGE.start, R_BYTES_RANGE.start] {
@@ -426,13 +393,16 @@ fn packed_passthrough_aliases_preserve_memory_but_fail_canonical_byte_checks() {
 }
 
 proptest! {
-    /// The chiplet's extracted output must agree with the reference permutation for arbitrary
-    /// lane values. Replaces a fixed-seed 3-trial loop; uniform lanes shrink toward zero on
-    /// failure. (Oracle-only, no trace generation, so the default case count is affordable.)
+    #![proptest_config(proptest::test_runner::Config::with_cases(4))]
+
+    /// The chiplet's output, read back from its production trace, must agree with the reference
+    /// permutation for arbitrary lane values. Capped at 4 cases because each case generates and
+    /// reads back a full 3200-row trace; uniform lanes shrink toward zero on failure.
     #[test]
-    fn extract_output_matches_reference_keccak_random_input(state in any::<[u64; 25]>()) {
+    fn trace_output_matches_reference_keccak_random_input(state in any::<[u64; 25]>()) {
         let expected = keccak_f1600(state);
-        let got = extract_output(&state, &KECCAK_RC);
+        let main = trace_for(&[state]);
+        let got = trace_lanes(&main, 1, 0, NUM_ROUNDS - 1);
         prop_assert_eq!(got, expected);
     }
 }
@@ -445,7 +415,7 @@ proptest! {
     /// single draw it replaces, with shrinking.
     #[test]
     fn keccak_round_constraints_hold_on_random_input(state in any::<[u64; 25]>()) {
-        let main = generate_trace_from_states(&[state], &KECCAK_RC);
+        let main = trace_for(&[state]);
 
         crate::prover::tests::check_local(KeccakRoundAir, &main);
     }
@@ -455,7 +425,7 @@ proptest! {
     #![proptest_config(proptest::test_runner::Config::with_cases(8))]
 
     /// Stack 3 independent perms of arbitrary states in one trace and verify both per-perm
-    /// output correctness (via `extract_outputs`) and constraint satisfaction. With
+    /// output correctness (read back from the trace) and constraint satisfaction. With
     /// NUM_LANES=2, the 3 perms split into a busiest lane of `⌈3/2⌉ = 2` perms, so the height
     /// is `2 * 3200 = 6400` padded to `8192`. Capped at 8 cases: each case generates and
     /// checks a 3-perm trace.
@@ -465,10 +435,10 @@ proptest! {
         let states: [[u64; 25]; 3] = states.try_into().expect("exactly 3 states");
 
         let expected: Vec<[u64; 25]> = states.iter().map(|s| keccak_f1600(*s)).collect();
-        let got = extract_outputs(&states, &KECCAK_RC);
+        let main = trace_for(&states);
+        let got: Vec<[u64; 25]> =
+            (0..states.len()).map(|perm| trace_lanes(&main, states.len(), perm, NUM_ROUNDS - 1)).collect();
         prop_assert_eq!(got, expected);
-
-        let main = generate_trace_from_states(&states, &KECCAK_RC);
         prop_assert_eq!(
             main.height(),
             (states.len().div_ceil(NUM_LANES) * PERM_CYCLE).next_power_of_two()
@@ -488,13 +458,12 @@ fn keccak_round_constraints_hold_on_extreme_input() {
 
     // Oracle agreement for the extreme states: constraints alone cannot catch a self-consistent
     // but wrong permutation result for these exact inputs.
-    for state in [all_ones, alternating] {
+    let main = trace_for(&[all_ones, alternating]);
+    for (perm, state) in [all_ones, alternating].into_iter().enumerate() {
         let expected = keccak_f1600(state);
-        let got = extract_output(&state, &KECCAK_RC);
+        let got = trace_lanes(&main, 2, perm, NUM_ROUNDS - 1);
         assert_eq!(got, expected);
     }
-
-    let main = generate_trace_from_states(&[all_ones, alternating], &KECCAK_RC);
 
     crate::prover::tests::check_local(KeccakRoundAir, &main);
 }

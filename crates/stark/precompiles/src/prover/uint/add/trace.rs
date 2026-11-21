@@ -74,11 +74,6 @@ pub struct UintAddRequires {
 }
 
 impl UintAddRequires {
-    #[cfg(test)]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub(crate) fn trace_height(&self) -> Option<usize> {
         self.ops.len().max(1).checked_mul(PERIOD)?.checked_next_power_of_two()
     }
@@ -147,7 +142,7 @@ impl UintAddRequires {
     /// shared modulus the identity is exactly value equality — the EC
     /// group law's `x₁ = x₂` / `y₁ = y₂` case ties.
     #[cfg(test)]
-    pub fn record_eq(&mut self, a: UintPtr, c: UintPtr, bound: UintPtr, mult: ProvideMult) {
+    pub(crate) fn record_eq(&mut self, a: UintPtr, c: UintPtr, bound: UintPtr, mult: ProvideMult) {
         self.push(AddOp { a, b: None, c: Some(c), bound, nz: false }, mult);
     }
 

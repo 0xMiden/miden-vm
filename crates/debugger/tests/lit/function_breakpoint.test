@@ -1,0 +1,14 @@
+# Unqualified function breakpoints match the suffix of a namespaced procedure name.
+#
+# RUN: compile-masm %S/frame_base_values.masm -o %t.masp
+# RUN: miden-debug --commands %s %t.masp 2>&1 | filecheck %s
+
+break in frame_values
+continue
+delete 0
+continue
+
+# CHECK: Breakpoint 0 set: call *::frame_values
+# CHECK: in [inferred] $exec::frame_values
+# CHECK: Deleted breakpoint 0
+# CHECK: Program terminated successfully

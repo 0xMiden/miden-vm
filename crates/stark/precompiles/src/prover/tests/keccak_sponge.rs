@@ -10,7 +10,7 @@ use std::{borrow::Cow, vec, vec::Vec};
 
 use miden_core::{
     Felt,
-    field::{PrimeCharacteristicRing, QuadFelt},
+    field::{Algebra, PrimeCharacteristicRing, QuadFelt},
 };
 use miden_crypto::hash::keccak::Keccak256;
 use miden_stark::{
@@ -30,7 +30,7 @@ use crate::prover::{
                 COL_STATE_OUT_LO, KeccakSpongeAir, KeccakSpongeMsg, NUM_AUX_COLS, NUM_MAIN_COLS,
                 NUM_PERIODIC_COLS, OFFSET_BITS_RANGE, SPONGE_PERIOD, STATE_NEW_BYTES_RANGE,
                 STATE_PREV_BYTES_RANGE,
-                trace::{Invocation, SpongeRequires, generate_trace, keccak_oracle},
+                trace::{Invocation, SpongeRequires, generate_trace_padded_to, keccak_oracle},
             },
         },
     },
@@ -56,7 +56,7 @@ fn build_sponge_requires(invs: &[Invocation]) -> (SpongeRequires, ChunkRequires,
 
 fn check_invocation(_seed: u64, inv: Invocation) {
     let (sponge_req, _chunk, _p2) = build_sponge_requires(&[inv]);
-    let main = generate_trace(sponge_req);
+    let main = generate_trace_padded_to(sponge_req, 0);
     crate::prover::tests::check_local(KeccakSpongeAir, &main);
 }
 
@@ -297,7 +297,7 @@ fn constraints_hold_on_overshoot_then_invocation_seam() {
     let b: Vec<u8> = (0..40).map(|_| rng.random()).collect();
     let (sponge_req, _chunk, _p2) =
         build_sponge_requires(&[Invocation { input: a }, Invocation { input: b }]);
-    let main = generate_trace(sponge_req);
+    let main = generate_trace_padded_to(sponge_req, 0);
     crate::prover::tests::check_local(KeccakSpongeAir, &main);
 }
 
@@ -331,7 +331,7 @@ fn constraints_hold_on_empty_transcript() {
     // (`act = 0`), so the cyclic wrap that would otherwise reject it (the
     // `M·136 ≢ 0` argument applies only to active traces) is vacuous.
     let (sponge_req, _chunk, _p2) = build_sponge_requires(&[]);
-    let main = generate_trace(sponge_req);
+    let main = generate_trace_padded_to(sponge_req, 0);
     crate::prover::tests::check_local(KeccakSpongeAir, &main);
 }
 
@@ -365,7 +365,7 @@ fn constraints_hold_on_empty_then_nonempty_seam() {
     let b: Vec<u8> = (0..40).map(|_| rng.random()).collect();
     let (sponge_req, _chunk, _p2) =
         build_sponge_requires(&[Invocation { input: vec![] }, Invocation { input: b }]);
-    let main = generate_trace(sponge_req);
+    let main = generate_trace_padded_to(sponge_req, 0);
     crate::prover::tests::check_local(KeccakSpongeAir, &main);
 }
 
@@ -383,7 +383,7 @@ fn constraints_hold_on_multiple_invocations() {
     let b: Vec<u8> = (0..40).map(|_| rng.random()).collect();
     let (sponge_req, _chunk, _p2) =
         build_sponge_requires(&[Invocation { input: a }, Invocation { input: b }]);
-    let main = generate_trace(sponge_req);
+    let main = generate_trace_padded_to(sponge_req, 0);
     crate::prover::tests::check_local(KeccakSpongeAir, &main);
 }
 
@@ -399,7 +399,7 @@ fn corrupt_and_check(
     corruption: impl FnOnce(&mut miden_core::utils::RowMajorMatrix<Felt>),
 ) {
     let (sponge_req, _chunk, _p2) = build_sponge_requires(&[inv]);
-    let mut main = generate_trace(sponge_req);
+    let mut main = generate_trace_padded_to(sponge_req, 0);
     corruption(&mut main);
     crate::prover::tests::check_local(KeccakSpongeAir, &main);
 }
@@ -485,6 +485,8 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
     }
 
     impl LiftedAir<Felt, QuadFelt> for AuxCorruptAir {
+        type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
         fn num_randomness(&self) -> usize {
             <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::num_randomness(&KeccakSpongeAir)
         }
@@ -516,13 +518,13 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
             (aux, normalized_sum)
         }
 
-        fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-            <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::eval(&KeccakSpongeAir, builder);
+        fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
+            <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::eval(&KeccakSpongeAir, builder, &());
         }
     }
 
     let (sponge_req, _chunk, _p2) = build_sponge_requires(&[Invocation { input: vec![0xab] }]);
-    let main = generate_trace(sponge_req);
+    let main = generate_trace_padded_to(sponge_req, 0);
     crate::prover::tests::check_local(AuxCorruptAir, &main);
 }
 
@@ -561,7 +563,7 @@ fn padding_covers_every_lane_offset_and_matches_independent_keccak() {
             }),
             "input length {len}",
         );
-        let main = generate_trace(requires);
+        let main = generate_trace_padded_to(requires, 0);
         let pad_row = (len / 136) * SPONGE_PERIOD + (len % 136) / 8;
         let offset = len % 8;
         for byte in 0..8 {
@@ -723,7 +725,7 @@ fn dead_padding_state_remains_bus_inert() {
 
 fn single_invocation_trace(input: Vec<u8>) -> miden_core::utils::RowMajorMatrix<Felt> {
     let (sponge_req, _chunk, _p2) = build_sponge_requires(&[Invocation { input }]);
-    let main = generate_trace(sponge_req);
+    let main = generate_trace_padded_to(sponge_req, 0);
     crate::prover::tests::check_local(KeccakSpongeAir, &main);
     main
 }

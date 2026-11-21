@@ -38,7 +38,6 @@ pub enum NarrowLookupKind {
     And8,
     Rot12,
     Rot7,
-    MessageWord,
     RangeCheck,
 }
 
@@ -50,7 +49,6 @@ pub struct NarrowLookup {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum OverlayRelationKind {
-    FullCv,
     CompressionLink,
     AeadInput,
     AeadLowOutputPair,
@@ -115,12 +113,6 @@ pub fn lookup_plan(row: usize, mode: EidosCompressionMode) -> LookupPlan {
     match row_kind(row) {
         RowKind::Ab => {
             add_fused_g_lookups(&mut plan, NarrowLookupKind::Rot12);
-            if row == 0 {
-                plan.overlay_relations.push(OverlayRelation {
-                    kind: OverlayRelationKind::FullCv,
-                    sign: -1,
-                });
-            }
         },
         RowKind::AbDiag => add_fused_g_lookups(&mut plan, NarrowLookupKind::Rot12),
         RowKind::Cd | RowKind::CdDiag => add_fused_g_lookups(&mut plan, NarrowLookupKind::Rot7),
@@ -134,10 +126,6 @@ fn add_fused_g_lookups(plan: &mut LookupPlan, rotation_kind: NarrowLookupKind) {
     plan.narrow.extend(NARROW_SLOTS.map(|spec| match spec.fused_bus {
         NarrowSlotBus::And8 => NarrowLookup { kind: NarrowLookupKind::And8, sign: -1 },
         NarrowSlotBus::Rotation(_) => NarrowLookup { kind: rotation_kind, sign: -1 },
-        NarrowSlotBus::MessageWord => NarrowLookup {
-            kind: NarrowLookupKind::MessageWord,
-            sign: 1,
-        },
         NarrowSlotBus::RangeCheck => unreachable!("range checks are not used on fused rows"),
     }));
 }
@@ -145,54 +133,28 @@ fn add_fused_g_lookups(plan: &mut LookupPlan, rotation_kind: NarrowLookupKind) {
 fn add_footer_lookups(plan: &mut LookupPlan, footer: usize, mode: EidosCompressionMode) {
     plan.narrow.extend(NARROW_SLOTS.into_iter().filter_map(|spec| {
         let bus = spec.footer_bus?;
-        Some(match bus {
-            NarrowSlotBus::And8 => NarrowLookup { kind: NarrowLookupKind::And8, sign: -1 },
-            NarrowSlotBus::RangeCheck => NarrowLookup {
-                kind: NarrowLookupKind::RangeCheck,
-                sign: -1,
-            },
-            NarrowSlotBus::MessageWord => NarrowLookup {
-                kind: NarrowLookupKind::MessageWord,
-                sign: -7,
-            },
-            NarrowSlotBus::Rotation(_) => {
-                unreachable!("rotations are not used on footer rows")
-            },
-        })
+        let kind = match bus {
+            NarrowSlotBus::And8 => NarrowLookupKind::And8,
+            NarrowSlotBus::RangeCheck => NarrowLookupKind::RangeCheck,
+            NarrowSlotBus::Rotation(_) => unreachable!("rotations are not used on footer rows"),
+        };
+        Some(NarrowLookup { kind, sign: -1 })
     }));
-
     if footer == FOOTER_ROWS - 1 {
         plan.overlay_relations.push(OverlayRelation {
-            kind: OverlayRelationKind::FullCv,
-            sign: 1,
+            kind: match mode {
+                EidosCompressionMode::Compression => OverlayRelationKind::CompressionLink,
+                EidosCompressionMode::AeadXof => OverlayRelationKind::AeadInput,
+            },
+            sign: -1,
         });
     }
-
-    match mode {
-        EidosCompressionMode::Compression => {
-            if footer == FOOTER_ROWS - 1 {
-                plan.overlay_relations.push(OverlayRelation {
-                    kind: OverlayRelationKind::CompressionLink,
-                    sign: -1,
-                });
-            }
-        },
-        EidosCompressionMode::AeadXof => {
-            if footer == FOOTER_ROWS - 1 {
-                plan.overlay_relations.push(OverlayRelation {
-                    kind: OverlayRelationKind::AeadInput,
-                    sign: -1,
-                });
-            }
-            plan.overlay_relations.push(OverlayRelation {
-                kind: OverlayRelationKind::AeadLowOutputPair,
-                sign: -1,
-            });
-            plan.overlay_relations.push(OverlayRelation {
-                kind: OverlayRelationKind::AeadHighOutputPair,
-                sign: -1,
-            });
-        },
+    if mode == EidosCompressionMode::AeadXof {
+        for kind in
+            [OverlayRelationKind::AeadLowOutputPair, OverlayRelationKind::AeadHighOutputPair]
+        {
+            plan.overlay_relations.push(OverlayRelation { kind, sign: -1 });
+        }
     }
 }
 

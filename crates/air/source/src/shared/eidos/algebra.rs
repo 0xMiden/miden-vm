@@ -47,15 +47,19 @@ where
     sum_input_b(next) - stored_results
 }
 
-/// Returns one raw initial-CV word through a row-independent linear expression.
+/// Reconstructs one of the footer's four message words from range-checked 16-bit limbs.
+pub fn footer_message_word<E: PrimeCharacteristicRing>(at: impl Fn(usize) -> E, idx: usize) -> E {
+    at(footer_range_slot_col(2 * idx, 0))
+        + E::from_u64(1 << 16) * at(footer_range_slot_col(2 * idx + 1, 0))
+}
+
+/// Returns a footer's raw initial-CV word through a linear expression.
 ///
-/// For lanes zero through three the expression is `A + C - IV`, reconstructed from the fused
-/// additions. On the first fused row `C = IV`, so it equals the input A word. A footer row uses its
-/// otherwise-unconstrained k2 coordinate to correct the same expression to the required CV word.
-///
-/// For lanes four through seven the expression is the fused B input. One byte coordinate per lane
-/// is reserved as the footer correction. All eight encodings remain linear in committed cells.
-pub fn universal_cv_word<E, A>(at: A, idx: usize) -> E
+/// The correction coordinates share storage with fused-row carries and B-input bytes. Footer
+/// constraints bind these expressions to the CV bytes as they arrive and carry the live prefix.
+/// All eight words are available on the final footer; the schedule fingerprint binds them to the
+/// first fused row's arithmetic inputs.
+pub fn footer_cv_word<E, A>(at: A, idx: usize) -> E
 where
     E: PrimeCharacteristicRing,
     A: Fn(usize) -> E,
@@ -74,7 +78,7 @@ where
         let b = packed_fused_bytes(at, G_BD_ROT_SLOT_BASE_COL, idx, 0);
         let c_new = packed_fused_bytes(at, G_BD_ROT_SLOT_BASE_COL, idx, 1);
         let input_a =
-            a_new + E::from_u64(1u64 << 32) * at(g_k3_col(idx)) - b - at(g_msg_word_col(idx));
+            a_new + E::from_u64(1u64 << 32) * at(g_k3_col(idx)) - b - footer_message_word(at, idx);
         input_a + c_new - d_new_rot16(at, idx)
     } else {
         let g = idx - NUM_G;
@@ -105,7 +109,7 @@ pub fn cv_storage_offset<E: PrimeCharacteristicRing>(idx: usize) -> E {
     }
 }
 
-fn packed_fused_bytes<E, A>(at: &A, base: usize, g: usize, field: usize) -> E
+pub(super) fn packed_fused_bytes<E, A>(at: &A, base: usize, g: usize, field: usize) -> E
 where
     E: PrimeCharacteristicRing,
     A: Fn(usize) -> E,

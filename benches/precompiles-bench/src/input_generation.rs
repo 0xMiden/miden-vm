@@ -60,7 +60,7 @@ impl PrecompileWorkload {
         .map(|(count, default)| count.div_ceil(default) as u64)
         .fold(1, u64::max);
         for class in [UINT_WORK, CURVE_WORK, HASH_WORK, MSM_WORK] {
-            let mut limit = limits.class(class).expect("default precompile work class");
+            let mut limit = limits.class(&class).expect("default precompile work class");
             limit.max_count = limit.max_count.checked_mul(scale).expect("work count overflow");
             limit.max_total_size =
                 limit.max_total_size.checked_mul(scale).expect("total work size overflow");

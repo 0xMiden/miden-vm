@@ -9,7 +9,9 @@ use core::{
 
 use num::{One, Zero};
 
-use super::{Inverse, MODULUS, N, field::FalconFelt};
+use super::{Inverse, field::FalconFelt};
+#[cfg(test)]
+use super::{MODULUS, N};
 use crate::{Felt, utils::zeroize::Zeroize};
 
 /// Represents a polynomial with coefficients of type F.
@@ -33,7 +35,7 @@ impl<F: Mul<Output = F> + Sub<Output = F> + AddAssign + Zero + Div<Output = F> +
     Polynomial<F>
 {
     /// Multiplies two polynomials coefficient-wise (Hadamard multiplication).
-    pub fn hadamard_mul(&self, other: &Self) -> Self {
+    pub(crate) fn hadamard_mul(&self, other: &Self) -> Self {
         Polynomial::new(
             self.coefficients
                 .iter()
@@ -43,7 +45,7 @@ impl<F: Mul<Output = F> + Sub<Output = F> + AddAssign + Zero + Div<Output = F> +
         )
     }
     /// Divides two polynomials coefficient-wise (Hadamard division).
-    pub fn hadamard_div(&self, other: &Self) -> Self {
+    pub(crate) fn hadamard_div(&self, other: &Self) -> Self {
         let other_coefficients_inverse = F::batch_inverse_or_zero(&other.coefficients);
         Polynomial::new(
             self.coefficients
@@ -55,7 +57,7 @@ impl<F: Mul<Output = F> + Sub<Output = F> + AddAssign + Zero + Div<Output = F> +
     }
 
     /// Computes the coefficient-wise inverse (Hadamard inverse).
-    pub fn hadamard_inv(&self) -> Self {
+    pub(crate) fn hadamard_inv(&self) -> Self {
         let coefficients_inverse = F::batch_inverse_or_zero(&self.coefficients);
         Polynomial::new(coefficients_inverse)
     }
@@ -98,7 +100,7 @@ impl<
 > Polynomial<F>
 {
     /// Reduce the polynomial by X^n + 1.
-    pub fn reduce_by_cyclotomic(&self, n: usize) -> Self {
+    pub(crate) fn reduce_by_cyclotomic(&self, n: usize) -> Self {
         let mut coefficients = vec![F::zero(); n];
         let mut sign = -F::one();
         for (i, c) in self.coefficients.iter().cloned().enumerate() {
@@ -116,7 +118,7 @@ impl<
     /// Corresponds to formula 3.25 in the spec [1, p.30].
     ///
     /// [1]: <https://falcon-sign.info/falcon.pdf>
-    pub fn field_norm(&self) -> Self {
+    pub(crate) fn field_norm(&self) -> Self {
         let n = self.coefficients.len();
         let mut f0_coefficients = vec![F::zero(); n / 2];
         let mut f1_coefficients = vec![F::zero(); n / 2];
@@ -133,7 +135,7 @@ impl<
     }
 
     /// Lifts an element from a cyclotomic polynomial ring to one of double the size.
-    pub fn lift_next_cyclotomic(&self) -> Self {
+    pub(crate) fn lift_next_cyclotomic(&self) -> Self {
         let n = self.coefficients.len();
         let mut coefficients = vec![F::zero(); n * 2];
         for i in 0..n {
@@ -147,7 +149,7 @@ impl<
     ///
     /// Together with [`Self::lift_next_cyclotomic`], which computes f(X^2), this implements the
     /// field-norm identity NTRU solving relies on: N(f)(X^2) = f(X) * f(-X).
-    pub fn galois_adjoint(&self) -> Self {
+    pub(crate) fn galois_adjoint(&self) -> Self {
         Self::new(
             self.coefficients
                 .iter()
@@ -385,7 +387,7 @@ impl<F: Mul<Output = F> + Sub<Output = F> + AddAssign + Zero + Div<Output = F> +
     ///
     /// Panics if the coefficient vectors have different lengths, are empty, or have a length that
     /// reaches an odd value above eight while being repeatedly halved.
-    pub fn karatsuba(&self, other: &Self) -> Self {
+    pub(crate) fn karatsuba(&self, other: &Self) -> Self {
         assert_eq!(
             self.coefficients.len(),
             other.coefficients.len(),
@@ -610,7 +612,7 @@ impl From<&Vec<i16>> for Polynomial<FalconFelt> {
 
 impl Polynomial<FalconFelt> {
     /// Computes the squared L2 norm of the polynomial.
-    pub fn norm_squared(&self) -> u64 {
+    pub(crate) fn norm_squared(&self) -> u64 {
         self.coefficients
             .iter()
             .map(|&i| i.balanced_value() as i64)
@@ -640,7 +642,8 @@ impl Polynomial<FalconFelt> {
     /// than the Miden prime.
     ///
     /// Note that this multiplication is not over Z_p\[x\]/(phi).
-    pub fn mul_modulo_p(a: &Self, b: &Self) -> [u64; 1024] {
+    #[cfg(test)]
+    pub(crate) fn mul_modulo_p(a: &Self, b: &Self) -> [u64; 1024] {
         let mut c = [0; 2 * N];
         for i in 0..N {
             for j in 0..N {
@@ -653,7 +656,8 @@ impl Polynomial<FalconFelt> {
 
     /// Reduces a polynomial, that is the product of two polynomials over Z_p\[x\], modulo
     /// the irreducible polynomial phi. This results in an element in Z_p\[x\]/(phi).
-    pub fn reduce_negacyclic(a: &[u64; 1024]) -> Self {
+    #[cfg(test)]
+    pub(crate) fn reduce_negacyclic(a: &[u64; 1024]) -> Self {
         let mut c = [FalconFelt::zero(); N];
         let modulus = MODULUS as u16;
         for i in 0..N {
@@ -677,7 +681,7 @@ impl Polynomial<Felt> {
 
 impl Polynomial<i16> {
     /// Returns the balanced values of the coefficients of this polynomial.
-    pub fn to_balanced_values(&self) -> Vec<i16> {
+    pub(crate) fn to_balanced_values(&self) -> Vec<i16> {
         self.coefficients.iter().map(|c| FalconFelt::new(*c).balanced_value()).collect()
     }
 }

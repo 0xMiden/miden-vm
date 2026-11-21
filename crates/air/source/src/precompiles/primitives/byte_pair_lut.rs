@@ -117,12 +117,15 @@ pub(crate) fn andnot_result_from_xor<E: Algebra<Felt>>(a: E, b: E, x: E) -> E {
     (x - a + b) * FELT_INV_TWO
 }
 
+/// Log2 of [`TRACE_HEIGHT`].
+pub const LOG_TRACE_HEIGHT: u8 = 16;
+
 /// Fixed trace height: every `(a, b) ∈ [0, 256)²` gets a row, in lex
 /// order (`idx = (a << 8) | b`). The preprocessed data table
 /// (`preprocessed_table`) is pinned to this lex enumeration on these
 /// `2^16` rows; the seven witness multiplicity columns are committed in
 /// lockstep at the same height.
-pub const TRACE_HEIGHT: usize = 1 << 16;
+pub const TRACE_HEIGHT: usize = 1 << LOG_TRACE_HEIGHT;
 
 const NUM_BYTE_PAIRS: usize = TRACE_HEIGHT;
 
@@ -272,6 +275,12 @@ impl BaseAir<Felt> for BytePairLutAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = ();
+
+    fn log_preprocessed_height(&self) -> Option<u8> {
+        Some(LOG_TRACE_HEIGHT)
+    }
+
     fn num_randomness(&self) -> usize {
         // Single global (α, β) pair shared across all relations; each
         // relation's bus_prefix keeps encodings unambiguous.
@@ -307,7 +316,7 @@ impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
         build_logup_aux_trace_with_preprocessed(self, main, preprocessed, challenges)
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
         let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
         lb.finish();

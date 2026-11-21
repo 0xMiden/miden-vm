@@ -15,6 +15,11 @@
 //! Debuggers can use this information along with MAST debug metadata to provide source-level
 //! variable inspection, stepping, and call stack visualization.
 
+#![allow(
+    clippy::empty_enums,
+    reason = "zerocopy derives generate uninhabited helper types"
+)]
+
 use alloc::{sync::Arc, vec::Vec};
 use core::{marker::PhantomData, num::NonZeroU32};
 
@@ -331,7 +336,7 @@ impl<T: Idx> OptionalIndex<T> {
     /// Convert this value into an [`Option<T>`] without panicking if the underlying discriminant
     /// is out of range.
     #[inline(always)]
-    pub fn try_into_option(self) -> Result<Option<T>, InvalidOptionalIndexError> {
+    pub(crate) fn try_into_option(self) -> Result<Option<T>, InvalidOptionalIndexError> {
         self.try_into()
     }
 }
@@ -467,7 +472,7 @@ impl<Exec: Idx, Src: Idx> SourceNode<Exec, Src> {
         insertion_index.checked_sub(1).and_then(|index| self.asm_ops.get(index))
     }
 
-    pub fn debug_vars_for_operation(
+    pub(crate) fn debug_vars_for_operation(
         &self,
         op_idx: u32,
     ) -> impl Iterator<Item = &DebugSourceVar> + '_ {
@@ -797,7 +802,7 @@ impl TryFrom<DebugPrimitiveType> for Type {
 
 impl DebugPrimitiveType {
     /// Converts a discriminant byte to a primitive type.
-    pub fn from_discriminant(discriminant: u8) -> Option<Self> {
+    pub(crate) fn from_discriminant(discriminant: u8) -> Option<Self> {
         match discriminant {
             0 => Some(Self::Void),
             1 => Some(Self::Bool),
@@ -1628,6 +1633,7 @@ fn checked_align_up_usize(value: usize, alignment: usize) -> Option<usize> {
     Clone,
     PartialEq,
     Eq,
+    Hash,
     zerocopy::FromBytes,
     zerocopy::Immutable,
     zerocopy::IntoBytes,

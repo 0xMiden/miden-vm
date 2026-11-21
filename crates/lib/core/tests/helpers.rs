@@ -31,6 +31,14 @@ pub fn read_memory_felt(output: &ExecutionOutput, addr: u32) -> Felt {
         .unwrap_or_else(|_| panic!("memory address {addr} was not written"))
 }
 
+/// Reads four initialized felts in address order from root-context memory.
+pub fn read_memory_word(output: &ExecutionOutput, addr: u32) -> Word {
+    Word::new(core::array::from_fn(|i| {
+        let addr = addr.checked_add(i as u32).expect("word address overflows u32");
+        read_memory_felt(output, addr)
+    }))
+}
+
 /// Generates MASM code to store field elements sequentially in memory starting at `base_addr`.
 pub fn masm_store_felts(felts: &[Felt], base_addr: u32) -> String {
     felts

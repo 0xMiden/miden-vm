@@ -201,6 +201,11 @@ fn large_smt_memory_benches(c: &mut Criterion) {
                 BatchSize::LargeInput,
             );
         });
+    }
+
+    // Use larger batches to reduce scheduling overhead as a share of each sample.
+    for size in [4_096, 16_384] {
+        group.throughput(Throughput::Elements(size as u64));
         group.bench_function(BenchmarkId::new("insert_batch/populated", size), |bench| {
             bench.iter_batched_ref(
                 || {

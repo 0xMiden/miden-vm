@@ -49,7 +49,12 @@ impl<'a> EcRequire<'a> {
     /// carries the `F_p` handle) until [`EcStoreRequires::set_scalar_bound`] names
     /// the scalar-field modulus.
     #[cfg(test)]
-    pub fn create_group(&mut self, a: U256, b: U256, bound: UintPtr) -> (EcGroupPtr, EcPointPtr) {
+    pub(crate) fn create_group(
+        &mut self,
+        a: U256,
+        b: U256,
+        bound: UintPtr,
+    ) -> (EcGroupPtr, EcPointPtr) {
         assert_ne!(b, U256::ZERO, "b = 0 puts (0,0) on the curve");
         let a_ptr = self.uint.intern(a, bound);
         let b_ptr = self.uint.intern(b, bound);

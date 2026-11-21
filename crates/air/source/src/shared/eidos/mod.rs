@@ -4,9 +4,13 @@
 //! equations, physical layout, narrow lookup encoding, and witness coordinates. Relation adapters
 //! supply their bus namespaces and bind the footer interface to VM controller/AEAD requests or
 //! PVM transcript digests.
+//!
+//! An algebraic fingerprint binds the fused additions to their scheduled message words and
+//! initial chaining value. Its accumulator closes independently on every 32-row cycle.
 
 pub(crate) mod algebra;
 pub(crate) mod constraints;
+pub(crate) mod fingerprint;
 #[doc(hidden)]
 pub mod layout;
 pub(crate) mod lookup;
@@ -24,9 +28,11 @@ pub mod testing;
 pub mod trace;
 
 pub use algebra::{
-    cv_storage_coefficient, cv_storage_offset, cv_word_base, sum_input_b, universal_cv_word,
+    cv_storage_coefficient, cv_storage_offset, cv_word_base, footer_cv_word, footer_message_word,
+    sum_input_b,
 };
 pub use constraints::{enforce_core_footer_rows, enforce_fused_rows};
+pub use fingerprint::{enforce_register_constraints, fill_aux_register};
 pub use lookup::{
     EidosCompressionCols, LookupMultiplicitySign, NarrowLookupConfig, XorExpression,
     emit_narrow_lookup_columns,

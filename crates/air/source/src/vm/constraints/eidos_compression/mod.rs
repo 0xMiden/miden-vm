@@ -4,19 +4,15 @@
 //! seven Eidos compression rounds; the footer rows assemble the message, input chaining value,
 //! compression output, and XOF output used by the external buses.
 //!
-//! # Physical-cycle binding
-//!
-//! Every cycle carries a canonical `compression_cycle_id`: the first cycle is zero, the value is
-//! constant over all 32 rows, and it increments between cycles. Every internal message-word and
-//! chaining-value binding includes that identity. The chaining-value relation carries all eight
-//! raw words atomically; message-word slots carry the ID directly. This prevents inputs from one
-//! physical compression from satisfying the internal lookups of another.
-//!
 //! The shared equations and physical layout live in [`crate::shared::eidos`]. This adapter adds
 //! the VM controller and AEAD interfaces. The processor constructs
 //! the same 32-row blocks through the public trace-writing API exported below.
 
 pub(crate) use crate::shared::eidos::algebra;
+#[cfg(test)]
+use crate::shared::eidos::fingerprint;
+#[cfg(test)]
+mod fingerprint_tests;
 
 #[cfg(test)]
 mod test_support;

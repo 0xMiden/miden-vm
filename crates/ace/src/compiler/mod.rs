@@ -3,10 +3,13 @@
 //! This module owns the generic compilation pipeline. Encoded circuit data, input layouts,
 //! and proof-order encodings remain available from the crate root for runtime consumers.
 
+mod aux_trace;
 mod circuit;
 mod dag;
+mod deep_queries;
 mod encode;
 mod masm;
+mod masm_memory;
 mod ood_scatter;
 mod order_maps;
 mod pipeline;
@@ -29,11 +32,14 @@ mod unit_tests;
 pub use dag::{PeriodicColumnData, build_verifier_dag, build_verifier_dag_from_ir};
 
 pub use self::{
+    aux_trace::{MasmAuxTraceConfig, render_masm_aux_trace, render_masm_ext2_power},
     circuit::{AceCircuit, emit_circuit},
     dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},
-    masm::{FoldCoefficientStaging, MasmConstraintsEvalConfig, render_masm_constraints_eval},
+    deep_queries::render_masm_deep_queries,
+    masm::{MasmConstraintsEvalConfig, render_masm_constraints_eval},
+    masm_memory::{MasmMemoryExtents, MasmMemoryLayout},
     ood_scatter::OodScatterPlan,
-    order_maps::{ProofOrderMapsConfig, render_proof_order_maps},
+    order_maps::render_proof_order_maps,
     pipeline::{
         AceArtifacts, AceConfig, LayoutKind, build_ace_circuit_for_air, build_ace_dag_for_air,
         build_canonical_multi_air_ace_circuit,

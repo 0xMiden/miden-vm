@@ -155,7 +155,8 @@ where
 
 /// Largest single-AIR height that can fit the budget, choosing the cheapest AIR while holding
 /// the other heights at zero. This permissive cap never rejects a shape the estimator accepts.
-pub fn max_any_height_for_budget<F, EF, MA>(
+#[cfg(test)]
+pub(crate) fn max_any_height_for_budget<F, EF, MA>(
     multi_air: &MA,
     budget_bytes: u64,
     params: &PcsParams,
@@ -354,6 +355,8 @@ mod tests {
     }
 
     impl LiftedAir<Felt, QuadFelt> for TestAir {
+        type EvalData<B: p3_field::Algebra<Felt>, E: p3_field::Algebra<B>> = ();
+
         fn num_randomness(&self) -> usize {
             0
         }
@@ -376,7 +379,7 @@ mod tests {
             panic!("memory estimation must not allocate auxiliary traces")
         }
 
-        fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+        fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB, _data: &()) {
             let value: AB::Expr = builder.main().current_slice()[0].into();
             builder.assert_zero(value.exp_u64(self.constraint_degree));
         }

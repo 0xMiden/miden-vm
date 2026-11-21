@@ -3,9 +3,13 @@
 use alloc::{borrow::Cow, vec::Vec};
 
 use miden_air_definitions::precompiles as definitions;
-use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
+use miden_core::{
+    Felt,
+    field::{Algebra, QuadFelt},
+    utils::RowMajorMatrix,
+};
 use miden_stark::air::{
-    BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, MultiAir, ReductionError,
+    BaseAir, ConstraintDegrees, EvalInputs, LiftedAir, LiftedAirBuilder, MultiAir, ReductionError,
 };
 
 include!(concat!(env!("OUT_DIR"), "/pvm_degrees.rs"));
@@ -49,16 +53,6 @@ impl ChipletAir {
     pub fn all() -> [ChipletAir; NUM_CHIPLETS] {
         definitions::ChipletAir::all().map(Self)
     }
-
-    /// The fixed log2 trace height of this instance, if the relation pins one.
-    ///
-    /// `BytePairLut` commits its main and preprocessed traces at
-    /// [`miden_air_definitions::precompiles::primitives::byte_pair_lut::TRACE_HEIGHT`], so its
-    /// proof shapes must carry exactly that height; every other instance ranges above its
-    /// derived minimum.
-    pub fn fixed_log_height(&self) -> Option<u32> {
-        self.0.fixed_log_height()
-    }
 }
 
 impl BaseAir<Felt> for ChipletAir {
@@ -80,6 +74,12 @@ impl BaseAir<Felt> for ChipletAir {
 }
 
 impl LiftedAir<Felt, QuadFelt> for ChipletAir {
+    type EvalData<B: Algebra<Felt>, E: Algebra<B>> = Vec<E>;
+
+    fn log_preprocessed_height(&self) -> Option<u8> {
+        self.0.log_preprocessed_height()
+    }
+
     fn constraint_degree(&self) -> ConstraintDegrees {
         generated_degrees(*self)
     }
@@ -122,22 +122,74 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
             challenges,
         )
     }
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn prepare<B: Algebra<Felt>, E: Algebra<B>>(&self, inputs: EvalInputs<'_, B, E>) -> Vec<E> {
+        let challenges = inputs.challenges;
         match self.0 {
-            definitions::ChipletAir::ChunkNodeSponge => generated::eval_chunk_node_sponge(builder),
-            definitions::ChipletAir::EidosCompression => generated::eval_eidos_compression(builder),
-            definitions::ChipletAir::KeccakRound => generated::eval_keccak_round(builder),
-            definitions::ChipletAir::BytePairLut => generated::eval_byte_pair_lut(builder),
-            definitions::ChipletAir::TranscriptEval => generated::eval_transcript_eval(builder),
-            definitions::ChipletAir::UintStoreMul => generated::eval_uint_store_mul(builder),
-            definitions::ChipletAir::UintAdd => generated::eval_uint_add(builder),
-            definitions::ChipletAir::EcPointStoreGroups => {
-                generated::eval_ec_point_store_groups(builder)
+            definitions::ChipletAir::ChunkNodeSponge => {
+                generated::precompute_chunk_node_sponge::<B, E>(challenges).into()
             },
-            definitions::ChipletAir::EcGroupAdd => generated::eval_ec_group_add(builder),
-            definitions::ChipletAir::EcMsm => generated::eval_ec_msm(builder),
-            definitions::ChipletAir::Sha512 => generated::eval_sha512(builder),
-            definitions::ChipletAir::Sha256 => generated::eval_sha256(builder),
+            definitions::ChipletAir::EidosCompression => {
+                generated::precompute_eidos_compression::<B, E>(challenges).into()
+            },
+            definitions::ChipletAir::KeccakRound => {
+                generated::precompute_keccak_round::<B, E>(challenges).into()
+            },
+            definitions::ChipletAir::BytePairLut => {
+                generated::precompute_byte_pair_lut::<B, E>(challenges).into()
+            },
+            definitions::ChipletAir::TranscriptEval => {
+                generated::precompute_transcript_eval::<B, E>(challenges).into()
+            },
+            definitions::ChipletAir::UintStoreMul => {
+                generated::precompute_uint_store_mul::<B, E>(challenges).into()
+            },
+            definitions::ChipletAir::UintAdd => {
+                generated::precompute_uint_add::<B, E>(challenges).into()
+            },
+            definitions::ChipletAir::EcPointStoreGroups => {
+                generated::precompute_ec_point_store_groups::<B, E>(challenges).into()
+            },
+            definitions::ChipletAir::EcGroupAdd => {
+                generated::precompute_ec_group_add::<B, E>(challenges).into()
+            },
+            definitions::ChipletAir::EcMsm => {
+                generated::precompute_ec_msm::<B, E>(challenges).into()
+            },
+            definitions::ChipletAir::Sha512 => {
+                generated::precompute_sha512::<B, E>(challenges).into()
+            },
+            definitions::ChipletAir::Sha256 => {
+                generated::precompute_sha256::<B, E>(challenges).into()
+            },
+        }
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(
+        &self,
+        builder: &mut AB,
+        terms: &Self::EvalData<AB::Expr, AB::ExprEF>,
+    ) {
+        match self.0 {
+            definitions::ChipletAir::ChunkNodeSponge => {
+                generated::eval_chunk_node_sponge(builder, terms)
+            },
+            definitions::ChipletAir::EidosCompression => {
+                generated::eval_eidos_compression(builder, terms)
+            },
+            definitions::ChipletAir::KeccakRound => generated::eval_keccak_round(builder, terms),
+            definitions::ChipletAir::BytePairLut => generated::eval_byte_pair_lut(builder, terms),
+            definitions::ChipletAir::TranscriptEval => {
+                generated::eval_transcript_eval(builder, terms)
+            },
+            definitions::ChipletAir::UintStoreMul => generated::eval_uint_store_mul(builder, terms),
+            definitions::ChipletAir::UintAdd => generated::eval_uint_add(builder, terms),
+            definitions::ChipletAir::EcPointStoreGroups => {
+                generated::eval_ec_point_store_groups(builder, terms)
+            },
+            definitions::ChipletAir::EcGroupAdd => generated::eval_ec_group_add(builder, terms),
+            definitions::ChipletAir::EcMsm => generated::eval_ec_msm(builder, terms),
+            definitions::ChipletAir::Sha512 => generated::eval_sha512(builder, terms),
+            definitions::ChipletAir::Sha256 => generated::eval_sha256(builder, terms),
         }
     }
 }

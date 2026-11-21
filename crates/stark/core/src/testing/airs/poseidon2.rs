@@ -5,7 +5,7 @@
 
 use alloc::vec::Vec;
 
-use p3_field::Field;
+use p3_field::{Algebra, Field};
 use p3_goldilocks::{GenericPoseidon2LinearLayersGoldilocks, Goldilocks};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use p3_poseidon2_air::{Poseidon2Air, RoundConstants, num_cols};
@@ -13,14 +13,14 @@ use p3_poseidon2_air::{Poseidon2Air, RoundConstants, num_cols};
 use crate::air::{Air, BaseAir, LiftedAir, LiftedAirBuilder};
 
 /// Goldilocks Poseidon2 configuration constants.
-pub const WIDTH: usize = 12;
-pub const SBOX_DEGREE: u64 = 7;
-pub const SBOX_REGISTERS: usize = 1;
-pub const HALF_FULL_ROUNDS: usize = 4;
-pub const PARTIAL_ROUNDS: usize = 22;
+pub(crate) const WIDTH: usize = 12;
+pub(crate) const SBOX_DEGREE: u64 = 7;
+pub(crate) const SBOX_REGISTERS: usize = 1;
+pub(crate) const HALF_FULL_ROUNDS: usize = 4;
+pub(crate) const PARTIAL_ROUNDS: usize = 22;
 
 /// Number of trace columns for the Goldilocks Poseidon2 AIR.
-pub const NUM_POSEIDON2_COLS: usize =
+pub(crate) const NUM_POSEIDON2_COLS: usize =
     num_cols::<WIDTH, SBOX_DEGREE, SBOX_REGISTERS, HALF_FULL_ROUNDS, PARTIAL_ROUNDS>();
 
 type GoldilocksRoundConstants = RoundConstants<Goldilocks, WIDTH, HALF_FULL_ROUNDS, PARTIAL_ROUNDS>;
@@ -56,6 +56,8 @@ impl<F> BaseAir<F> for LiftedPoseidon2Air {
 }
 
 impl<EF: Field> LiftedAir<Goldilocks, EF> for LiftedPoseidon2Air {
+    type EvalData<B: Algebra<Goldilocks>, E: Algebra<B>> = ();
+
     fn num_randomness(&self) -> usize {
         1
     }
@@ -79,7 +81,7 @@ impl<EF: Field> LiftedAir<Goldilocks, EF> for LiftedPoseidon2Air {
         (RowMajorMatrix::new(EF::zero_vec(main.height()), 1), Vec::new())
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Goldilocks>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Goldilocks>>(&self, builder: &mut AB, _data: &()) {
         Air::eval(&self.inner, builder);
     }
 }
@@ -88,7 +90,7 @@ impl<EF: Field> LiftedAir<Goldilocks, EF> for LiftedPoseidon2Air {
 ///
 /// Each input is a WIDTH=12 element Goldilocks array. The number of inputs must
 /// be a power of two. The trace has `inputs.len()` rows and
-/// [`NUM_POSEIDON2_COLS`] columns.
+/// `NUM_POSEIDON2_COLS` columns.
 pub fn generate_poseidon2_trace(
     inputs: Vec<[Goldilocks; WIDTH]>,
     constants: &GoldilocksRoundConstants,

@@ -5,13 +5,14 @@ sidebar_position: 3
 
 # Bitwise chiplet
 
-The bitwise region supports ordinary 32-bit `AND` and `XOR` operations and an eight-row overlay
-used by `CRYPTOSTREAM`. Both modes reduce bit operations to byte-level lookups in the fixed
+The ordinary bitwise chiplet handles 32-bit `AND` and `XOR`. The AEAD stream chiplet handles
+`CRYPTOSTREAM`. Both reduce bit operations to byte-level lookups in the fixed
 [`And8LookupAir`](../range.md).
 
 ## Ordinary u32 operations
 
-One ordinary operation occupies one chiplet row. Its 13-column local layout contains:
+One ordinary operation occupies one chiplet row with selector prefix `101`. Its payload uses
+columns 3–15 and contains:
 
 - an operation flag, where $0$ selects AND and $1$ selects XOR;
 - four little-endian bytes for each input $a$ and $b$; and
@@ -54,8 +55,8 @@ $$
 then each limb is XORed bytewise with its keystream lane. The output is stored as sixteen u32 field
 elements so ciphertext serialization is unambiguous.
 
-Each stream entry occupies eight rows and overlays 20 shared chiplet columns. Every row proves one
-u32 XOR through four And8 lookups. The phases are:
+Each stream entry occupies eight rows with selector prefix `100` and payload columns 3–22.
+Every row proves one u32 XOR through four And8 lookups. The phases are:
 
 | Phase | Purpose                                                                        |
 |-------|--------------------------------------------------------------------------------|
@@ -76,7 +77,3 @@ words between phases. They also require every stream entry to begin at phase zer
 period-eight grid. The trace writer therefore places all stream entries before ordinary one-row
 bitwise entries, preserving order within each class; the relations are position-independent and
 retain their execution clock and memory addresses.
-
-The stream mode is a row-local selector overlay. It is constrained separately from the ordinary
-bitwise operation flag, so a row cannot satisfy an ordinary response while being interpreted as
-an AEAD stream phase.

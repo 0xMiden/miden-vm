@@ -26,13 +26,13 @@ use crate::setup::preprocessed::cached_preprocessed_setup;
 /// Failure while producing a VM STARK proof.
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
-pub struct ProvingError(pub alloc::string::String);
+pub struct ProvingError(pub(crate) alloc::string::String);
 
 /// Proves a completed VM trace using the selected commitment hash.
 ///
 /// `hash_lde_blocks` hashes completed blocks during the final trace LDE when supported by the
 /// commitment scheme. It changes scheduling while preserving commitments and proof bytes.
-#[tracing::instrument(name = "miden_vm", skip_all)]
+#[tracing::instrument(target = "miden::vm::prove", level = "trace", name = "prove_vm", skip_all)]
 pub fn prove(
     trace: VmTrace,
     hash_fn: HashFunction,
@@ -41,7 +41,8 @@ pub fn prove(
     let trace_len_summary = trace.trace_len_summary();
     let params = config::pcs_params();
     tracing::event!(
-        tracing::Level::INFO,
+        target: "miden::vm::prove",
+        tracing::Level::TRACE,
         "Generated execution traces: core={}, chiplets={}, eidos_compression={}, and8={}, padded={}, \
              estimated_prover_memory_bytes={:?}",
         trace_len_summary.core_rows(),
@@ -111,7 +112,7 @@ pub fn prove(
 /// Pre-seeds the challenger with the protocol parameters, the AIR public values, and the
 /// statement `aux_inputs` (program hash, final deferred root, and the concatenated kernel-procedure
 /// digests). Then delegates to the lifted multi-AIR prover.
-#[instrument("prove_stark", skip_all)]
+#[instrument(target = "miden::vm::prove", level = "trace", name = "prove_stark", skip_all)]
 pub(crate) fn prove_stark<SC>(
     config: &SC,
     core_trace: RowMajorMatrix<Felt>,

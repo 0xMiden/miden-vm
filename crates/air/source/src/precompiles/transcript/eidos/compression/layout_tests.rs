@@ -14,7 +14,7 @@ fn mark_range(used: &mut [bool; NUM_COLS], range: core::ops::Range<usize>) {
 }
 
 #[test]
-fn footer_overlay_fits_108_columns_without_collisions() {
+fn footer_overlay_fits_104_columns_without_collisions() {
     assert_eq!(F_RANGE_NARROW_SLOTS, [22, 23, 24, 25, 26, 17, 28, 29]);
     assert_eq!(footer_range_slot_col(5, 0), 51);
     assert_eq!(footer_range_slot_col(0, 0), 66);
@@ -29,9 +29,6 @@ fn footer_overlay_fits_108_columns_without_collisions() {
                 mark_col(&mut used, footer_range_slot_col(limb, field));
             }
         }
-        for word in 0..F_MSG_WORD_SLOTS {
-            mark_col(&mut used, footer_msg_word_col(word));
-        }
         mark_col(&mut used, F_COMPRESSION_CYCLE_ID_COL);
         for idx in 0..4 {
             mark_col(&mut used, footer_digest_col(idx));
@@ -43,7 +40,7 @@ fn footer_overlay_fits_108_columns_without_collisions() {
         for idx in 0..footer_future_w_indices(footer).len() {
             mark_col(&mut used, footer_future_w_col(footer, idx));
         }
-        for &col in &F_CV_STORAGE_COLS[..2 * footer + 2] {
+        for &col in &F_CV_STORAGE_COLS[..if footer == 2 { 8 } else { 2 * footer + 2 }] {
             mark_col(&mut used, col);
         }
         if footer == 0 {
@@ -59,7 +56,11 @@ fn footer_overlay_fits_108_columns_without_collisions() {
             assert!(!used[super::super::COL_OUT_MULTIPLICITY]);
         }
 
-        let expected = if footer == 0 { 105 } else { 104 };
+        let expected = match footer {
+            0 => 101,
+            2 => 102,
+            _ => 100,
+        };
         assert_eq!(used.into_iter().filter(|&live| live).count(), expected, "footer {footer}");
     }
 }

@@ -57,16 +57,16 @@ pub(in crate::vm::constraints::lookup) fn emit_chiplet_responses<LB>(
     let aead_phase: [LB::Expr; 8] = periodic.aead_stream.phases.map(Into::into);
 
     // Typed chiplet-data overlays.
-    let ctrl = local.controller();
-    let bw = local.bitwise();
-    let mem = local.memory();
-    let ace = local.ace();
-    let krom = local.kernel_rom();
+    let ctrl = local.controller_cols();
+    let bw = local.bitwise_cols();
+    let mem = local.memory_cols();
+    let ace = local.ace_cols();
+    let krom = local.kernel_rom_cols();
 
     // Hash-start and continuation flags on controller rows.
     let hs0: LB::Expr = ctrl.s0.into();
     let not_hs0 = hs0.not();
-    let merkle_or_padding: LB::Expr = local.controller_merkle_or_padding().into();
+    let merkle_or_padding: LB::Expr = ctrl.merkle_or_padding.into();
     let hash_gate = ctx.chiplet_active.controller.clone() * merkle_or_padding.not();
 
     let state: [LB::Var; 12] = ctrl.state;
@@ -87,9 +87,9 @@ pub(in crate::vm::constraints::lookup) fn emit_chiplet_responses<LB>(
 
     // --- Emit everything into a single LogUp column ---
 
-    // All hasher response variants encode their row at the chiplet-trace row counter
-    // (`chip_clk`) so they cancel against the matching request.
-    let row_addr: LB::Expr = local.chip_clk.into();
+    // All hasher response variants use the controller row address so they cancel against
+    // the matching request.
+    let row_addr: LB::Expr = ctrl.addr.into();
 
     // Local helpers: convert the copied Var arrays into Expr arrays.
     let full_state = || -> [LB::Expr; 12] { state.map(Into::into) };

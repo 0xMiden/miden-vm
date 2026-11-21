@@ -37,6 +37,9 @@ runs:
       if: ${{ inputs.mode == 'dry-run' }}
       uses: ./.github/actions/cleanup-runner
 
+    - uses: ./.github/actions/setup-protoc
+      if: ${{ inputs.mode == 'dry-run' }}
+
     # Install cargo-msrv for MSRV checks
     - name: Install cargo-msrv
       if: ${{ inputs.mode == 'dry-run' }}

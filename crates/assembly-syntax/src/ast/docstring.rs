@@ -27,7 +27,7 @@ impl DocString {
 
     /// Get the content of this docstring as a `str` reference, with source span.
     #[inline]
-    pub fn as_spanned_str(&self) -> Span<&str> {
+    pub(crate) fn as_spanned_str(&self) -> Span<&str> {
         self.0.as_deref()
     }
 

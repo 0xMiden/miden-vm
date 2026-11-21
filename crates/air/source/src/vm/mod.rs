@@ -22,10 +22,13 @@ pub use airs::{
 pub use constraints::{
     and8_lookup,
     and8_lookup::columns::{And8LookupCols, And8LookupPreprocessedCols},
-    chiplets::columns::{
-        AceCols, AceEvalCols, AceReadCols, AeadStreamCols, AeadStreamHighFirstCols,
-        AeadStreamHighSecondCols, AeadStreamLowSecondCols, AeadStreamReadCols, BitwiseCols,
-        ControllerCols, KernelRomCols, MemoryCols,
+    chiplets::{
+        columns::{
+            AceCols, AceEvalCols, AceReadCols, AeadStreamCols, AeadStreamHighFirstCols,
+            AeadStreamHighSecondCols, AeadStreamLowSecondCols, AeadStreamReadCols, BitwiseOpCols,
+            ControllerCols, KernelRomCols, MemoryCols,
+        },
+        selectors::ChipletActiveFlags,
     },
     columns::{ChipletCols, CoreCols},
     decoder::columns::DecoderCols,
@@ -35,7 +38,7 @@ pub use constraints::{
     stack::columns::StackCols,
     system::columns::SystemCols,
 };
-pub use execution_trace::{ChipletsLengths, TraceLenSummary, VmTrace};
+pub use execution_trace::{ChipletsLengths, TraceLenSummary, TraceLenSummaryError, VmTrace};
 pub use inputs::{NUM_PUBLIC_VALUES, PublicInputs};
 pub use miden_core::{
     Felt,

@@ -10,7 +10,8 @@ use super::{
     OpFlags, generate_test_row,
 };
 
-// Valid interpolation slots that do not currently map to an `Operation`.
+// Unused opcode slots. The decoder rejects both; the route table still describes the flags their
+// bit patterns raise.
 const UNUSED_DEGREE_7_LEFT_SHIFT_ROUTE_OPCODE: u8 = 47;
 const UNUSED_DEGREE_5_REJECTED_OPCODE: u8 = 95;
 

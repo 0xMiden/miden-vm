@@ -62,12 +62,12 @@ pub const COLLISION_RESISTANCE: u32 = HashFunction::Eidos.collision_resistance()
 pub const SECURITY_CAP: u64 = deployed_instance(0).cap();
 
 /// Q16 upper bound on the log2 of the lookup round's error coefficient.
-pub const LOOKUP_COEFFICIENT: u64 = fixed::ceil_log2(
+pub(crate) const LOOKUP_COEFFICIENT: u64 = fixed::ceil_log2(
     (LOOKUP_SHAPE.max_message_width as u64 + 2) * LOOKUP_SHAPE.fractions_per_row as u64,
 );
 
 /// Q16 upper bound on the log2 of the constraint-composition round's error coefficient.
-pub const COMPOSITION_COEFFICIENT: u64 =
+pub(crate) const COMPOSITION_COEFFICIENT: u64 =
     fixed::ceil_log2(AIR_SHAPE.num_composed_constraints as u64);
 
 /// Q16 upper bound on the log2 of the out-of-domain round's error coefficient.
@@ -82,7 +82,7 @@ pub const OOD_COEFFICIENT: u64 =
     fixed::ceil_log2(AIR_SHAPE.max_constraint_degree as u64 + AIR_SHAPE.max_combo as u64);
 
 /// Q16 upper bound on the log2 of the DEEP round's error coefficient.
-pub const DEEP_COEFFICIENT: u64 = fixed::ceil_log2(match AIR_SHAPE.num_deep_terms {
+pub(crate) const DEEP_COEFFICIENT: u64 = fixed::ceil_log2(match AIR_SHAPE.num_deep_terms {
     Some(n) => n as u64,
     None => 0,
 });
@@ -137,6 +137,8 @@ const fn deployed_instance(log_max_height: u32) -> InstanceShape {
 pub const LOG2_E: u64 = fixed::LOG2_E;
 
 /// Number of lookup fractions `emit_core_boundary` emits unconditionally: the block-hash seed and
-/// the two log-deferred-root terminals. Matches `sys::vm::mod.masm`'s
-/// `CORE_BOUNDARY_LOOKUP_TERMS`.
+/// the two log-deferred-root terminals.
 pub const CORE_BOUNDARY_LOOKUP_TERMS: u32 = 3;
+
+/// Number of lookup fractions contributed by the fixed boundary messages.
+pub const FIXED_LOOKUP_ERROR_TERMS: u32 = CORE_BOUNDARY_LOOKUP_TERMS;

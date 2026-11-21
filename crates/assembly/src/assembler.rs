@@ -170,7 +170,7 @@ pub struct Assembler {
     /// Whether to treat warning diagnostics as errors
     warnings_as_errors: bool,
     /// Whether to preserve debug information in the assembled artifact.
-    pub(super) emit_debug_info: bool,
+    emit_debug_info: bool,
     /// Whether to trim source file paths in debug information.
     pub(super) trim_paths: bool,
 }
@@ -1231,9 +1231,9 @@ impl Assembler {
                     let pctx = ProcedureContext::new(
                         procedure_gid,
                         is_program_entrypoint,
-                        path.clone(),
+                        path,
                         proc.visibility(),
-                        signature.clone(),
+                        signature,
                         module_kind.is_kernel(),
                         self.source_manager.clone(),
                     )

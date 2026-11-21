@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{Algebra, BasedVectorSpace, PrimeCharacteristicRing};
 use miden_stark::air::{
-    AirBuilder, ExtensionBuilder, LiftedAir, PermutationAirBuilder, RowWindow,
-    symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpr},
+    AirBuilder, EvalInputs, ExtensionBuilder, LiftedAir, PermutationAirBuilder, RowWindow,
+    symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpr, eval_air},
 };
 use p3_field::{PackedField, PackedValue};
 
@@ -16,7 +16,7 @@ use crate::ir::{Class, Graph, Leaf, Node, OpKind};
 /// uses the builder's symbolic degree rules independently of the optimizer IR.
 pub fn constraint_degrees<A: LiftedAir<Felt, QuadFelt>>(air: &A) -> [Vec<usize>; 2] {
     let mut builder = SymbolicAirBuilder::<Felt>::new(air.air_layout());
-    air.eval(&mut builder);
+    eval_air(air, &mut builder);
     [
         builder.base_constraints().iter().map(SymbolicExpr::degree_multiple).collect(),
         builder
@@ -213,10 +213,10 @@ pub struct EvaluationBuilder<'a, P, PE> {
     preprocessed: RowWindow<'a, P>,
     aux: RowWindow<'a, PE>,
     inputs: &'a EvaluationInputs<P, PE>,
-    pub base_constraints: Vec<P>,
-    pub ext_constraints: Vec<PE>,
-    pub base_indices: Vec<usize>,
-    pub ext_indices: Vec<usize>,
+    pub(crate) base_constraints: Vec<P>,
+    pub(crate) ext_constraints: Vec<PE>,
+    pub(crate) base_indices: Vec<usize>,
+    pub(crate) ext_indices: Vec<usize>,
 }
 
 impl<P, PE> EvaluationBuilder<'_, P, PE> {
@@ -299,7 +299,7 @@ where
     }
 }
 
-/// Compare real scalar and packed evaluations with independently captured graph values,
+/// Compare scalar/SIMD evaluations with independently captured graph values,
 /// including global assertion order and class. Packed lanes receive distinct full-field inputs.
 pub fn assert_concrete_evaluation<A: LiftedAir<Felt, QuadFelt>>(
     air: &A,
@@ -310,13 +310,24 @@ pub fn assert_concrete_evaluation<A: LiftedAir<Felt, QuadFelt>>(
     type P = <Felt as miden_crypto::field::Field>::Packing;
     type PE = <QuadFelt as miden_crypto::field::ExtensionField<Felt>>::ExtensionPacking;
     let scalar_inputs = EvaluationInputs::<Felt, QuadFelt>::new(air.air_layout(), seed);
+    let packed_inputs = EvaluationInputs::<P, PE>::new(air.air_layout(), seed);
     let mut scalar = scalar_inputs.builder();
-    air.eval(&mut scalar);
+    let data = air.prepare(EvalInputs {
+        public_values: &scalar_inputs.public,
+        challenges: &scalar_inputs.challenges,
+        aux_values: &scalar_inputs.values,
+    });
+    air.eval(&mut scalar, &data);
     assert_eq!(scalar.base_indices, captured.base_global_indices);
     assert_eq!(scalar.ext_indices, captured.ext_global_indices);
-    let packed_inputs = EvaluationInputs::<P, PE>::new(air.air_layout(), seed);
     let mut packed = packed_inputs.builder();
-    air.eval(&mut packed);
+    let public: Vec<P> = packed_inputs.public.iter().copied().map(P::broadcast).collect();
+    let data = air.prepare(EvalInputs {
+        public_values: &public,
+        challenges: &packed_inputs.challenges,
+        aux_values: &packed_inputs.values,
+    });
+    air.eval(&mut packed, &data);
     assert_eq!(packed.base_indices, captured.base_global_indices);
     assert_eq!(packed.ext_indices, captured.ext_global_indices);
     for lane in 0..P::WIDTH {
@@ -356,8 +367,8 @@ pub fn assert_concrete_evaluation<A: LiftedAir<Felt, QuadFelt>>(
     }
 }
 
-/// Times scalar and packed field evaluation with reused input/output allocations.
-/// Build in release mode; input generation and graph capture are outside the timed region.
+/// Times scalar and packed row evaluation with prepared data and reused input/output allocations.
+/// Build in release mode; preparation, input generation and graph capture are outside the timer.
 pub fn time_evaluation<A: LiftedAir<Felt, QuadFelt>>(
     air: &A,
     iterations: usize,
@@ -370,11 +381,17 @@ pub fn time_evaluation<A: LiftedAir<Felt, QuadFelt>>(
     {
         let inputs = EvaluationInputs::<P, PE>::new(air.air_layout(), 0x243f6a8885a308d3);
         let mut builder = inputs.builder();
-        air.eval(&mut builder);
+        let public: Vec<P> = inputs.public.iter().copied().map(P::broadcast).collect();
+        let data = air.prepare(EvalInputs {
+            public_values: &public,
+            challenges: &inputs.challenges,
+            aux_values: &inputs.values,
+        });
+        air.eval(&mut builder, &data);
         let start = std::time::Instant::now();
         for _ in 0..iterations {
             builder.clear();
-            air.eval(std::hint::black_box(&mut builder));
+            air.eval(std::hint::black_box(&mut builder), &data);
             std::hint::black_box((&builder.base_constraints, &builder.ext_constraints));
         }
         start.elapsed()

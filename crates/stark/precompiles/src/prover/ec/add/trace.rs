@@ -48,7 +48,7 @@ pub(crate) enum EcAddCase {
 
 impl EcAddCase {
     /// The `(pai_p, pai_q, cancel, double, generic)` flag cells.
-    pub(crate) fn flags(self) -> [bool; 5] {
+    fn flags(self) -> [bool; 5] {
         match self {
             Self::PaiP => [true, false, false, false, false],
             Self::PaiQ => [false, true, false, false, false],
@@ -110,17 +110,12 @@ pub(crate) struct EcAddOp {
 pub struct EcAddRequires {
     /// `(op, provide mult)` in first-recorded order; mult 0 = dormant
     /// (no `EcGroupAdd` consumer yet — until the MSM / DAG layer lands).
-    pub(crate) ops: Vec<(EcAddOp, ProvideMult)>,
+    ops: Vec<(EcAddOp, ProvideMult)>,
     /// Relation identity `(group, p, q)` → index into `ops`.
     dedup: BTreeMap<(EcGroupPtr, EcPointPtr, EcPointPtr), usize>,
 }
 
 impl EcAddRequires {
-    #[cfg(test)]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub(crate) fn trace_height(&self) -> Option<usize> {
         self.ops.len().max(1).checked_mul(PERIOD)?.checked_next_power_of_two()
     }

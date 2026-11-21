@@ -13,7 +13,7 @@ impl Ed25519Scalar {
     pub const ID: Felt = Felt::new_unchecked(5);
 
     /// Prime subgroup order `l`, little-endian u32 limbs.
-    pub const MODULUS: Limbs = [
+    pub(crate) const MODULUS: Limbs = [
         0x5cf5_d3ed,
         0x5812_631a,
         0xa2f7_9cd6,

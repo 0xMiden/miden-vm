@@ -18,13 +18,15 @@
 //! observes the derived instance count and those heights at the protocol layer.
 //! Callers must not pre-observe them.
 //!
-//! # Statement-bound trace heights
+//! # Trace heights
 //!
-//! The verifier accepts whatever trace heights the proof carries; it never
-//! compares them against a caller-supplied expectation. If your statement
-//! fixes the trace size (e.g. a proof for a 2^16-row execution), parse it
-//! with [`StarkProof::from_data`](crate::proof::StarkProof::from_data) using the same
-//! [`VerifierInstance`], and check `proof.log_trace_heights()` yourself.
+//! All trace heights must satisfy the protocol's shape checks. An AIR's main trace must also match
+//! the fixed native height of its preprocessed trace, when present, as declared by
+//! [`LiftedAir::log_preprocessed_height`].
+//!
+//! Applications that additionally require a specific trace size must check
+//! [`StarkProofData::log_trace_heights`] against that requirement alongside successful
+//! verification.
 //!
 //! # Transcript boundaries (strict consumption)
 //!
@@ -138,7 +140,7 @@ where
     }
 
     /// Borrow the preprocessed commitment, if any.
-    pub fn preprocessed_commitment(&self) -> Option<&<SC::Lmcs as Lmcs>::Commitment> {
+    pub(crate) fn preprocessed_commitment(&self) -> Option<&<SC::Lmcs as Lmcs>::Commitment> {
         self.preprocessed_commitment.as_ref()
     }
 }
@@ -222,7 +224,7 @@ pub enum VerifierError {
 ///
 /// ## Trusted (NOT validated)
 /// - AIR structural shape (same list as in [`prove`](crate::ProverInstance::prove))
-pub(crate) fn verify<F, EF, MA, SC>(
+fn verify<F, EF, MA, SC>(
     instance: &VerifierInstance<'_, F, EF, MA, SC>,
     proof: &StarkProofData<F, EF, SC>,
     mut challenger: SC::Challenger,
@@ -241,7 +243,7 @@ where
     // `TraceOrder::from_log_heights` validates the (untrusted) proof heights
     // against the AIRs: it bounds `log_h` within the host's `usize` width
     // (later code dereferences `1usize << log_h` and would otherwise overflow on
-    // a malicious proof) and checks per-AIR periodic-height feasibility.
+    // a malicious proof) and checks per-AIR periodic lengths and fixed preprocessing heights.
     // Statement::new already enforced the input-side contracts before construction.
     let trace_order = TraceOrder::from_log_heights::<F, EF, _>(
         statement.airs(),
@@ -478,7 +480,14 @@ where
 
         #[cfg(debug_assertions)]
         crate::air::debug::check_builder_shape(*air, &folder);
-        air.eval(&mut folder);
+        let public_values: Vec<EF> =
+            air_inputs[instance_idx].iter().copied().map(EF::from).collect();
+        let data = air.prepare(crate::air::EvalInputs {
+            public_values: &public_values,
+            challenges: &randomness[..num_rand],
+            aux_values: aux_values_j,
+        });
+        air.eval(&mut folder, &data);
 
         // Accumulate: acc = acc * beta + folded_j
         accumulated = accumulated * beta + folder.accumulator;

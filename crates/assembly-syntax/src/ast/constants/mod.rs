@@ -51,7 +51,7 @@ impl Constant {
     }
 
     /// Returns the documentation associated with this item.
-    pub fn docs(&self) -> Option<Span<&str>> {
+    pub(crate) fn docs(&self) -> Option<Span<&str>> {
         self.docs.as_ref().map(|docstring| docstring.as_spanned_str())
     }
 

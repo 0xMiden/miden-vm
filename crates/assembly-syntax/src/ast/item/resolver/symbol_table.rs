@@ -183,7 +183,7 @@ impl LocalSymbolTable {
                     "duplicate symbol '{name}' reached local resolver construction (previous={prev:?}, current={id:?})"
                 );
             } else {
-                symbols.insert(name.clone(), id);
+                symbols.insert(name, id);
             }
             items.push(symbol);
         }

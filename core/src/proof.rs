@@ -28,17 +28,17 @@ const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
 
 /// The recursive VM verifier root declared by proofs from the current prover.
 pub const CURRENT_VM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(2540371365325371670),
-    crate::Felt::new_unchecked(3570678579590236003),
-    crate::Felt::new_unchecked(8749031741072791721),
-    crate::Felt::new_unchecked(1328348911100443505),
+    crate::Felt::new_unchecked(3223954665599901117),
+    crate::Felt::new_unchecked(8073916412432927369),
+    crate::Felt::new_unchecked(9007241368715754818),
+    crate::Felt::new_unchecked(8246585383530848516),
 ]);
 /// The recursive precompile verifier root declared by proofs from the current prover.
 pub const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(7107144425070209002),
-    crate::Felt::new_unchecked(3878108566258647521),
-    crate::Felt::new_unchecked(6191699580199477240),
-    crate::Felt::new_unchecked(3714974346477231786),
+    crate::Felt::new_unchecked(7173065334209775922),
+    crate::Felt::new_unchecked(7216367738407047901),
+    crate::Felt::new_unchecked(3647559246820275399),
+    crate::Felt::new_unchecked(5457102007388138413),
 ]);
 
 // HASH FUNCTION
@@ -76,7 +76,7 @@ impl HashFunction {
 #[derive(Debug, thiserror::Error)]
 #[error("invalid hash function '{hash_function}'. Valid options are: blake3-256, keccak, eidos")]
 pub struct InvalidHashFunctionError {
-    pub hash_function: String,
+    pub(crate) hash_function: String,
 }
 
 impl TryFrom<u8> for HashFunction {

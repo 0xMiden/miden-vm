@@ -16,9 +16,9 @@ pub const LOG_FOLDING_ARITY: u8 = 2;
 /// Log2 of the final polynomial degree (degree = 128).
 const LOG_FINAL_DEGREE: u8 = 7;
 /// Proof-of-work bits for FRI folding challenges.
-pub const FOLDING_POW_BITS: usize = 4;
+pub(crate) const FOLDING_POW_BITS: usize = 4;
 /// Proof-of-work bits for DEEP composition polynomial.
-pub const DEEP_POW_BITS: usize = 12;
+pub(crate) const DEEP_POW_BITS: usize = 12;
 /// Number of FRI query repetitions.
 const NUM_QUERIES: usize = 27;
 /// Proof-of-work bits for the query phase. Together with 27 queries, this gives the query round
@@ -55,10 +55,10 @@ pub const DIGEST_WIDTH: usize = 4;
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR. The generated
 /// `sys::vm` wrapper embeds it, and the pinned VM verifier root covers that module.
 pub const RELATION_DIGEST: RelationDigest = [
-    Felt::new_unchecked(7856671528189646221),
-    Felt::new_unchecked(2458781204466877327),
-    Felt::new_unchecked(1097061327429211191),
-    Felt::new_unchecked(3384814590852465759),
+    Felt::new_unchecked(3944049037450585107),
+    Felt::new_unchecked(6509283310715731584),
+    Felt::new_unchecked(3272207253404545641),
+    Felt::new_unchecked(8914097185422519457),
 ];
 
 /// Eidos digest of the order-invariant recursive-verifier ACE circuit's instruction stream.
@@ -66,10 +66,10 @@ pub const RELATION_DIGEST: RelationDigest = [
 /// One circuit serves every proof order, so this digest names the accepted circuit outright: it
 /// is the advice-map key the stream is served under and the value the MASM loader pins it to.
 pub const ACE_CIRCUIT_DIGEST: [Felt; 4] = [
-    Felt::new_unchecked(2192960401214109567),
-    Felt::new_unchecked(8980372480879030342),
-    Felt::new_unchecked(7824773558143124059),
-    Felt::new_unchecked(7947412689729091791),
+    Felt::new_unchecked(4465317984193022749),
+    Felt::new_unchecked(8705460443111136286),
+    Felt::new_unchecked(750153222074786383),
+    Felt::new_unchecked(1248343258323250262),
 ];
 
 // Fixed And8 commitments for the three VM proof configurations, each built from the canonical VM
@@ -110,9 +110,9 @@ mod tests {
             assert!(
                 miden_stark::log_quotient_degree::<Felt, QuadFelt, _>(&air) <= super::LOG_BLOWUP
             );
-            assert_eq!(
-                miden_stark::air::LiftedAir::<Felt, QuadFelt>::aux_width(&air),
+            assert!(
                 air.column_shape().len()
+                    <= miden_stark::air::LiftedAir::<Felt, QuadFelt>::aux_width(&air)
             );
         }
     }

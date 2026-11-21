@@ -9,7 +9,7 @@ use miden_stark::lookup::{
 };
 
 use super::{
-    algebra::{pack_pair, pack_u32_le, universal_cv_word, xor_from_and},
+    algebra::{footer_cv_word, footer_message_word, pack_pair, pack_u32_le, xor_from_and},
     layout::*,
     selectors::EidosCompressionSelectors,
 };
@@ -38,13 +38,6 @@ struct FooterInputMsg<E> {
     tail: [E; 4],
 }
 
-/// Cycle-tagged internal relation carrying all eight raw chaining-value words atomically.
-#[derive(Debug)]
-struct FullCvMsg<E> {
-    compression_cycle_id: E,
-    words: [E; 8],
-}
-
 impl<E, EF> LookupMessage<E, EF> for FooterInputMsg<E>
 where
     E: PrimeCharacteristicRing,
@@ -65,33 +58,19 @@ where
     }
 }
 
-impl<E, EF> LookupMessage<E, EF> for FullCvMsg<E>
-where
-    E: PrimeCharacteristicRing,
-    EF: Algebra<E>,
-{
-    fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let fields: [E; 9] = core::array::from_fn(|idx| {
-            if idx == 0 {
-                self.compression_cycle_id.clone()
-            } else {
-                self.words[idx - 1].clone()
-            }
-        });
-        challenges.encode(BusId::EidosCompressionInputCv as usize, fields)
-    }
-}
-
 /// Number of lookup fractions grouped into each Eidos compression auxiliary column.
-pub(crate) const EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE: [usize; AUX_COLS] = [2; AUX_COLS];
+pub(crate) const EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = {
+    let mut shape = [2; NUM_LOGUP_COLS];
+    shape[FOOTER_INPUT_COLUMN] = 1;
+    shape
+};
 
-pub(crate) const FOOTER_INPUT_COLUMN: usize = 18;
-pub(crate) const FOOTER_OUTPUT_COLUMN: usize = 19;
+pub(crate) const FOOTER_INPUT_COLUMN: usize = NARROW_AUX_COLS;
+pub(crate) const FOOTER_OUTPUT_COLUMN: usize = FOOTER_INPUT_COLUMN + 1;
 
 const _: () = assert!(FOOTER_INPUT_COLUMN == NARROW_BATCH_COLUMNS);
-const _: () = assert!(FOOTER_OUTPUT_COLUMN == FOOTER_INPUT_COLUMN + 1);
 
-const FOOTER_INPUT_DEG: Deg = Deg { v: 3, u: 2 };
+const FOOTER_INPUT_DEG: Deg = Deg { v: 2, u: 1 };
 const FOOTER_OUTPUT_BATCH2_DEG: Deg = Deg { v: 3, u: 2 };
 
 fn mvm_relation_bus(relation: eidos_lookup::BytePairRelation) -> usize {
@@ -101,7 +80,6 @@ fn mvm_relation_bus(relation: eidos_lookup::BytePairRelation) -> usize {
 const MVM_NARROW_LOOKUP_CONFIG: NarrowLookupConfig = NarrowLookupConfig {
     relation_bus: mvm_relation_bus,
     range_check_bus: BusId::RangeCheck as usize,
-    message_word_bus: BusId::EidosCompressionMessageWord as usize,
     table_multiplicity_sign: LookupMultiplicitySign::Negative,
     xor_expression: XorExpression::DoubleAnd,
     pair_name: "narrow_pair",
@@ -135,56 +113,28 @@ pub(crate) fn emit_lookup_columns<LB>(
                     "eidos_compression",
                     |group| match aux_col {
                         FOOTER_INPUT_COLUMN => {
-                            // The linear CV and external-input denominators are batched with
-                            // degree-one and degree-two multiplicities, giving degree two for U
-                            // and degree three for V. The external-input denominator remains in
-                            // the cross product when its multiplicity is zero; its unit alpha
-                            // coefficient prevents an identically zero cancellation. The
-                            // inactive-row constraint pins this column when both multiplicities are
-                            // zero.
                             let mode = LB::Expr::from(local.columns[F_MODE_COL]);
-                            let is_f3 = selectors.is_footer_row(FOOTER_ROWS - 1);
-                            let cv_multiplicity = is_f3.clone() - selectors.is_first_fused();
-                            let input_multiplicity = -is_f3
+                            let input_multiplicity = -selectors.is_footer_row(FOOTER_ROWS - 1)
                                 * (LB::Expr::from(local.columns[F_COMPRESSION_MULTIPLICITY_COL])
                                     + mode.clone());
-                            group.batch(
-                                "full_cv_and_external_input",
+                            group.insert(
+                                "compression_or_aead_input",
                                 LB::Expr::ONE,
-                                |batch| {
-                                    batch.insert(
-                                        "full_cv",
-                                        cv_multiplicity,
-                                        FullCvMsg {
-                                            compression_cycle_id: LB::Expr::from(
-                                                local.columns[F_COMPRESSION_CYCLE_ID_COL],
-                                            ),
-                                            words: core::array::from_fn(|idx| {
-                                                cv_word::<LB>(local, idx)
-                                            }),
-                                        },
-                                        Deg { v: 1, u: 1 },
-                                    );
-                                    batch.insert(
-                                        "compression_or_aead_input",
-                                        input_multiplicity,
-                                        FooterInputMsg {
-                                            mode,
-                                            block: footer_block::<LB>(local),
-                                            cv_in: core::array::from_fn(|idx| {
-                                                pack_pair(
-                                                    cv_word::<LB>(local, 2 * idx),
-                                                    cv_word::<LB>(local, 2 * idx + 1),
-                                                )
-                                            }),
-                                            tail: core::array::from_fn(|idx| {
-                                                LB::Expr::from(
-                                                    local.columns[footer_interface_tail_col(idx)],
-                                                )
-                                            }),
-                                        },
-                                        Deg { v: 2, u: 1 },
-                                    );
+                                input_multiplicity,
+                                || FooterInputMsg {
+                                    mode,
+                                    block: footer_block::<LB>(local),
+                                    cv_in: core::array::from_fn(|idx| {
+                                        pack_pair(
+                                            cv_word::<LB>(local, 2 * idx),
+                                            cv_word::<LB>(local, 2 * idx + 1),
+                                        )
+                                    }),
+                                    tail: core::array::from_fn(|idx| {
+                                        LB::Expr::from(
+                                            local.columns[footer_interface_tail_col(idx)],
+                                        )
+                                    }),
                                 },
                                 FOOTER_INPUT_DEG,
                             );
@@ -240,8 +190,8 @@ where
         } else {
             let pair = idx - 6;
             pack_pair(
-                LB::Expr::from(local.columns[footer_msg_word_col(2 * pair)]),
-                LB::Expr::from(local.columns[footer_msg_word_col(2 * pair + 1)]),
+                footer_message_word(|col| LB::Expr::from(local.columns[col]), 2 * pair),
+                footer_message_word(|col| LB::Expr::from(local.columns[col]), 2 * pair + 1),
             )
         }
     })
@@ -251,7 +201,7 @@ fn cv_word<LB>(local: &EidosCompressionCols<LB::Var>, idx: usize) -> LB::Expr
 where
     LB: LookupBuilder<F = Felt>,
 {
-    universal_cv_word(|col| LB::Expr::from(local.columns[col]), idx)
+    footer_cv_word(|col| LB::Expr::from(local.columns[col]), idx)
 }
 
 fn aead_output_pair_msg_for_current_footer<LB>(

@@ -559,14 +559,14 @@ mod tests {
 
         assert!(matches!(error.root(), PrecompileError::AssertionFailed));
         assert_eq!(state.get_canonical_digest(digest), None);
-        assert_eq!(state.execution_work.class(FIXTURE_WORK).unwrap().count(), 1);
+        assert_eq!(state.execution_work.class(&FIXTURE_WORK).unwrap().count(), 1);
         assert!(matches!(
             state.register(node),
             Err(PrecompileError::Limit(PrecompileLimitError::Count {
-                class: FIXTURE_WORK,
+                class,
                 actual: 2,
                 max: 1,
-            }))
+            })) if class == FIXTURE_WORK
         ));
     }
 
@@ -601,16 +601,16 @@ mod tests {
         assert!(matches!(
             error,
             PrecompileError::Limit(PrecompileLimitError::Count {
-                class: FIXTURE_WORK,
+                class,
                 actual: 1,
                 max: 0,
-            })
+            }) if class == FIXTURE_WORK
         ));
         assert!(matches!(
             state.register(node).unwrap_err().root(),
             PrecompileError::AssertionFailed
         ));
-        assert_eq!(state.execution_work.class(FIXTURE_WORK).unwrap().count(), 2);
+        assert_eq!(state.execution_work.class(&FIXTURE_WORK).unwrap().count(), 2);
     }
 
     #[test]

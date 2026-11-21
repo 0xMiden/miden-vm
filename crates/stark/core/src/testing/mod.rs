@@ -61,7 +61,7 @@ pub use crate::{
 ///
 /// Fixtures pick their own sizes, so an out-of-range pair is a programmer error
 /// rather than a recoverable condition; this wraps the validated
-/// [`LiftedDomain::try_canonical`] so tests and benches don't repeat the
+/// `try_canonical` so tests and benches don't repeat the
 /// `.expect(...)`.
 pub fn canonical_domain<F: TwoAdicField>(log_trace_height: u8, log_blowup: u8) -> LiftedDomain<F> {
     LiftedDomain::try_canonical(log_trace_height, log_blowup)

@@ -1,10 +1,11 @@
 use alloc::vec::Vec;
-use core::{
-    f64::consts::PI,
-    ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
-};
+#[cfg(test)]
+use core::f64::consts::PI;
+use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
-use num::{Float, One, Zero};
+#[cfg(test)]
+use num::Float;
+use num::{One, Zero};
 use num_complex::Complex64;
 
 use super::{Inverse, field::FalconFelt, polynomial::Polynomial};
@@ -78,10 +79,11 @@ where
         + Inverse,
 {
     /// Gets a primitive nth (with n a power of 2) root of unity.
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn primitive_root_of_unity(n: usize) -> Self;
 
     /// Computes the integer whose n-bit binary expansion is the reverse of that of the argument.
+    #[cfg(test)]
     fn bitreverse_index(arg: usize, n: usize) -> usize {
         assert!(n > 0);
         assert_eq!(n & (n - 1), 0);
@@ -98,7 +100,7 @@ where
 
     /// Computes the first n powers of a primitive 2n-th root of unity, and puts them in
     /// bit-reversed order.
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn bitreversed_powers(n: usize) -> Vec<Self> {
         let psi = Self::primitive_root_of_unity(2 * n);
         let mut array = vec![Self::zero(); n];
@@ -113,7 +115,7 @@ where
 
     /// Computes the first n powers of the inverse of a primitive 2n-th root of unity, and puts
     /// them in bit-reversed order.
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn bitreversed_powers_inverse(n: usize) -> Vec<Self> {
         let psi = Self::primitive_root_of_unity(2 * n).inverse_or_zero();
         let mut array = vec![Self::zero(); n];
@@ -128,6 +130,7 @@ where
 
     /// Reorders the given elements in the array by reversing the binary expansions of their
     /// indices.
+    #[cfg(test)]
     fn bitreverse_array<T>(array: &mut [T]) {
         let n = array.len();
         for i in 0..n {
@@ -269,6 +272,7 @@ where
 }
 
 impl CyclotomicFourier for Complex64 {
+    #[cfg(test)]
     fn primitive_root_of_unity(n: usize) -> Self {
         let angle = 2. * PI / (n as f64);
         Complex64::new(Float::cos(angle), Float::sin(angle))
@@ -276,6 +280,7 @@ impl CyclotomicFourier for Complex64 {
 
     /// Custom implementation of CyclotomicFourier::bitreversed_powers for
     /// better precision.
+    #[cfg(test)]
     fn bitreversed_powers(n: usize) -> Vec<Self> {
         let mut array = vec![Self::zero(); n];
         let half_circle = PI;
@@ -289,6 +294,7 @@ impl CyclotomicFourier for Complex64 {
 
     /// Custom implementation of CyclotomicFourier::bitreversed_powers_inverse
     /// for better precision.
+    #[cfg(test)]
     fn bitreversed_powers_inverse(n: usize) -> Vec<Self> {
         let mut array = vec![Self::zero(); n];
         let half_circle = PI;

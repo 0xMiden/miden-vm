@@ -7,6 +7,7 @@ use {
     HOOK_PROCESS_PUBLIC_INPUTS_PTR,
     HOOK_PROCESS_ROW_OOD_EVALUATIONS_PTR,
     NUM_QUERIES_PTR,
+    NUM_QUERIES_MAX,
     QUERY_POW_BITS_PTR,
     ROOT_UNITY,
 } from miden::core::stark::constants
@@ -15,7 +16,6 @@ use miden::core::stark::types
 # Accepted transcript-bound security-parameter envelope for the recursive verifier. These bounds
 # also define the domain over which its returned descriptor may be passed to the common estimator.
 const NUM_QUERIES_MIN = 7
-const NUM_QUERIES_MAX = 150
 const POW_BITS_MAX = 31
 
 #! Loads the proof's security parameters from advice into the generic verifier context.
@@ -31,6 +31,7 @@ pub proc load_security_params()
 end
 
 #! Compute the LDE domain generator from the log2 of its size.
+#! Requires log_domain_size in 1..=32.
 #!
 #! Input: [log2(domain_size), ..]
 #! Output: [domain_gen, ..]
@@ -49,6 +50,7 @@ end
 #!
 #! This mirrors `LiftedDomain::canonical_lde_shift(log_lde_order)` on the Rust side:
 #! `Felt::GENERATOR^(2^(TWO_ADICITY - log_lde_order))`.
+#! Requires log_domain_size in 1..=32.
 #!
 #! Input: [log2(domain_size), ..]
 #! Output: [domain_shift, ..]
@@ -113,7 +115,7 @@ end
 
 #! Stores digests of dynamically executed procedures.
 #!
-#! Input: [D0, D1, D2, D3, D4, ...]
+#! Input: [D0(4), D1(4), D2(4), D3(4), D4(4), ...]
 #! Output: [...]
 pub proc store_dynamically_executed_procedures(hooks: types::VerifierHooks)
     mem_storew_le.HOOK_OBSERVE_AUX_TRACE_PTR dropw

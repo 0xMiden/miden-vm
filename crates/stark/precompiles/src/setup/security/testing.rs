@@ -36,12 +36,14 @@ pub const BITS_PER_QUERY: u64 = fixed::bits_per_query(LOG_BLOWUP as u32, CHALLEN
 pub const SECURITY_CAP: u64 = deployed_instance(0).cap();
 
 /// Q16 upper bound on the log2 of the lookup round's error coefficient.
-pub const LOOKUP_COEFFICIENT: u64 = fixed::ceil_log2(
+#[cfg(test)]
+pub(crate) const LOOKUP_COEFFICIENT: u64 = fixed::ceil_log2(
     (LOOKUP_SHAPE.max_message_width as u64 + 2) * LOOKUP_SHAPE.fractions_per_row as u64,
 );
 
 /// Q16 upper bound on the log2 of the constraint-composition round's error coefficient.
-pub const COMPOSITION_COEFFICIENT: u64 =
+#[cfg(test)]
+pub(crate) const COMPOSITION_COEFFICIENT: u64 =
     fixed::ceil_log2(AIR_SHAPE.num_composed_constraints as u64);
 
 /// Q16 upper bound on the log2 of the out-of-domain round's error coefficient.
@@ -52,17 +54,19 @@ pub const COMPOSITION_COEFFICIENT: u64 =
 /// `(d + 2) * H` bounds for every trace height at or above `d - 1`. Dividing out `H` leaves this
 /// height-independent coefficient, so `OOD_BASE - log_max_height` stays a lower bound on the
 /// round.
-pub const OOD_COEFFICIENT: u64 =
+#[cfg(test)]
+pub(crate) const OOD_COEFFICIENT: u64 =
     fixed::ceil_log2(AIR_SHAPE.max_constraint_degree as u64 + AIR_SHAPE.max_combo as u64);
 
 /// Q16 upper bound on the log2 of the DEEP round's error coefficient.
-pub const DEEP_COEFFICIENT: u64 = fixed::ceil_log2(match AIR_SHAPE.num_deep_terms {
+#[cfg(test)]
+pub(crate) const DEEP_COEFFICIENT: u64 = fixed::ceil_log2(match AIR_SHAPE.num_deep_terms {
     Some(n) => n as u64,
     None => 0,
 });
 
 /// Q16 upper bound on the log2 of the FRI folding round's error coefficient.
-pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << LOG_FOLDING_ARITY) - 1));
+pub(crate) const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << LOG_FOLDING_ARITY) - 1));
 
 /// Lookup grinding applied before the lookup challenges are sampled.
 ///
@@ -71,18 +75,22 @@ pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << LOG_FOLDING_ARI
 pub const LOOKUP_POW_BITS: u32 = 0;
 
 /// The Eidos challenge-support bound less the lookup round's coefficient, in fixed point.
-pub const LOOKUP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - LOOKUP_COEFFICIENT;
+#[cfg(test)]
+pub(crate) const LOOKUP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - LOOKUP_COEFFICIENT;
 
 /// The Eidos challenge-support bound less the constraint-composition round's coefficient, in
 /// fixed point.
-pub const COMPOSITION_TERM: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - COMPOSITION_COEFFICIENT;
+#[cfg(test)]
+pub(crate) const COMPOSITION_TERM: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - COMPOSITION_COEFFICIENT;
 
 /// The Eidos challenge-support bound less the out-of-domain round's coefficient, in fixed
 /// point.
-pub const OOD_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - OOD_COEFFICIENT;
+#[cfg(test)]
+pub(crate) const OOD_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - OOD_COEFFICIENT;
 
 /// The Eidos challenge-support bound less the DEEP round's coefficient, in fixed point.
-pub const DEEP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - DEEP_COEFFICIENT;
+#[cfg(test)]
+pub(crate) const DEEP_BASE: u64 = EIDOS_CHALLENGE_SAMPLE_BITS - DEEP_COEFFICIENT;
 
 /// The Eidos challenge-support bound less the FRI folding round's coefficient and fixed
 /// blowup, in fixed point.
@@ -109,11 +117,11 @@ const fn deployed_instance(log_max_height: u32) -> InstanceShape {
 ///
 /// The generic lookup bound counts `fractions_per_row * 2^log_max_height` terms. The PVM boundary
 /// also adds one lookup fraction for every fixed `UintVal` and `EcGroup` message, for a total
-/// of [`super::FIXED_BOUNDARY_LOOKUP_TERMS`] additional terms per proof. These terms are not
+/// of [`super::FIXED_LOOKUP_ERROR_TERMS`] additional terms per proof. These terms are not
 /// included in the production AIR shape's per-row count, so their contribution is accounted for
 /// separately. Both divisions round up, which keeps the correction conservative.
 fn fixed_boundary_correction(log_max_height: u32) -> u64 {
-    let numerator = u64::from(super::FIXED_BOUNDARY_LOOKUP_TERMS) * LOG2_E;
+    let numerator = u64::from(super::FIXED_LOOKUP_ERROR_TERMS) * LOG2_E;
     numerator
         .div_ceil(LOOKUP_SHAPE.fractions_per_row as u64)
         .div_ceil(1u64 << log_max_height)

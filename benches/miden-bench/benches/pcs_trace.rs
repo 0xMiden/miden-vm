@@ -27,12 +27,15 @@ use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use tracing_subscriber::EnvFilter;
 
 fn main() {
+    let env_filter = match std::env::var("RUST_LOG") {
+        Ok(value) => EnvFilter::try_new(value).expect("invalid RUST_LOG"),
+        Err(std::env::VarError::NotPresent) => EnvFilter::new("debug,miden::vm::prove=trace"),
+        Err(error) => panic!("invalid RUST_LOG: {error}"),
+    };
     // Initialize tracing subscriber.
-    // Use RUST_LOG to control verbosity, e.g. RUST_LOG=debug for debug_span! events.
+    // Use RUST_LOG to override the prover phase tracing filter.
     tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")),
-        )
+        .with_env_filter(env_filter)
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
         .init();
 

@@ -1,4 +1,4 @@
-use super::{layout::*, periodic::*, schedule::fused_step_at};
+use super::{layout::*, periodic::*};
 
 #[test]
 fn periodic_columns_have_32_row_period() {
@@ -78,28 +78,5 @@ fn footer_selectors_are_disjoint_and_cover_footer_rows() {
         let expected = usize::from(row >= FOOTER_START) as u64;
         assert_eq!(total, expected, "row {row}");
         assert_eq!(columns[P_IS_FOOTER][row].as_canonical_u64(), expected, "row {row}");
-    }
-}
-
-#[test]
-fn sigma_periodic_columns_match_fused_schedule() {
-    let columns = get_periodic_column_values();
-    let sigma_cols = [P_SIGMA_MSG_0, P_SIGMA_MSG_1, P_SIGMA_MSG_2, P_SIGMA_MSG_3];
-
-    for (row, _) in columns[P_SIGMA_MSG_0].iter().enumerate().take(FUSED_G_ROWS) {
-        let step = fused_step_at(row).unwrap();
-        for g in 0..NUM_G {
-            assert_eq!(
-                columns[sigma_cols[g]][row].as_canonical_u64(),
-                step.message_indices[g] as u64,
-                "row {row}, lane {g}",
-            );
-        }
-    }
-
-    for (row, _) in columns[P_SIGMA_MSG_0].iter().enumerate().skip(FOOTER_START) {
-        for &col in &sigma_cols {
-            assert_eq!(columns[col][row].as_canonical_u64(), 0);
-        }
     }
 }

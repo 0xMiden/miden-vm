@@ -8,6 +8,7 @@ use super::{
     DIGEST_WIDTH, PACKED_LANES, PackedU32ChainingValue, domain::EidosDomain,
     domains::GenericFeltSequenceDomain, primitive::IV,
 };
+#[cfg(test)]
 use crate::Felt;
 
 pub(super) const GENERIC_FELT_TAG: u32 = GenericFeltSequenceDomain::TAG.as_u32();
@@ -45,6 +46,7 @@ pub(super) fn init_packed_u32_cv(tag: u32, params: [u32; 3]) -> PackedU32Chainin
 }
 
 #[inline]
+#[cfg(test)]
 pub(super) fn init_packed_cv(tag: u32, params: [u32; 3]) -> [[Felt; PACKED_LANES]; DIGEST_WIDTH] {
     init_u64_cv(tag, params).map(|value| [Felt::new_unchecked(value); PACKED_LANES])
 }

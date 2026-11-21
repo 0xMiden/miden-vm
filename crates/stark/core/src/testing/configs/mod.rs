@@ -6,7 +6,7 @@
 //! The common field types (`Felt`, `QuadFelt`, `PackedFelt`) are defined here
 //! and re-exported by each hash configuration module.
 
-use p3_field::{Field, extension::BinomialExtensionField};
+use p3_field::{ExtensionField, Field, extension::BinomialExtensionField};
 use p3_goldilocks::Goldilocks;
 
 /// Goldilocks base field.
@@ -17,6 +17,9 @@ pub type QuadFelt = BinomialExtensionField<Felt, 2>;
 
 /// Packed base field for SIMD operations.
 pub type PackedFelt = <Felt as Field>::Packing;
+
+/// Packed quadratic extension for SIMD operations.
+pub type PackedQuadFelt = <QuadFelt as ExtensionField<Felt>>::ExtensionPacking;
 
 pub mod goldilocks_blake3;
 pub mod goldilocks_blake3_192;

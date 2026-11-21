@@ -12,8 +12,8 @@ use super::handlers::{
     EventError, EventHandler, EventHandlerRegistry, TraceError, TraceHandler, TraceHandlerRegistry,
 };
 use crate::{
-    BaseHost, ExecutionError, LoadedMastForest, MastForestStore, MemMastForestStore,
-    ProcessorState, SyncHost, advice::AdviceMutation,
+    BaseHost, ExecutionError, LoadedMastForest, MastForestLoadError, MastForestStore,
+    MemMastForestStore, ProcessorState, SyncHost, advice::AdviceMutation,
 };
 
 // DEFAULT HOST IMPLEMENTATION
@@ -188,8 +188,11 @@ impl<S> SyncHost for DefaultHost<S>
 where
     S: SourceManager,
 {
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<LoadedMastForest> {
-        self.store.get(node_digest)
+    fn get_mast_forest(
+        &self,
+        node_digest: &Word,
+    ) -> Result<Option<LoadedMastForest>, MastForestLoadError> {
+        Ok(self.store.get(node_digest))
     }
 
     fn on_event(
@@ -240,8 +243,11 @@ impl BaseHost for NoopHost {
 
 impl SyncHost for NoopHost {
     #[inline(always)]
-    fn get_mast_forest(&self, _node_digest: &Word) -> Option<LoadedMastForest> {
-        None
+    fn get_mast_forest(
+        &self,
+        _node_digest: &Word,
+    ) -> Result<Option<LoadedMastForest>, MastForestLoadError> {
+        Ok(None)
     }
 
     #[inline(always)]
@@ -370,7 +376,7 @@ mod tests {
 
         assert!(is_registered(&host, "test::a"));
         assert!(is_registered(&host, "test::b"));
-        assert!(host.get_mast_forest(&procedure).is_some());
+        assert!(host.get_mast_forest(&procedure).unwrap().is_some());
     }
 
     #[test]
@@ -389,6 +395,9 @@ mod tests {
             "unexpected error: {err}"
         );
         assert!(!is_registered(&host, "test::a"), "the first handler must be rolled back");
-        assert!(host.get_mast_forest(&procedure).is_none(), "the forest must not be loaded");
+        assert!(
+            host.get_mast_forest(&procedure).unwrap().is_none(),
+            "the forest must not be loaded"
+        );
     }
 }

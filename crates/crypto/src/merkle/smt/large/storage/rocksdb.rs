@@ -1227,7 +1227,7 @@ pub struct RocksDbConfig {
     /// This cache stores frequently accessed data blocks in memory to improve read performance.
     /// Larger cache sizes generally improve read performance but consume more memory.
     /// Default: 1GB (1 << 30 bytes)
-    pub(crate) cache_size: usize,
+    cache_size: usize,
 
     /// The maximum number of files that RocksDB can have open simultaneously.
     ///
@@ -1237,10 +1237,10 @@ pub struct RocksDbConfig {
     pub(crate) max_open_files: i32,
 
     /// Optional per-DB write-buffer manager shared by this DB's column families.
-    pub(crate) write_buffer_manager: Option<RocksDbWriteBufferManagerBudget>,
+    write_buffer_manager: Option<RocksDbWriteBufferManagerBudget>,
 
     /// Tunable RocksDB profile values.
-    pub(crate) tuning_options: RocksDbTuningOptions,
+    tuning_options: RocksDbTuningOptions,
 
     /// Write durability mode for RocksDB write operations.
     pub(crate) durability_mode: RocksDbDurabilityMode,
