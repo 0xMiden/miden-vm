@@ -39,8 +39,8 @@ use crate::prover::{
     session::{
         EcNode, Session,
         strategies::{
-            glv_joint_wnaf_with_tables, joint_naf, joint_wnaf, straus, wnaf_msm, wnaf_table,
-            wnaf_table_endo,
+            glv_joint_wnaf_with_tables, joint_naf, joint_wnaf_with_tables, straus, wnaf_msm,
+            wnaf_table, wnaf_table_endo,
         },
     },
     tests::{SessionTracesTestExt, check_local, check_local_inputs, verify_deferred},
@@ -597,7 +597,7 @@ fn msm_joint_naf_proves() {
         .expect("joint_naf strategy round-trip must verify");
 }
 
-/// The **interleaved wNAF** strategy ([`joint_wnaf`], `w = 4`) on the same
+/// The **interleaved wNAF** strategy ([`joint_wnaf_with_tables`], `w = 4`) on the same
 /// claim `3·G + 5·Q = 13G` — one shared double-and-add ladder, each base
 /// adding its own (signed, sparse) wNAF digit. Reaches the same value as
 /// [`straus`] by a different chain (shared doublings, fewer adds); the GLV
@@ -616,7 +616,10 @@ fn msm_joint_wnaf_traces() -> crate::prover::session::SessionTraces {
     let q_pt = create(&mut s, qx, qy);
     let r_pt = create(&mut s, rx, ry);
 
-    let acc = joint_wnaf(&mut s, &[(g_pt, from_hex("3")), (q_pt, from_hex("5"))], 4);
+    let g_table = wnaf_table(&mut s, &g_pt, 4);
+    let q_table = wnaf_table(&mut s, &q_pt, 4);
+    let acc =
+        joint_wnaf_with_tables(&mut s, &[(&g_table, from_hex("3")), (&q_table, from_hex("5"))]);
     let s3 = s.uint_leaf(from_hex("3"), SN_PTR);
     let s5 = s.uint_leaf(from_hex("5"), SN_PTR);
     let value = s.ec_msm(acc, &[(g_pt, s3), (q_pt, s5)]);
@@ -636,7 +639,7 @@ fn msm_joint_wnaf_checks() {
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn msm_joint_wnaf_proves() {
     verify_deferred(&msm_joint_wnaf_traces().prove())
-        .expect("joint_wnaf strategy round-trip must verify");
+        .expect("joint wNAF strategy round-trip must verify");
 }
 
 /// Unit scalars put every base in one wNAF column, exposing term-list copying at large arity.
@@ -652,7 +655,10 @@ fn msm_joint_wnaf_unit_scalars(count: usize) -> crate::prover::session::SessionT
         terms.push((create(&mut s, x, y), U256::from(1u64)));
     }
     s.constrain_scalar_bound(&terms[0].0, SN_PTR);
-    let expr = joint_wnaf(&mut s, &terms, 2);
+    let tables: Vec<_> = terms.iter().map(|(point, _)| wnaf_table(&mut s, point, 2)).collect();
+    let table_terms: Vec<_> =
+        tables.iter().zip(&terms).map(|(table, &(_, scalar))| (table, scalar)).collect();
+    let expr = joint_wnaf_with_tables(&mut s, &table_terms);
     let one = s.uint_leaf(U256::from(1u64), SN_PTR);
     let claim_terms: Vec<_> = terms.iter().map(|(point, _)| (*point, one)).collect();
     let value = s.ec_msm(expr, &claim_terms);

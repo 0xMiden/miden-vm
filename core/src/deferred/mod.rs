@@ -160,7 +160,7 @@ impl PrecompileError {
         }
     }
 
-    pub(crate) fn with_precompile(name: &'static str, source: PrecompileError) -> Self {
+    fn with_precompile(name: &'static str, source: PrecompileError) -> Self {
         Self::Precompile { name, source: Box::new(source) }
     }
 }

@@ -151,7 +151,7 @@ where
 }
 
 /// Evaluate a base-field symbolic expression at concrete inputs.
-pub fn eval_base_expr<F, EF>(
+pub(crate) fn eval_base_expr<F, EF>(
     expr: &SymbolicExpression<F>,
     inputs: &[EF],
     layout: &InputLayout,
@@ -202,7 +202,7 @@ where
 }
 
 /// Evaluate an extension-field symbolic expression at concrete inputs.
-pub fn eval_ext_expr<F, EF>(
+pub(crate) fn eval_ext_expr<F, EF>(
     expr: &SymbolicExpressionExt<F, EF>,
     inputs: &[EF],
     layout: &InputLayout,

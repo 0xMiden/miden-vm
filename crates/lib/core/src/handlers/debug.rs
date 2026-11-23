@@ -58,7 +58,7 @@ const MAX_PRINT_MEM_RANGE: u64 = 1024;
 ///
 /// The default set prints operand-stack and memory state to stdout. Advice-stack and advice-map
 /// printers are excluded because they may expose witness data.
-pub fn default_debug_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
+pub(crate) fn default_debug_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
     let printer: Arc<dyn EventHandler> = Arc::new(DebugPrinter::default());
     vec![
         (PRINT_STACK_EVENT_NAME, printer.clone()),

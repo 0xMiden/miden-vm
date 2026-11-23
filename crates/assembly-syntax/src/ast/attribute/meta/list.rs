@@ -48,7 +48,7 @@ impl MetaList {
     }
 
     /// Get the name of this attribute as a string
-    pub fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         self.name.as_str()
     }
 

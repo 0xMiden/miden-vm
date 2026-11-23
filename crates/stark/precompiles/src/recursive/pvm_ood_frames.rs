@@ -77,12 +77,12 @@ impl PvmOodGeometry {
     }
 
     /// Felts in one out-of-domain row.
-    pub(crate) fn row_felts(&self) -> usize {
+    fn row_felts(&self) -> usize {
         self.query_row_felts() * EXT_DEGREE
     }
 
     /// `adv_pipe` blocks in one out-of-domain row.
-    pub(crate) fn row_blocks(&self) -> usize {
+    fn row_blocks(&self) -> usize {
         self.row_felts() / ADV_PIPE_BLOCK_FELTS
     }
 
@@ -180,7 +180,7 @@ mod tests {
     const HOOK_PATH: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/../../lib/core/asm/sys/pvm/ood_frames.masm");
 
-    pub(crate) fn live_geometry() -> PvmOodGeometry {
+    fn live_geometry() -> PvmOodGeometry {
         let captured = CapturedPvmRelation::new().expect("captured PVM relation");
         let compiled = captured.compile().expect("compiled PVM relation");
         let canonical = compiled.build_circuit(LayoutKind::Masm).expect("PVM canonical circuit");

@@ -328,8 +328,8 @@ impl<F: TwoAdicField> Coset<F> for TwoAdicCoset<F> {
 /// `g·K_max`.
 ///
 /// **Single home of `F::GENERATOR` in this crate** — exposed via
-/// [`LiftedDomain::canonical_lde_shift`] and used internally by
-/// [`LiftedDomain::try_canonical`] and [`LiftedDomain::try_sub_domain`].
+/// `canonical_lde_shift` and used internally by `try_canonical` and
+/// [`LiftedDomain::try_sub_domain`].
 ///
 /// # Invariants
 ///
@@ -357,7 +357,7 @@ impl<F: TwoAdicField> LiftedDomain<F> {
     ///
     /// Single source of `F::GENERATOR` in this crate.
     #[inline]
-    pub fn canonical_lde_shift(log_lde_order: u8) -> Option<F> {
+    pub(crate) fn canonical_lde_shift(log_lde_order: u8) -> Option<F> {
         let exp = F::TWO_ADICITY.checked_sub(log_lde_order as usize)?;
         Some(F::GENERATOR.exp_power_of_2(exp))
     }
@@ -384,7 +384,7 @@ impl<F: TwoAdicField> LiftedDomain<F> {
     /// overflow guard). Fixtures with statically valid sizes use the
     /// `testing::canonical_domain` helper.
     #[inline]
-    pub fn try_canonical(log_trace_height: u8, log_blowup: u8) -> Result<Self, DomainError> {
+    pub(crate) fn try_canonical(log_trace_height: u8, log_blowup: u8) -> Result<Self, DomainError> {
         let log_lde_order = log_trace_height as usize + log_blowup as usize;
         let bound = F::TWO_ADICITY.min((usize::BITS - 1) as usize);
         if log_lde_order > bound {
@@ -462,7 +462,7 @@ impl<F: TwoAdicField> LiftedDomain<F> {
 
     /// Log₂ of the blowup factor for this matrix: `log_lde_height − log_trace_height`.
     #[inline]
-    pub fn log_blowup(&self) -> u8 {
+    pub(crate) fn log_blowup(&self) -> u8 {
         self.log_lde_height() - self.log_trace_height()
     }
 

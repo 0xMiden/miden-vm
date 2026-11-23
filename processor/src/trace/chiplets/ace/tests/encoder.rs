@@ -13,7 +13,7 @@ pub enum EncodingError {
 /// An `EncodedCircuit` represents a `Circuit` as a list of field elements, containing both
 /// constants and instructions.
 #[derive(Clone, Debug)]
-pub struct EncodedCircuit {
+pub(crate) struct EncodedCircuit {
     num_vars: usize,
     num_eval: usize,
     encoded_circuit: Vec<Felt>,
@@ -25,20 +25,20 @@ impl EncodedCircuit {
         Self { num_vars, num_eval, encoded_circuit }
     }
 
-    pub fn num_vars(&self) -> usize {
+    pub(crate) fn num_vars(&self) -> usize {
         self.num_vars
     }
 
-    pub fn num_eval(&self) -> usize {
+    pub(crate) fn num_eval(&self) -> usize {
         self.num_eval
     }
 
-    pub fn encoded_circuit(&self) -> &[Felt] {
+    pub(crate) fn encoded_circuit(&self) -> &[Felt] {
         &self.encoded_circuit
     }
 
     /// Returns the number of constants in the circuit.
-    pub fn num_constants(&self) -> usize {
+    pub(crate) fn num_constants(&self) -> usize {
         (self.encoded_circuit.len() - self.num_eval) / 2
     }
 
@@ -61,7 +61,7 @@ impl EncodedCircuit {
     ///
     /// 1. the circuit is not in the right format (i.e. the instructions are not properly ordered).
     /// 2. The number of nodes exceeds `MAX_ID`.
-    pub fn try_from_circuit(circuit: &Circuit) -> Result<Self, EncodingError> {
+    pub(crate) fn try_from_circuit(circuit: &Circuit) -> Result<Self, EncodingError> {
         // Get the layout of the padded circuit
         let layout = circuit.layout().padded();
 
@@ -119,7 +119,10 @@ impl EncodedCircuit {
     /// `[ id_l (30 bits) || id_r (30 bits) || op (2 bits) ]`,
     /// where `id_{l, r}` are is the index of the node in the graph, reversed
     /// with regard to the total number of nodes.
-    pub fn encode_instruction(instruction: &Instruction, layout: &CircuitLayout) -> Option<Felt> {
+    pub(crate) fn encode_instruction(
+        instruction: &Instruction,
+        layout: &CircuitLayout,
+    ) -> Option<Felt> {
         if layout.num_nodes() > MAX_ID as usize {
             return None;
         }

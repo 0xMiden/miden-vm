@@ -14,7 +14,7 @@ use crate::handlers::u64_to_u32_elements;
 const M: u64 = 12289;
 
 /// Event name for the falcon_div operation.
-pub const FALCON_DIV_EVENT_NAME: EventName =
+pub(crate) const FALCON_DIV_EVENT_NAME: EventName =
     EventName::new("miden::core::crypto::dsa::falcon512_eidos::falcon_div");
 
 /// FALCON_DIV system event handler.
@@ -36,7 +36,9 @@ pub const FALCON_DIV_EVENT_NAME: EventName =
 /// # Errors
 ///
 /// - Returns an error if either a0 or a1 is not a u32.
-pub fn handle_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+pub(crate) fn handle_falcon_div(
+    process: &ProcessorState,
+) -> Result<Vec<AdviceMutation>, EventError> {
     let dividend_lo = process.get_stack_item(1).as_canonical_u64();
     let dividend_hi = process.get_stack_item(2).as_canonical_u64();
 

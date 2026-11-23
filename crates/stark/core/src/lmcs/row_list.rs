@@ -28,7 +28,7 @@ impl<T> RowList<T> {
     /// # Panics
     ///
     /// Panics if `widths.iter().sum() != elems.len()`.
-    pub fn new(elems: Vec<T>, widths: Vec<usize>) -> Self {
+    pub(crate) fn new(elems: Vec<T>, widths: Vec<usize>) -> Self {
         let expected: usize = widths.iter().sum();
         assert_eq!(
             elems.len(),
@@ -43,7 +43,7 @@ impl<T> RowList<T> {
     /// Build a `RowList` from an iterator of row-like items.
     ///
     /// Accepts anything convertible to `&[T]`: owned `Vec<T>`, `&Vec<T>`, `&[T]`, `Cow`, etc.
-    pub fn from_rows<R: AsRef<[T]>>(rows: impl IntoIterator<Item = R>) -> Self
+    pub(crate) fn from_rows<R: AsRef<[T]>>(rows: impl IntoIterator<Item = R>) -> Self
     where
         T: Clone,
     {
@@ -59,7 +59,7 @@ impl<T> RowList<T> {
 
     /// Contiguous element slice.
     #[inline]
-    pub fn as_slice(&self) -> &[T] {
+    pub(crate) fn as_slice(&self) -> &[T] {
         &self.elems
     }
 
@@ -74,12 +74,13 @@ impl<T> RowList<T> {
 
     /// Number of rows.
     #[inline]
-    pub fn num_rows(&self) -> usize {
+    #[cfg(test)]
+    pub(crate) fn num_rows(&self) -> usize {
         self.widths.len()
     }
 
     /// Iterate over rows as slices.
-    pub fn iter_rows(&self) -> impl DoubleEndedIterator<Item = &[T]> {
+    pub(crate) fn iter_rows(&self) -> impl DoubleEndedIterator<Item = &[T]> {
         RowIter { elems: &self.elems, widths: &self.widths }
     }
 
@@ -113,7 +114,8 @@ impl<T: Copy + Default> RowList<T> {
 
 impl<T: Default + Clone> RowList<T> {
     /// Build a `RowList` from an iterator of row-like items, padding each to `alignment`.
-    pub fn from_rows_aligned<R: AsRef<[T]>>(
+    #[cfg(test)]
+    pub(crate) fn from_rows_aligned<R: AsRef<[T]>>(
         rows: impl IntoIterator<Item = R>,
         alignment: usize,
     ) -> Self {

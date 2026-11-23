@@ -11,7 +11,7 @@ use miden_stark::lookup::Challenges;
 use crate::prover::{
     hash::sha512::{
         compression::{self, Sha512CompressionAir, Sha512CompressionRequires, Sha512WordMsg},
-        io::{self, Sha512IoAir, Sha512IoRequires, generate_trace},
+        io::{self, Sha512IoAir, Sha512IoRequires, generate_trace_padded_to},
     },
     logup::LookupMessage,
     primitives::byte_pair_lut::{self, BytePairLutAir, BytePairLutRequires, Range16Msg},
@@ -39,7 +39,7 @@ fn sha512_io_padding_boundaries_match_all_eight_digest_words() {
         let output = io.require(&input, &mut compression, &mut eidos);
         assert_eq!(output.digest, <[u8; 64]>::from(Sha512::hash(&input)), "length {len}");
     }
-    let trace = generate_trace(io, &mut BytePairLutRequires::new());
+    let trace = generate_trace_padded_to(io, &mut BytePairLutRequires::new(), 0);
     crate::prover::tests::check_local(Sha512IoAir, &trace);
 }
 
@@ -47,11 +47,11 @@ fn sha512_io_padding_boundaries_match_all_eight_digest_words() {
 fn sha512_io_empty_accumulator_and_exact_final_row_are_valid() {
     crate::prover::tests::check_local(
         Sha512IoAir,
-        &generate_trace(Sha512IoRequires::new(), &mut BytePairLutRequires::new()),
+        &generate_trace_padded_to(Sha512IoRequires::new(), &mut BytePairLutRequires::new(), 0),
     );
     let mut io = Sha512IoRequires::new();
     io.require(&[0xa5; 112], &mut Sha512CompressionRequires::new(), &mut EidosRequires::new());
-    let main = generate_trace(io, &mut BytePairLutRequires::new());
+    let main = generate_trace_padded_to(io, &mut BytePairLutRequires::new(), 0);
     assert_eq!(main.values.len(), 2 * io::IO_PERIOD * io::NUM_MAIN_COLS);
     crate::prover::tests::check_local(Sha512IoAir, &main);
 }
@@ -60,7 +60,7 @@ fn sha512_io_empty_accumulator_and_exact_final_row_are_valid() {
 fn sha512_io_rejects_noncanonical_padding_and_invocation_transitions() {
     let mut io = Sha512IoRequires::new();
     io.require(&[0xa5; 129], &mut Sha512CompressionRequires::new(), &mut EidosRequires::new());
-    let main = io::generate_trace_padded_to(io, &mut BytePairLutRequires::new(), 4 * io::IO_PERIOD);
+    let main = generate_trace_padded_to(io, &mut BytePairLutRequires::new(), 4 * io::IO_PERIOD);
     crate::prover::tests::check_local(Sha512IoAir, &main);
     // Each case changes a distinct part of the canonical message/padding layout. In particular,
     // the final digest pointer must be transported all the way into its binding-row EidosOut read.
@@ -122,7 +122,7 @@ fn sha512_io_rejects_noncanonical_padding_and_invocation_transitions() {
             &mut Sha512CompressionRequires::new(),
             &mut EidosRequires::new(),
         );
-        let main = generate_trace(io, &mut BytePairLutRequires::new());
+        let main = generate_trace_padded_to(io, &mut BytePairLutRequires::new(), 0);
         crate::prover::tests::check_local(Sha512IoAir, &main);
         for block in 0..(len + 17).div_ceil(128) {
             let mut bad = main.clone();
@@ -161,8 +161,8 @@ fn sha512_io_binds_chained_blocks_full_digest_and_shared_eidos_multiplicities() 
             Felt::ONE;
     }
     let mut bpl = BytePairLutRequires::new();
-    let main = generate_trace(io, &mut bpl);
-    let compression_main = compression::generate_trace(compression, &mut bpl);
+    let main = generate_trace_padded_to(io, &mut bpl, 0);
+    let compression_main = compression::generate_trace_padded_to(compression, &mut bpl, 0);
     fold_balance(&Sha512CompressionAir, &compression_main, &challenges, &mut net);
     let eidos_main = eidos_trace(eidos, &mut bpl);
     fold_balance(&EidosCompressionAir, &eidos_main, &challenges, &mut net);

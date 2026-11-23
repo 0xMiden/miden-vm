@@ -41,20 +41,6 @@ pub trait HashFunction: Default + Send + Sync + 'static {
 
 const ASSERT_DISC: u32 = 0;
 
-/// A structural view of a hash assertion node owned by [`HashPrecompile`].
-///
-/// This exposes only the assertion frame parameters and join child digests; it does not evaluate
-/// the preimage or expected digest children.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct HashAssertNode {
-    /// Declared preimage length in bytes.
-    pub n_bytes: u32,
-    /// Structural digest of the preimage chunk-list child.
-    pub preimage_digest: Digest,
-    /// Structural digest of the expected-digest chunk-list child.
-    pub expected_digest: Digest,
-}
-
 /// A hash assertion precompile parameterized by its [`HashFunction`].
 pub struct HashPrecompile<H>(PhantomData<H>);
 
@@ -102,25 +88,6 @@ impl<H: HashFunction> HashPrecompile<H> {
         }
 
         Ok(Some(n_bytes))
-    }
-
-    /// Decodes a hash assertion node without evaluating its children.
-    ///
-    /// Returns `Ok(None)` when `node` belongs to another precompile. Owned nodes return their
-    /// structural join child digests directly from the payload.
-    pub fn decode_assert_node(node: &Node) -> Result<Option<HashAssertNode>, PrecompileError> {
-        let Some(frame) = node.frame() else {
-            return Ok(None);
-        };
-        let Some(n_bytes) = Self::decode_assert_frame(frame)? else {
-            return Ok(None);
-        };
-        let (preimage_digest, expected_digest) = node.payload().as_join()?;
-        Ok(Some(HashAssertNode {
-            n_bytes,
-            preimage_digest,
-            expected_digest,
-        }))
     }
 
     fn digest_chunks() -> usize {
@@ -279,23 +246,12 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
         Err(PrecompileError::InvalidNode)
     ));
 
-    let assert_node = HashPrecompile::<H>::assert_node(65, TRUE_DIGEST, TRUE_DIGEST);
-    assert_eq!(HashPrecompile::<H>::decode_assert_node(&Node::TRUE).unwrap(), None);
-    assert_eq!(
-        HashPrecompile::<H>::decode_assert_node(&assert_node).unwrap(),
-        Some(HashAssertNode {
-            n_bytes: 65,
-            preimage_digest: TRUE_DIGEST,
-            expected_digest: TRUE_DIGEST,
-        })
-    );
-    let invalid_node = Node::join(invalid_assert_frame, TRUE_DIGEST, TRUE_DIGEST).unwrap();
-    assert!(matches!(
-        HashPrecompile::<H>::decode_assert_node(&invalid_node),
-        Err(PrecompileError::InvalidNode)
-    ));
-    let invalid_shape = Node::value(assert_frame, [ZERO; 8]).unwrap();
-    assert!(HashPrecompile::<H>::decode_assert_node(&invalid_shape).is_err());
+    // The assertion frame selects a join node; a value payload under it is malformed.
+    let mut state = fresh();
+    let err = state
+        .register(Node::value(assert_frame, [ZERO; 8]).expect("value payload"))
+        .expect_err("a value payload cannot carry a join frame");
+    assert_error(err, PrecompileError::InvalidNode);
 
     let input = b"hash assertions consume generic chunks";
     let mut state = fresh();

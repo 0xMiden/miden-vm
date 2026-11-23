@@ -47,7 +47,7 @@ const fn deployed_instance(log_max_height: u32) -> InstanceShape {
 /// computing the security level of a proof committed under a different LMCS (Blake3, alignment 1;
 /// Keccak, alignment 17) calls this instead of using the alignment-8
 /// [`miden_air::vm::security::AIR_SHAPE`], which is fixed for the Eidos-only recursive verifier.
-pub fn num_deep_terms(alignment: usize) -> u32 {
+pub(crate) fn num_deep_terms(alignment: usize) -> u32 {
     miden_air_definitions::shared::geometry::num_deep_terms_for_widths(
         RAW_WIDTHS,
         AIR_SHAPE.num_quotient_chunks as usize,

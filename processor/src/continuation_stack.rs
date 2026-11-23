@@ -184,7 +184,7 @@ pub enum Continuation<F> {
 impl<F> Continuation<F> {
     /// Returns true if executing this continuation increments the processor clock, and false
     /// otherwise.
-    pub fn increments_clk(&self) -> bool {
+    pub(crate) fn increments_clk(&self) -> bool {
         use Continuation::*;
 
         // Note: we prefer naming all the variants over using a wildcard arm to ensure that if new

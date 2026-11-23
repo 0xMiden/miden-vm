@@ -57,7 +57,7 @@ pub struct ChipletTraceFragment<'a> {
 impl<'a> ChipletTraceFragment<'a> {
     /// Payload-only fragment for chiplet-level unit tests.
     #[cfg(test)]
-    pub fn row_major(band: &'a mut [Felt], width: usize) -> Self {
+    pub(crate) fn row_major(band: &'a mut [Felt], width: usize) -> Self {
         Self::with_prefix(band, width, width, &[])
     }
 

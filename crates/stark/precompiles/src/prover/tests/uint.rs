@@ -42,7 +42,7 @@ use crate::prover::{
             NUM_MAIN_COLS as STORE_MUL_NUM_MAIN_COLS, UintStoreMulAir,
             trace::generate_trace as store_mul_trace,
         },
-        trace::{UintStoreRequires, generate_trace},
+        trace::{UintStoreRequires, generate_trace_padded_to},
     },
 };
 
@@ -117,7 +117,7 @@ fn fold_balance<A>(
 fn uint_store_constraints_hold() {
     let mut rng = StdRng::seed_from_u64(0xace1);
     let store = sample_store(&mut rng);
-    let main = generate_trace(store, &mut BytePairLutRequires::new());
+    let main = generate_trace_padded_to(store, &mut BytePairLutRequires::new(), 0);
     assert_eq!(main.height(), 16, "3 uints + 1 padding block × 4 rows");
 
     // The random value at ptr 2 borrows across limbs in `comp = bound − v`,
@@ -138,7 +138,7 @@ fn uint_store_constraints_hold() {
 fn uint_store_rejects_pointer_zero() {
     let mut rng = StdRng::seed_from_u64(0x0bad_0000);
     let store = sample_store(&mut rng);
-    let mut main = generate_trace(store, &mut BytePairLutRequires::new());
+    let mut main = generate_trace_padded_to(store, &mut BytePairLutRequires::new(), 0);
 
     // Forge the first block from ptr 1 to ptr 0 while preserving its
     // within-block constancy and its gap transition to ptr 2.
@@ -155,7 +155,8 @@ fn uint_store_rejects_pointer_zero() {
 fn production_uint_store_rejects_pointer_zero() {
     let mut rng = StdRng::seed_from_u64(0x0bad_c0de);
     let store = sample_store(&mut rng);
-    let mut main = store_mul_trace(store, UintMulRequires::new(), &mut BytePairLutRequires::new());
+    let mut main =
+        store_mul_trace(store, UintMulRequires::default(), &mut BytePairLutRequires::new());
 
     for row in 0..PERIOD {
         main.values[row * STORE_MUL_NUM_MAIN_COLS + COL_PTR] = Felt::ZERO;
@@ -174,7 +175,7 @@ fn uint_store_buses_balance_against_bpl() {
     // consumes (every v / comp 16-bit limb + ptr gaps) — driven by the
     // store's own trace pass.
     let mut bpl = BytePairLutRequires::new();
-    let uint_main = generate_trace(store, &mut bpl);
+    let uint_main = generate_trace_padded_to(store, &mut bpl, 0);
     let bpl_main = bpl_trace(bpl);
 
     let [alpha, beta] = [rand_qf(&mut rng), rand_qf(&mut rng)];
@@ -198,7 +199,7 @@ fn uint_store_rejects_tampered_value() {
     let bound = random_modulus(&mut rng);
     let mut store = UintStoreRequires::new();
     store.pin_modulus(1, bound); // modulus (self-ref)
-    let mut main = generate_trace(store, &mut BytePairLutRequires::new());
+    let mut main = generate_trace_padded_to(store, &mut BytePairLutRequires::new(), 0);
     // Tamper a v limb of the modulus block (row 0, col 0): v + comp ≠ bound
     // ⇒ SZ `id ≠ 0`.
     main.values[0] += Felt::from(1u32);
@@ -219,7 +220,7 @@ fn uint_store_rejects_out_of_range_value() {
     let mut store = UintStoreRequires::new();
     let fp = store.pin_modulus(1, bound); // modulus (self-ref)
     store.intern_pinned(2, random_uint_below(&mut rng, bound), fp); // in-range placeholder
-    let mut main = generate_trace(store, &mut BytePairLutRequires::new());
+    let mut main = generate_trace_padded_to(store, &mut BytePairLutRequires::new(), 0);
 
     // Out-of-range value: top limb above the bound's (bit 15 set ⇒ v > bound,
     // as the bound's top limb is < 2¹⁵). Forge its wrapped comp = (bound − v)
@@ -269,7 +270,7 @@ fn uint_store_gaps_and_self_ref_padding() {
     store.pin_modulus(100, U256::ZERO);
 
     let mut bpl = BytePairLutRequires::new();
-    let uint_main = generate_trace(store, &mut bpl);
+    let uint_main = generate_trace_padded_to(store, &mut bpl, 0);
     let bpl_main = bpl_trace(bpl);
 
     // Constraints hold, including the gap tie on the real boundaries.
@@ -295,7 +296,7 @@ fn uint_store_empty_pads_to_one_block() {
     let mut rng = StdRng::seed_from_u64(0xe39);
     let store = UintStoreRequires::new();
     let mut bpl = BytePairLutRequires::new();
-    let main = generate_trace(store, &mut bpl);
+    let main = generate_trace_padded_to(store, &mut bpl, 0);
     assert_eq!(main.height(), 4, "one padding block");
 
     crate::prover::tests::check_local(UintStoreAir, &main);
@@ -433,7 +434,7 @@ fn uint_store_mul_lookup_matches_its_standalone_components() {
     let r = mac_reduce(1, a, b, 1, c, bound);
     let r_ptr = store.intern(r, fp);
 
-    let mut mul = UintMulRequires::new();
+    let mut mul = UintMulRequires::default();
     mul.record(1, a_ptr, b_ptr, 1, c_ptr, r_ptr, fp, 1);
 
     let mut bpl = BytePairLutRequires::new();
@@ -515,7 +516,7 @@ fn comp_hi_range_checks_cover_the_upper_comp_cells() {
     let mut rng = StdRng::seed_from_u64(0xc0_ffee);
     let store = sample_store(&mut rng);
     let mut bpl = BytePairLutRequires::new();
-    let mut main = generate_trace(store, &mut bpl);
+    let mut main = generate_trace_padded_to(store, &mut bpl, 0);
 
     // uint@2 (the random in-range value) sits in the second block, rows
     // 4–7; its `comp` row is row 6, cell 8 = comp_hi's first limb.
@@ -557,7 +558,7 @@ proptest! {
         let fp = store.pin_modulus(1, bound);
         store.intern_pinned(2, v, fp);
         store.intern_pinned(3, U256::ZERO, fp);
-        let main = generate_trace(store, &mut BytePairLutRequires::new());
+        let main = generate_trace_padded_to(store, &mut BytePairLutRequires::new(), 0);
         prop_assert_eq!(main.height(), 16, "3 uints + 1 padding block × 4 rows");
 
         // The trace HOSTS the carries of `v + comp = bound` in the value
@@ -622,7 +623,7 @@ proptest! {
     // consumes (every v / comp 16-bit limb + ptr gaps) — driven by the
     // store's own trace pass.
     let mut bpl = BytePairLutRequires::new();
-    let uint_main = generate_trace(store, &mut bpl);
+    let uint_main = generate_trace_padded_to(store, &mut bpl, 0);
     let bpl_main = bpl_trace(bpl);
 
         let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
@@ -674,7 +675,7 @@ proptest! {
         static TRACES: std::sync::LazyLock<(RowMajorMatrix<Felt>, RowMajorMatrix<Felt>)> =
             std::sync::LazyLock::new(|| {
                 let mut bpl = BytePairLutRequires::new();
-                let main = generate_trace(UintStoreRequires::new(), &mut bpl);
+                let main = generate_trace_padded_to(UintStoreRequires::new(), &mut bpl, 0);
                 assert_eq!(main.height(), 4, "one padding block");
                 crate::prover::tests::check_local(UintStoreAir, &main);
                 (main, bpl_trace(bpl))
@@ -697,7 +698,7 @@ fn gaps_layout_assertions(bound: U256, v: U256, challenges: &Challenges<QuadFelt
     store.pin_modulus(100, U256::ZERO);
 
     let mut bpl = BytePairLutRequires::new();
-    let uint_main = generate_trace(store, &mut bpl);
+    let uint_main = generate_trace_padded_to(store, &mut bpl, 0);
     let bpl_main = bpl_trace(bpl);
 
     crate::prover::tests::check_local(UintStoreAir, &uint_main);

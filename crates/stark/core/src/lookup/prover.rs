@@ -57,7 +57,7 @@ where
     /// # Panics
     ///
     /// Panics in debug builds if the fraction-buffer width differs from `air.column_shape().len()`.
-    pub fn new<A>(
+    pub(crate) fn new<A>(
         main: RowWindow<'a, F>,
         preprocessed: RowWindow<'a, F>,
         periodic_values: &'a [F],

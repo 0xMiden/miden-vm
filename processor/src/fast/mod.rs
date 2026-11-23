@@ -382,7 +382,7 @@ impl FastProcessor {
     }
 
     #[inline(always)]
-    pub(super) fn deferred_state_mut(&mut self) -> &mut DeferredState {
+    fn deferred_state_mut(&mut self) -> &mut DeferredState {
         &mut self.deferred_state
     }
 
@@ -441,7 +441,7 @@ impl FastProcessor {
     /// # Preconditions
     /// - `idx` must be less than or equal to 15.
     #[inline(always)]
-    pub fn stack_get_mut(&mut self, idx: usize) -> &mut Felt {
+    pub(crate) fn stack_get_mut(&mut self, idx: usize) -> &mut Felt {
         &mut self.stack[self.stack_top_idx - idx - 1]
     }
 

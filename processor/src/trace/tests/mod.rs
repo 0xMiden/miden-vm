@@ -30,7 +30,7 @@ const TEST_TRACE_FRAGMENT_SIZE: usize = 1 << 10;
 // ================================================================================================
 
 /// Builds a sample trace by executing the provided code block against the provided stack inputs.
-pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> VmTrace {
+pub(crate) fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> VmTrace {
     let stack_inputs = stack_inputs.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<Felt>>();
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new_with_options(
@@ -51,7 +51,7 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> VmTr
 /// Unlike [`build_trace_from_program`], this helper accepts a `StackInputs` value directly so
 /// that callers can supply `Felt` elements (e.g. a procedure hash word) without having to
 /// convert them through `u64` first.
-pub fn build_trace_from_program_with_stack(
+pub(crate) fn build_trace_from_program_with_stack(
     program: &Program,
     stack_inputs: StackInputs,
 ) -> VmTrace {
@@ -71,7 +71,7 @@ pub fn build_trace_from_program_with_stack(
 
 /// Builds a sample trace by executing a span block containing the specified operations. This
 /// results in 1 additional hash cycle (8 rows) at the beginning of the hash chiplet.
-pub fn build_trace_from_ops(operations: Vec<Operation>, stack: &[u64]) -> VmTrace {
+pub(crate) fn build_trace_from_ops(operations: Vec<Operation>, stack: &[u64]) -> VmTrace {
     let mut mast_forest = MastForest::new();
 
     let basic_block_id =
@@ -87,7 +87,7 @@ pub fn build_trace_from_ops(operations: Vec<Operation>, stack: &[u64]) -> VmTrac
 /// [`build_trace_from_ops`], this variant accepts the full [`AdviceInputs`] object, so the
 /// program can run against an initialised advice provider (e.g. to seed a Merkle tree for the
 /// sibling-table tests).
-pub fn build_trace_from_ops_with_inputs(
+pub(crate) fn build_trace_from_ops_with_inputs(
     operations: Vec<Operation>,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,

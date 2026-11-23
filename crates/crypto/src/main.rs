@@ -58,7 +58,7 @@ fn main() -> Result<(), LargeSmtError> {
 }
 
 /// Run a benchmark for [`Smt`].
-pub fn benchmark_smt() -> Result<(), LargeSmtError> {
+pub(crate) fn benchmark_smt() -> Result<(), LargeSmtError> {
     let args = BenchmarkCmd::parse();
     let tree_size = args.size;
     let insertions = args.insertions;
@@ -117,7 +117,7 @@ pub fn construction(
     Ok(tree)
 }
 
-pub fn open_existing(
+pub(crate) fn open_existing(
     storage_path: Option<PathBuf>,
     storage: StorageKind,
 ) -> Result<LargeSmt<Storage>, LargeSmtError> {
@@ -155,7 +155,7 @@ pub fn insertion(tree: &mut LargeSmt<Storage>, insertions: usize) -> Result<(), 
     Ok(())
 }
 
-pub fn batched_insertion(
+pub(crate) fn batched_insertion(
     tree: &mut LargeSmt<Storage>,
     insertions: usize,
 ) -> Result<(), LargeSmtError> {
@@ -256,7 +256,7 @@ pub fn batched_update(
 }
 
 /// Runs the proof generation benchmark for the [`Smt`].
-pub fn proof_generation(tree: &mut LargeSmt<Storage>) -> Result<(), LargeSmtError> {
+pub(crate) fn proof_generation(tree: &mut LargeSmt<Storage>) -> Result<(), LargeSmtError> {
     const NUM_PROOFS: usize = 100;
 
     println!("Running a proof generation benchmark:");

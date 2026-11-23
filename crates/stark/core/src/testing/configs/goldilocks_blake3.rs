@@ -25,7 +25,7 @@ pub type Compress = CompressionFunctionFromHasher<Blake3, 2, DIGEST>;
 pub type Challenger = SerializingChallenger64<Felt, HashChallenger<u8, Blake3, DIGEST>>;
 
 /// Sponge + compressor for Merkle construction.
-pub fn test_components() -> (Sponge, Compress) {
+pub(crate) fn test_components() -> (Sponge, Compress) {
     (ChainingHasher::new(Blake3), CompressionFunctionFromHasher::new(Blake3))
 }
 

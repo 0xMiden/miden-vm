@@ -108,7 +108,7 @@ impl Import {
 
     /// Set the cached resolved concrete item.
     #[inline]
-    pub fn set_resolved(&self, resolved: GlobalItemIndex) {
+    pub(crate) fn set_resolved(&self, resolved: GlobalItemIndex) {
         self.resolved.set(Some(resolved));
     }
 }

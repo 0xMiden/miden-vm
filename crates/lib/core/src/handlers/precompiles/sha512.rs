@@ -17,7 +17,7 @@ pub const SHA512_DIGEST_EVENT_NAME: EventName =
     EventName::new("miden::precompiles::hashes::sha512::digest");
 
 /// Supplies all sixteen digest limbs. The MASM wrapper binds them with a deferred assertion.
-pub fn handle_sha512_digest(
+pub(crate) fn handle_sha512_digest(
     process: &ProcessorState<'_>,
 ) -> Result<Vec<AdviceMutation>, EventError> {
     let ptr = process.get_stack_item(1).as_canonical_u64();
