@@ -303,7 +303,8 @@ mod tests {
         let mut stack = AdviceStack::from(vec![Felt::new_unchecked(3), Felt::new_unchecked(4)]);
 
         stack.push_element(Felt::new_unchecked(2));
-        stack.prepend_elements([Felt::new_unchecked(0), Felt::new_unchecked(1)]);
+        stack
+            .prepend_stack(AdviceStack::from(vec![Felt::new_unchecked(0), Felt::new_unchecked(1)]));
 
         assert_eq!(
             stack.into_elements(),

@@ -213,10 +213,10 @@ pub struct EvaluationBuilder<'a, P, PE> {
     preprocessed: RowWindow<'a, P>,
     aux: RowWindow<'a, PE>,
     inputs: &'a EvaluationInputs<P, PE>,
-    pub base_constraints: Vec<P>,
-    pub ext_constraints: Vec<PE>,
-    pub base_indices: Vec<usize>,
-    pub ext_indices: Vec<usize>,
+    pub(crate) base_constraints: Vec<P>,
+    pub(crate) ext_constraints: Vec<PE>,
+    pub(crate) base_indices: Vec<usize>,
+    pub(crate) ext_indices: Vec<usize>,
 }
 
 impl<P, PE> EvaluationBuilder<'_, P, PE> {

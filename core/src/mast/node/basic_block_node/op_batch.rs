@@ -273,7 +273,8 @@ impl OpBatch {
     /// operation because it tracks group boundaries incrementally instead of using binary search
     /// for each operation (which would be O(n * log m) total, where m is the number of groups,
     /// and n is the number of operations).
-    pub fn iter_with_groups(&self) -> OpBatchIterator<'_> {
+    #[cfg(test)]
+    pub(crate) fn iter_with_groups(&self) -> OpBatchIterator<'_> {
         OpBatchIterator::new(self)
     }
 
@@ -283,7 +284,8 @@ impl OpBatch {
     /// Since groups either contain immediate values or operations, this is equivalent to skipping
     /// all groups that contain immediate values after `after_this_group_index` and returns the
     /// index of the first group that contains operations.
-    pub fn next_op_group_index(&self, after_this_group_index: usize) -> Option<usize> {
+    #[cfg(test)]
+    pub(crate) fn next_op_group_index(&self, after_this_group_index: usize) -> Option<usize> {
         // when indptr[i] == indptr[i+1], the group has no operations - and therefore carries an
         // immediate value
         let is_op_group = |group_idx: usize| self.indptr[group_idx] != self.indptr[group_idx + 1];
@@ -485,7 +487,7 @@ impl OpBatchAccumulator {
 
     /// Saves the current group into the group array, advances current and next group pointers,
     /// and resets group content.
-    pub(super) fn finalize_op_group(&mut self) {
+    fn finalize_op_group(&mut self) {
         // we pad if we are looking at an empty group, or one finishing in an op carrying an
         // immediate
         self.pad_if_needed();
@@ -553,19 +555,23 @@ impl OpBatchAccumulator {
 /// This is more efficient than calling `op_idx_in_batch_to_group()` for each
 /// operation (O(log m) per operation, for m groups) because it tracks group boundaries
 /// incrementally using a simple counter check.
+#[cfg(test)]
 pub struct OpBatchIterator<'a> {
     batch: &'a OpBatch,
     current_op_idx: usize,
     grp_idx: usize,
 }
 
+#[cfg(test)]
 impl<'a> OpBatchIterator<'a> {
     /// Creates a new iterator over the operations in the batch.
+    #[cfg(test)]
     pub fn new(batch: &'a OpBatch) -> Self {
         Self { batch, current_op_idx: 0, grp_idx: 0 }
     }
 }
 
+#[cfg(test)]
 impl<'a> Iterator for OpBatchIterator<'a> {
     type Item = (usize, usize, &'a Operation);
 
@@ -600,6 +606,7 @@ impl<'a> Iterator for OpBatchIterator<'a> {
     }
 }
 
+#[cfg(test)]
 impl<'a> ExactSizeIterator for OpBatchIterator<'a> {}
 
 #[cfg(test)]

@@ -48,7 +48,7 @@ pub fn air_shape_for(alignment: usize) -> AirShape {
 ///
 /// The build counts the fixed-message catalogue; the native estimator and the recursive verifier's
 /// security descriptor both use this value.
-pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 =
+pub(crate) const FIXED_BOUNDARY_LOOKUP_TERMS: u32 =
     miden_air::precompiles::protocol::PROTOCOL.fixed_boundary_lookup_terms;
 
 /// Number of lookup fractions contributed by the fixed boundary messages.

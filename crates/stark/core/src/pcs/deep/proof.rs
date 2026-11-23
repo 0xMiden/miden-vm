@@ -28,7 +28,7 @@ pub struct DeepProof<F: Field, EF: ExtensionField<F>> {
     /// `evals[g][m]` is a `RowMajorMatrix` with `num_eval_points` rows.
     pub evals: OpenedValues<EF>,
     /// Proof-of-work witness sampled before DEEP challenges.
-    pub pow_witness: F,
+    pub(crate) pow_witness: F,
     /// Challenge `α` for batching columns into `f_reduced`.
     pub challenge_columns: EF,
     /// Challenge `β` for batching opening points.

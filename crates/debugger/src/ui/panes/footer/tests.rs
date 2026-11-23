@@ -75,7 +75,7 @@ fn footer_renders_input_modes_and_expires_temporary_status() {
     assert_eq!(pane.get_status_line(), "ready");
     assert!(pane.timed_status_line.is_none());
     let mut terminal = Terminal::new(TestBackend::new(60, 2)).unwrap();
-    for (mode, label) in [(InputMode::Normal, "[N]"), (InputMode::Insert, "[I]")] {
+    for (mode, label) in [(InputMode::Normal, "[N]"), (InputMode::Command, "[C]")] {
         state.input_mode = mode;
         terminal
             .draw(|frame| pane.draw(frame, Rect::new(0, 0, 60, 1), &state).unwrap())

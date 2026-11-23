@@ -74,7 +74,7 @@ pub enum LargeSmtForestError {
 
 impl LargeSmtForestError {
     /// Constructs a fatal error variant from the provided concrete error `e`.
-    pub fn fatal_from<E: core::error::Error + Sync + Send + 'static>(e: E) -> Self {
+    pub(crate) fn fatal_from<E: core::error::Error + Sync + Send + 'static>(e: E) -> Self {
         Self::Fatal(Box::new(e))
     }
 }

@@ -128,7 +128,7 @@ impl Ident {
     }
 
     /// Returns true if this identifier is a valid constant identifier
-    pub fn is_constant_ident(&self) -> bool {
+    pub(crate) fn is_constant_ident(&self) -> bool {
         self.name
             .chars()
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')

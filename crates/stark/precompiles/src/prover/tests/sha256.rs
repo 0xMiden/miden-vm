@@ -21,7 +21,7 @@ use crate::prover::{
     hash::sha256::compression::{
         COL_A_BEGIN, COL_ACT, COL_B_BEGIN, COL_BLOCK_ID, COL_CARRY, COL_R_BEGIN, COL_ROT_BEGIN,
         NUM_MAIN_COLS, Sha256CompressionAir, Sha256CompressionRequires, Sha256WordMsg,
-        generate_trace, program,
+        generate_trace_padded_to, program,
     },
     logup::LookupMessage,
     primitives::byte_pair_lut::{
@@ -152,7 +152,7 @@ fn mutation_trace() -> RowMajorMatrix<Felt> {
     });
     let mut requires = Sha256CompressionRequires::new();
     requires.require(state, block);
-    generate_trace(requires, &mut BytePairLutRequires::new())
+    generate_trace_padded_to(requires, &mut BytePairLutRequires::new(), 0)
 }
 
 fn first_slot(op: program::Op) -> usize {
@@ -247,11 +247,7 @@ fn sha256_rejects_shifted_block_ids_via_first_row_anchor() {
     let mut requires = Sha256CompressionRequires::new();
     requires.require([0; 8], [0; 16]);
     requires.require([1; 8], [1; 16]);
-    let mut main = crate::prover::hash::sha256::compression::generate_trace_padded_to(
-        requires,
-        &mut BytePairLutRequires::new(),
-        8192,
-    );
+    let mut main = generate_trace_padded_to(requires, &mut BytePairLutRequires::new(), 8192);
     for row in main.values.as_chunks_mut::<{ NUM_MAIN_COLS }>().0 {
         row[COL_BLOCK_ID] += Felt::ONE;
     }
@@ -264,11 +260,7 @@ fn sha256_rejects_reactivation_after_inactive_block() {
     let mut requires = Sha256CompressionRequires::new();
     requires.require([0; 8], [0; 16]);
     requires.require([1; 8], [1; 16]);
-    let mut main = crate::prover::hash::sha256::compression::generate_trace_padded_to(
-        requires,
-        &mut BytePairLutRequires::new(),
-        8192,
-    );
+    let mut main = generate_trace_padded_to(requires, &mut BytePairLutRequires::new(), 8192);
     for row in main.values[..program::COMPRESSION_PERIOD * NUM_MAIN_COLS]
         .as_chunks_mut::<{ NUM_MAIN_COLS }>()
         .0
@@ -286,7 +278,7 @@ fn sha256_arithmetic_edges_cover_rotations_and_both_carries() {
     let mut requires = Sha256CompressionRequires::new();
     requires.require(state, block);
     requires.require(core::array::from_fn(|i| words[(i * 7 + 2) % words.len()]), block);
-    let main = generate_trace(requires, &mut BytePairLutRequires::new());
+    let main = generate_trace_padded_to(requires, &mut BytePairLutRequires::new(), 0);
     let mut seen = 0u8;
     for row in main.values.as_chunks::<{ NUM_MAIN_COLS }>().0.iter() {
         if row[crate::prover::hash::sha256::compression::COL_PROG_BEGIN + program::T_IS_ADD]
@@ -348,7 +340,7 @@ fn sha256_expansion_rotation_and_shift_slots_match_native_words() {
     block[14] = 0x8765_4321;
     let mut requires = Sha256CompressionRequires::new();
     requires.require(state, block);
-    let main = generate_trace(requires, &mut BytePairLutRequires::new());
+    let main = generate_trace_padded_to(requires, &mut BytePairLutRequires::new(), 0);
     let slots = program::slots();
     let rotr7 = slots.iter().position(|s| s.op == program::Op::Rol(25)).unwrap();
     let w1 = trace_word(&main, 32 + 16 + 15, COL_R_BEGIN);
@@ -371,7 +363,7 @@ fn sha256_expansion_rotation_and_shift_slots_match_native_words() {
 fn sha256_compression_trace_satisfies_local_air() {
     let mut requires = Sha256CompressionRequires::new();
     requires.require([0; 8], [0; 16]);
-    let main = generate_trace(requires, &mut BytePairLutRequires::new());
+    let main = generate_trace_padded_to(requires, &mut BytePairLutRequires::new(), 0);
     crate::prover::tests::check_local(Sha256CompressionAir, &main);
 }
 
@@ -400,11 +392,7 @@ fn sha256_compression_supports_multiple_blocks_and_requested_padding() {
     requires.require([0; 8], [0; 16]);
     requires.require([1; 8], [u32::MAX; 16]);
     assert_eq!(requires.trace_height(), Some(8192));
-    let main = crate::prover::hash::sha256::compression::generate_trace_padded_to(
-        requires,
-        &mut BytePairLutRequires::new(),
-        12_000,
-    );
+    let main = generate_trace_padded_to(requires, &mut BytePairLutRequires::new(), 12_000);
     assert_eq!(main.height(), 16_384);
     crate::prover::tests::check_local(Sha256CompressionAir, &main);
 }
@@ -414,7 +402,7 @@ fn sha256_compression_records_all_byte_pair_and_range16_demands() {
     let mut requires = Sha256CompressionRequires::new();
     requires.require([0x0123_4567; 8], [0x89ab_cdef; 16]);
     let mut bpl = BytePairLutRequires::new();
-    let main = generate_trace(requires, &mut bpl);
+    let main = generate_trace_padded_to(requires, &mut bpl, 0);
     let bpl_main = bpl_trace(bpl);
 
     let mut counts = [0usize; BPL_MAIN_COLS];
@@ -436,11 +424,7 @@ fn sha256_compression_records_all_byte_pair_and_range16_demands() {
 fn sha256_activity_cannot_restart_in_padded_tail() {
     let mut requires = Sha256CompressionRequires::new();
     requires.require([0; 8], [0; 16]);
-    let mut main = crate::prover::hash::sha256::compression::generate_trace_padded_to(
-        requires,
-        &mut BytePairLutRequires::new(),
-        8192,
-    );
+    let mut main = generate_trace_padded_to(requires, &mut BytePairLutRequires::new(), 8192);
     main.values[program::COMPRESSION_PERIOD * NUM_MAIN_COLS + COL_ACT] = Felt::ONE;
     crate::prover::tests::check_local(Sha256CompressionAir, &main);
 }
@@ -478,7 +462,7 @@ fn sha256_and_bpl_buses_balance_with_input_and_output_boundaries() {
     let mut requires = Sha256CompressionRequires::new();
     let output = requires.require(state, block);
     let mut bpl = BytePairLutRequires::new();
-    let sha_main = generate_trace(requires, &mut bpl);
+    let sha_main = generate_trace_padded_to(requires, &mut bpl, 0);
     let bpl_main = bpl_trace(bpl);
     let challenges = Challenges::new(
         QuadFelt::from_u64(17),
@@ -529,7 +513,7 @@ fn two_block_bus_balance(
     let mut requires = Sha256CompressionRequires::new();
     let outputs = [requires.require(states[0], blocks[0]), requires.require(states[1], blocks[1])];
     let mut bpl = BytePairLutRequires::new();
-    let mut sha_main = generate_trace(requires, &mut bpl);
+    let mut sha_main = generate_trace_padded_to(requires, &mut bpl, 0);
     let bpl_main = bpl_trace(bpl);
     mutator(&mut sha_main);
 
@@ -952,7 +936,11 @@ fn sha256_fixed_metadata_provider_authenticates_unused_tuple_fields() {
 
 #[test]
 fn sha256_empty_trace_needs_only_the_metadata_period() {
-    let main = generate_trace(Sha256CompressionRequires::new(), &mut BytePairLutRequires::new());
+    let main = generate_trace_padded_to(
+        Sha256CompressionRequires::new(),
+        &mut BytePairLutRequires::new(),
+        0,
+    );
     assert_eq!(main.height(), 128);
     crate::prover::tests::check_local(Sha256CompressionAir, &main);
     assert!(Sha256CompressionAir.periodic_columns().iter().all(|column| column.len() <= 128));
@@ -977,7 +965,7 @@ fn sha256_materialized_program_matches_random_compressions() {
             sha256_reference_compress(state, block)
         })
         .collect();
-    let main = generate_trace(requires, &mut BytePairLutRequires::new());
+    let main = generate_trace_padded_to(requires, &mut BytePairLutRequires::new(), 0);
     for (block, expected) in expected.iter().enumerate() {
         for (slot, expected) in program::OUTPUT_SLOTS.iter().zip(expected) {
             assert_eq!(

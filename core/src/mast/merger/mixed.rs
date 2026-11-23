@@ -404,7 +404,7 @@ impl<'forest> MixedMastForestMerger<'forest> {
             node.clone(),
             &self.builder_source,
             &self.node_maps[forest_idx],
-        )?;
+        );
         let remapped_node = builder.build_linked()?;
         let content_key = StoredContentKey::from_node(&remapped_node, Some)
             .expect("remapped child IDs are always available");

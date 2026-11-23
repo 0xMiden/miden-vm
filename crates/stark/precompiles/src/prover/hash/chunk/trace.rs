@@ -172,12 +172,6 @@ impl ChunkRequires {
 // TRACE GENERATION
 // ================================================================================================
 
-/// Builds the main trace at its natural height.
-#[cfg(test)]
-pub fn generate_trace(requires: ChunkRequires) -> RowMajorMatrix<Felt> {
-    generate_trace_padded_to(requires, 0)
-}
-
 /// Build the chunk chiplet's main trace from the recorded
 /// invocations. Walks records in allocation order, stamping each at
 /// its `chunk_seq_id_range.start`; trailing rows up to the next power

@@ -116,7 +116,8 @@ impl Executor {
     ///
     /// Mutations are only recorded for live event handling; nothing is recorded while an event
     /// replay queue is being consumed.
-    pub fn with_event_advice_mutations_recording(&mut self) -> &mut Self {
+    #[cfg(test)]
+    pub(crate) fn with_event_advice_mutations_recording(&mut self) -> &mut Self {
         self.record_event_mutations = true;
         self
     }
@@ -165,7 +166,7 @@ impl Executor {
     /// this the cheap way to step a program to its end while observing every cycle. The profiler
     /// configuration is not used; observe the cycles through the stepper's callback instead.
     ///
-    /// Fails as [`Stepper::for_package`] does: the package's advice map conflicts with the
+    /// Fails as `Stepper::for_package` does: the package's advice map conflicts with the
     /// advice inputs or, added to them, exceeds the options' advice budget, or its debug info
     /// cannot be used with its program. Panics, as [`Executor::into_debug`] does, when `package`
     /// is not a program, the advice inputs do not fit the options' advice budget, or an event

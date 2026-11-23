@@ -213,7 +213,7 @@ where
     /// `num_rows` rows. The flat fraction capacity is `num_rows * Σ shape`, so the row loop
     /// does not re-allocate as long as each row stays within its declared bound. The flat
     /// count capacity is `num_rows * shape.len()`.
-    pub fn from_shape(shape: Vec<usize>, num_rows: usize) -> Self {
+    pub(crate) fn from_shape(shape: Vec<usize>, num_rows: usize) -> Self {
         let num_cols = shape.len();
         let total_fraction_capacity: usize = num_rows * shape.iter().sum::<usize>();
         let fractions = Vec::with_capacity(total_fraction_capacity);

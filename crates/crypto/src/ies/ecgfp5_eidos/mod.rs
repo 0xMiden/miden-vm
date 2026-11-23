@@ -37,7 +37,7 @@ use crate::{
 };
 
 /// Maximum plaintext length with empty associated data. Context shares the AEAD input budget.
-pub const MAX_PLAINTEXT_FELTS: usize = (MAX_AUTHENTICATED_INPUT_FELTS - 6) / 2;
+pub(crate) const MAX_PLAINTEXT_FELTS: usize = (MAX_AUTHENTICATED_INPUT_FELTS - 6) / 2;
 
 const ENVELOPE_HEADER_LEN: usize = 8;
 

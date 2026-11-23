@@ -39,7 +39,7 @@ pub struct ReturnTarget {
 }
 
 impl ReturnTarget {
-    pub fn is_recovered(&self) -> bool {
+    pub(crate) fn is_recovered(&self) -> bool {
         self.invocation.is_some()
     }
 
@@ -65,7 +65,7 @@ impl RecoveredCallStack {
         self.frames.iter().map(|frame| frame.invocation)
     }
 
-    pub fn return_target(&self, event_depth: usize) -> ReturnTarget {
+    pub(crate) fn return_target(&self, event_depth: usize) -> ReturnTarget {
         ReturnTarget {
             invocation: self
                 .frames
@@ -181,7 +181,7 @@ impl RecoveredCallStack {
         }
     }
 
-    pub fn logical_frames(&self, strip_prefix: &str) -> Vec<LogicalStackFrame> {
+    pub(crate) fn logical_frames(&self, strip_prefix: &str) -> Vec<LogicalStackFrame> {
         let mut logical = Vec::new();
         for frame in &self.frames {
             let name = &frame.identity.debug_info()[frame.identity.function().name_idx];
@@ -201,6 +201,7 @@ impl RecoveredCallStack {
                 name: Arc::from(demangle(name)),
                 kind: LogicalFrameKind::Physical,
                 location,
+                #[cfg(test)]
                 physical_index: None,
                 origin: Some(frame.identity.origin()),
                 invocation: Some(frame.invocation),
@@ -217,6 +218,7 @@ impl RecoveredCallStack {
                     name: Arc::from(inline.display.display_name()),
                     kind: LogicalFrameKind::Inline,
                     location: location.map(LogicalFrameLocation::Assembly),
+                    #[cfg(test)]
                     physical_index: None,
                     origin: None,
                     invocation: None,

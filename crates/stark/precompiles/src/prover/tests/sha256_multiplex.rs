@@ -84,8 +84,8 @@ fn sha256_multiplex_preserves_dense_lookup_demands_and_empty_heights() {
         check_local(Sha256Air, &sparse);
 
         let mut dense_bpl = BytePairLutRequires::new();
-        let dense_comp = compression::generate_trace(compression, &mut dense_bpl);
-        let dense_io = io::generate_trace(io, &mut dense_bpl);
+        let dense_comp = compression::generate_trace_padded_to(compression, &mut dense_bpl, 0);
+        let dense_io = io::generate_trace_padded_to(io, &mut dense_bpl, 0);
         let challenges = challenges();
         let mut net = HashMap::new();
         fold_balance(&Sha256CompressionAir, &dense_comp, &challenges, &mut net);

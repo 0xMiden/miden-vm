@@ -664,7 +664,7 @@ impl EcMsmRequires {
     /// Count of recorded expressions (ordinary, zero, and endomorphism intros; combines; and
     /// negs) — the chain-cost diagnostic for comparing addition-chain strategies.
     #[cfg(test)]
-    pub fn expr_count(&self) -> usize {
+    pub(crate) fn expr_count(&self) -> usize {
         self.exprs.len()
     }
 

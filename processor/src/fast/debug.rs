@@ -58,7 +58,8 @@ impl DebugCallFrame {
     pub fn origin(&self) -> DebugFrameOrigin {
         self.origin
     }
-    pub fn is_inferred(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_inferred(&self) -> bool {
         self.origin != DebugFrameOrigin::Source
     }
 

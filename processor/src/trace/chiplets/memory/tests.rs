@@ -537,7 +537,7 @@ impl Memory {
 }
 
 /// Contains data representing a memory access.
-pub struct MemoryAccess {
+pub(crate) struct MemoryAccess {
     operation: MemoryOperation,
     access_type: MemoryAccessType,
     ctx: ContextId,

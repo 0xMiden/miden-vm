@@ -1730,7 +1730,8 @@ impl FastProcessor {
     /// Async variant of [`Self::execute_mut_sync`].
     #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
-    pub async fn execute_mut(
+    #[cfg(test)]
+    pub(crate) async fn execute_mut(
         &mut self,
         program: &Program,
         host: &mut impl Host,

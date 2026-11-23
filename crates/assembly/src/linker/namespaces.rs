@@ -124,7 +124,7 @@ impl NamespaceGraph {
 
     /// Find a module by exact path.
     #[inline]
-    pub fn find_module_index(&self, path: &Path) -> Option<ModuleIndex> {
+    pub(crate) fn find_module_index(&self, path: &Path) -> Option<ModuleIndex> {
         self.modules_by_path.get(path).copied()
     }
 
