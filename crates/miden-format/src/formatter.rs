@@ -1985,38 +1985,32 @@ fn result_tokens_after_params(tokens: &[SyntaxToken], params_close: usize) -> Ve
     trim_outer_whitespace_tokens(&tokens[(arrow_offset + 1)..])
 }
 
-/// Removes trailing commas in parameter and result lists, i.e. commas whose next significant
-/// token is a closing parenthesis, together with the whitespace between them and the parenthesis.
+/// Removes trailing commas in parameter and result lists, i.e. commas immediately followed by a
+/// closing parenthesis.
 ///
-/// The multi-line signature layout never emits trailing commas, so the single-line layout must not
-/// either; otherwise a signature whose only overflow is the trailing comma would be wrapped on the
-/// first pass and collapsed again on the next, making formatting non-idempotent. The tokens may
-/// include trivia (a signature with comments keeps its whitespace), so the closing parenthesis is
-/// looked up past it.
+/// The multi-line signature layout drops a trailing comma, so the single-line layout must drop it
+/// too; otherwise a signature whose only overflow is the trailing comma would be wrapped on the
+/// first pass and collapsed again on the next, making formatting non-idempotent. The one exception
+/// is a comment written between the last comma and the closing parenthesis: the multi-line layout
+/// keeps that comma in front of the comment, and such a list is never rendered on a single line.
+///
+/// The tokens must be free of trivia (whitespace and comments), so that a trailing comma is always
+/// adjacent to its closing parenthesis.
 fn without_trailing_commas(tokens: &[SyntaxToken]) -> Vec<SyntaxToken> {
-    let mut kept = Vec::with_capacity(tokens.len());
-    let mut index = 0;
-    while index < tokens.len() {
-        let token = &tokens[index];
-        if token.kind() == SyntaxKind::Comma {
-            let next = tokens[(index + 1)..]
-                .iter()
-                .position(|token| !token.kind().is_trivia())
-                .map(|offset| index + 1 + offset);
-            if let Some(next) = next
-                && tokens[next].kind() == SyntaxKind::RParen
-                && tokens[(index + 1)..next].iter().all(|token| {
-                    matches!(token.kind(), SyntaxKind::Whitespace | SyntaxKind::Newline)
-                })
-            {
-                index = next;
-                continue;
-            }
-        }
-        kept.push(token.clone());
-        index += 1;
-    }
-    kept
+    debug_assert!(
+        tokens.iter().all(|token| !token.kind().is_trivia()),
+        "trailing commas are looked up in trivia-free tokens",
+    );
+
+    tokens
+        .iter()
+        .enumerate()
+        .filter(|(index, token)| {
+            token.kind() != SyntaxKind::Comma
+                || tokens.get(index + 1).is_none_or(|next| next.kind() != SyntaxKind::RParen)
+        })
+        .map(|(_, token)| token.clone())
+        .collect()
 }
 
 /// Renders one comma-separated item of a signature parameter or result list.
