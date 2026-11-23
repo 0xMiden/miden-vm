@@ -21,6 +21,7 @@
 - Restored `no_std` builds for VM libraries by using `alloc` in the constraint compiler, building processor traces serially without `std`, and gating diagnostic rendering behind `std` ([#3934](https://github.com/0xMiden/miden-vm/pull/3934)).
 - Enabled `miden-test-utils` builds without `std` by keeping logging and test-only dependencies behind its `std` feature ([#3934](https://github.com/0xMiden/miden-vm/pull/3934)).
 - Fixed `miden-format` leaving struct and enum bodies over the line limit when they contained comments or line breaks, or nested struct field types. Each field now gets its own line and long fields wrap, keeping comments and blank lines. Type items no longer get a space before `;` or `:` when wrapped ([#4064](https://github.com/0xMiden/miden-vm/issues/4064)).
+- [BREAKING] Rejected struct and enum types larger than `u32::MAX` bytes with an error instead of panicking (debug builds) or computing a wrapped size (release builds). Standalone arrays larger than `u32::MAX` bytes are now rejected too. This affects the assembler, the recursive type builder, and `Type` deserialization; the new fallible `StructType::try_from_parts` reports the error as `InvalidStructTypeError::SizeOverflow`, and `EnumType::new` as `InvalidEnumTypeError::SizeOverflow`. Valid enum layouts can grow to fit every variant and satisfy alignment requirements. For example, a `u32`-tagged enum with `[u8; 5]` and `u32` payload variants grows from 8 to 12 bytes ([#3983](https://github.com/0xMiden/miden-vm/pull/3983)).
 
 ## v1.0.0-rc.1 (2026-11-14)
 
