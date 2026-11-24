@@ -134,6 +134,7 @@ fn wide_excerpts_keep_the_source_location_and_label_without_padding() {
         ("x".repeat(65_536), 0, 65_536, 1),
         ("界".repeat(65_536), 196_605, 196_608, 65_536),
         ("\t".repeat(51), 50, 51, 51),
+        ("\u{301}".repeat(65_536), 0, 2, 1),
         (format!("x\n{}", "y".repeat(201)), 0, 1, 1),
     ];
     for (text, start, end, column) in cases {

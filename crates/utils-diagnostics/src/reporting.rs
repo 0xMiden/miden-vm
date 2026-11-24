@@ -186,7 +186,9 @@ impl<'a> Excerpt<'a> {
                         .strip_suffix("\r\n")
                         .or_else(|| text.strip_suffix('\n'))
                         .unwrap_or(text);
-                    display_column(text, 0) > MAX_EXCERPT_WIDTH
+                    // Combining characters can occupy bytes without adding display cells.
+                    text.len() > MAX_EXCERPT_WIDTH * 4
+                        || display_column(text, 0) > MAX_EXCERPT_WIDTH
                 })
         });
         if too_wide {
