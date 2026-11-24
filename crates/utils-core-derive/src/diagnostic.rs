@@ -325,7 +325,11 @@ fn expand_fields(
             assignments.push(quote!(details.labels.to_mut().extend_from_slice(#collection);));
         }
     } else if let Some(collection) = collection {
-        assignments.push(quote!(details.labels = #collection.as_slice().into();));
+        assignments.push(quote! {
+            details.labels = ::core::convert::Into::into(
+                #collection as &[::miden_utils_diagnostics::Label]
+            );
+        });
     }
     if let Some(help) = options.help {
         let help = formatted(help);
