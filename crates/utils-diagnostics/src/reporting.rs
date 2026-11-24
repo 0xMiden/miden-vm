@@ -150,6 +150,8 @@ impl<'a> Excerpt<'a> {
     }
 
     fn render(&self, out: &mut impl Write, label: &Label, marker: char) -> fmt::Result {
+        const MAX_EXCERPT_WIDTH: usize = 200;
+
         let content = self.source.content();
         let span = label.span.into_slice_index();
         let first = self.first_line.to_usize();
@@ -173,6 +175,27 @@ impl<'a> Excerpt<'a> {
 
         let context_start = first.saturating_sub(1);
         let context_end = (last + 1).min(content.last_line_index().to_usize());
+        let too_wide = (context_start..=context_end).any(|index| {
+            content
+                .line_range((index as u32).into())
+                .and_then(|range| {
+                    self.source.as_str().get(range.start.to_usize()..range.end.to_usize())
+                })
+                .is_some_and(|text| {
+                    let text = text
+                        .strip_suffix("\r\n")
+                        .or_else(|| text.strip_suffix('\n'))
+                        .unwrap_or(text);
+                    display_column(text, 0) > MAX_EXCERPT_WIDTH
+                })
+        });
+        if too_wide {
+            if let Some(message) = label.label() {
+                write_inline(out, format_args!("  = {message}"))?;
+                out.write_char('\n')?;
+            }
+            return Ok(());
+        }
         let gutter = (context_end + 1).ilog10() as usize + 1;
         for index in context_start..=context_end {
             let Some(range) = content.line_range((index as u32).into()) else {

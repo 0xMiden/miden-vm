@@ -127,6 +127,31 @@ fn renders_multiline_spans_with_tabs_crlf_and_wide_characters() {
 }
 
 #[test]
+fn wide_excerpts_keep_the_source_location_and_label_without_padding() {
+    let cases = [
+        ("x".repeat(65_537), 65_536, 65_537, 65_537),
+        ("x".repeat(65_536), 65_535, 65_536, 65_536),
+        ("x".repeat(65_536), 0, 65_536, 1),
+        ("界".repeat(65_536), 196_605, 196_608, 65_536),
+        ("\t".repeat(51), 50, 51, 51),
+        (format!("x\n{}", "y".repeat(201)), 0, 1, 1),
+    ];
+    for (text, start, end, column) in cases {
+        let file = source(&text);
+        let span = SourceSpan::new(file.id(), start..end);
+        let error = RelatedLabel::error("bad input")
+            .with_source_file(Some(file))
+            .with_labeled_span(span, "check this");
+
+        let rendered = format!("{:?}", Report::new(error));
+        assert!(rendered.contains(&format!("test.masm:1:{column}\n")), "{rendered}");
+        assert!(rendered.contains("  = check this\n"), "{rendered}");
+        assert!(!rendered.contains('|'), "{rendered}");
+        assert!(rendered.len() < 256);
+    }
+}
+
+#[test]
 fn eof_anchor_inside_crlf_uses_the_visible_end_of_line() {
     let file = source("begin\r\n");
     let span = SourceSpan::at(file.id(), 6);
