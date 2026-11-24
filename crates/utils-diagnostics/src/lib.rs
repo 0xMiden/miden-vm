@@ -1,24 +1,30 @@
 #![no_std]
+#![forbid(unsafe_code)]
 
-#[macro_use]
 extern crate alloc;
+extern crate self as miden_utils_diagnostics;
 
-#[cfg(feature = "std")]
-extern crate std;
-
+mod diagnostic;
 mod label;
 mod related;
+mod report;
 pub mod reporting;
+#[cfg(test)]
+mod tests;
 
-pub use miette::{
-    self, Diagnostic, IntoDiagnostic, LabeledSpan, NamedSource, Report, Result, Severity,
-    SourceCode, WrapErr,
-};
+#[doc(hidden)]
+pub use alloc::{format, vec};
+
+#[doc(hidden)]
+pub use miden_debug_types::Spanned;
+pub use miden_utils_core_derive::Diagnostic;
 pub use tracing;
 
 pub use self::{
+    diagnostic::{Diagnostic, DiagnosticDetails, MessageDiagnostic, Severity},
     label::Label,
     related::{RelatedError, RelatedLabel},
+    report::{IntoDiagnostic, Report, Result, WrapErr},
 };
 
 #[macro_export]
@@ -33,10 +39,10 @@ macro_rules! report {
 #[macro_export]
 macro_rules! diagnostic {
     ($fmt:literal $($arg:tt)*) => {{
-        $crate::miette::MietteDiagnostic::new(format!($fmt $($arg)*))
+        $crate::MessageDiagnostic::new($crate::format!($fmt $($arg)*))
     }};
     ($($key:ident = $value:expr,)+ $fmt:literal $($arg:tt)*) => {{
-        let mut diag = $crate::miette::MietteDiagnostic::new(format!($fmt $($arg)*));
+        let mut diag = $crate::MessageDiagnostic::new($crate::format!($fmt $($arg)*));
         $(diag.$key = Some($value.into());)*
         diag
     }};

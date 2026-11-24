@@ -1,6 +1,3 @@
-// Allow unused assignments - required by miette::Diagnostic derive macro
-#![allow(unused_assignments)]
-
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_air_definitions::vm::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
@@ -10,7 +7,7 @@ use miden_mast_package::{
     PackageDebugInfoError,
     debug_info::{DebugSourceNodeId, PackageDebugInfo},
 };
-use miden_utils_diagnostics::{Diagnostic, miette};
+use miden_utils_diagnostics::Diagnostic;
 
 use crate::{
     BaseHost, ContextId, Felt, Word,
@@ -28,7 +25,6 @@ use crate::{
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum ExecutionError {
     #[error("failed to execute arithmetic circuit evaluation operation: {error}")]
-    #[diagnostic()]
     AceChipError {
         #[label("this call failed")]
         label: SourceSpan,
@@ -51,7 +47,6 @@ pub enum ExecutionError {
         Some(name) => format!("'{name}' (ID: {event_id})"),
         None => format!("with ID: {event_id}"),
     })]
-    #[diagnostic()]
     EventError {
         #[label]
         label: SourceSpan,
@@ -64,7 +59,6 @@ pub enum ExecutionError {
     },
     /// Failed to load a MAST forest from the host.
     #[error("failed to load MAST forest for procedure with root digest {root_digest}: {error}")]
-    #[diagnostic()]
     MastForestError {
         #[label]
         label: SourceSpan,
@@ -76,7 +70,6 @@ pub enum ExecutionError {
     },
     /// Deferred system event failed while validating or evaluating a committed node.
     #[error("{err}")]
-    #[diagnostic()]
     DeferredError {
         #[label]
         label: SourceSpan,
@@ -129,7 +122,6 @@ pub enum ExecutionError {
     #[error("stack should have at most {MIN_STACK_DEPTH} elements at the end of program execution, but had {} elements", MIN_STACK_DEPTH + .0)]
     OutputStackOverflow(usize),
     #[error("procedure with root digest {root_digest} could not be found")]
-    #[diagnostic()]
     ProcedureNotFound {
         #[label]
         label: SourceSpan,

@@ -10,7 +10,7 @@ use core::{
 };
 
 use miden_debug_types::{SourceSpan, Span, Spanned};
-use miden_utils_diagnostics::{IntoDiagnostic, Report, miette};
+use miden_utils_diagnostics::{IntoDiagnostic, Report};
 
 use crate::{
     Path, PathBuf,
@@ -175,12 +175,6 @@ impl PartialOrd for QualifiedProcedureName {
     }
 }
 
-impl From<QualifiedProcedureName> for miette::SourceSpan {
-    fn from(fqn: QualifiedProcedureName) -> Self {
-        fqn.span.into()
-    }
-}
-
 impl Spanned for QualifiedProcedureName {
     fn span(&self) -> SourceSpan {
         self.span
@@ -330,12 +324,6 @@ impl Hash for ProcedureName {
 impl Spanned for ProcedureName {
     fn span(&self) -> SourceSpan {
         self.0.span()
-    }
-}
-
-impl From<ProcedureName> for miette::SourceSpan {
-    fn from(name: ProcedureName) -> Self {
-        name.span().into()
     }
 }
 

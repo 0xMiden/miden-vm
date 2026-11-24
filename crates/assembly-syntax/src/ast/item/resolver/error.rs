@@ -1,13 +1,10 @@
-// Allow unused assignments - required by miette::Diagnostic derive macro
-#![allow(unused_assignments)]
-
 use alloc::sync::Arc;
 
 use miden_debug_types::{SourceFile, SourceManager, SourceSpan};
 
 use crate::{
     ast::ItemIndex,
-    diagnostics::{Diagnostic, RelatedLabel, miette},
+    diagnostics::{Diagnostic, RelatedLabel},
 };
 
 /// Represents an error that occurs during symbol resolution
@@ -44,7 +41,6 @@ pub enum SymbolResolutionError {
         relative_to: Option<RelatedLabel>,
     },
     #[error("invalid symbol reference: wrong type")]
-    #[diagnostic()]
     InvalidSymbolType {
         expected: &'static str,
         #[label("expected this symbol to reference a {expected} item")]

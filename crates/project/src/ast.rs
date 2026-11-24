@@ -32,7 +32,7 @@ pub use self::{
     target::{BinTarget, LibTarget},
     workspace::WorkspaceFile,
 };
-use crate::{Diagnostic, Label, RelatedError, Report, SourceFile, SourceSpan, miette};
+use crate::{Diagnostic, Label, RelatedError, Report, SourceFile, SourceSpan};
 
 /// Represents all possible variants of `miden-project.toml`
 #[derive(Debug)]

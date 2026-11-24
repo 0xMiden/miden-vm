@@ -67,11 +67,10 @@ fn dupn_fail() {
     assert_assembler_diagnostic!(
         test,
         "invalid immediate: value must be in the range 0..16 (exclusive)",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+        regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
         "12 |",
         "13 | begin dup.16 exec.truncate_stack end",
-        "   :           ^^",
-        "  `----"
+        "   :           ^^"
     );
 }
 
@@ -104,11 +103,10 @@ fn dupwn_fail() {
     assert_assembler_diagnostic!(
         test,
         "invalid immediate: value must be in the range 0..4 (exclusive)",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+        regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
         "12 |",
         "13 | begin dupw.4 exec.truncate_stack end",
-        "   :            ^",
-        "  `----"
+        "   :            ^"
     );
 }
 
@@ -141,11 +139,10 @@ fn swapn_fail() {
     assert_assembler_diagnostic!(
         test,
         "invalid immediate: value must be in the range 1..16 (exclusive)",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+        regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
         "12 |",
         "13 | begin swap.16 exec.truncate_stack end",
-        "   :            ^^",
-        "  `----"
+        "   :            ^^"
     );
 }
 
@@ -178,11 +175,10 @@ fn swapwn_fail() {
     assert_assembler_diagnostic!(
         test,
         "invalid immediate: value must be in the range 1..4 (exclusive)",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+        regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
         "12 |",
         "13 | begin swapw.4 exec.truncate_stack end",
-        "   :             ^",
-        "   `----"
+        "   :             ^"
     );
 }
 
@@ -212,11 +208,10 @@ fn movup_fail() {
     assert_assembler_diagnostic!(
         test,
         "invalid immediate: value must be in the range 2..16 (exclusive)",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+        regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
         "12 |",
         "13 | begin movup.0 exec.truncate_stack end",
-        "   :             ^",
-        "  `----"
+        "   :             ^"
     );
 
     let asm_op = "movup.1";
@@ -225,11 +220,10 @@ fn movup_fail() {
     assert_assembler_diagnostic!(
         test,
         "invalid immediate: value must be in the range 2..16 (exclusive)",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+        regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
         "12 |",
         "13 | begin movup.1 exec.truncate_stack end",
-        "   :             ^",
-        "  `----"
+        "   :             ^"
     );
 
     let asm_op = "movup.16";
@@ -238,11 +232,10 @@ fn movup_fail() {
     assert_assembler_diagnostic!(
         test,
         "invalid immediate: value must be in the range 2..16 (exclusive)",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+        regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
         "12 |",
         "13 | begin movup.16 exec.truncate_stack end",
-        "   :             ^^",
-        "  `----"
+        "   :             ^^"
     );
 }
 
@@ -263,11 +256,10 @@ fn movupw_fail() {
     assert_assembler_diagnostic!(
         test,
         "invalid immediate: value must be in the range 2..4 (exclusive)",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+        regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
         "12 |",
         "13 | begin movupw.0 exec.truncate_stack end",
-        "   :              ^",
-        "  `----"
+        "   :              ^"
     );
 
     let asm_op = "movupw.1";
@@ -276,11 +268,10 @@ fn movupw_fail() {
     assert_assembler_diagnostic!(
         test,
         "invalid immediate: value must be in the range 2..4 (exclusive)",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+        regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
         "12 |",
         "13 | begin movupw.1 exec.truncate_stack end",
-        "   :              ^",
-        "  `----"
+        "   :              ^"
     );
 
     let asm_op = "movupw.4";
@@ -289,11 +280,10 @@ fn movupw_fail() {
     assert_assembler_diagnostic!(
         test,
         "invalid immediate: value must be in the range 2..4 (exclusive)",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+        regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
         "12 |",
         "13 | begin movupw.4 exec.truncate_stack end",
-        "   :              ^",
-        "  `----"
+        "   :              ^"
     );
 }
 
@@ -314,11 +304,10 @@ fn movdn_fail() {
     assert_assembler_diagnostic!(
         test,
         "invalid immediate: value must be in the range 2..16 (exclusive)",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+        regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
         "12 |",
         "13 | begin movdn.0 exec.truncate_stack end",
-        "   :             ^",
-        "  `----"
+        "   :             ^"
     );
 
     let asm_op = "movdn.1";
@@ -327,11 +316,10 @@ fn movdn_fail() {
     assert_assembler_diagnostic!(
         test,
         "invalid immediate: value must be in the range 2..16 (exclusive)",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+        regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
         "12 |",
         "13 | begin movdn.1 exec.truncate_stack end",
-        "   :             ^",
-        "  `----"
+        "   :             ^"
     );
 
     let asm_op = "movdn.16";
@@ -340,11 +328,10 @@ fn movdn_fail() {
     assert_assembler_diagnostic!(
         test,
         "invalid immediate: value must be in the range 2..16 (exclusive)",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+        regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
         "12 |",
         "13 | begin movdn.16 exec.truncate_stack end",
-        "   :             ^^",
-        "  `----"
+        "   :             ^^"
     );
 }
 
@@ -365,11 +352,10 @@ fn movdnw_fail() {
     assert_assembler_diagnostic!(
         test,
         "invalid immediate: value must be in the range 2..4 (exclusive)",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+        regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
         "12 |",
         "13 | begin movdnw.0 exec.truncate_stack end",
-        "   :              ^",
-        "  `----"
+        "   :              ^"
     );
 
     let asm_op = "movdnw.1";
@@ -378,11 +364,10 @@ fn movdnw_fail() {
     assert_assembler_diagnostic!(
         test,
         "invalid immediate: value must be in the range 2..4 (exclusive)",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+        regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
         "12 |",
         "13 | begin movdnw.1 exec.truncate_stack end",
-        "   :              ^",
-        "  `----"
+        "   :              ^"
     );
 
     let asm_op = "movdnw.4";
@@ -391,11 +376,10 @@ fn movdnw_fail() {
     assert_assembler_diagnostic!(
         test,
         "invalid immediate: value must be in the range 2..4 (exclusive)",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+        regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
         "12 |",
         "13 | begin movdnw.4 exec.truncate_stack end",
-        "   :              ^",
-        "  `----"
+        "   :              ^"
     );
 }
 
