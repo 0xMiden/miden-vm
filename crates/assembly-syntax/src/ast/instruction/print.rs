@@ -223,6 +223,7 @@ impl PrettyPrint for Instruction {
 
             // ----- input / output operations ----------------------------------------------------
             Self::Push(value) => inst_with_imm("push", value),
+            Self::PushU32(value) => inst_with_imm("push", value),
             Self::PushSlice(value, range) => flatten(
                 const_text("push.")
                     + value.render()

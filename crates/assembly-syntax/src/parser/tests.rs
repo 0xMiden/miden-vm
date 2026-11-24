@@ -1079,8 +1079,7 @@ end
     ));
     assert!(matches!(
         instruction_at(ops[3]),
-        Instruction::Push(Immediate::Value(value))
-            if *value.inner() == PushValue::Int(IntValue::U32(0))
+        Instruction::PushU32(Immediate::Value(value)) if *value.inner() == 0
     ));
     assert!(matches!(instruction_at(ops[4]), Instruction::U32And));
     assert!(matches!(

@@ -224,6 +224,10 @@ pub enum Instruction {
 
     // ----- input / output operations -----------------------------------------------------------
     Push(Immediate<PushValue>),
+    /// Pushes a `u32` immediate. This is how the immediate forms of `u32and`, `u32or`, `u32xor`,
+    /// `u32not`, `u32lt`, `u32lte`, `u32gt`, `u32gte`, `u32min` and `u32max` push their operand,
+    /// so a constant operand is range-checked as a `u32`, like a literal one.
+    PushU32(ImmU32),
     PushSlice(Immediate<WordValue>, Range<usize>),
     PushFeltList(Vec<Felt>),
     Locaddr(ImmU16),

@@ -467,7 +467,8 @@ where
         | MemLoadWLeImm(imm)
         | MemStoreImm(imm)
         | MemStoreWBeImm(imm)
-        | MemStoreWLeImm(imm) => visitor.visit_immediate_u32(imm),
+        | MemStoreWLeImm(imm)
+        | PushU32(imm) => visitor.visit_immediate_u32(imm),
         EmitImm(EventImmediate::Immediate(imm)) | TraceImm(EventImmediate::Immediate(imm)) => {
             visitor.visit_immediate_felt(imm)
         },
@@ -959,7 +960,8 @@ where
         | MemLoadWLeImm(imm)
         | MemStoreImm(imm)
         | MemStoreWBeImm(imm)
-        | MemStoreWLeImm(imm) => visitor.visit_mut_immediate_u32(imm),
+        | MemStoreWLeImm(imm)
+        | PushU32(imm) => visitor.visit_mut_immediate_u32(imm),
         EmitImm(EventImmediate::Immediate(imm)) | TraceImm(EventImmediate::Immediate(imm)) => {
             visitor.visit_mut_immediate_felt(imm)
         },

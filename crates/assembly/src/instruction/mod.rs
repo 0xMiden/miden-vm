@@ -373,6 +373,9 @@ impl Assembler {
                 },
                 PushValue::Word(v) => env_ops::push_word(&v.0, block_builder),
             },
+            Instruction::PushU32(imm) => {
+                env_ops::push_one(Felt::from_u32(imm.expect_value()), block_builder)
+            },
             Instruction::PushSlice(imm, range) => {
                 env_ops::push_word_slice(imm, range, block_builder)?
             },

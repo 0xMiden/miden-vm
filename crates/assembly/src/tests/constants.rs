@@ -1525,3 +1525,62 @@ fn link_time_const_evaluation_invalid_constant() -> TestResult {
 
     Ok(())
 }
+
+/// The immediate forms of these instructions push their operand before the instruction itself.
+const U32_IMMEDIATE_PUSHING_INSTRUCTIONS: [&str; 10] = [
+    "u32and", "u32or", "u32xor", "u32not", "u32lt", "u32lte", "u32gt", "u32gte", "u32min", "u32max",
+];
+
+#[test]
+fn u32_immediate_constant_larger_than_u32_is_rejected() {
+    let context = TestContext::default();
+    let constant_value = u32::MAX as u64 + 1;
+    for instruction in U32_IMMEDIATE_PUSHING_INSTRUCTIONS {
+        let source = source_file!(
+            &context,
+            format!(
+                "const CONSTANT = {constant_value}\nbegin\n    push.7\n    {instruction}.CONSTANT\nend\n"
+            )
+        );
+        let err = context.assemble(source).expect_err(instruction);
+        assert_diagnostic!(err, "invalid immediate: value is larger than expected range");
+    }
+}
+
+#[test]
+fn u32_immediate_word_constant_is_rejected() {
+    let context = TestContext::default();
+    for instruction in U32_IMMEDIATE_PUSHING_INSTRUCTIONS {
+        let source = source_file!(
+            &context,
+            format!("const WORD = [1, 2, 3, 4]\nbegin\n    push.7\n    {instruction}.WORD\nend\n")
+        );
+        let err = context.assemble(source).expect_err(instruction);
+        assert_diagnostic!(err, "expected u32");
+    }
+}
+
+#[test]
+fn u32_immediate_constant_assembles_like_the_literal() -> TestResult {
+    let context = TestContext::default();
+    for instruction in U32_IMMEDIATE_PUSHING_INSTRUCTIONS {
+        for value in [0, 1, 5, u32::MAX] {
+            let with_constant = source_file!(
+                &context,
+                format!(
+                    "const CONSTANT = {value}\nbegin\n    push.7\n    {instruction}.CONSTANT\nend\n"
+                )
+            );
+            let with_literal = source_file!(
+                &context,
+                format!("begin\n    push.7\n    {instruction}.{value}\nend\n")
+            );
+            assert_eq!(
+                context.assemble(with_constant)?.hash(),
+                context.assemble(with_literal)?.hash(),
+                "{instruction}.{value}"
+            );
+        }
+    }
+    Ok(())
+}

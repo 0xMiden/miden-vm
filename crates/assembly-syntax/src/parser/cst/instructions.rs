@@ -1967,9 +1967,5 @@ fn inst_op(span: SourceSpan, instruction: Instruction) -> ast::Op {
 
 /// Builds a `push` op for a `u32` immediate or constant.
 pub(super) fn push_u32_op(span: SourceSpan, imm: ast::ImmU32) -> ast::Op {
-    let push = match imm {
-        Immediate::Constant(name) => Immediate::Constant(name),
-        Immediate::Value(value) => Immediate::Value(value.map(PushValue::from)),
-    };
-    inst_op(span, Instruction::Push(push))
+    inst_op(span, Instruction::PushU32(imm))
 }
