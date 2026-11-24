@@ -145,10 +145,25 @@ fn wide_excerpts_keep_the_source_location_and_label_without_padding() {
 
         let rendered = format!("{:?}", Report::new(error));
         assert!(rendered.contains(&format!("test.masm:1:{column}\n")), "{rendered}");
-        assert!(rendered.contains("  = check this\n"), "{rendered}");
+        assert!(rendered.contains(": check this\n"), "{rendered}");
+        assert!(rendered.contains(&format!("bytes {start}..{end}")), "{rendered}");
         assert!(!rendered.contains('|'), "{rendered}");
         assert!(rendered.len() < 256);
     }
+}
+
+#[test]
+fn wide_unlabeled_spans_keep_their_byte_range() {
+    let file = source(&"x".repeat(300));
+    let span = SourceSpan::new(file.id(), 200..205);
+    let error = RelatedLabel::error("invalid identifier")
+        .with_source_file(Some(file))
+        .with_label(Label::underline(span));
+
+    let rendered = format!("{:?}", Report::new(error));
+    assert!(rendered.contains("test.masm:1:201\n"), "{rendered}");
+    assert!(rendered.contains("  = bytes 200..205\n"), "{rendered}");
+    assert!(!rendered.contains('|'), "{rendered}");
 }
 
 #[test]

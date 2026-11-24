@@ -190,10 +190,11 @@ impl<'a> Excerpt<'a> {
                 })
         });
         if too_wide {
+            write_inline(out, format_args!("  = bytes {}..{}", span.start, span.end))?;
             if let Some(message) = label.label() {
-                write_inline(out, format_args!("  = {message}"))?;
-                out.write_char('\n')?;
+                write_inline(out, format_args!(": {message}"))?;
             }
+            out.write_char('\n')?;
             return Ok(());
         }
         let gutter = (context_end + 1).ilog10() as usize + 1;
