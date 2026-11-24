@@ -76,12 +76,10 @@ fn assert_overlapped_matches_buffered(program_src: &str, stack: &[u64], advice: 
             .run_sync(&mut host)
             .map(|output| output.witness)
             .unwrap();
-        let (trace, precompiles_witness) = execution_witness
-            .build_trace(miden_vm_stark::memory::default_budget())
-            .unwrap()
-            .into_parts();
+        let (vm_witness, precompiles_witness) = execution_witness.into_parts();
         assert!(precompiles_witness.is_none());
-        trace
+        miden_processor::trace::build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
+            .unwrap()
     };
 
     let streamed = {

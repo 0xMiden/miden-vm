@@ -12,10 +12,10 @@ use miden_processor::{
 
 use crate::PrecompileProvingError;
 
-/// A synchronous, configurable prover for post-execution Miden VM witnesses.
+/// A synchronous, configurable prover for Miden VM execution witnesses and traces.
 ///
 /// This type does not execute programs. It owns proof-generation policy — including the memory
-/// budget for materializing a VM execution trace — and consumes witnesses produced by the
+/// budget for materializing a VM execution trace — and consumes artifacts produced by the
 /// processor.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Prover {
@@ -124,9 +124,8 @@ impl Prover {
 
     /// Returns the canonical VM trace-building budget for this prover's memory limit.
     ///
-    /// Use this budget when recording a materialized trace or building one from an execution
-    /// witness separately from proving. This applies the same VM relation model and byte limit as
-    /// this prover; the precompile proving budget is configured independently.
+    /// Pass this to `ExecutionRequest::build_trace` to apply the same VM relation model and
+    /// byte limit as this prover. The precompile proving budget is configured independently.
     pub fn trace_budget(&self) -> VmTraceBudget {
         miden_vm_stark::memory::canonical_budget(self.max_prover_memory_bytes)
     }
@@ -151,29 +150,16 @@ impl Prover {
     /// If the execution authenticated deferred precompile work, the returned proof carries its
     /// portable singleton witness for later proving. Otherwise, it is complete.
     pub fn prove(&self, witness: ExecutionWitness) -> Result<ExecutionProof, ProverError> {
-        let (vm_witness, precompile_witness) = witness.into_parts();
-        let vm = self.prove_vm(vm_witness)?;
-        let Some(precompile_witness) = precompile_witness else {
-            return Ok(ExecutionProof::new(vm, PrecompileStatus::Empty));
-        };
-        Ok(ExecutionProof::new(vm, PrecompileStatus::Deferred(precompile_witness)))
+        let (vm, precompile) = witness.into_parts();
+        self.prove_trace_parts(self.build_vm_trace(vm)?, precompile)
     }
 
     /// Proves a complete execution witness entirely in memory.
     ///
     /// VM replay and direct precompile import consume the in-memory witness without serialization.
     pub fn prove_full(&self, witness: ExecutionWitness) -> Result<ExecutionProof, ProverError> {
-        let (vm_witness, precompile_witness) = witness.into_parts();
-        let precompile_root = vm_witness.precompile_root();
-        let vm = self.prove_vm(vm_witness)?;
-        let precompile = precompile_witness
-            .map(|witness| self.prove_precompile_for_root(witness, precompile_root))
-            .transpose()?;
-        let precompile = match precompile {
-            Some(precompile) => PrecompileStatus::Proven(precompile),
-            None => PrecompileStatus::Empty,
-        };
-        Ok(ExecutionProof::new(vm, precompile))
+        let (vm, precompile) = witness.into_parts();
+        self.prove_full_trace_parts(self.build_vm_trace(vm)?, precompile)
     }
 
     /// Proves the VM portion of a materialized execution trace.
@@ -184,9 +170,7 @@ impl Prover {
     /// limit before materializing it.
     pub fn prove_trace(&self, input: ExecutionTrace) -> Result<ExecutionProof, ProverError> {
         let (trace, precompile) = input.into_parts();
-        let vm = self.prove_vm_trace(trace)?;
-        let status = precompile.map_or(PrecompileStatus::Empty, PrecompileStatus::Deferred);
-        Ok(ExecutionProof::new(vm, status))
+        self.prove_trace_parts(trace, precompile)
     }
 
     /// Proves a materialized VM trace and all of its authenticated precompile work.
@@ -209,16 +193,11 @@ impl Prover {
             return Err(ProverError::VmWitnessHasPrecompiles);
         }
 
-        let vm = self.prove_vm(witness)?;
-        Ok(ExecutionProof::new(vm, PrecompileStatus::Empty))
+        self.prove_trace_parts(self.build_vm_trace(witness)?, None)
     }
 
-    /// Materializes and proves the VM trace represented by `witness`.
-    fn prove_vm(&self, witness: VmWitness) -> Result<VmProof, ProverError> {
-        let trace =
-            build_trace(witness, &self.trace_budget()).map_err(ProverError::TraceGeneration)?;
-
-        self.prove_vm_trace(trace)
+    fn build_vm_trace(&self, witness: VmWitness) -> Result<VmTrace, ProverError> {
+        build_trace(witness, &self.trace_budget()).map_err(ProverError::TraceGeneration)
     }
 
     /// Proves an owned batch of singleton execution obligations in one STARK.
@@ -258,6 +237,16 @@ impl Prover {
             self.max_precompile_prover_memory_bytes,
         )
         .map_err(ProverError::PrecompileProofGeneration)
+    }
+
+    fn prove_trace_parts(
+        &self,
+        trace: VmTrace,
+        precompile: Option<PrecompileWitness>,
+    ) -> Result<ExecutionProof, ProverError> {
+        let vm = self.prove_vm_trace(trace)?;
+        let status = precompile.map_or(PrecompileStatus::Empty, PrecompileStatus::Deferred);
+        Ok(ExecutionProof::new(vm, status))
     }
 
     fn prove_full_trace_parts(

@@ -3,12 +3,9 @@
 
 extern crate alloc;
 
-mod execution;
-
 // EXPORTS
 // ================================================================================================
 
-pub use execution::{Processor, ProveComplete, ProveDeferred, ProvingOutput, ProvingRunError};
 pub use miden_assembly::{
     self as assembly, Assembler,
     ast::{Module, ModuleKind},
@@ -37,16 +34,15 @@ pub use miden_precompiles::{
 };
 /// Low-level processor state, execution modes, and session interfaces.
 ///
-/// Use [`Processor`] for the high-level execution builder. This namespace exposes the
-/// processor crate for callers that need direct machine control or reusable execution modes
-/// and session machinery.
+/// Use [`ExecutionRequest`] to configure and run a program, or this namespace
+/// to access lower-level machine controls.
 pub use miden_processor as processor;
 pub use miden_processor::{
     BaseHost, CompletedExecution, DefaultHost, Execute, Execution, ExecutionError,
-    ExecutionOptions, ExecutionOutput, ExecutionSession, ExecutionTrace, ExecutionWitness,
-    FutureMaybeSend, Host, Memory, PackageSourceDebugContext, StepStatus, SyncHost, Trace,
-    TraceOutput, VmTraceBudget, Witness, WitnessOutput, advice, crypto, field, serde, trace,
-    trace::VmTrace, utils,
+    ExecutionOptions, ExecutionOutput, ExecutionRequest, ExecutionSession, ExecutionTrace,
+    ExecutionWitness, FutureMaybeSend, Host, Memory, PackageSourceDebugContext, StepStatus,
+    SyncHost, Trace, TraceOutput, VmTraceBudget, Witness, WitnessOutput, advice, crypto, field,
+    serde, trace, trace::VmTrace, utils,
 };
 pub use miden_prover::{CompleteProof, PrecompileProvingError, Prover, ProverError};
 pub use miden_verifier::{

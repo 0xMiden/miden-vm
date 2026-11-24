@@ -1,7 +1,0 @@
-error[E0599]: no method named `record_witness` found for struct `miden_vm::Execution<'p, T>` in the current scope
- --> tests/ui/fail/task_already_selected.rs:4:47
-  |
-4 |     let _ = Processor::new(program).execute().record_witness();
-  |             -----------------------           ^^^^^^^^^^^^^^ method not found in `miden_vm::Execution<'_, Execute>`
-  |             |
-  |             method `record_witness` is available on `Processor<'_>`

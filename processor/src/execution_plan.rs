@@ -1,13 +1,11 @@
-//! Typed execution requests, tasks, and resumable execution for the processor engine.
+//! Typed execution requests and resumable execution for the processor engine.
 //!
-//! Execution modes select the VM recorder. Tasks finalize a successfully prepared artifact, which
-//! lets higher-level crates add proving without duplicating execution or session mechanics.
+//! Execution modes select the VM recorder and the output produced after successful execution.
 
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_core::{deferred::TRUE_DIGEST, mast::MastForest};
-use tracing::{Instrument, Span};
+use miden_core::mast::MastForest;
 
 use crate::{
     AdviceInputs, AdviceProvider, ExecutionClaim, ExecutionError, ExecutionOptions,
@@ -24,7 +22,7 @@ use crate::{
 pub type VmTraceBudget =
     miden_stark::memory::ProvingBudget<{ miden_air_definitions::vm::MIDEN_AIR_COUNT }>;
 
-/// Program-bound configuration before selecting an execution task.
+/// Program-bound configuration before selecting an execution mode.
 ///
 /// Configuration setters retain raw inputs. Advice is validated against the final execution
 /// options when execution is prepared, run, or started, independently of setter order.
@@ -87,29 +85,25 @@ impl<'p> ExecutionRequest<'p> {
 
     /// Selects ordinary execution without replay recording.
     pub fn execute(self) -> Execution<'p, Execute> {
-        self.select(Execute)
+        self.with_mode(Execute)
     }
 
     /// Selects a compact execution witness with its claim and final advice.
     pub fn record_witness(self) -> Execution<'p, Witness> {
-        self.select(Witness)
+        self.with_mode(Witness)
     }
 
     /// Selects VM trace construction under the supplied relation-compatible budget.
     pub fn build_trace(self, budget: VmTraceBudget) -> Execution<'p, Trace> {
-        self.select(Trace::new(budget))
+        self.with_mode(Trace { budget })
     }
 
-    /// Selects a task that finalizes the artifact produced by a supported VM execution mode.
-    ///
-    /// This is the composition point for higher-level tasks such as proving. The processor owns
-    /// the execution lifecycle and invokes task finalization only after artifact preparation.
-    pub fn select<T: ExecutionTask>(self, task: T) -> Execution<'p, T> {
+    fn with_mode<M: ExecutionMode>(self, mode: M) -> Execution<'p, M> {
         Execution {
             processor: ProcessorSource::Inputs(self.inputs),
             program: self.program,
             source_context: self.source_context,
-            task,
+            mode,
         }
     }
 }
@@ -135,24 +129,24 @@ impl ProcessorSource {
     }
 }
 
-/// A program and processor configuration bound to one execution task.
+/// A program and processor configuration bound to one execution mode.
 ///
 /// Running or starting consumes this value. Continuing an execution requires the returned session,
-/// which retains the recorder selected for this task.
-pub struct Execution<'p, T: ExecutionTask> {
+/// which retains the recorder selected for this mode.
+pub struct Execution<'p, M: ExecutionMode> {
     processor: ProcessorSource,
     program: &'p Program,
     source_context: Option<PackageSourceDebugContext<'p>>,
-    task: T,
+    mode: M,
 }
 
-impl<'p, T: ExecutionTask> Execution<'p, T> {
+impl<'p, M: ExecutionMode> Execution<'p, M> {
     /// Binds a test fixture's initialized machine before its first cycle.
     #[cfg(test)]
     pub(crate) fn from_processor(
         processor: FastProcessor,
         program: &'p Program,
-        task: T,
+        mode: M,
     ) -> Result<Self, ExecutionError> {
         if u32::from(processor.state().clock()) != 0 {
             return Err(ExecutionError::Internal("an execution plan requires a fresh processor"));
@@ -161,7 +155,7 @@ impl<'p, T: ExecutionTask> Execution<'p, T> {
             processor: ProcessorSource::Initialized(processor),
             program,
             source_context: None,
-            task,
+            mode,
         })
     }
 
@@ -176,55 +170,52 @@ impl<'p, T: ExecutionTask> Execution<'p, T> {
         Ok(self)
     }
 
-    pub fn run_sync(self, host: &mut impl SyncHost) -> Result<T::Output, T::Error> {
-        let _span = self.task.run_span().entered();
-        let mode = self.task.mode();
+    /// Runs to completion with a synchronous host.
+    ///
+    /// A host that only implements [`Host`] must use [`Self::run`].
+    ///
+    /// ```compile_fail
+    /// use miden_processor::{ExecutionRequest, Host, Program};
+    ///
+    /// fn run(program: &Program, host: &mut impl Host) {
+    ///     let _ = ExecutionRequest::new(program).execute().run_sync(host);
+    /// }
+    /// ```
+    pub fn run_sync(self, host: &mut impl SyncHost) -> Result<M::Output, ExecutionError> {
         let processor = self.processor.into_processor()?;
         // Full synchronous execution retains each mode's optimized path, including overlapped
         // hasher trace construction. Stepped execution deliberately uses buffered recording.
-        let output = private::ExecutionModeImpl::run_sync(
-            mode,
+        private::ExecutionModeImpl::run_sync(
+            self.mode,
             processor,
             self.program,
             self.source_context,
             host,
-        )?;
-        self.task.finish(output)
+        )
     }
 
-    /// Awaits host callbacks, then prepares the artifact and finalizes the task on this thread.
-    ///
-    /// A task may perform synchronous CPU work during finalization, such as proof generation.
-    pub async fn run(self, host: &mut impl Host) -> Result<T::Output, T::Error> {
-        let span = self.task.run_span();
-        async move {
-            let mode = self.task.mode();
-            let processor = self.processor.into_processor()?;
-            let output = private::ExecutionModeImpl::run(
-                mode,
-                processor,
-                self.program,
-                self.source_context,
-                host,
-            )
-            .await?;
-            self.task.finish(output)
-        }
-        .instrument(span)
+    /// Awaits host callbacks, then prepares the mode's output on the calling thread.
+    pub async fn run(self, host: &mut impl Host) -> Result<M::Output, ExecutionError> {
+        let processor = self.processor.into_processor()?;
+        private::ExecutionModeImpl::run(
+            self.mode,
+            processor,
+            self.program,
+            self.source_context,
+            host,
+        )
         .await
     }
 
     /// Starts a session without invoking the host. The recorder is retained across pauses.
-    pub fn start(self) -> Result<ExecutionSession<T>, ExecutionError> {
+    pub fn start(self) -> Result<ExecutionSession<M>, ExecutionError> {
         let mut processor = self.processor.into_processor()?;
         let context = processor.start_context(self.program, self.source_context)?;
         let program_hash = self.program.hash();
-        let mode = self.task.mode();
         let stack_inputs = processor.initial_stack_inputs();
-        let recorder = private::ExecutionModeImpl::recorder(&mode, &processor);
+        let recorder = private::ExecutionModeImpl::recorder(&self.mode, &processor);
         Ok(ExecutionSession {
-            task: self.task,
-            mode,
+            mode: self.mode,
             processor,
             program_hash,
             stack_inputs,
@@ -232,31 +223,6 @@ impl<'p, T: ExecutionTask> Execution<'p, T> {
             state: SessionState::Ready(context),
         })
     }
-}
-
-/// A task finalizing the output of one supported VM execution mode.
-///
-/// Execution modes are sealed and retain ownership of recorder selection and artifact preparation.
-/// Higher-level crates can implement this trait to transform prepared artifacts, for example by
-/// proving a trace. Task finalization runs once, after successful VM termination and artifact
-/// preparation. It cannot construct completion tokens or alter the session's execution state.
-pub trait ExecutionTask: Sized {
-    type Mode: ExecutionMode;
-    type Output;
-    type Error: From<ExecutionError>;
-
-    fn mode(&self) -> Self::Mode;
-
-    /// A span around VM execution, artifact preparation, and finalization in a single run.
-    #[doc(hidden)]
-    fn run_span(&self) -> Span {
-        Span::none()
-    }
-
-    fn finish(
-        self,
-        input: <Self::Mode as ExecutionMode>::Output,
-    ) -> Result<Self::Output, Self::Error>;
 }
 
 /// Ordinary execution without replay recording.
@@ -278,12 +244,6 @@ pub struct Trace {
     budget: VmTraceBudget,
 }
 
-impl Trace {
-    pub fn new(budget: VmTraceBudget) -> Self {
-        Self { budget }
-    }
-}
-
 /// A portable replay witness with its claim and final advice from the same execution.
 #[derive(Debug)]
 pub struct WitnessOutput {
@@ -300,27 +260,11 @@ pub struct TraceOutput {
     pub advice: AdviceProvider,
 }
 
-impl<M: ExecutionMode + Copy> ExecutionTask for M {
-    type Mode = M;
-    type Output = <M as ExecutionMode>::Output;
-    type Error = ExecutionError;
-
-    fn mode(&self) -> Self::Mode {
-        *self
-    }
-
-    fn finish(
-        self,
-        output: <M as ExecutionMode>::Output,
-    ) -> Result<<Self as ExecutionTask>::Output, Self::Error> {
-        Ok(output)
-    }
-}
-
 /// An execution mode owned by the processor crate.
 ///
-/// The sealed implementation selects a recorder and prepares its output. [`Execute`], [`Witness`],
-/// and [`Trace`] can be selected directly or used as the mode of a higher-level execution task.
+/// Select a mode through [`ExecutionRequest::execute`], [`ExecutionRequest::record_witness`],
+/// or [`ExecutionRequest::build_trace`]. The sealed implementation selects a recorder and prepares
+/// the output.
 pub trait ExecutionMode: private::ExecutionModeImpl {
     type Output;
 }
@@ -337,7 +281,9 @@ impl ExecutionMode for Trace {
     type Output = TraceOutput;
 }
 
-/// The VM trace and its matching optional portable precompile witness.
+/// The VM trace and its optional portable precompile witness from the same execution.
+///
+/// Produced by the execution mode selected with [`ExecutionRequest::build_trace`].
 #[derive(Debug)]
 pub struct ExecutionTrace {
     vm: VmTrace,
@@ -345,36 +291,6 @@ pub struct ExecutionTrace {
 }
 
 impl ExecutionTrace {
-    /// Reconstructs an execution trace while checking its authenticated precompile obligation.
-    ///
-    /// A nonempty trace root requires a witness with the same root. An empty root must not carry
-    /// a witness. This checks graph structure and the pairing. Precompile admission, semantic
-    /// validity, and proof validity are checked when preparing and verifying the corresponding
-    /// proofs.
-    pub fn try_new(
-        vm: VmTrace,
-        precompile: Option<PrecompileWitness>,
-    ) -> Result<Self, ExecutionError> {
-        let expected = vm.precompile_root();
-        match &precompile {
-            None if expected != TRUE_DIGEST => {
-                return Err(ExecutionError::MissingPrecompileWitness);
-            },
-            Some(_) if expected == TRUE_DIGEST => {
-                return Err(ExecutionError::UnexpectedPrecompileWitness);
-            },
-            Some(witness) => {
-                let actual =
-                    witness.compute_root().map_err(ExecutionError::InvalidPrecompileWitness)?;
-                if actual != expected {
-                    return Err(ExecutionError::PrecompileRootMismatch { expected, actual });
-                }
-            },
-            None => {},
-        }
-        Ok(Self { vm, precompile })
-    }
-
     /// Borrows the VM trace.
     pub fn vm_trace(&self) -> &VmTrace {
         &self.vm
@@ -419,21 +335,30 @@ enum SessionState {
     Failed,
 }
 
-/// A resumable execution retaining its continuation context, recorder, and selected task.
+/// A resumable execution retaining its continuation context and recorder.
 ///
 /// The session owns the VM context prepared at startup. Dropping an in-flight async step or drive
 /// leaves the session busy and prevents further execution. The VM state remains inspectable.
-pub struct ExecutionSession<T: ExecutionTask> {
-    task: T,
-    mode: T::Mode,
+///
+/// Only a [`CompletedExecution`] can export the selected artifact with `finish`.
+///
+/// ```compile_fail
+/// use miden_processor::{ExecutionSession, Witness};
+///
+/// fn finish(session: ExecutionSession<Witness>) {
+///     let _ = session.finish();
+/// }
+/// ```
+pub struct ExecutionSession<M: ExecutionMode> {
+    mode: M,
     processor: FastProcessor,
     program_hash: Word,
     stack_inputs: StackInputs,
-    recorder: <T::Mode as private::ExecutionModeImpl>::Recorder,
+    recorder: M::Recorder,
     state: SessionState,
 }
 
-impl<T: ExecutionTask> ExecutionSession<T> {
+impl<M: ExecutionMode> ExecutionSession<M> {
     /// Returns the VM state for inspection, including after termination, failure, or cancellation.
     pub fn state(&self) -> ProcessorState<'_> {
         self.processor.state()
@@ -494,18 +419,14 @@ impl<T: ExecutionTask> ExecutionSession<T> {
         }
     }
 
-    /// Runs the remaining execution, prepares its artifact, and finalizes the selected task.
-    pub fn run_sync(self, host: &mut impl SyncHost) -> Result<T::Output, T::Error> {
-        let _span = self.task.run_span().entered();
+    /// Runs the remaining execution and prepares the mode's output.
+    pub fn run_sync(self, host: &mut impl SyncHost) -> Result<M::Output, ExecutionError> {
         self.run_to_completion_sync(host)?.finish()
     }
 
-    /// Awaits host callbacks, then prepares the artifact and finalizes the task on this thread.
-    pub async fn run(self, host: &mut impl Host) -> Result<T::Output, T::Error> {
-        let span = self.task.run_span();
-        async move { self.run_to_completion(host).await?.finish() }
-            .instrument(span)
-            .await
+    /// Awaits host callbacks, then prepares the mode's output on the calling thread.
+    pub async fn run(self, host: &mut impl Host) -> Result<M::Output, ExecutionError> {
+        self.run_to_completion(host).await?.finish()
     }
 
     /// Runs the remaining VM execution, leaving the session available for inspection or completion.
@@ -530,7 +451,7 @@ impl<T: ExecutionTask> ExecutionSession<T> {
     pub fn run_to_completion_sync(
         mut self,
         host: &mut impl SyncHost,
-    ) -> Result<CompletedExecution<T>, ExecutionError> {
+    ) -> Result<CompletedExecution<M>, ExecutionError> {
         self.run_until_halt_sync(host)?;
         let ControlFlow::Break(completed) = self.try_complete() else {
             unreachable!("successful run completed the session")
@@ -541,7 +462,7 @@ impl<T: ExecutionTask> ExecutionSession<T> {
     pub async fn run_to_completion(
         mut self,
         host: &mut impl Host,
-    ) -> Result<CompletedExecution<T>, ExecutionError> {
+    ) -> Result<CompletedExecution<M>, ExecutionError> {
         self.run_until_halt(host).await?;
         let ControlFlow::Break(completed) = self.try_complete() else {
             unreachable!("successful run completed the session")
@@ -551,12 +472,11 @@ impl<T: ExecutionTask> ExecutionSession<T> {
 
     /// Returns `Break` with a completion token after successful termination, or `Continue` with
     /// the session when it has not completed successfully.
-    pub fn try_complete(self) -> ControlFlow<CompletedExecution<T>, Self> {
+    pub fn try_complete(self) -> ControlFlow<CompletedExecution<M>, Self> {
         let SessionState::Finished { stack, kernel } = self.state else {
             return ControlFlow::Continue(self);
         };
         ControlFlow::Break(CompletedExecution {
-            task: self.task,
             mode: self.mode,
             processor: self.processor,
             program_info: ProgramInfo::new(self.program_hash, kernel),
@@ -567,39 +487,36 @@ impl<T: ExecutionTask> ExecutionSession<T> {
     }
 }
 
-/// Successfully terminated execution whose artifact and selected task may now be finalized.
+/// Successfully terminated execution whose output may now be prepared.
 ///
 /// The constructor is private. Only successful VM termination yields a completion value.
-pub struct CompletedExecution<T: ExecutionTask> {
-    task: T,
-    mode: T::Mode,
+pub struct CompletedExecution<M: ExecutionMode> {
+    mode: M,
     processor: FastProcessor,
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack: StackOutputs,
-    recorder: <T::Mode as private::ExecutionModeImpl>::Recorder,
+    recorder: M::Recorder,
 }
 
-impl<T: ExecutionTask> CompletedExecution<T> {
+impl<M: ExecutionMode> CompletedExecution<M> {
     /// Returns the halted VM state before output packaging consumes the processor.
     pub fn state(&self) -> ProcessorState<'_> {
         self.processor.state()
     }
 
-    /// Packages the output, prepares the selected artifact, then finalizes the task.
+    /// Exports the execution outputs and prepares the selected artifact.
     ///
-    /// Successful VM termination does not guarantee that precompile witness export, trace
-    /// construction, or task finalization will succeed under their configured limits.
-    pub fn finish(self) -> Result<T::Output, T::Error> {
+    /// Precompile witness export and trace construction still enforce their configured limits.
+    pub fn finish(self) -> Result<M::Output, ExecutionError> {
         let output = self.processor.into_execution_output(self.stack)?;
-        let artifact = private::ExecutionModeImpl::prepare_output(
+        private::ExecutionModeImpl::prepare_output(
             self.mode,
             || self.program_info,
             self.stack_inputs,
             output,
             self.recorder,
-        )?;
-        self.task.finish(artifact)
+        )
     }
 }
 
@@ -713,9 +630,6 @@ mod private {
         ) -> Result<TraceOutput, ExecutionError> {
             let WitnessOutput { claim, witness, advice } =
                 Witness.prepare_output(program_info, stack_inputs, output, recorder)?;
-            // These components come from the same VM execution. Preserve that trusted handoff
-            // without reconstructing precompile roots before the prover applies its admission
-            // limits. Imported full witnesses use ExecutionWitness::build_trace instead.
             let (vm_witness, precompile) = witness.into_parts();
             let vm = build_trace(vm_witness, &self.budget)?;
             Ok(TraceOutput {

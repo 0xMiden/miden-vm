@@ -1,5 +1,0 @@
-error[E0599]: no method named `finish` found for struct `ExecutionSession<T>` in the current scope
- --> tests/ui/fail/unfinished_session.rs:5:21
-  |
-5 |     let _ = session.finish();
-  |                     ^^^^^^ method not found in `ExecutionSession<Witness>`

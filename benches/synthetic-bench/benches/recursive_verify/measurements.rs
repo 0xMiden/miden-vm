@@ -2,14 +2,13 @@
 
 use std::{hint::black_box, time::Instant};
 
+use miden_core::program::ExecutionClaim;
 use miden_processor::{
-    DefaultHost, ExecutionRequest,
+    DefaultHost, ExecutionRequest, Program,
+    advice::AdviceInputs,
     trace::{TraceLenSummary, build_trace},
 };
-use miden_vm::{
-    ExecutionProof, ExecutionWitness, Processor, Prover, ProvingOutput, StackOutputs, Verifier,
-    VmTrace,
-};
+use miden_vm::{ExecutionProof, ExecutionWitness, Prover, StackOutputs, Verifier, VmTrace};
 
 use super::{RecursionCase, config::ProofComposition, recursive_host};
 
@@ -103,31 +102,39 @@ pub(super) fn prove_recursive_case(
     prover: &Prover,
     (case, mut host): (RecursionCase, DefaultHost),
 ) -> (StackOutputs, ExecutionProof) {
-    let ProvingOutput { claim, proof, .. } = Processor::new(&case.program)
-        .with_advice(case.advice_inputs)
-        .prove_complete(prover)
-        .run_sync(&mut host)
-        .expect("prove recursive verifier");
-    (*claim.stack_outputs(), proof.into_inner())
+    let (claim, proof) =
+        prove_recursive_trace(prover, &case.program, case.advice_inputs, &mut host);
+    (*claim.stack_outputs(), proof)
+}
+
+fn prove_recursive_trace(
+    prover: &Prover,
+    program: &Program,
+    advice_inputs: AdviceInputs,
+    host: &mut DefaultHost,
+) -> (ExecutionClaim, ExecutionProof) {
+    let output = ExecutionRequest::new(program)
+        .with_advice(advice_inputs)
+        .build_trace(prover.trace_budget())
+        .run_sync(host)
+        .expect("execute recursive verifier and build trace");
+    let proof = prover.prove_full_trace(output.trace).expect("prove recursive verifier");
+    (output.claim, proof.into_inner())
 }
 
 fn prove_recursive_once(prover: &Prover, case: &RecursionCase) -> (f64, usize) {
     let advice_inputs = case.advice_inputs.clone();
     let mut host = recursive_host();
     let start = Instant::now();
-    let ProvingOutput { claim, proof, .. } = Processor::new(&case.program)
-        .with_advice(advice_inputs)
-        .prove_complete(prover)
-        .run_sync(&mut host)
-        .expect("prove recursive verifier");
+    let (claim, proof) = prove_recursive_trace(prover, &case.program, advice_inputs, &mut host);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1_000.0;
     assert!(
         Verifier::new()
-            .verify(&claim, proof.as_inner())
+            .verify(&claim, &proof)
             .expect("verify outer proof")
             .is_complete()
     );
-    let proof_bytes = proof.as_inner().to_bytes().len();
+    let proof_bytes = proof.to_bytes().len();
     black_box(proof);
     (elapsed_ms, proof_bytes)
 }

@@ -94,20 +94,11 @@ witness. `Prover::prove_full_trace(ExecutionTrace)` proves all work and returns 
 opaque wrapper guaranteeing that no deferred work remains. Its `as_inner()` and `into_inner()`
 methods expose the underlying `ExecutionProof`; verification establishes proof validity.
 
-Use `Prover::trace_budget()` to build traces with this prover's canonical VM model and memory
-limit. Pass the `trace` field from `TraceOutput` directly to either proving method. If you
-already have an `ExecutionWitness`, `witness.build_trace(prover.trace_budget())` checks the pairing
-and returns an `ExecutionTrace`. A synchronous `build_trace` task overlaps execution and
-hasher trace construction when enabled and a separate Rayon worker is available. Other paths use
-buffered replay. Proving rechecks the trace against its memory budget.
-`ExecutionTrace::try_new` checks that a separately supplied VM trace and optional precompile witness
-have matching roots and consistent presence before accepting them as proving input.
-
-For execution and proving in one operation, use the [`miden-vm` builder](../miden-vm/):
-`Processor::new(&program).prove_complete(&prover).run_sync(&mut host)`.
-The facade supplies proving tasks to the processor's shared execution and session pipeline;
-its `ProveComplete` and `ProveDeferred` tasks retain a concrete `&Prover` and finalize the original
-execution trace after successful VM termination.
+Select `ExecutionRequest::build_trace(prover.trace_budget())` to use the same VM model and memory
+limit as the prover. Pass `TraceOutput::trace` to either proving method. A synchronous trace run can
+overlap execution and hasher trace construction when enabled and a separate Rayon worker is
+available. Other paths use buffered replay. Proving rechecks the trace against its memory budget.
+For a saved witness, use `prove` or `prove_full` directly.
 
 ## STARK Backend
 

@@ -1,5 +1,5 @@
 use miden_assembly::Assembler;
-use miden_vm::{Processor, Program};
+use miden_vm::{ExecutionRequest, Program};
 
 use super::TestHost;
 
@@ -22,7 +22,7 @@ fn test_event_handling() {
         .unwrap()
         .unwrap_program();
     let mut host = TestHost::default();
-    Processor::new(&program).execute().run_sync(&mut host).unwrap();
+    ExecutionRequest::new(&program).execute().run_sync(&mut host).unwrap();
 
     // make sure events were handled correctly
     let expected = vec![1000, 2000];

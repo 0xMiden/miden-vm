@@ -41,6 +41,7 @@ pub use miden_processor::{
 #[cfg(not(target_family = "wasm"))]
 use miden_processor::{
     DefaultHost, ExecutionOptions, ExecutionOutput, ExecutionRequest, WitnessOutput,
+    trace::build_trace,
 };
 use miden_processor::{
     Program,
@@ -613,8 +614,8 @@ impl Test {
         );
 
         recorded.and_then(|(_, witness)| {
-            let trace =
-                witness.build_trace(miden_vm_stark::memory::default_budget())?.into_vm_trace();
+            let (vm_witness, _) = witness.into_parts();
+            let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget())?;
 
             assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
             Ok(trace)

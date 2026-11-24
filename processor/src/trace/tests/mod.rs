@@ -215,10 +215,8 @@ fn clear_deferred_replays_across_fragments_and_retains_new_obligations() {
         .unwrap()
         .witness;
     let restored = ExecutionWitness::read_from_bytes(&witness.to_bytes()).unwrap();
-    let (trace, precompile_witness) = restored
-        .build_trace(miden_vm_stark::memory::default_budget())
-        .unwrap()
-        .into_parts();
+    let (vm_witness, precompile_witness) = restored.into_parts();
+    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
     let first_root = Node::and(TRUE_DIGEST, TRUE_DIGEST).digest();
     let expected_root = Node::and(TRUE_DIGEST, first_root).digest();
     assert_eq!(trace.precompile_root(), expected_root);

@@ -146,12 +146,8 @@ pub(crate) fn selected_criterion_axes(bench_axes: &str) -> Option<BTreeSet<Strin
 fn report_span_metric_name(name: &str) -> Option<String> {
     match name {
         "record_witness_sync"
-        | EXECUTE_FOR_PROVING_METRIC
         | "execute_for_proving_with_package_debug_info_sync"
-        | "execute_for_proving_with_package_debug_info_at_source_node_sync"
-        | "execute_trace_inputs_sync"
-        | "execute_trace_inputs_with_package_debug_info_sync"
-        | "execute_trace_inputs_with_package_debug_info_at_source_node_sync" => {
+        | "execute_for_proving_with_package_debug_info_at_source_node_sync" => {
             Some(EXECUTE_FOR_PROVING_METRIC.to_string())
         },
         "build aux traces" => Some("build_aux_trace".to_string()),
@@ -237,28 +233,4 @@ fn split_csv(value: &str) -> Vec<String> {
         .filter(|part| !part.is_empty())
         .map(str::to_string)
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{EXECUTE_FOR_PROVING_METRIC, report_span_metric_name};
-
-    #[test]
-    fn witness_recording_spans_share_the_existing_metric() {
-        for span in [
-            "record_witness_sync",
-            "execute_for_proving_sync",
-            "execute_for_proving_with_package_debug_info_sync",
-            "execute_for_proving_with_package_debug_info_at_source_node_sync",
-            "execute_trace_inputs_sync",
-            "execute_trace_inputs_with_package_debug_info_sync",
-            "execute_trace_inputs_with_package_debug_info_at_source_node_sync",
-        ] {
-            assert_eq!(
-                report_span_metric_name(span).as_deref(),
-                Some(EXECUTE_FOR_PROVING_METRIC),
-                "{span}"
-            );
-        }
-    }
 }

@@ -133,7 +133,7 @@ client still requires `protoc`.
 
 ```toml
 [dependencies]
-miden-prover-service = { version = "1.0.0-rc.2", default-features = false }
+miden-prover-service = { version = "1.0.0-rc.1", default-features = false }
 ```
 
 The generated `protocol::prover_service_client::ProverServiceClient` works with

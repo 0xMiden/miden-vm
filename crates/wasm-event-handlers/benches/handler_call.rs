@@ -27,9 +27,7 @@ use std::{sync::Arc, time::Duration};
 use criterion::{Criterion, criterion_group, criterion_main};
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_event_handler_abi::ABI_VERSION;
-use miden_processor::{
-    DefaultHost, ExecutionRequest, FastProcessor, Program, StackInputs, event::EventName,
-};
+use miden_processor::{DefaultHost, ExecutionRequest, Program, event::EventName};
 use miden_wasm_event_handlers::{WasmHandlerLimits, WasmHandlerModule};
 
 const EVENT: EventName = EventName::new("bench::wasm::handler");
@@ -153,26 +151,25 @@ fn bench_handlers(c: &mut Criterion) {
     group.warm_up_time(Duration::from_millis(500));
     group.measurement_time(Duration::from_secs(2));
 
-    let processor = FastProcessor::new(StackInputs::default());
-    let populated_program = populated_memory_program();
-    let populated = ExecutionRequest::new(&populated_program)
-        .execute()
-        .start()
-        .expect("the bench session starts")
-        .run_to_completion_sync(&mut DefaultHost::default())
+    let program = populated_memory_program();
+    let start = || ExecutionRequest::new(&program).execute().start().expect("start bench session");
+    let processor = start();
+    let mut populated = start();
+    populated
+        .run_until_halt_sync(&mut DefaultHost::default())
         .expect("the bench program populates the memory");
 
-    for (name, wat_src, state) in [
-        ("call_empty_handler", EMPTY_WAT, processor.state()),
-        ("guest_arith_100k_iters", ARITH_WAT, processor.state()),
-        ("host_extend_4096_felts", EXTEND_WAT, processor.state()),
-        ("host_stack_read_4096_felts", STACK_READ_WAT, processor.state()),
-        ("host_poseidon2_merge", POSEIDON2_MERGE_WAT, processor.state()),
-        ("host_keccak256_4096_bytes", KECCAK256_WAT, processor.state()),
-        ("host_sha256_4096_bytes", SHA256_WAT, processor.state()),
-        ("host_sha512_4096_bytes", SHA512_WAT, processor.state()),
-        ("host_blake3_4096_bytes", BLAKE3_WAT, processor.state()),
-        ("host_mem_read_4096_felts_populated", MEM_READ_WAT, populated.state()),
+    for (name, wat_src, session) in [
+        ("call_empty_handler", EMPTY_WAT, &processor),
+        ("guest_arith_100k_iters", ARITH_WAT, &processor),
+        ("host_extend_4096_felts", EXTEND_WAT, &processor),
+        ("host_stack_read_4096_felts", STACK_READ_WAT, &processor),
+        ("host_poseidon2_merge", POSEIDON2_MERGE_WAT, &processor),
+        ("host_keccak256_4096_bytes", KECCAK256_WAT, &processor),
+        ("host_sha256_4096_bytes", SHA256_WAT, &processor),
+        ("host_sha512_4096_bytes", SHA512_WAT, &processor),
+        ("host_blake3_4096_bytes", BLAKE3_WAT, &processor),
+        ("host_mem_read_4096_felts_populated", MEM_READ_WAT, &populated),
     ] {
         let wasm = wat::parse_str(wat_src).expect("bench WAT parses");
         let module = Arc::new(
@@ -189,6 +186,7 @@ fn bench_handlers(c: &mut Criterion) {
 
         group.bench_function(name, |bencher| {
             bencher.iter(|| {
+                let state = session.state();
                 std::hint::black_box(handler.on_event(&state).expect("bench handler succeeds"))
             })
         });

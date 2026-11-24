@@ -9,8 +9,8 @@ use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, PackageSourceDebugContext};
 use miden_vm::{
-    HashFunction, PrecompileLimits, PrecompileStatus, Processor, Prover, ProvingOutput,
-    ProvingRunError, internal::InputFile,
+    ExecutionRequest, HashFunction, PrecompileLimits, PrecompileStatus, Prover, WitnessOutput,
+    internal::InputFile,
 };
 
 use super::{
@@ -226,28 +226,23 @@ impl ProveCmd {
         let source = package_debug_info
             .as_ref()
             .map(|info| PackageSourceDebugContext::new_optional(info, entrypoint_source_node));
-        let processor = Processor::new(&program)
+        let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
             .with_options(execution_options)
             .with_stack_inputs(stack_inputs)
             .with_advice(advice_inputs)
-            .with_source_context(source);
+            .with_source_context(source)
+            .record_witness()
+            .run_sync(&mut host)
+            .wrap_err("Failed to execute program")?;
+        let stack_outputs = *claim.stack_outputs();
         let prover = self.prover(hash_fn, verification_limits);
-        let (stack_outputs, proof) = if self.complete || !self.deferred {
-            processor.prove_complete(&prover).run_sync(&mut host).map(
-                |ProvingOutput { claim, proof, .. }| (*claim.stack_outputs(), proof.into_inner()),
-            )
+        let proof = if self.complete || !self.deferred {
+            prover.prove_full(witness)
         } else {
-            processor
-                .prove_deferred(&prover)
-                .run_sync(&mut host)
-                .map(|ProvingOutput { claim, proof, .. }| (*claim.stack_outputs(), proof))
+            prover.prove(witness)
         }
-        .or_else(|err| match err {
-            ProvingRunError::Execution(err) => Err(err).wrap_err("Failed to execute program"),
-            ProvingRunError::Prover(err) => {
-                Err(err).into_diagnostic().wrap_err("Failed to prove program")
-            },
-        })?;
+        .into_diagnostic()
+        .wrap_err("Failed to prove program")?;
 
         println!("Program proved in {} ms", now.elapsed().as_millis());
         if matches!(proof.precompile(), PrecompileStatus::Deferred(_)) {

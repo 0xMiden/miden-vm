@@ -26,9 +26,7 @@ use codspeed_criterion_compat as criterion;
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
 use miden_core::program::ExecutionClaim;
 use miden_processor::{DefaultHost, ExecutionRequest, StackInputs, advice::AdviceInputs};
-use miden_vm::{
-    Assembler, ExecutionProof, HashFunction, Processor, Program, Prover, ProvingOutput, Verifier,
-};
+use miden_vm::{Assembler, ExecutionProof, HashFunction, Program, Prover, Verifier};
 use miden_vm_synthetic_bench::{
     calibrator::{Calibration, calibrate},
     snapshot::{DEFAULT_SCENARIOS, TraceSnapshot},
@@ -104,13 +102,14 @@ fn execute_and_prove(
     advice_inputs: AdviceInputs,
     host: &mut DefaultHost,
 ) -> (ExecutionClaim, ExecutionProof) {
-    let ProvingOutput { claim, proof, .. } = Processor::new(program)
+    let output = ExecutionRequest::new(program)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
-        .prove_complete(prover)
+        .build_trace(prover.trace_budget())
         .run_sync(host)
-        .expect("execute and prove program");
-    (claim, proof.into_inner())
+        .expect("execute program and build trace");
+    let proof = prover.prove_full_trace(output.trace).expect("prove program");
+    (output.claim, proof.into_inner())
 }
 
 fn synthetic_bench(c: &mut Criterion) {

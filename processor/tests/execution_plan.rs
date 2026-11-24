@@ -1,14 +1,45 @@
-use core::{cell::Cell, ops::ControlFlow};
+use core::{
+    future::Future,
+    ops::ControlFlow,
+    task::{Context, Poll, Waker},
+};
+use std::sync::Arc;
 
 use miden_assembly::Assembler;
 use miden_core::deferred::{PrecompileError, PrecompileLimitError, PrecompileLimits, TRUE_DIGEST};
-use miden_mast_package::debug_info::PackageDebugInfo;
+use miden_debug_types::{Location, SourceFile, SourceSpan};
+use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, ExecutionRequest, ExecutionTask, ExecutionTrace,
-    Felt, PackageSourceDebugContext, PrecompileWitness, StepStatus, Witness, WitnessOutput, Word,
-    advice::{AdviceError, AdviceInputs, AdviceMap, AdviceProvider},
+    BaseHost, CompletedExecution, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput,
+    ExecutionRequest, Felt, FutureMaybeSend, Host, LoadedMastForest, MastForestLoadError,
+    PackageSourceDebugContext, ProcessorState, StepStatus, TraceOutput, Witness, WitnessOutput,
+    Word,
+    advice::{AdviceError, AdviceInputs, AdviceMap, AdviceMutation, AdviceProvider},
+    event::{EventError, EventName},
     operation::OperationError,
 };
+
+#[test]
+fn async_execution_futures_preserve_mode_outputs_and_send_bounds() {
+    fn assert_future<T>(_: impl FutureMaybeSend<Result<T, ExecutionError>>) {}
+
+    let program = Assembler::default()
+        .assemble_program("execution_plan", "begin nop end")
+        .unwrap()
+        .unwrap_program();
+    let request = || ExecutionRequest::new(&program);
+    let trace = || request().build_trace(miden_vm_stark::memory::default_budget());
+    let mut host = DefaultHost::default();
+    assert_future::<ExecutionOutput>(request().execute().run(&mut host));
+    assert_future::<WitnessOutput>(request().record_witness().run(&mut host));
+    assert_future::<TraceOutput>(trace().run(&mut host));
+    assert_future::<TraceOutput>(trace().start().unwrap().run(&mut host));
+
+    let mut session = request().record_witness().start().unwrap();
+    assert_future::<StepStatus>(session.step(&mut host));
+    assert_future::<()>(session.run_until_halt(&mut host));
+    assert_future::<CompletedExecution<Witness>>(session.run_to_completion(&mut host));
+}
 
 #[test]
 fn preparing_execution_validates_initial_advice_before_program_advice() {
@@ -30,10 +61,11 @@ fn preparing_execution_validates_initial_advice_before_program_advice() {
         ExecutionRequest::new(&program)
             .with_advice(advice.clone())
             .with_options(options.clone())
-            .execute()
     };
-    for error in [request().prepare().err(), request().run_sync(&mut DefaultHost::default()).err()]
-    {
+    for error in [
+        request().execute().prepare().err(),
+        request().execute().run_sync(&mut DefaultHost::default()).err(),
+    ] {
         assert!(matches!(
             error,
             Some(ExecutionError::AdviceError {
@@ -42,6 +74,13 @@ fn preparing_execution_validates_initial_advice_before_program_advice() {
             }) if max == budget
         ));
     }
+
+    let output = request()
+        .with_options(ExecutionOptions::default())
+        .execute()
+        .run_sync(&mut DefaultHost::default())
+        .unwrap();
+    assert_eq!(output.advice.get_mapped_values(&Word::empty()), Some([Felt::ONE].as_slice()));
 
     let program = program.with_advice_map(advice_map);
     let prepared = ExecutionRequest::new(&program)
@@ -140,86 +179,6 @@ fn paused_execution_preserves_trace_and_final_advice() {
 }
 
 #[test]
-fn custom_task_finalization_waits_for_successful_artifact_preparation() {
-    #[derive(Debug)]
-    enum TaskError {
-        Execution(ExecutionError),
-        Finalization,
-    }
-
-    impl From<ExecutionError> for TaskError {
-        fn from(error: ExecutionError) -> Self {
-            Self::Execution(error)
-        }
-    }
-
-    struct RejectOutput<'a>(&'a Cell<u32>);
-
-    impl ExecutionTask for RejectOutput<'_> {
-        type Mode = Witness;
-        type Output = ();
-        type Error = TaskError;
-
-        fn mode(&self) -> Self::Mode {
-            Witness
-        }
-
-        fn finish(self, output: WitnessOutput) -> Result<(), Self::Error> {
-            assert_eq!(output.witness.claim(), output.claim);
-            assert_eq!(self.0.replace(1), 0, "finalization must consume the task exactly once");
-            Err(TaskError::Finalization)
-        }
-    }
-
-    let assemble = |source: &str| {
-        Assembler::default()
-            .assemble_program("execution_task", source)
-            .unwrap()
-            .unwrap_program()
-    };
-    let program = assemble("begin push.3 swap drop end");
-    for stepped in [false, true] {
-        let finalizations = Cell::new(0);
-        let execution = ExecutionRequest::new(&program).select(RejectOutput(&finalizations));
-        let result = if stepped {
-            let mut session = execution.start().unwrap();
-            session.step_sync(&mut DefaultHost::default()).unwrap();
-            assert_eq!(finalizations.get(), 0);
-            let completed = session.run_to_completion_sync(&mut DefaultHost::default()).unwrap();
-            assert_eq!(completed.state().get_stack_item(0), Felt::from_u32(3));
-            assert_eq!(finalizations.get(), 0);
-            completed.finish()
-        } else {
-            execution.run_sync(&mut DefaultHost::default())
-        };
-        assert!(matches!(result, Err(TaskError::Finalization)));
-        assert_eq!(finalizations.get(), 1);
-    }
-
-    // Neither a VM error nor a later artifact-export error may reach the finalizer.
-    for (source, options) in [
-        ("begin push.0 assert end", ExecutionOptions::default()),
-        (
-            "begin log_deferred end",
-            ExecutionOptions::default()
-                .with_verification_precompile_limits(PrecompileLimits::new(0)),
-        ),
-    ] {
-        let program = assemble(source);
-        let finalizations = Cell::new(0);
-        let result = ExecutionRequest::new(&program)
-            .with_options(options)
-            .select(RejectOutput(&finalizations))
-            .run_sync(&mut DefaultHost::default());
-        assert!(matches!(
-            result,
-            Err(TaskError::Execution(ExecutionError::OperationError { .. }))
-        ));
-        assert_eq!(finalizations.get(), 0);
-    }
-}
-
-#[test]
 fn completed_execution_defers_precompile_witness_export_until_finish() {
     let program = Assembler::default()
         .assemble_program("execution_plan", "begin log_deferred end")
@@ -276,58 +235,113 @@ fn failed_execution_retains_state_without_resuming_or_completing() {
     assert_eq!(session.state().precompile_root(), root);
 }
 
-#[test]
-fn reconstructed_execution_traces_check_precompile_obligations() {
-    let build_trace = |source: &str| {
-        let program = Assembler::default()
-            .assemble_program("execution_trace", source)
-            .unwrap()
-            .unwrap_program();
-        ExecutionRequest::new(&program)
-            .build_trace(miden_vm_stark::memory::default_budget())
-            .run_sync(&mut DefaultHost::default())
-            .unwrap()
-            .trace
-    };
+struct PendingHost {
+    event_calls: usize,
+}
 
-    let trace = build_trace("begin nop end");
-    assert!(trace.precompile_witness().is_none());
-    let (vm_trace, witness) = trace.into_parts();
-    assert!(ExecutionTrace::try_new(vm_trace, witness).is_ok());
+impl BaseHost for PendingHost {
+    fn get_label_and_source_file(&self, _: &Location) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        (SourceSpan::UNKNOWN, None)
+    }
+}
 
-    // Logging TRUE creates an actual nonempty authenticated graph and portable witness.
-    let trace = build_trace("begin log_deferred end");
-    let expected_root = trace.vm_trace().precompile_root();
-    let (vm_trace, witness) = trace.into_parts();
-    let witness = witness.expect("logged work must carry a witness");
-    assert_ne!(expected_root, TRUE_DIGEST);
-    assert!(ExecutionTrace::try_new(vm_trace, Some(witness.clone())).is_ok());
+impl Host for PendingHost {
+    fn get_mast_forest(
+        &self,
+        _: &Word,
+    ) -> impl FutureMaybeSend<Result<Option<LoadedMastForest>, MastForestLoadError>> {
+        async { Ok(None) }
+    }
 
-    let vm_trace = build_trace("begin log_deferred end").into_vm_trace();
-    assert!(matches!(
-        ExecutionTrace::try_new(vm_trace, None),
-        Err(ExecutionError::MissingPrecompileWitness)
-    ));
+    fn on_event(
+        &mut self,
+        _: &ProcessorState<'_>,
+    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
+        self.event_calls += 1;
+        core::future::pending()
+    }
+}
 
-    let vm_trace = build_trace("begin nop end").into_vm_trace();
-    assert!(matches!(
-        ExecutionTrace::try_new(vm_trace, Some(witness.clone())),
-        Err(ExecutionError::UnexpectedPrecompileWitness)
-    ));
+fn emitting_package() -> Box<Package> {
+    let event_id = EventName::new("test::execution_plan::pending").to_event_id().as_u64();
+    Assembler::default()
+        .assemble_program("execution_plan", format!("begin push.{event_id} emit drop end"))
+        .unwrap()
+}
 
-    let vm_trace = build_trace("begin log_deferred log_deferred end").into_vm_trace();
-    let different_root = vm_trace.precompile_root();
-    assert_ne!(different_root, expected_root);
-    assert!(matches!(
-        ExecutionTrace::try_new(vm_trace, Some(witness)),
-        Err(ExecutionError::PrecompileRootMismatch { expected, actual })
-            if expected == different_root && actual == expected_root
-    ));
+#[tokio::test(flavor = "current_thread")]
+async fn invalid_source_context_fails_before_execution() {
+    let package = emitting_package();
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let program = package.unwrap_program();
+    let source = PackageSourceDebugContext::new(&debug_info, 123_u32.into());
+    let request = || ExecutionRequest::new(&program).with_source_context(Some(source));
+    let mut host = PendingHost { event_calls: 0 };
+    let errors = [
+        request().execute().run_sync(&mut DefaultHost::default()).err(),
+        request().record_witness().run(&mut host).await.err(),
+        request().build_trace(miden_vm_stark::memory::default_budget()).start().err(),
+        request().execute().prepare().unwrap().start().err(),
+    ];
+    for error in errors {
+        assert!(matches!(
+            error,
+            Some(ExecutionError::Internal(
+                "package debug source graph is missing the entrypoint source node"
+            ))
+        ));
+    }
+    assert_eq!(host.event_calls, 0);
+}
 
-    let vm_trace = build_trace("begin log_deferred end").into_vm_trace();
-    let malformed = PrecompileWitness::from_entries(Vec::new()).unwrap();
-    assert!(matches!(
-        ExecutionTrace::try_new(vm_trace, Some(malformed)),
-        Err(ExecutionError::InvalidPrecompileWitness(_))
-    ));
+#[tokio::test(flavor = "current_thread")]
+async fn cancelled_async_execution_cannot_be_resumed_or_completed() {
+    let program = emitting_package().unwrap_program();
+    for cancel_drain in [false, true] {
+        let mut session = ExecutionRequest::new(&program).record_witness().start().unwrap();
+        let mut host = PendingHost { event_calls: 0 };
+        let mut context = Context::from_waker(Waker::noop());
+
+        if cancel_drain {
+            let mut future = Box::pin(session.run_until_halt(&mut host));
+            assert!(future.as_mut().poll(&mut context).is_pending());
+        } else {
+            let mut cancelled = false;
+            for _ in 0..64 {
+                let mut step = Box::pin(session.step(&mut host));
+                match step.as_mut().poll(&mut context) {
+                    Poll::Pending => {
+                        cancelled = true;
+                        break;
+                    },
+                    Poll::Ready(Ok(_)) => {},
+                    Poll::Ready(Err(err)) => {
+                        panic!("execution failed before the host callback: {err}")
+                    },
+                }
+            }
+            assert!(cancelled, "execution did not reach its pending callback");
+        }
+        assert_eq!(host.event_calls, 1);
+        let clock = session.state().clock();
+        assert!(u32::from(clock) > 0);
+        let mut session = match session.try_complete() {
+            ControlFlow::Break(_) => {
+                panic!("a cancelled step cannot produce a completed execution")
+            },
+            ControlFlow::Continue(session) => session,
+        };
+        let error = if cancel_drain {
+            session.run_until_halt_sync(&mut DefaultHost::default()).unwrap_err()
+        } else {
+            session.run_until_halt(&mut host).await.unwrap_err()
+        };
+        assert!(matches!(
+            error,
+            ExecutionError::Internal("execution session failed or a previous step was cancelled")
+        ));
+        assert_eq!(host.event_calls, 1);
+        assert_eq!(session.state().clock(), clock);
+        assert!(matches!(session.try_complete(), ControlFlow::Continue(_)));
+    }
 }

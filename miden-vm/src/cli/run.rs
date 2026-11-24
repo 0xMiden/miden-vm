@@ -4,7 +4,7 @@ use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, PackageSourceDebugContext, trace::VmTrace};
-use miden_vm::{Processor, TraceOutput, internal::InputFile};
+use miden_vm::{ExecutionRequest, TraceOutput, internal::InputFile};
 use miden_vm_stark::memory::{DEFAULT_MAX_PROVER_MEMORY_BYTES, canonical_budget};
 use tracing::instrument;
 
@@ -187,7 +187,7 @@ fn run_masp_program(
 
     let program_hash: [u8; 32] = program.hash().into();
 
-    let TraceOutput { trace, .. } = Processor::new(&program)
+    let TraceOutput { trace, .. } = ExecutionRequest::new(&program)
         .with_options(exec_options)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
@@ -250,7 +250,7 @@ fn run_masm_program(
     let source = package_debug_info
         .as_ref()
         .map(|info| PackageSourceDebugContext::new_optional(info, entrypoint_source_node));
-    let TraceOutput { trace, .. } = Processor::new(&program)
+    let TraceOutput { trace, .. } = ExecutionRequest::new(&program)
         .with_options(exec_options)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)

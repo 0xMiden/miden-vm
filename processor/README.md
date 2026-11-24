@@ -20,52 +20,23 @@ let WitnessOutput { claim, witness, advice } = ExecutionRequest::new(program)
 # }
 ```
 
-The [`miden-vm` facade](../miden-vm/) wraps this request in `Processor::new(&program)` and adds
-complete and deferred proving tasks with the concrete `Prover`. Both entry points use the same
-`Execution`, `ExecutionSession`, `CompletedExecution`, and public output types. Ordinary execution
-uses `.execute().run_sync(...)` or async `.execute().run(...).await` and returns
-`Result<ExecutionOutput, ExecutionError>`.
+Ordinary execution uses `.execute().run_sync(...)` or `.execute().run(...).await` and returns
+`ExecutionOutput` with the final stack, advice provider, memory, and deferred work. Pass a recorded
+witness to the [prover](../prover/) for local or remote proving.
 
 Pass the program as `&Program`, its public inputs as `StackInputs`, and its private inputs as
 `AdviceInputs`. The `Host` supplies non-deterministic inputs and receives messages from the VM.
 `ExecutionOptions` sets limits such as the maximum allowed number of cycles.
 
-On success, `ExecutionOutput` contains the final stack, advice provider, memory, and deferred state.
-The memory snapshot's `Memory` type is reexported by both `miden_processor` and `miden_vm`.
-
 ### Execution and sessions
 
-Use `Execution::prepare()` to initialize the machine before running or starting the selected task.
-A benchmark can prepare the witness task during setup and run it in the measured section.
-
-```rust
-use miden_processor::{DefaultHost, ExecutionRequest, WitnessOutput};
-# fn example(program: &miden_processor::Program) -> Result<(), miden_processor::ExecutionError> {
-let execution = ExecutionRequest::new(program).record_witness().prepare()?;
-let WitnessOutput { claim, witness, advice } = execution.run_sync(&mut DefaultHost::default())?;
-# Ok(())
-# }
-```
-
-Running the `.execute()` task returns `ExecutionOutput` without witness recording overhead.
-Running `.record_witness()` returns `WitnessOutput` with its claim and final advice provider.
-Running `.build_trace(budget)` returns `TraceOutput` with the claim, final advice, and an
-`ExecutionTrace` ready for proving. The execution trace keeps the VM trace and its matching
-optional precompile witness together. Use
-`trace.vm_trace()` to inspect the VM trace or `ExecutionTrace::try_new()` to check separately
-supplied trace and witness components.
-
-Select a custom task with `ExecutionRequest::select(task)` to retain deferred initialization. Each task
-selects a sealed `ExecutionMode` and finalizes that mode's output after successful execution. The
-modes `Execute`, `Witness`, and `Trace` can also be selected directly as tasks that return the
-mode's prepared output. Every mode supports `.start()`, which returns an `ExecutionSession`.
-Higher-level tasks can transform that same output, as the `miden-vm` proving tasks do with
-`TraceOutput::trace`.
+Use `Execution::prepare()` to initialize the machine before a run or session. Benchmarks can use it
+to initialize the machine outside the measured section.
 
 Use `.with_source_context(Some(PackageSourceDebugContext::new(&debug_info, source_node)))` on the
-request before selecting a task. Source resolution and recorder setup happen at run or start.
-Once started, a session owns its machine, continuation, and recorder. The program and source
-metadata can go out of scope.
+request to identify the source occurrence for diagnostics. Source resolution and recorder setup
+happen at run or start. Every mode supports `.start()`, which returns an `ExecutionSession`
+that owns the machine, continuation, and recorder.
 
 `state()` remains available after halt, failure, or cancellation. Use borrowed `step_sync` and
 `step` for individual steps, or `run_until_halt_sync` and `run_until_halt` to drive the remaining
@@ -75,11 +46,10 @@ execution and keep the session.
 `CompletedExecution` after successful termination. Its `state()` exposes the halted machine until
 `finish()` consumes it and exports the execution output and any recorded artifact. Deferred
 precompile witness export happens during `finish()`, so export failures occur after VM completion.
-Startup and VM driving return `ExecutionError`. `run`, `run_sync`, and `finish` return the task's
-error type because they also finalize the selected task. Failed or cancelled sessions cannot
-resume or complete.
+Each stage returns `ExecutionError` on failure. Failed or cancelled sessions cannot resume or
+complete.
 
-With the `std` feature, a synchronous `build_trace` task can overlap execution with hasher
+With the `std` feature, a synchronous `build_trace` run can overlap execution with hasher
 trace construction when enabled in `ExecutionOptions`. Execution stays on the calling thread while
 Rayon may run the hasher builder on a worker. A caller with no separate Rayon worker uses compact
 buffered replay. Async trace building and stepped trace sessions use buffered replay.
@@ -89,16 +59,14 @@ The processor is separated into two main components: **execution** and **trace g
 
 ### Execution with `FastProcessor`
 `FastProcessor` holds the machine state and runs the same engine for all execution modes. Construct
-it directly for raw stepping and machine inspection. `Execute` uses the no-op tracer,
-`record_witness` records the complete post-execution witness, and `build_trace` materializes the
-trace from the recorded execution.
+it directly for raw stepping and machine inspection. Ordinary execution uses the no-op tracer.
 
 ### Trace generation with `build_trace()`
-Call `witness.build_trace(budget)` on the `ExecutionWitness` returned by the `record_witness` task to
-materialize a checked `ExecutionTrace`. The execution trace retains the VM trace and its matching
-optional precompile witness. Use `into_parts()` to take
-ownership of both components or `into_vm_trace()` when only the VM trace is needed. The lower-level
-`trace::build_trace(vm_witness, &budget)` works directly with a `VmWitness`.
+Select `ExecutionRequest::build_trace(budget)` to return `TraceOutput` with the claim, final advice,
+and an `ExecutionTrace` that pairs the VM trace with its optional precompile witness. Use
+`vm_trace()` to inspect the VM trace or `into_parts()` to take ownership of both components.
+For VM-only trace analysis from a saved witness, extract its `VmWitness` and use
+`trace::build_trace(vm_witness, &budget)`.
 
 Use `Prover::trace_budget()` when a configured prover will consume the trace. Standalone callers
 can use `miden_vm_stark::memory::default_budget()` or `canonical_budget(limit_bytes)` with the

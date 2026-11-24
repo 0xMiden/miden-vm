@@ -61,8 +61,7 @@ pub use errors::{
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use execution_plan::{
     CompletedExecution, Execute, Execution, ExecutionMode, ExecutionRequest, ExecutionSession,
-    ExecutionTask, ExecutionTrace, StepStatus, Trace, TraceOutput, VmTraceBudget, Witness,
-    WitnessOutput,
+    ExecutionTrace, StepStatus, Trace, TraceOutput, VmTraceBudget, Witness, WitnessOutput,
 };
 pub(crate) use fast::BreakReason;
 pub use fast::{

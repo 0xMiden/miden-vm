@@ -73,8 +73,8 @@ mod tests;
 
 /// Builds the main trace from the provided trace states in parallel.
 ///
-/// This is the VM-only trace builder. To retain and validate an execution's matching precompile
-/// witness, use [`ExecutionWitness::build_trace`](crate::ExecutionWitness::build_trace).
+/// To build a trace and retain its precompile witness from a live execution, use
+/// [`ExecutionRequest::build_trace`](crate::ExecutionRequest::build_trace).
 ///
 /// The caller supplies the relation's proof-memory model and byte limit. The model must describe
 /// the VM AIRs in [`AIRS`] order and match the intended prover configuration.

@@ -118,16 +118,11 @@ async fn witness_recording_async_matches_sync() {
         .unwrap();
 
     assert_eq!(sync_witness.claim().stack_outputs(), async_witness.claim().stack_outputs());
-    let (sync_trace, sync_precompile) = sync_witness
-        .build_trace(miden_vm_stark::memory::default_budget())
-        .unwrap()
-        .into_parts();
-    let (async_trace, async_precompile) = async_witness
-        .build_trace(miden_vm_stark::memory::default_budget())
-        .unwrap()
-        .into_parts();
-    assert!(sync_precompile.is_none());
-    assert!(async_precompile.is_none());
+    let (sync_vm_witness, _) = sync_witness.into_parts();
+    let (async_vm_witness, _) = async_witness.into_parts();
+    let budget = miden_vm_stark::memory::default_budget();
+    let sync_trace = miden_processor::trace::build_trace(sync_vm_witness, &budget).unwrap();
+    let async_trace = miden_processor::trace::build_trace(async_vm_witness, &budget).unwrap();
 
     assert_eq!(sync_trace.public_inputs(), async_trace.public_inputs());
     assert_eq!(sync_trace.trace_len_summary(), async_trace.trace_len_summary());
