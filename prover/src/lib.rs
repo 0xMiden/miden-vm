@@ -22,7 +22,7 @@ pub use miden_processor::{
     ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionWitness, FutureMaybeSend, Host,
     SyncHost, VmWitness,
 };
-pub use prover::{Prover, ProverError, ProvingInput};
+pub use prover::{Prover, ProverError};
 
 #[cfg(all(test, feature = "std"))]
 mod block_stack_entry_kind_repro;

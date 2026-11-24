@@ -1,6 +1,6 @@
 use miden_assembly::Assembler;
 use miden_processor::{DefaultHost, ExecutionError, Processor};
-use miden_prover::{Prover, ProverError, ProvingInput};
+use miden_prover::{Prover, ProverError};
 
 #[test]
 fn materialized_trace_proving_rechecks_the_provers_memory_budget() {
@@ -41,11 +41,10 @@ fn materialized_trace_proving_rechecks_the_provers_memory_budget() {
             .run_sync(&mut DefaultHost::default())
             .expect("trace capture should fit the normal budget")
             .trace;
-        let input = ProvingInput::from(execution_trace);
         let result = if complete {
-            prover.prove_full(input)
+            prover.prove_full(execution_trace)
         } else {
-            prover.prove(input)
+            prover.prove(execution_trace)
         };
         assert!(
             matches!(

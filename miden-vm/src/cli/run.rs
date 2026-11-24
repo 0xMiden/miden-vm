@@ -4,7 +4,7 @@ use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, PackageSourceDebugContext, trace::VmTrace};
-use miden_vm::{Processor, TraceOutput, internal::InputFile};
+use miden_vm::{Processor, internal::InputFile};
 use miden_vm_stark::memory::{DEFAULT_MAX_PROVER_MEMORY_BYTES, canonical_budget};
 use tracing::instrument;
 
@@ -187,15 +187,20 @@ fn run_masp_program(
 
     let program_hash: [u8; 32] = program.hash().into();
 
-    let TraceOutput { trace, .. } = Processor::new(&program)
+    let witness = Processor::new(&program)
         .with_options(exec_options)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
-        .build_trace(canonical_budget(params.max_prover_memory))
+        .record_witness()
         .run_sync(&mut host)
-        .wrap_err("Failed to execute program and build trace")?;
+        .wrap_err("Failed to execute program")?
+        .witness;
+    let (vm_witness, _) = witness.into_parts();
+    let trace = vm_witness
+        .build_trace(&canonical_budget(params.max_prover_memory))
+        .wrap_err("Failed to build trace")?;
 
-    Ok((trace.into_vm_trace(), program_hash))
+    Ok((trace, program_hash))
 }
 
 #[instrument(target = "miden::cli", level = "trace", name = "run_program", skip_all)]
@@ -250,14 +255,19 @@ fn run_masm_program(
     let source = package_debug_info
         .as_ref()
         .map(|info| PackageSourceDebugContext::new_optional(info, entrypoint_source_node));
-    let TraceOutput { trace, .. } = Processor::new(&program)
+    let witness = Processor::new(&program)
         .with_options(exec_options)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
         .with_source_context(source)
-        .build_trace(canonical_budget(params.max_prover_memory))
+        .record_witness()
         .run_sync(&mut host)
-        .wrap_err("Failed to execute program and build trace")?;
+        .wrap_err("Failed to execute program")?
+        .witness;
+    let (vm_witness, _) = witness.into_parts();
+    let trace = vm_witness
+        .build_trace(&canonical_budget(params.max_prover_memory))
+        .wrap_err("Failed to build trace")?;
 
-    Ok((trace.into_vm_trace(), program_hash))
+    Ok((trace, program_hash))
 }

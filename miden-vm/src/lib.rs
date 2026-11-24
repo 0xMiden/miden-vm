@@ -44,7 +44,7 @@ pub use miden_processor::{
     SyncHost, TraceOutput, VmTraceBudget, WitnessOutput, advice, crypto, field, serde, trace,
     utils,
 };
-pub use miden_prover::{PrecompileProvingError, Prover, ProverError, ProvingInput};
+pub use miden_prover::{PrecompileProvingError, Prover, ProverError};
 pub use miden_verifier::{
     PrecompileVerificationError, ProofSecurityParameters, ProvenSecurityReport, SecurityReport,
     StarkVerificationError, VerificationError, VerificationOutcome, Verifier,
