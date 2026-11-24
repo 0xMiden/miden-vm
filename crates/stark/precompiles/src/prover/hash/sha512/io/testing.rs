@@ -8,13 +8,6 @@ use miden_core::{Felt, utils::RowMajorMatrix};
 use super::trace::{Sha512IoRequires, populate_rows};
 use crate::prover::primitives::byte_pair_lut::BytePairLutRequires;
 
-pub fn generate_trace(
-    requires: Sha512IoRequires,
-    bpl: &mut BytePairLutRequires,
-) -> RowMajorMatrix<Felt> {
-    generate_trace_padded_to(requires, bpl, 0)
-}
-
 pub fn generate_trace_padded_to(
     requires: Sha512IoRequires,
     bpl: &mut BytePairLutRequires,

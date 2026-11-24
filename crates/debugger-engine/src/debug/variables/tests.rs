@@ -1,35 +1,61 @@
 use alloc::sync::Arc;
 
 use miden_assembly_syntax::ast::types::{StructType, TypeRepr};
+use miden_processor::StackInputs;
 
 use super::*;
+use crate::debug::InvocationId;
+
+/// An invocation id for a tracker under test.
+fn invocation() -> InvocationId {
+    InvocationId(1)
+}
+
+/// A processor whose operand stack starts with `values`, top first.
+fn processor_with_stack(values: &[Felt]) -> FastProcessor {
+    FastProcessor::new(StackInputs::new(values).expect("stack inputs fit the stack"))
+}
+
+/// Observes `infos` for the single live invocation at cycle `clk`.
+fn observe(
+    tracker: &mut DebugVarTracker,
+    processor: &FastProcessor,
+    clk: u32,
+    infos: Vec<DebugVarInfo>,
+) {
+    tracker.observe_execution(
+        [invocation()],
+        Some(invocation()),
+        processor,
+        RowIndex::from(clk),
+        infos,
+    );
+}
 
 #[test]
-fn test_tracker_basic() {
-    let events: Rc<RefCell<BTreeMap<RowIndex, Vec<DebugVarInfo>>>> = Rc::new(Default::default());
-
-    // Add some events
-    {
-        let mut events_mut = events.borrow_mut();
-        events_mut
-            .insert(RowIndex::from(1), vec![DebugVarInfo::new("x", DebugVarLocation::Stack(0))]);
-        events_mut
-            .insert(RowIndex::from(5), vec![DebugVarInfo::new("y", DebugVarLocation::Stack(1))]);
-    }
-
-    let mut tracker = DebugVarTracker::new(events);
+fn observed_declarations_become_the_visible_variables() {
+    let processor = processor_with_stack(&[Felt::from_u32(42), Felt::from_u32(1)]);
+    let mut tracker = DebugVarTracker::new();
 
     // Initially no variables
     assert_eq!(tracker.variable_count(), 0);
 
-    // Process up to cycle 3
-    tracker.update_to_cycle(RowIndex::from(3));
+    observe(
+        &mut tracker,
+        &processor,
+        1,
+        vec![DebugVarInfo::new("x", DebugVarLocation::Stack(0))],
+    );
     assert_eq!(tracker.variable_count(), 1);
     assert!(tracker.get_variable("x").is_some());
     assert!(tracker.get_variable("y").is_none());
 
-    // Process up to cycle 10
-    tracker.update_to_cycle(RowIndex::from(10));
+    observe(
+        &mut tracker,
+        &processor,
+        5,
+        vec![DebugVarInfo::new("y", DebugVarLocation::Stack(1))],
+    );
     assert_eq!(tracker.variable_count(), 2);
     assert!(tracker.get_variable("x").is_some());
     assert!(tracker.get_variable("y").is_some());
@@ -95,17 +121,12 @@ fn snapshots_transient_stack_locations_as_constants() {
 
 #[test]
 fn snapshots_all_felts_for_typed_stack_locations() {
-    let events: Rc<RefCell<BTreeMap<RowIndex, Vec<DebugVarInfo>>>> = Rc::new(Default::default());
-    let mut tracker = DebugVarTracker::new(events);
+    let processor = processor_with_stack(&[Felt::from_u32(7), Felt::from_u32(1)]);
+    let mut tracker = DebugVarTracker::new();
     let mut info = DebugVarInfo::new("wide", DebugVarLocation::Stack(0));
     info.set_ty(Type::U64, None);
 
-    tracker.record_events_with_stack(
-        RowIndex::from(1),
-        vec![info],
-        &[Felt::from_u32(7), Felt::from_u32(1)],
-    );
-    tracker.update_to_cycle(RowIndex::from(1));
+    observe(&mut tracker, &processor, 1, vec![info]);
 
     let snapshot = tracker.get_variable("wide").unwrap();
     assert_eq!(snapshot.info.value_location(), &DebugVarLocation::Const(Felt::from_u32(7)));
@@ -317,24 +338,25 @@ fn resolves_consecutive_memory_values() {
 
 #[test]
 fn debug_kill_removes_current_variable() {
-    let events: Rc<RefCell<BTreeMap<RowIndex, Vec<DebugVarInfo>>>> = Rc::new(Default::default());
-    {
-        let mut events = events.borrow_mut();
-        events.insert(
-            RowIndex::from(1),
-            vec![DebugVarInfo::new(
-                "x",
-                DebugVarLocation::Const(Felt::new(1).expect("value exceeds field modulus")),
-            )],
-        );
-        events
-            .insert(RowIndex::from(2), vec![DebugVarInfo::new("x", DebugVarLocation::Unavailable)]);
-    }
+    let processor = processor_with_stack(&[]);
+    let mut tracker = DebugVarTracker::new();
 
-    let mut tracker = DebugVarTracker::new(events);
-    tracker.update_to_cycle(RowIndex::from(1));
+    observe(
+        &mut tracker,
+        &processor,
+        1,
+        vec![DebugVarInfo::new(
+            "x",
+            DebugVarLocation::Const(Felt::new(1).expect("value exceeds field modulus")),
+        )],
+    );
     assert!(tracker.get_variable("x").is_some());
 
-    tracker.update_to_cycle(RowIndex::from(2));
+    observe(
+        &mut tracker,
+        &processor,
+        2,
+        vec![DebugVarInfo::new("x", DebugVarLocation::Unavailable)],
+    );
     assert!(tracker.get_variable("x").is_none());
 }

@@ -1092,7 +1092,7 @@ fn translate_snapshot_continuation_stack(
 
 /// Looks up `id` in `mast_forest_store`, returning [`ExecutionError::Internal`] if it is out of
 /// range.
-pub(super) fn lookup_mast_forest(
+fn lookup_mast_forest(
     mast_forest_store: &[Arc<SparseMastForest>],
     id: MastForestId,
 ) -> Result<&Arc<SparseMastForest>, ExecutionError> {

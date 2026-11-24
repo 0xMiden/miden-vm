@@ -154,8 +154,6 @@ struct Theme {
     current_line: Style,
     current_span: Style,
     line_number: Style,
-    #[allow(dead_code)]
-    gutter_border: Style,
 }
 impl Default for Theme {
     fn default() -> Self {
@@ -164,7 +162,6 @@ impl Default for Theme {
             current_line: Style::default().add_modifier(Modifier::BOLD | Modifier::REVERSED),
             current_span: Style::default().add_modifier(Modifier::BOLD | Modifier::REVERSED),
             line_number: Style::default(),
-            gutter_border: Style::default(),
         }
     }
 }

@@ -158,6 +158,7 @@ impl SourceTracker {
     }
 
     /// Number of source nodes currently open; boundaries are not counted.
+    #[cfg(test)]
     pub fn open_nodes(&self) -> usize {
         self.open.iter().filter(|entry| matches!(entry, Entry::Node { .. })).count()
     }

@@ -353,7 +353,7 @@ fn repeat_count_constant_at_limit_allowed() {
         format!("const REPEAT_COUNT = {MAX_REPEAT_COUNT}\nbegin repeat.REPEAT_COUNT nop end end")
     );
     context
-        .parse_program(source)
+        .parse_module(source)
         .expect("expected repeat count at limit from constant to parse and analyze");
 }
 

@@ -110,7 +110,7 @@ pub(crate) fn sorting_network(num_inputs: usize) -> Vec<Comparator> {
 
 /// Applies `network` to `keys` in place, exactly as the verifier does.
 #[cfg(test)]
-pub(crate) fn apply_sorting_network(network: &[Comparator], keys: &mut [u64]) {
+fn apply_sorting_network(network: &[Comparator], keys: &mut [u64]) {
     for &(lo, hi) in network {
         if keys[lo] > keys[hi] {
             keys.swap(lo, hi);

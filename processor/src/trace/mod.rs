@@ -261,14 +261,14 @@ impl VmWitness {
     /// Returns the replay data captured during execution.
     #[cfg(any(test, feature = "testing"))]
     #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
-    pub(crate) fn trace_replay(&self) -> &TraceReplay {
+    fn trace_replay(&self) -> &TraceReplay {
         &self.trace
     }
 
     // Kept for tests that force invalid replay data without widening the public API.
     #[cfg(any(test, feature = "testing"))]
     #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
-    pub(crate) fn trace_replay_mut(&mut self) -> &mut TraceReplay {
+    fn trace_replay_mut(&mut self) -> &mut TraceReplay {
         &mut self.trace
     }
 
@@ -277,7 +277,6 @@ impl VmWitness {
     /// Available under the `testing` feature for external tests that check which replay data a
     /// serialized witness preserves.
     #[cfg(any(test, feature = "testing"))]
-    #[allow(dead_code)]
     pub fn mast_forest_count(&self) -> usize {
         self.trace.mast_forest_store.len()
     }

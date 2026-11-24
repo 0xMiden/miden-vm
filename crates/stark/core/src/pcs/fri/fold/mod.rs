@@ -49,7 +49,7 @@ impl FriFold {
     }
 
     #[inline]
-    pub const fn log_arity(self) -> u8 {
+    pub(crate) const fn log_arity(self) -> u8 {
         self.log_arity
     }
 
@@ -185,7 +185,7 @@ impl FriFold {
 // ============================================================================
 
 #[cfg(test)]
-pub mod tests {
+pub(crate) mod tests {
     use alloc::vec::Vec;
 
     use p3_dft::{NaiveDft, Radix2DFTSmallBatch, TwoAdicSubgroupDft};

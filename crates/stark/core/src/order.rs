@@ -151,7 +151,7 @@ impl TraceOrder {
     }
 
     /// Number of AIR instances.
-    pub(crate) fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.log_heights.len()
     }
 

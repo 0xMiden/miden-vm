@@ -6,7 +6,7 @@ use miden_air::vm::ace::{ACE_CIRCUIT_SHAPE, ACE_INSTRUCTIONS};
 ///
 /// The commitment is the pinned [`miden_air::vm::config::ACE_CIRCUIT_DIGEST`]; the recursive
 /// verifier rejects a stream that does not hash to it.
-pub fn compiled_recursive_circuit() -> RecursiveAceCircuit {
+pub(crate) fn compiled_recursive_circuit() -> RecursiveAceCircuit {
     let (num_inputs, num_eval_gates, stream_len) = ACE_CIRCUIT_SHAPE;
     RecursiveAceCircuit {
         num_inputs,

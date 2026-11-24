@@ -573,7 +573,7 @@ impl SourceContent {
 
     /// Returns the range of valid byte indices for this file
     #[inline]
-    pub fn source_range(&self) -> Range<ByteIndex> {
+    pub(crate) fn source_range(&self) -> Range<ByteIndex> {
         ByteIndex(0)..ByteIndex(self.content.len() as u32)
     }
 
@@ -592,7 +592,8 @@ impl SourceContent {
     ///
     /// Returns `None` if the given span is out of bounds
     #[inline(always)]
-    pub fn byte_slice(&self, span: impl Into<Range<ByteIndex>>) -> Option<&[u8]> {
+    #[cfg(test)]
+    pub(crate) fn byte_slice(&self, span: impl Into<Range<ByteIndex>>) -> Option<&[u8]> {
         let Range { start, end } = span.into();
         self.as_bytes().get(start.to_usize()..end.to_usize())
     }

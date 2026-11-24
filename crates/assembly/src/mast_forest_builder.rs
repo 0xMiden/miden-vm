@@ -1087,10 +1087,7 @@ impl MastForestBuilder {
         self.nodes.get(node_ref).map(|pending_node| pending_node.digest)
     }
 
-    pub(crate) fn latest_source_ref_for_node_ref(
-        &self,
-        node_ref: MastNodeRef,
-    ) -> Option<SourceNodeRef> {
+    fn latest_source_ref_for_node_ref(&self, node_ref: MastNodeRef) -> Option<SourceNodeRef> {
         self.latest_source_ref_by_node_ref.get(&node_ref).copied()
     }
 
@@ -1248,7 +1245,7 @@ impl MastForestBuilder {
         }
     }
 
-    pub(crate) fn record_procedure_root_use(&mut self, root: MastNodeUse) {
+    fn record_procedure_root_use(&mut self, root: MastNodeUse) {
         if !self.procedure_root_refs.contains(&root.node_ref()) {
             self.procedure_root_refs.push(root.node_ref());
         }

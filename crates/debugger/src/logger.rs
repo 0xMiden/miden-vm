@@ -4,7 +4,6 @@ use std::{
     collections::VecDeque,
     string::String,
     sync::{Arc, LazyLock, Mutex},
-    vec::Vec,
 };
 
 use compact_str::CompactString;
@@ -73,7 +72,7 @@ impl Log for DebugLogger {
 
 impl DebugLogger {
     /// Returns an error if the global logger was already initialized.
-    pub fn install_with_max_level(
+    pub(crate) fn install_with_max_level(
         inner: Box<dyn Log>,
         max_level: LevelFilter,
     ) -> Result<(), log::SetLoggerError> {
@@ -110,19 +109,6 @@ impl DebugLogger {
     {
         let guard = self.0.lock().unwrap();
         guard.captured.iter().any(predicate)
-    }
-
-    /// Clones all of the log entries in the buffer which match `predicate`.
-    pub fn select_matching<F>(&self, mut predicate: F) -> Vec<LogEntry>
-    where
-        F: FnMut(&LogEntry) -> bool,
-    {
-        let guard = self.0.lock().unwrap();
-        guard
-            .captured
-            .iter()
-            .filter_map(move |entry| if predicate(entry) { Some(entry.clone()) } else { None })
-            .collect()
     }
 
     pub fn clone_captured(&self) -> VecDeque<LogEntry> {

@@ -4,13 +4,11 @@ use alloc::{
     vec::Vec,
 };
 use std::{
-    cell::RefCell,
     collections::{BTreeMap, BTreeSet, btree_map::Entry},
     eprintln,
     io::{BufReader, BufWriter},
     net::TcpListener,
     path::{Path, PathBuf},
-    rc::Rc,
     sync::{
         Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
@@ -1182,7 +1180,7 @@ struct DapDebugVarState {
 impl DapDebugVarState {
     fn new() -> Self {
         Self {
-            debug_vars: DebugVarTracker::new(Rc::new(RefCell::new(BTreeMap::new()))),
+            debug_vars: DebugVarTracker::new(),
             source_breakpoints: SourceBreakpoints::default(),
         }
     }
@@ -1581,7 +1579,7 @@ impl DapExecutor {
                         );
                         debug_state.source_breakpoints.send_updates(&mut server);
                         match result {
-                            StepResult::Stepped | StepResult::Breakpoint(_) => {
+                            StepResult::Stepped | StepResult::Breakpoint => {
                                 send_ui_state_snapshot(
                                     &mut server,
                                     &mut processor,
@@ -1656,7 +1654,7 @@ impl DapExecutor {
 
                         debug_state.source_breakpoints.send_updates(&mut server);
                         match step_result {
-                            StepResult::Stepped | StepResult::Breakpoint(_) => {
+                            StepResult::Stepped | StepResult::Breakpoint => {
                                 if resume_ctx.is_none() {
                                     server.send_event(Event::Terminated(None)).ok();
                                 } else {
@@ -1708,7 +1706,7 @@ impl DapExecutor {
                         );
                         debug_state.source_breakpoints.send_updates(&mut server);
                         match result {
-                            StepResult::Stepped | StepResult::Breakpoint(_) => {
+                            StepResult::Stepped | StepResult::Breakpoint => {
                                 if resume_ctx.is_none() {
                                     server.send_event(Event::Terminated(None)).ok();
                                 } else {
@@ -1760,7 +1758,7 @@ impl DapExecutor {
                         );
                         debug_state.source_breakpoints.send_updates(&mut server);
                         match result {
-                            StepResult::Stepped | StepResult::Breakpoint(_) => {
+                            StepResult::Stepped | StepResult::Breakpoint => {
                                 if resume_ctx.is_none() {
                                     server.send_event(Event::Terminated(None)).ok();
                                 } else {
@@ -2576,7 +2574,7 @@ fn step_until_breakpoint<H: Host>(
                         && source_paths_match(path, &bp.path, breakpoints.source_path_prefixes)
                     {
                         update_top_frame(host, current_asmop.as_ref());
-                        return StepResult::Breakpoint(line);
+                        return StepResult::Breakpoint;
                     }
                 }
             }
@@ -2599,14 +2597,13 @@ fn step_until_breakpoint<H: Host>(
                             continue;
                         }
                         update_top_frame(host, current_asmop.as_ref());
-                        let line = resolved.as_ref().map_or(0, |(_, l)| *l);
-                        return StepResult::Breakpoint(line);
+                        return StepResult::Breakpoint;
                     }
-                    if let Some((ref path, line)) = resolved
+                    if let Some((ref path, _)) = resolved
                         && fbp.source_pattern.is_match(&Uri::new(path))
                     {
                         update_top_frame(host, current_asmop.as_ref());
-                        return StepResult::Breakpoint(line);
+                        return StepResult::Breakpoint;
                     }
                 }
             }
@@ -2690,12 +2687,11 @@ fn send_stopped_step<R: std::io::Read, W: std::io::Write>(server: &mut Server<R,
 }
 
 /// Result of a stepping operation.
-#[allow(dead_code)]
 enum StepResult {
     /// Successfully advanced one or more steps.
     Stepped,
     /// Hit a breakpoint at the given line.
-    Breakpoint(i64),
+    Breakpoint,
     /// Program terminated normally.
     Terminated,
     /// An execution error occurred.

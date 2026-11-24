@@ -133,10 +133,10 @@ impl PartialMerkleTree {
     // --------------------------------------------------------------------------------------------
 
     /// Minimum supported depth.
-    pub const MIN_DEPTH: u8 = 1;
+    pub(crate) const MIN_DEPTH: u8 = 1;
 
     /// Maximum supported depth.
-    pub const MAX_DEPTH: u8 = 64;
+    pub(crate) const MAX_DEPTH: u8 = 64;
 
     // CONSTRUCTORS
     // --------------------------------------------------------------------------------------------

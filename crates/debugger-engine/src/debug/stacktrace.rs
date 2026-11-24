@@ -35,10 +35,29 @@ pub enum ControlFlowOp {
 pub struct StepInfo<'a> {
     pub op: Option<Operation>,
     pub control: Option<ControlFlowOp>,
-    pub asmop: Option<&'a AssemblyOp>,
+    pub(crate) asmop: Option<&'a AssemblyOp>,
     pub clk: RowIndex,
     pub ctx: ContextId,
-    pub inline_frames: &'a [InlineCallFrame],
+    pub(crate) inline_frames: &'a [InlineCallFrame],
+}
+
+impl<'a> StepInfo<'a> {
+    /// Creates a step description without assembly metadata or inline call frames.
+    pub fn new(
+        op: Option<Operation>,
+        control: Option<ControlFlowOp>,
+        clk: RowIndex,
+        ctx: ContextId,
+    ) -> Self {
+        Self {
+            op,
+            control,
+            asmop: None,
+            clk,
+            ctx,
+            inline_frames: &[],
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,6 +97,7 @@ pub struct LogicalStackFrame {
     name: Arc<str>,
     kind: LogicalFrameKind,
     location: Option<LogicalFrameLocation>,
+    #[cfg(test)]
     physical_index: Option<usize>,
     origin: Option<miden_processor::DebugFrameOrigin>,
     invocation: Option<InvocationId>,
@@ -155,7 +175,8 @@ impl LogicalStackFrame {
         self.kind
     }
 
-    pub fn physical_index(&self) -> Option<usize> {
+    #[cfg(test)]
+    pub(crate) fn physical_index(&self) -> Option<usize> {
         self.physical_index
     }
 
@@ -299,7 +320,7 @@ impl CallStack {
         self.recovered.return_target(self.frames.len())
     }
 
-    pub fn has_returned(&self, target: &ReturnTarget) -> bool {
+    pub(crate) fn has_returned(&self, target: &ReturnTarget) -> bool {
         target.has_returned(&self.recovered, self.frames.len())
     }
 
@@ -311,11 +332,11 @@ impl CallStack {
         self.recovered.invocation_ids()
     }
 
-    pub fn has_recovered_current_frame(&self) -> bool {
+    pub(crate) fn has_recovered_current_frame(&self) -> bool {
         self.recovered.has_current_frame()
     }
 
-    pub fn observe_source_context(
+    pub(crate) fn observe_source_context(
         &mut self,
         context: &miden_processor::ResumeContext,
         current: Option<(DebugSourceNodeId, u32)>,
@@ -330,6 +351,8 @@ impl CallStack {
         }
         let mut logical = Vec::new();
         for (physical_index, frame) in self.frames.iter().enumerate() {
+            // `physical_index` is only kept in test builds.
+            let _ = physical_index;
             let current_location = frame.last_logical_location();
             let location = frame
                 .inline_frames
@@ -340,6 +363,7 @@ impl CallStack {
                 name: frame.procedure(strip_prefix).unwrap_or_else(|| Arc::from("<unknown>")),
                 kind: LogicalFrameKind::Physical,
                 location,
+                #[cfg(test)]
                 physical_index: Some(physical_index),
                 origin: None,
                 invocation: None,
@@ -359,6 +383,7 @@ impl CallStack {
                     name: Arc::from(inline.display_name().into_boxed_str()),
                     kind: LogicalFrameKind::Inline,
                     location,
+                    #[cfg(test)]
                     physical_index: Some(physical_index),
                     origin: None,
                     invocation: None,
@@ -371,7 +396,7 @@ impl CallStack {
 
     /// Takes the frame event handled by the most recent [`Self::next`], clearing it so a later
     /// cycle does not read it as its own.
-    pub fn take_frame_transition(&mut self) -> Option<FrameTransition> {
+    pub(crate) fn take_frame_transition(&mut self) -> Option<FrameTransition> {
         self.frame_transition.take()
     }
 
@@ -610,7 +635,7 @@ impl CallFrame {
         initialized
     }
 
-    pub fn push_exec(&mut self, callee: Option<Arc<str>>) {
+    pub(crate) fn push_exec(&mut self, callee: Option<Arc<str>>) {
         if self.context.len() == 5 {
             self.context.pop_front();
         }

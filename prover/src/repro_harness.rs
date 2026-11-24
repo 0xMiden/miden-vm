@@ -19,7 +19,7 @@ use miden_verifier::{VerificationError, VerificationOutcome, Verifier};
 use miden_vm_stark::prover::prove;
 
 /// Returns a mutable view of one core trace row.
-pub fn core_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut CoreCols<Felt> {
+pub(crate) fn core_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut CoreCols<Felt> {
     let width = matrix.width();
     matrix.values[row * width..(row + 1) * width].borrow_mut()
 }
@@ -28,7 +28,7 @@ pub fn core_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut CoreC
 ///
 /// Scenario-specific fixtures own one of these and keep only their relevant row indices and
 /// honest values alongside it.
-pub struct ReproTrace {
+pub(crate) struct ReproTrace {
     pub core: RowMajorMatrix<Felt>,
     chiplets: RowMajorMatrix<Felt>,
     eidos_compression: RowMajorMatrix<Felt>,
@@ -66,7 +66,7 @@ impl ReproTrace {
 
     /// Proves `core` against the honest public outputs and runs the resulting proof through the
     /// verifier. A low-level proving failure is unexpected in tests using this method.
-    pub fn prove_and_verify(
+    pub(crate) fn prove_and_verify(
         &self,
         core: RowMajorMatrix<Felt>,
     ) -> Result<VerificationOutcome, VerificationError> {
@@ -74,12 +74,14 @@ impl ReproTrace {
     }
 
     /// Proves and verifies the currently stored core matrix.
-    pub fn prove_and_verify_current(&self) -> Result<VerificationOutcome, VerificationError> {
+    pub(crate) fn prove_and_verify_current(
+        &self,
+    ) -> Result<VerificationOutcome, VerificationError> {
         self.prove_and_verify(self.core.clone())
     }
 
     /// Like [`Self::prove_and_verify`], but proves against caller-supplied public outputs.
-    pub fn prove_and_verify_with_outputs(
+    pub(crate) fn prove_and_verify_with_outputs(
         &self,
         core: RowMajorMatrix<Felt>,
         outputs: StackOutputs,
@@ -100,7 +102,7 @@ impl ReproTrace {
 
     /// Proves and verifies caller-supplied AIR matrices while permitting lookup construction to
     /// reject an unbalanced adversarial trace. Other proving failures remain test failures.
-    pub fn prove_and_verify_parts_allowing_lookup_rejection(
+    pub(crate) fn prove_and_verify_parts_allowing_lookup_rejection(
         &self,
         core: RowMajorMatrix<Felt>,
         chiplets: RowMajorMatrix<Felt>,
@@ -125,7 +127,7 @@ impl ReproTrace {
 
     /// Runs the full proof pipeline while allowing the lookup construction itself to reject an
     /// unbalanced adversarial trace. Other proving failures remain test failures.
-    pub fn prove_and_verify_allowing_lookup_rejection(
+    pub(crate) fn prove_and_verify_allowing_lookup_rejection(
         &self,
         core: RowMajorMatrix<Felt>,
     ) -> Result<VerificationOutcome, String> {

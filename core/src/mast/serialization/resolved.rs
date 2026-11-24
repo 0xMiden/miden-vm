@@ -177,21 +177,15 @@ impl<'a> ResolvedSerializedForest<'a> {
         self.layout.node_count
     }
 
-    pub(super) fn procedure_root_count(&self) -> usize {
+    fn procedure_root_count(&self) -> usize {
         self.layout.roots_count
     }
 
-    pub(super) fn procedure_root_at(
-        &self,
-        index: usize,
-    ) -> Result<MastNodeId, DeserializationError> {
+    fn procedure_root_at(&self, index: usize) -> Result<MastNodeId, DeserializationError> {
         self.layout.read_procedure_root_at(self.bytes, index)
     }
 
-    pub(super) fn node_entry_at(
-        &self,
-        index: usize,
-    ) -> Result<MastNodeEntry, DeserializationError> {
+    fn node_entry_at(&self, index: usize) -> Result<MastNodeEntry, DeserializationError> {
         self.layout.read_node_entry_at(self.bytes, index)
     }
 

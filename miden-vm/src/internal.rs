@@ -73,10 +73,10 @@ pub struct InputFile {
     /// elements.
     pub advice_stack: Option<Vec<String>>,
     /// Optional map of 32 byte hex strings to vectors of u64s representing the initial advice map.
-    pub advice_map: Option<HashMap<String, Vec<u64>>>,
+    pub(crate) advice_map: Option<HashMap<String, Vec<u64>>>,
     /// Optional vector of merkle data which will be loaded into the initial merkle store. Merkle
     /// data is represented as 32 byte hex strings and node indexes are represented as u64s.
-    pub merkle_store: Option<Vec<MerkleData>>,
+    pub(crate) merkle_store: Option<Vec<MerkleData>>,
 }
 
 impl Default for InputFile {
@@ -311,7 +311,7 @@ impl InputFile {
     }
 
     /// Parse a `Word` from a hex string.
-    pub fn parse_word(word_hex: &str) -> Result<Word, String> {
+    pub(crate) fn parse_word(word_hex: &str) -> Result<Word, String> {
         let Some(word_value) = word_hex.strip_prefix("0x") else {
             return Err(format!("failed to decode `Word` from hex {word_hex} - missing 0x prefix"));
         };

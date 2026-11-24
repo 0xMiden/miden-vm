@@ -23,7 +23,7 @@ const KECCAK256_DIGEST_FELTS: usize = 8;
 
 /// Reads the requested u32-packed memory preimage, computes Keccak-256, and pushes the digest limbs
 /// onto the advice stack for the MASM wrapper to bind with deferred assertions.
-pub fn handle_keccak256_digest(
+pub(crate) fn handle_keccak256_digest(
     process: &ProcessorState<'_>,
 ) -> Result<Vec<AdviceMutation>, EventError> {
     let ptr = process.get_stack_item(1).as_canonical_u64();

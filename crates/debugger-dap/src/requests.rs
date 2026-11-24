@@ -540,7 +540,8 @@ impl Request {
     /// Create a cancellation response for the given request. The sequence number will be copied
     /// from the request, message will be [`ResponseMessage::Cancelled`], `success` will be false,
     /// and `body` will be `None`.
-    pub fn cancellation(self) -> Response {
+    #[cfg(test)]
+    pub(crate) fn cancellation(self) -> Response {
         Response {
             request_seq: self.seq,
             success: false,

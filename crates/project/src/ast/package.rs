@@ -272,8 +272,8 @@ impl ProjectFile {
 
         Ok(package)
     }
-
-    pub fn get_or_inherit_version(
+    #[cfg(all(feature = "std", feature = "serde"))]
+    pub(crate) fn get_or_inherit_version(
         &self,
         source: Arc<SourceFile>,
         workspace: Option<&WorkspaceFile>,
@@ -309,8 +309,8 @@ impl ProjectFile {
             },
         }
     }
-
-    pub fn get_or_inherit_description(
+    #[cfg(all(feature = "std", feature = "serde"))]
+    pub(crate) fn get_or_inherit_description(
         &self,
         source: Arc<SourceFile>,
         workspace: Option<&WorkspaceFile>,
@@ -335,8 +335,8 @@ impl ProjectFile {
             },
         }
     }
-
-    pub fn extract_dependencies(
+    #[cfg(all(feature = "std", feature = "serde"))]
+    pub(crate) fn extract_dependencies(
         &self,
         source: Arc<SourceFile>,
         workspace: Option<&WorkspaceFile>,

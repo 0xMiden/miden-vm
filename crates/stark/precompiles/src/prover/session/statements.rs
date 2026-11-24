@@ -31,7 +31,7 @@ use crate::prover::{
 /// so roughly half of path B's intermediates dedup onto path A's store
 /// blocks — canonical interning exercised mid-chain, not just at the
 /// ends.
-pub fn horner_sign_paths(
+pub(crate) fn horner_sign_paths(
     session: &mut Session,
     x: U256,
     coeffs: &[U256],

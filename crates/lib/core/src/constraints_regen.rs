@@ -59,7 +59,7 @@ const LMCS_ALIGNMENT: usize = config::SPONGE_RATE;
 const ADV_PIPE_BLOCK_FELTS: usize = 8;
 
 /// Computes the relation digest used by recursive verification.
-pub fn compute_relation_digest(circuit_digest: &[Felt; 4]) -> [Felt; 4] {
+pub(crate) fn compute_relation_digest(circuit_digest: &[Felt; 4]) -> [Felt; 4] {
     relation_digest(PROTOCOL_ID, &Word::new(*circuit_digest))
 }
 
@@ -808,7 +808,7 @@ fn relation_digest_matches_artifact(artifact: &ComputedArtifacts) -> Result<(), 
 }
 
 /// Verify that Miden VM public-input constants match the current AIR set.
-pub fn public_inputs_masm_matches_air() -> Result<(), String> {
+pub(crate) fn public_inputs_masm_matches_air() -> Result<(), String> {
     let public_inputs = read_file(VM_PUBLIC_INPUTS_PATH).map_err(|e| e.to_string())?;
     let num_miden_airs =
         parse_masm_const::<usize>(&public_inputs, "NUM_MIDEN_AIRS", VM_PUBLIC_INPUTS_PATH)?;

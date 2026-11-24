@@ -34,7 +34,7 @@ use crate::prover::{
 /// is zero. (A zero scalar wastes its base's intro + table entries; drop
 /// such terms before calling.)
 #[cfg(test)]
-pub fn straus(session: &mut Session, terms: &[(EcNode, U256)]) -> EcExprPtr {
+pub(crate) fn straus(session: &mut Session, terms: &[(EcNode, U256)]) -> EcExprPtr {
     let k = terms.len();
     assert!(k >= 1, "an MSM needs at least one base");
     assert!(k <= 16, "Straus' 2ᵏ table is impractical past k = 16");
@@ -95,7 +95,7 @@ pub fn straus(session: &mut Session, terms: &[(EcNode, U256)]) -> EcExprPtr {
 /// exactly two `(base, scalar value)` pairs. Returns the combined MSM
 /// expression. Panics if `terms.len() != 2` or both scalars are zero.
 #[cfg(test)]
-pub fn joint_naf(session: &mut Session, terms: &[(EcNode, U256)]) -> EcExprPtr {
+pub(crate) fn joint_naf(session: &mut Session, terms: &[(EcNode, U256)]) -> EcExprPtr {
     assert_eq!(terms.len(), 2, "joint_naf is a 2-base strategy");
 
     // The signed joint table {±P, ±Q, ±(P+Q), ±(P−Q)} — the ± are `neg`
@@ -238,7 +238,7 @@ pub fn wnaf_scalarmul(session: &mut Session, table: &WnafTable, k: U256) -> EcEx
 /// rather than rebuilt per term. Returns the combined MSM expression. Panics
 /// if `terms` is empty.
 #[cfg(test)]
-pub fn wnaf_msm(session: &mut Session, terms: &[(&WnafTable, U256)]) -> EcExprPtr {
+pub(crate) fn wnaf_msm(session: &mut Session, terms: &[(&WnafTable, U256)]) -> EcExprPtr {
     let mut acc: Option<EcExprPtr> = None;
     for &(table, k) in terms {
         let term = wnaf_scalarmul(session, table, k);
@@ -265,29 +265,15 @@ pub fn wnaf_msm(session: &mut Session, terms: &[(&WnafTable, U256)]) -> EcExprPt
 /// `{±1,±3,±5,±7}`) is the sweet spot at this width: the `1/5` density beats
 /// Straus's `15/16` columns while the `2ᵂ⁻²·m`-entry tables stay small.
 ///
-/// `terms` pairs each base with its **non-negative** scalar (GLV signs ride
-/// the base via transcript `ec_sub(∞, P)` upstream, so the magnitudes land
-/// here); each base's [`WnafTable`] is built fresh. Returns the combined MSM
-/// expression. Panics if `terms` is empty or every scalar is zero.
+/// `terms` pairs each prebuilt [`WnafTable`] with its **non-negative** scalar
+/// (GLV signs ride the base via transcript `ec_sub(∞, P)` upstream, so the
+/// magnitudes land here). Each table drives its own digit expansion at its own
+/// window (`table.w`). Returns the combined MSM expression. Panics if `terms`
+/// is empty or every scalar is zero.
 ///
-/// When a base recurs across many calls — the generator across a batch of
-/// signatures — build its table once with [`wnaf_table`] and drive the same
-/// interleaved ladder with [`joint_wnaf_with_tables`] instead, so the
-/// recurring base's table is laid once rather than rebuilt per call.
-#[cfg(test)]
-pub fn joint_wnaf(session: &mut Session, terms: &[(EcNode, U256)], w: usize) -> EcExprPtr {
-    let tables: Vec<WnafTable> = terms.iter().map(|(p, _)| wnaf_table(session, p, w)).collect();
-    let table_terms: Vec<(&WnafTable, U256)> =
-        tables.iter().zip(terms).map(|(table, &(_, k))| (table, k)).collect();
-    joint_wnaf_with_tables(session, &table_terms)
-}
-
-/// An interleaved wNAF ladder taking already-built
-/// [`WnafTable`]s instead of building one per base — lets a caller reuse a
-/// recurring base's table (built once via [`wnaf_table`]) across many MSM
-/// claims instead of rebuilding it per claim. Each table drives its own digit
-/// expansion at its own window (`table.w`). Returns the combined MSM
-/// expression. Panics if `terms` is empty or every scalar is zero.
+/// The tables come from [`wnaf_table`], so a recurring base — the generator
+/// across a batch of signatures — has its table laid **once** and reused across
+/// every claim instead of rebuilt per call.
 pub fn joint_wnaf_with_tables(session: &mut Session, terms: &[(&WnafTable, U256)]) -> EcExprPtr {
     let signed_terms: Vec<(&WnafTable, U256, bool)> =
         terms.iter().map(|&(table, k)| (table, k, false)).collect();

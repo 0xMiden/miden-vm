@@ -38,7 +38,7 @@ impl SectionId {
     pub const KERNEL: Self = Self(Cow::Borrowed("kernel"));
     /// This section contains a Wasm module with custom event handlers plus its manifest; see
     /// [`crate::EventHandlerSection`].
-    pub const EVENT_HANDLERS: Self = Self(Cow::Borrowed("event_handlers"));
+    pub(crate) const EVENT_HANDLERS: Self = Self(Cow::Borrowed("event_handlers"));
 
     /// Construct a user-defined (i.e. "custom") section identifier
     ///

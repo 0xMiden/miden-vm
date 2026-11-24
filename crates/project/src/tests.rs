@@ -23,7 +23,7 @@ impl Default for TestContext {
 }
 
 impl TestContext {
-    pub fn load_workspace(&self, path: impl AsRef<Path>) -> Result<Box<Workspace>, Report> {
+    pub(crate) fn load_workspace(&self, path: impl AsRef<Path>) -> Result<Box<Workspace>, Report> {
         let path = path.as_ref();
         let source_file = self.source_manager.load_file(path).map_err(Report::msg)?;
         Workspace::load(source_file, &self.source_manager)

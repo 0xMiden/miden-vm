@@ -259,7 +259,7 @@ impl AppliedLineageMutation {
     }
 
     /// Returns the entry count before this mutation.
-    pub fn old_entry_count(&self) -> usize {
+    pub(crate) fn old_entry_count(&self) -> usize {
         self.old_entry_count
     }
 

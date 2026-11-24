@@ -172,7 +172,7 @@ impl MastForestMerger {
             node,
             original_forests[forest_idx],
             &self.node_id_mappings[forest_idx],
-        )?;
+        );
 
         let node_fingerprint =
             remapped_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
@@ -233,7 +233,7 @@ impl MastForestMerger {
         src: MastNode,
         original_forest: &MastForest,
         nmap: &DenseIdMap<MastNodeId, MastNodeId>,
-    ) -> Result<MastNodeBuilder, MastForestError> {
+    ) -> MastNodeBuilder {
         super::build_node_with_remapped_ids(merging_id, src, original_forest, nmap)
     }
 
@@ -274,7 +274,7 @@ pub struct MastForestRootMap {
 }
 
 impl MastForestRootMap {
-    pub(super) fn from_maps(
+    fn from_maps(
         node_maps: Vec<BTreeMap<MastNodeId, MastNodeId>>,
         root_maps: Vec<BTreeMap<MastNodeId, MastNodeId>>,
     ) -> Self {

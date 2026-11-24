@@ -56,7 +56,7 @@ pub struct ColumnDescriptor {
     /// Datatype of values in this column. Defaults to `string` if not specified.
     /// Values: 'string', 'number', 'bool', 'unixTimestampUTC'
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
-    pub column_descriptor_type: Option<ColumnDescriptorType>,
+    pub(crate) column_descriptor_type: Option<ColumnDescriptorType>,
     /// Width of this column in characters (hint only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub width: Option<i64>,
@@ -216,7 +216,7 @@ pub struct Capabilities {
 }
 
 #[derive(Deserialize, Serialize, Debug, Default, Clone)]
-pub struct CustomValue(pub Value);
+pub struct CustomValue(pub(crate) Value);
 
 #[cfg(feature = "integration_testing")]
 struct ValueFaker;

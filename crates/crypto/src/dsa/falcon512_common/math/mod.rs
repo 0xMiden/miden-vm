@@ -12,8 +12,10 @@ use num::{BigInt, Float, FromPrimitive, One, Zero};
 use num_complex::Complex64;
 use rand::Rng;
 
+#[cfg(test)]
+use super::N;
 use super::{
-    MODULUS, N,
+    MODULUS,
     keys::{WIDTH_BIG_POLY_COEFFICIENT, WIDTH_SMALL_POLY_COEFFICIENT},
 };
 

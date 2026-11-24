@@ -3,7 +3,7 @@ mod context;
 mod pattern;
 
 #[cfg(test)]
-pub use self::context::SyntaxTestContext;
+pub(crate) use self::context::SyntaxTestContext;
 pub use self::pattern::Pattern;
 
 /// Create a [Pattern::Regex] from the given input

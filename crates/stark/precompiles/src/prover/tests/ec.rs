@@ -28,7 +28,7 @@ use crate::prover::{
         groups::{
             COL_SBOUND_PTR as G_COL_SBOUND_PTR, EcGroupsAir, NUM_MAIN_COLS as G_NUM_MAIN_COLS,
         },
-        trace::{EcPointPtr, EcStoreRequires, generate_traces as ec_store_traces},
+        trace::{EcPointPtr, EcStoreRequires, groups_trace_padded_to, points_trace},
     },
     math::{U256, from_hex},
     primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
@@ -40,7 +40,7 @@ use crate::prover::{
             UintMulAir,
             trace::{UintMulRequires, generate_trace as mul_trace},
         },
-        trace::{UintPtr, UintStoreRequires, generate_trace as store_trace},
+        trace::{UintPtr, UintStoreRequires, generate_trace_padded_to as store_trace},
     },
 };
 
@@ -87,10 +87,10 @@ struct Fixture {
 fn fixture(bound: U256, a: U256, b: U256, x: U256, y: U256) -> Fixture {
     let mut store = UintStoreRequires::new();
     let fp = store.pin_modulus(1, bound);
-    let mut adds = UintAddRequires::new();
-    let mut muls = UintMulRequires::new();
-    let mut ec = EcStoreRequires::new();
-    let mut ec_add = EcAddRequires::new();
+    let mut adds = UintAddRequires::default();
+    let mut muls = UintMulRequires::default();
+    let mut ec = EcStoreRequires::default();
+    let mut ec_add = EcAddRequires::default();
 
     let mut req =
         EcRequire::new(&mut ec, &mut ec_add, UintRequire::new(&mut store, &mut adds, &mut muls));
@@ -126,8 +126,9 @@ impl Fixture {
     fn traces(mut self) -> FixtureTraces {
         let mut bpl = BytePairLutRequires::new();
         let mul = mul_trace(self.muls, &mut self.store, &mut bpl);
-        let store = store_trace(self.store, &mut bpl);
-        let (groups, points) = ec_store_traces(self.ec);
+        let store = store_trace(self.store, &mut bpl, 0);
+        let groups = groups_trace_padded_to(&self.ec, 0);
+        let points = points_trace(&self.ec);
         FixtureTraces {
             bpl: bpl_trace(bpl),
             store,
@@ -176,7 +177,7 @@ fn log_quotient_degree_matches_design_target() {
 }
 
 fn group_trace_with_pad_row() -> (RowMajorMatrix<Felt>, usize) {
-    let mut store = EcStoreRequires::new();
+    let mut store = EcStoreRequires::default();
     let mut live_groups = CurveId::ALL.len();
     while live_groups.is_power_of_two() {
         let base = 10_000 + live_groups as u32 * 3;
@@ -188,7 +189,7 @@ fn group_trace_with_pad_row() -> (RowMajorMatrix<Felt>, usize) {
         live_groups += 1;
     }
 
-    let (groups, _) = ec_store_traces(store);
+    let groups = groups_trace_padded_to(&store, 0);
     assert!(groups.height() > live_groups);
     (groups, live_groups)
 }
@@ -385,7 +386,9 @@ fn forged_group_mult_unbalances() {
 fn empty_stores_hold() {
     // No runtime groups or points: fixed group rows plus pad rows must satisfy
     // every constraint and touch no bus unless separately required.
-    let (groups_main, points_main) = ec_store_traces(EcStoreRequires::new());
+    let empty = EcStoreRequires::default();
+    let groups_main = groups_trace_padded_to(&empty, 0);
+    let points_main = points_trace(&empty);
     assert_eq!(groups_main.height(), CurveId::ALL.len().next_power_of_two().max(2));
     assert_eq!(points_main.height(), 2);
     assert_eq!(groups_main.values.len(), groups_main.height() * G_NUM_MAIN_COLS);
@@ -398,7 +401,7 @@ fn empty_stores_hold() {
 fn inactive_point_row_cannot_provide() {
     // A pad row with nonzero EcPoint multiplicity would provide a point
     // without paying its EcGroup / membership obligations.
-    let (_, mut points_main) = ec_store_traces(EcStoreRequires::new());
+    let mut points_main = points_trace(&EcStoreRequires::default());
     points_main.values[COL_ECPOINT_MULT] = Felt::ONE;
 
     check_points(&points_main);
@@ -408,7 +411,7 @@ fn inactive_point_row_cannot_provide() {
 fn inactive_point_rows_cannot_select_membership_subtypes() {
     // Linear membership selectors are safe only when both subtypes are subsets of activity.
     for subtype in [COL_IS_PAI, crate::prover::ec::COL_IS_CERT] {
-        let (_, mut points) = ec_store_traces(EcStoreRequires::new());
+        let mut points = points_trace(&EcStoreRequires::default());
         points.values[subtype] = Felt::ONE;
         assert!(std::panic::catch_unwind(|| check_points(&points)).is_err());
     }
