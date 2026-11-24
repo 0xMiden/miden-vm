@@ -12,8 +12,8 @@ pub struct CallTrace {
 #[derive(Debug)]
 pub struct CallFrameRecord {
     pub callee: Option<String>,
-    pub enter_clk: usize,
-    pub exit_clk: Option<usize>,
+    pub(crate) enter_clk: usize,
+    pub(crate) exit_clk: Option<usize>,
     pub args: Vec<TracedArg>,
     /// Returned values, top of the stack first, or `None` when they could not be worked out.
     pub results: Option<Vec<u64>>,

@@ -11,7 +11,7 @@ use miden_stark::lookup::Challenges;
 use crate::prover::{
     hash::sha256::{
         compression::{self, Sha256CompressionAir, Sha256CompressionRequires, Sha256WordMsg},
-        io::{self, Sha256IoAir, Sha256IoRequires, generate_trace},
+        io::{self, Sha256IoAir, Sha256IoRequires, generate_trace_padded_to},
     },
     logup::LookupMessage,
     primitives::byte_pair_lut::{self, BytePairLutAir, BytePairLutRequires, Range16Msg},
@@ -39,7 +39,7 @@ fn sha256_io_padding_boundaries_match_all_eight_digest_words() {
         let output = io.require(&input, &mut compression, &mut eidos);
         assert_eq!(output.digest, <[u8; 32]>::from(Sha256::hash(&input)), "length {len}");
     }
-    let trace = generate_trace(io, &mut BytePairLutRequires::new());
+    let trace = generate_trace_padded_to(io, &mut BytePairLutRequires::new(), 0);
     crate::prover::tests::check_local(Sha256IoAir, &trace);
 }
 
@@ -56,7 +56,7 @@ fn sha256_io_countdown_borrows_across_the_u16_boundary() {
             io.require(&input, &mut Sha256CompressionRequires::new(), &mut EidosRequires::new());
         assert_eq!(output.digest, <[u8; 32]>::from(Sha256::hash(&input)));
         let mut bpl = BytePairLutRequires::new();
-        let main = generate_trace(io, &mut bpl);
+        let main = generate_trace_padded_to(io, &mut bpl, 0);
         crate::prover::tests::check_local(Sha256IoAir, &main);
         assert_eq!(main.values[io::COL_LEFT_LO16], Felt::from_u32(first_low));
         assert_eq!(main.values[io::COL_LEFT_HI16], Felt::from_u32(first_high));
@@ -85,11 +85,11 @@ fn sha256_io_countdown_borrows_across_the_u16_boundary() {
 fn sha256_io_empty_accumulator_and_exact_final_row_are_valid() {
     crate::prover::tests::check_local(
         Sha256IoAir,
-        &generate_trace(Sha256IoRequires::new(), &mut BytePairLutRequires::new()),
+        &generate_trace_padded_to(Sha256IoRequires::new(), &mut BytePairLutRequires::new(), 0),
     );
     let mut io = Sha256IoRequires::new();
     io.require(&[0xa5; 56], &mut Sha256CompressionRequires::new(), &mut EidosRequires::new());
-    let main = generate_trace(io, &mut BytePairLutRequires::new());
+    let main = generate_trace_padded_to(io, &mut BytePairLutRequires::new(), 0);
     assert_eq!(main.values.len(), 64 * io::NUM_MAIN_COLS);
     crate::prover::tests::check_local(Sha256IoAir, &main);
 }
@@ -98,7 +98,7 @@ fn sha256_io_empty_accumulator_and_exact_final_row_are_valid() {
 fn sha256_io_rejects_noncanonical_padding_and_invocation_transitions() {
     let mut io = Sha256IoRequires::new();
     io.require(&[0xa5; 65], &mut Sha256CompressionRequires::new(), &mut EidosRequires::new());
-    let main = io::generate_trace_padded_to(io, &mut BytePairLutRequires::new(), 128);
+    let main = generate_trace_padded_to(io, &mut BytePairLutRequires::new(), 128);
     crate::prover::tests::check_local(Sha256IoAir, &main);
     // Each case corrupts a distinct serialized phase or transport boundary.
     for (name, row, col, value) in [
@@ -157,7 +157,7 @@ fn sha256_io_rejects_noncanonical_padding_and_invocation_transitions() {
             &mut Sha256CompressionRequires::new(),
             &mut EidosRequires::new(),
         );
-        let main = generate_trace(io, &mut BytePairLutRequires::new());
+        let main = generate_trace_padded_to(io, &mut BytePairLutRequires::new(), 0);
         crate::prover::tests::check_local(Sha256IoAir, &main);
         for block in 0..(len + 9).div_ceil(64) {
             let mut bad = main.clone();
@@ -185,7 +185,7 @@ fn sha256_io_marker_fit_rejects_length_row_forgeries() {
             &mut Sha256CompressionRequires::new(),
             &mut EidosRequires::new(),
         );
-        generate_trace(io, &mut BytePairLutRequires::new()).values
+        generate_trace_padded_to(io, &mut BytePairLutRequires::new(), 0).values
     };
 
     // Fifty-six bytes fill raw rows 0..13. A forged final flag replaces the marker
@@ -271,8 +271,8 @@ fn sha256_io_binds_chained_blocks_full_digest_and_shared_eidos_multiplicities() 
             Felt::from_u32(consumers);
     }
     let mut bpl = BytePairLutRequires::new();
-    let main = generate_trace(io, &mut bpl);
-    let compression_main = compression::generate_trace(compression, &mut bpl);
+    let main = generate_trace_padded_to(io, &mut bpl, 0);
+    let compression_main = compression::generate_trace_padded_to(compression, &mut bpl, 0);
     fold_balance(&Sha256CompressionAir, &compression_main, &challenges, &mut net);
     let eidos_main = eidos_trace(eidos, &mut bpl);
     fold_balance(&EidosCompressionAir, &eidos_main, &challenges, &mut net);

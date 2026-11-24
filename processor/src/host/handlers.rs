@@ -80,7 +80,7 @@ pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 ///
 /// # Errors
 /// Returns an error if the name is empty or is in the reserved namespace.
-pub(crate) fn validate_event_name(event: &EventName) -> Result<(), ExecutionError> {
+fn validate_event_name(event: &EventName) -> Result<(), ExecutionError> {
     if event.as_str().is_empty() {
         return Err(crate::errors::HostError::EmptyEventName.into());
     }

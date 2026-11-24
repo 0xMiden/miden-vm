@@ -30,7 +30,7 @@ use crate::prover::{
             GAMMA_SLOTS, NUM_GAMMA_SLOTS, NUM_MAIN_COLS, PERIOD, ROW_Q, ROW_R, UintMulAir,
             trace::{UintMulRequires, canonical_q, gamma_halves, generate_trace, op_block},
         },
-        trace::{UintPtr, UintStoreRequires, generate_trace as store_trace},
+        trace::{UintPtr, UintStoreRequires, generate_trace_padded_to as store_trace},
     },
 };
 
@@ -110,7 +110,7 @@ fn check_and_balance(
 ) -> RowMajorMatrix<Felt> {
     let mut bpl = BytePairLutRequires::new();
     let mul_main = generate_trace(mul, &mut store, &mut bpl);
-    let store_main = store_trace(store, &mut bpl);
+    let store_main = store_trace(store, &mut bpl, 0);
     let bpl_main = bpl_trace(bpl);
 
     crate::prover::tests::check_local(UintMulAir, &mul_main);
@@ -143,7 +143,7 @@ fn mul_constraints_hold() {
     let c = random_uint_below(&mut rng, bound);
 
     let (mut store, fp, ptrs) = store_with(bound, &[a, b, c]);
-    let mut mul = UintMulRequires::new();
+    let mut mul = UintMulRequires::default();
     record_mac(&mut store, fp, &ptrs, &mut mul, 1, a, 1, c, b, bound);
 
     let (op, _) = mul.ops[0];
@@ -177,7 +177,7 @@ fn mul_scaled_17_limb_quotient() {
     // a = b = bound is the modulus row itself (@1) — canonical interning
     // keeps one row per value, so the convolution operands ride it.
     let (mut store, fp, ptrs) = store_with(bound, &[c]);
-    let mut mul = UintMulRequires::new();
+    let mut mul = UintMulRequires::default();
     let r = mac_reduce(3, bound, bound, 2, c, bound);
     let r_ptr = store.intern(r, fp);
     mul.record(3, fp, fp, 2, ptrs[0], r_ptr, fp, 0);
@@ -198,7 +198,7 @@ fn mul_ops_balance_with_padding() {
     let c = random_uint_below(&mut rng, bound);
 
     let (mut store, fp, ptrs) = store_with(bound, &[a, b, c]);
-    let mut mul = UintMulRequires::new();
+    let mut mul = UintMulRequires::default();
     record_mac(&mut store, fp, &ptrs, &mut mul, 1, a, 1, c, b, bound);
     record_mac(&mut store, fp, &ptrs, &mut mul, 3, a, 0, c, b, bound);
     // Squaring is just mul(x, x): both convolution operands at ptr 2.
@@ -222,7 +222,7 @@ fn mul_div_arrangement() {
 
     let (mut store, fp, ptrs) = store_with(bound, &[y, z]);
     let x_ptr = store.intern(x, fp);
-    let mut mul = UintMulRequires::new();
+    let mut mul = UintMulRequires::default();
     // (a, b, c, r) = (y@2, z@3, modulus@1 with κ_c = 0, x).
     mul.record(1, ptrs[0], ptrs[1], 0, fp, x_ptr, fp, 0);
 
@@ -241,7 +241,7 @@ fn mul_zero_operand() {
     let c = random_uint_below(&mut rng, bound);
 
     let (mut store, fp, ptrs) = store_with(bound, &[zero, b, c]);
-    let mut mul = UintMulRequires::new();
+    let mut mul = UintMulRequires::default();
     let r_ptr = record_mac(&mut store, fp, &ptrs, &mut mul, 1, zero, 1, c, b, bound);
     let r = store.uint(r_ptr).value;
     assert_eq!(r, c, "0·b + c must reduce to c");
@@ -262,7 +262,7 @@ fn mul_rejects_wrong_result() {
     let c = random_uint_below(&mut rng, bound);
 
     let (mut store, fp, ptrs) = store_with(bound, &[a, b, c]);
-    let mut mul = UintMulRequires::new();
+    let mut mul = UintMulRequires::default();
     record_mac(&mut store, fp, &ptrs, &mut mul, 1, a, 1, c, b, bound);
     let mut main = generate_trace(mul, &mut store, &mut BytePairLutRequires::new());
     main.values[ROW_R * NUM_MAIN_COLS] += Felt::from(1u32);
@@ -284,7 +284,7 @@ fn mul_q_range_checks_reject_an_oversized_limb() {
     let c = random_uint_below(&mut rng, bound);
 
     let (mut store, fp, ptrs) = store_with(bound, &[a, b, c]);
-    let mut mul = UintMulRequires::new();
+    let mut mul = UintMulRequires::default();
     record_mac(&mut store, fp, &ptrs, &mut mul, 1, a, 1, c, b, bound);
 
     let (op, mult) = mul.ops[0];
@@ -306,7 +306,7 @@ fn mul_q_range_checks_reject_an_oversized_limb() {
     crate::prover::tests::check_local(UintMulAir, &mul_main);
 
     // …but the bus does not: the 17-bit limb's Range16 is unprovidable.
-    let store_main = store_trace(store, &mut bpl);
+    let store_main = store_trace(store, &mut bpl, 0);
     let bpl_main = bpl_trace(bpl);
 
     let [alpha, beta] = [rand_qf(&mut rng), rand_qf(&mut rng)];
@@ -359,7 +359,7 @@ proptest! {
     #[test]
     fn mul_constraints_hold_proptest((bound, a, b, c) in arb_triple()) {
         let (mut store, fp, ptrs) = store_with(bound, &[a, b, c]);
-        let mut mul = UintMulRequires::new();
+        let mut mul = UintMulRequires::default();
         record_mac(&mut store, fp, &ptrs, &mut mul, 1, a, 1, c, b, bound);
 
         let main = generate_trace(mul, &mut store, &mut BytePairLutRequires::new());
@@ -383,7 +383,7 @@ proptest! {
         // kappa_a = 3 against a near-2^255 modulus with a = b = p - 1
         // pushes the quotient past 2^256 for ANY c below the bound.
         let (mut store, fp, ptrs) = store_with(bound, &[c]);
-        let mut mul = UintMulRequires::new();
+        let mut mul = UintMulRequires::default();
         let r = mac_reduce(3, bound, bound, 2, c, bound);
         let r_ptr = store.intern(r, fp);
         mul.record(3, fp, fp, 2, ptrs[0], r_ptr, fp, 0);
@@ -400,7 +400,7 @@ proptest! {
         let x = mac_reduce(1, y, z, 0, bound, bound);
         let (mut store, fp, ptrs) = store_with(bound, &[y, z]);
         let x_ptr = store.intern(x, fp);
-        let mut mul = UintMulRequires::new();
+        let mut mul = UintMulRequires::default();
         mul.record(1, ptrs[0], ptrs[1], 0, fp, x_ptr, fp, 0);
 
         check_and_balance(store, mul, &fixed_challenges());
@@ -420,7 +420,7 @@ proptest! {
         // a = 0 degenerates the product: S = 0, q = 0, r = c — the
         // zero-heavy block must still satisfy constraints and balance.
         let (mut store, fp, ptrs) = store_with(bound, &[U256::ZERO, b, c]);
-        let mut mul = UintMulRequires::new();
+        let mut mul = UintMulRequires::default();
         let r_ptr = record_mac(&mut store, fp, &ptrs, &mut mul, 1, U256::ZERO, 1, c, b, bound);
         let r = store.uint(r_ptr).value;
         prop_assert_eq!(r, c, "0 * b + c must reduce to c");
@@ -441,7 +441,7 @@ proptest! {
         // blocks; the all-zero act = 0 padding block must stay off every
         // bus.
         let (mut store, fp, ptrs) = store_with(bound, &[a, b, c]);
-        let mut mul = UintMulRequires::new();
+        let mut mul = UintMulRequires::default();
         record_mac(&mut store, fp, &ptrs, &mut mul, 1, a, 1, c, b, bound);
         record_mac(&mut store, fp, &ptrs, &mut mul, 3, a, 0, c, b, bound);
         let r = mac_reduce(1, a, a, 1, c, bound);
@@ -459,7 +459,7 @@ fn repeated_zero_operands_balance() {
     limbs[15] = 0x7fff;
     let bound = from_limbs16(&limbs);
     let (mut store, fp, ptrs) = store_with(bound, &[U256::ZERO; 3]);
-    let mut mul = UintMulRequires::new();
+    let mut mul = UintMulRequires::default();
     record_mac(&mut store, fp, &ptrs, &mut mul, 1, U256::ZERO, 1, U256::ZERO, U256::ZERO, bound);
     record_mac(&mut store, fp, &ptrs, &mut mul, 3, U256::ZERO, 0, U256::ZERO, U256::ZERO, bound);
     mul.record(1, ptrs[0], ptrs[0], 1, ptrs[2], ptrs[0], fp, 0);

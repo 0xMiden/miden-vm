@@ -75,7 +75,7 @@ impl OutputWriter for alloc::vec::Vec<u8> {
 /// An instrument name that is not supported by the debugger.
 #[derive(Debug, thiserror::Error)]
 #[error("unknown profiling instrument '{0}'")]
-pub struct InstrumentError(pub String);
+pub struct InstrumentError(pub(crate) String);
 
 /// Construct one of the debugger's built-in profiling instruments.
 #[cfg(feature = "std")]

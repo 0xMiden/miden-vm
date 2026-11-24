@@ -119,7 +119,8 @@ impl LayoutBuilder {
 
 impl InputLayout {
     /// Build a native layout with no alignment padding.
-    pub fn new(counts: InputCounts) -> Self {
+    #[cfg(feature = "compiler")]
+    pub(crate) fn new(counts: InputCounts) -> Self {
         Self::build_with_policy(counts, LayoutPolicy::native(), AirComposition::Single, None)
     }
 

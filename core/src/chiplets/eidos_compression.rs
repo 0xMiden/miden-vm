@@ -17,7 +17,7 @@ use miden_crypto::{
 pub const STATE_WIDTH: usize = 12;
 
 /// Number of block Felts in the stack window.
-pub const BLOCK_LEN: usize = 8;
+pub(crate) const BLOCK_LEN: usize = 8;
 
 /// Number of Felts in the packed chaining value.
 pub const DIGEST_WIDTH: usize = 4;

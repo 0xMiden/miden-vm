@@ -111,7 +111,7 @@ impl MastNodeEntry {
     ///
     /// The `node_count` is the total expected number of nodes in the
     /// [`crate::mast::MastForest`] **after deserialization**.
-    pub fn try_into_mast_node_builder(
+    pub(crate) fn try_into_mast_node_builder(
         self,
         node_count: usize,
         basic_block_data_decoder: &BasicBlockDataDecoder,
@@ -291,7 +291,7 @@ impl MastNodeEntry {
     /// Decodes one `u32` number from a 60-bit payload.
     ///
     /// Returns an error if the payload doesn't fit in a `u32`.
-    pub fn decode_u32_payload(payload: u64) -> Result<u32, DeserializationError> {
+    pub(crate) fn decode_u32_payload(payload: u64) -> Result<u32, DeserializationError> {
         payload.try_into().map_err(|_| {
             DeserializationError::InvalidValue(format!(
                 "Invalid payload: expected to fit in u32, but was {payload}"

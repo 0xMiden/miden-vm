@@ -122,7 +122,7 @@ impl UintNode {
 #[derive(Debug, Clone, Copy)]
 pub struct EcNode {
     pub(crate) id: u32,
-    pub(crate) hash: EidosDigest,
+    hash: EidosDigest,
     pub(crate) point: EcPointPtr,
 }
 
@@ -324,7 +324,7 @@ impl TranscriptEvalRequires {
     /// the bus entry; the eval chip consumes it only when the handle is folded, so no eval row is
     /// added.
     #[cfg(test)]
-    pub fn issue(&mut self, hash: EidosDigest) -> Truthy {
+    pub(crate) fn issue(&mut self, hash: EidosDigest) -> Truthy {
         self.fresh(hash)
     }
 

@@ -52,7 +52,7 @@ pub fn mask_and_pack_felt(lo: u32, hi: u32) -> Felt {
 
 /// Clear the high bit of each odd output lane and pack the eight lanes into a four-Felt word.
 #[inline]
-pub fn mask_and_pack_word(cv: [u32; 8]) -> Word {
+pub(crate) fn mask_and_pack_word(cv: [u32; 8]) -> Word {
     Word::new([
         mask_and_pack_felt(cv[0], cv[1]),
         mask_and_pack_felt(cv[2], cv[3]),
@@ -62,7 +62,7 @@ pub fn mask_and_pack_word(cv: [u32; 8]) -> Word {
 }
 
 #[inline]
-pub(super) const fn pack_output_pair_u64(lo: u32, hi: u32) -> u64 {
+const fn pack_output_pair_u64(lo: u32, hi: u32) -> u64 {
     (((hi & ODD_LANE_MASK) as u64) << 32) | lo as u64
 }
 

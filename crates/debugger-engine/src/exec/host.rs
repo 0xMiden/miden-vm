@@ -64,7 +64,7 @@ where
     ///
     /// Mutations are only recorded for live event handling; nothing is recorded while an event
     /// replay queue is being consumed.
-    pub fn with_event_advice_mutations_recording(mut self) -> Self {
+    pub(crate) fn with_event_advice_mutations_recording(mut self) -> Self {
         self.event_recording = Some(Vec::new());
         self
     }
@@ -72,7 +72,7 @@ where
     /// Returns the advice mutations recorded so far, leaving the recording empty.
     ///
     /// Returns an empty log when recording was not enabled via
-    /// [DebuggerHost::with_event_advice_mutations_recording].
+    /// `DebuggerHost::with_event_advice_mutations_recording`.
     pub fn take_recorded_event_mutations(&mut self) -> Vec<Vec<AdviceMutation>> {
         self.event_recording.as_mut().map(core::mem::take).unwrap_or_default()
     }

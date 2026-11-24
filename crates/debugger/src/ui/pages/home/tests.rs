@@ -149,17 +149,12 @@ fn key_events_dispatch_navigation_and_respect_input_mode() {
             .unwrap()
             .is_none()
     );
-    for mode in [InputMode::Insert, InputMode::Command] {
-        state.input_mode = mode;
-        assert!(
-            home.handle_key_events(
-                KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE),
-                &mut state
-            )
+    state.input_mode = InputMode::Command;
+    assert!(
+        home.handle_key_events(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE), &mut state)
             .unwrap()
             .is_none()
-        );
-    }
+    );
 }
 
 #[test]

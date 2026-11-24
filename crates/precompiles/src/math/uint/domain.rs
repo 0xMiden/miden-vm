@@ -291,7 +291,7 @@ impl UintDomain {
     }
 
     /// Returns the generated field constants for prime-field domains.
-    pub fn field_constants(self) -> Option<[Limbs; 5]> {
+    pub(crate) fn field_constants(self) -> Option<[Limbs; 5]> {
         if self.is_prime_field() {
             Some([
                 self.minus_one(),

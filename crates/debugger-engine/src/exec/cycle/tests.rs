@@ -688,6 +688,46 @@ impl Instrument for RecordingInstrument {
     }
 }
 
+/// An instrument that keeps an owned copy of every record it receives.
+struct RecordingCycles {
+    records: Rc<RefCell<Vec<Record>>>,
+}
+
+impl Instrument for RecordingCycles {
+    fn name(&self) -> &'static str {
+        "recording-cycles"
+    }
+
+    fn on_operation_execution_cycle(&mut self, _op: Operation, _proc: Option<&str>) {}
+
+    fn on_cycle(&mut self, cycle: &CycleInfo<'_>) {
+        self.records.borrow_mut().push(Record::from(cycle));
+    }
+
+    fn write_report_to(&self, _writer: &mut dyn OutputWriter) -> OutputResult<()> {
+        Ok(())
+    }
+}
+
+/// An instrument that unwinds through the cycle it receives.
+struct PanickingInstrument;
+
+impl Instrument for PanickingInstrument {
+    fn name(&self) -> &'static str {
+        "panicking"
+    }
+
+    fn on_operation_execution_cycle(&mut self, _op: Operation, _proc: Option<&str>) {}
+
+    fn on_cycle(&mut self, _cycle: &CycleInfo<'_>) {
+        panic!("boom")
+    }
+
+    fn write_report_to(&self, _writer: &mut dyn OutputWriter) -> OutputResult<()> {
+        Ok(())
+    }
+}
+
 /// The profiler's instruments receive every record before its cycle runs, the failing one
 /// included, and after the internal observer has seen the source context.
 #[test]
@@ -707,11 +747,7 @@ fn instruments_receive_the_record_before_the_cycle_runs() {
     let mut outcome = Ok(None);
     while !exec.stopped {
         let order_observer = order.clone();
-        let order_cycle = order.clone();
-        outcome = exec.step_impl(
-            move |_| order_observer.borrow_mut().push("observer"),
-            move |_| order_cycle.borrow_mut().push("on_cycle"),
-        );
+        outcome = exec.step_impl(move |_| order_observer.borrow_mut().push("observer"));
         if outcome.is_err() {
             break;
         }
@@ -721,11 +757,8 @@ fn instruments_receive_the_record_before_the_cycle_runs() {
     assert!(matches!(records.last(), Some(Some(Operation::Assert(_)))), "{records:?}");
     assert_eq!(records.len(), exec.cycle + 1, "every cycle plus the failing one");
     let order = order.borrow();
-    assert_eq!(order.len(), 3 * records.len());
-    assert!(
-        order.chunks(3).all(|turn| turn == ["observer", "instrument", "on_cycle"]),
-        "{order:?}"
-    );
+    assert_eq!(order.len(), 2 * records.len());
+    assert!(order.chunks(2).all(|turn| turn == ["observer", "instrument"]), "{order:?}");
 }
 
 /// The debug executor describes every cycle of a program that runs to its end and mirrors the
@@ -735,25 +768,30 @@ fn instruments_receive_the_record_before_the_cycle_runs() {
 #[test]
 fn debug_executor_describes_every_cycle_and_stops_at_the_end() {
     let (package, source_manager) = fixture();
-    let mut exec = Executor::new(inputs(1, 3)).into_debug(package, source_manager);
-    let mut records = Vec::new();
+    let records = Rc::new(RefCell::new(Vec::new()));
+    let mut executor = Executor::new(inputs(1, 3));
+    executor.with_profiler_config(ProfilerConfig {
+        instruments: vec![Box::new(RecordingCycles { records: records.clone() })],
+        ..Default::default()
+    });
+    let mut exec = executor.into_debug(package, source_manager);
     while !exec.stopped {
-        exec.step_with(|cycle| records.push(Record::from(cycle))).unwrap();
+        exec.step().unwrap();
     }
-    assert!(!records.is_empty());
-    assert_eq!(records.len(), exec.cycle);
+    let described = records.borrow().len();
+    assert!(described > 0);
+    assert_eq!(described, exec.cycle);
     assert_eq!(exec.cycle, clock(exec.processor()));
-    let mut described = false;
-    assert!(exec.step_with(|_| described = true).unwrap().is_none());
-    assert!(!described, "a step after the end describes nothing");
+    assert!(exec.step().unwrap().is_none());
+    assert_eq!(records.borrow().len(), described, "a step after the end describes nothing");
     assert!(exec.stopped);
     // A session may reset the flag; the guard on the stepper's own state keeps the step a
     // no-op. A guard on the flag and on a failure alone would step the finished stepper, which
     // comes back empty and reaches the executor's unreachable arm.
     exec.stopped = false;
-    let returned_frame = exec.step_with(|_| described = true).map(|frame| frame.is_some());
+    let returned_frame = exec.step().map(|frame| frame.is_some());
     assert!(matches!(returned_frame, Ok(false)), "{returned_frame:?}");
-    assert!(!described, "a step after a reset describes nothing");
+    assert_eq!(records.borrow().len(), described, "a step after a reset describes nothing");
     assert!(exec.stopped);
 }
 
@@ -763,7 +801,13 @@ fn debug_executor_describes_every_cycle_and_stops_at_the_end() {
 #[test]
 fn debug_executor_stops_on_a_failing_step() {
     let (package, source_manager) = failing_program();
-    let mut exec = Executor::new(Vec::new()).into_debug(package, source_manager);
+    let records = Rc::new(RefCell::new(Vec::new()));
+    let mut executor = Executor::new(Vec::new());
+    executor.with_profiler_config(ProfilerConfig {
+        instruments: vec![Box::new(RecordingCycles { records: records.clone() })],
+        ..Default::default()
+    });
+    let mut exec = executor.into_debug(package, source_manager);
     let error = loop {
         if let Err(error) = exec.step() {
             break error;
@@ -773,9 +817,9 @@ fn debug_executor_stops_on_a_failing_step() {
     assert!(!matches!(error, ExecutionError::Internal(_)), "{error:?}");
     assert!(exec.stopped);
     assert_eq!(exec.cycle, clock(exec.processor()));
-    let mut described = false;
-    assert!(exec.step_with(|_| described = true).unwrap().is_none());
-    assert!(!described, "a step after a failure describes nothing");
+    let described = records.borrow().len();
+    assert!(exec.step().unwrap().is_none());
+    assert_eq!(records.borrow().len(), described, "a step after a failure describes nothing");
     assert!(exec.stopped);
     // A session may reset the flag; the stepper's own state keeps the step a no-op rather
     // than an error of the failed stepper.
@@ -790,10 +834,13 @@ fn debug_executor_stops_on_a_failing_step() {
 #[test]
 fn a_step_after_a_panic_in_the_callback_reports_the_lost_execution_once() {
     let (package, source_manager) = fixture();
-    let mut exec = Executor::new(inputs(1, 3)).into_debug(package, source_manager);
-    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        exec.step_with(|_| panic!("boom"))
-    }));
+    let mut executor = Executor::new(inputs(1, 3));
+    executor.with_profiler_config(ProfilerConfig {
+        instruments: vec![Box::new(PanickingInstrument)],
+        ..Default::default()
+    });
+    let mut exec = executor.into_debug(package, source_manager);
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| exec.step()));
     assert!(unwound.is_err());
     assert!(!exec.stopped);
     match exec.step() {
@@ -1583,15 +1630,19 @@ fn a_cycle_that_trips_the_limit_is_counted() {
 #[test]
 fn debug_executor_mirrors_the_clock_on_a_cycle_limit() {
     let (package, source_manager) = fixture();
-    let mut exec = Executor::from_config(crate::exec::ExecutionConfig {
+    let records = Rc::new(RefCell::new(Vec::new()));
+    let mut executor = Executor::from_config(crate::exec::ExecutionConfig {
         inputs: StackInputs::new(&inputs(1, 3)).unwrap(),
         options: cycle_limit(64),
         ..Default::default()
-    })
-    .into_debug(package, source_manager);
-    let mut records = Vec::new();
+    });
+    executor.with_profiler_config(ProfilerConfig {
+        instruments: vec![Box::new(RecordingCycles { records: records.clone() })],
+        ..Default::default()
+    });
+    let mut exec = executor.into_debug(package, source_manager);
     let error = loop {
-        if let Err(error) = exec.step_with(|cycle| records.push(Record::from(cycle))) {
+        if let Err(error) = exec.step() {
             break error;
         }
         assert!(!exec.stopped, "the fixture runs longer than the limit");
@@ -1601,7 +1652,7 @@ fn debug_executor_mirrors_the_clock_on_a_cycle_limit() {
     // The 65th cycle completed before it tripped the limit of 64.
     assert_eq!(exec.cycle, 65);
     assert_eq!(
-        records.len(),
+        records.borrow().len(),
         exec.cycle,
         "every cycle, the one that tripped the limit included"
     );

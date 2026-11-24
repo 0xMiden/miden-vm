@@ -156,7 +156,7 @@ pub struct FunctionType {
     pub cc: types::CallConv,
     pub args: Vec<TypeExpr>,
     /// Parameter names, where known. Like `span`, equality and hashing ignore them.
-    pub arg_names: Vec<Option<Ident>>,
+    pub(crate) arg_names: Vec<Option<Ident>>,
     pub results: Vec<TypeExpr>,
 }
 
@@ -870,13 +870,13 @@ impl TypeAlias {
     }
 
     /// Get the name of this type alias
-    pub fn name(&self) -> &Ident {
+    pub(crate) fn name(&self) -> &Ident {
         &self.name
     }
 
     /// Get the visibility of this type alias
     #[inline]
-    pub const fn visibility(&self) -> Visibility {
+    pub(crate) const fn visibility(&self) -> Visibility {
         self.visibility
     }
 }

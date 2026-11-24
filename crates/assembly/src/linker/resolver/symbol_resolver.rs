@@ -38,7 +38,7 @@ pub struct SymbolResolutionContext {
 
 impl SymbolResolutionContext {
     #[inline]
-    pub fn in_syscall(&self) -> bool {
+    pub(crate) fn in_syscall(&self) -> bool {
         matches!(self.kind, Some(InvokeKind::SysCall))
     }
 }
@@ -208,7 +208,7 @@ impl<'a> SymbolResolver<'a> {
     }
 
     #[inline(always)]
-    pub fn source_manager_arc(&self) -> Arc<dyn SourceManager> {
+    pub(crate) fn source_manager_arc(&self) -> Arc<dyn SourceManager> {
         self.graph.source_manager.clone()
     }
 

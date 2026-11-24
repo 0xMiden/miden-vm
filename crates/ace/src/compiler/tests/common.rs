@@ -7,11 +7,11 @@ use crate::{
     compiler::dag::{NodeId, NodeKind},
 };
 
-pub fn eval_periodic_values(periodic_columns: &[Vec<Felt>], z_k: QuadFelt) -> Vec<QuadFelt> {
+pub(crate) fn eval_periodic_values(periodic_columns: &[Vec<Felt>], z_k: QuadFelt) -> Vec<QuadFelt> {
     crate::compiler::testing::eval_periodic_values::<Felt, QuadFelt>(periodic_columns, z_k)
 }
 
-pub fn eval_dag(
+pub(crate) fn eval_dag(
     nodes: &[NodeKind<QuadFelt>],
     root: NodeId,
     inputs: &[QuadFelt],
@@ -32,6 +32,6 @@ pub fn eval_dag(
     values[root.index()]
 }
 
-pub fn eval_quotient(layout: &InputLayout, inputs: &[QuadFelt]) -> QuadFelt {
+pub(crate) fn eval_quotient(layout: &InputLayout, inputs: &[QuadFelt]) -> QuadFelt {
     crate::compiler::testing::eval_quotient::<Felt, QuadFelt>(layout, inputs)
 }

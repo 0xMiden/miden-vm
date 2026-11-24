@@ -30,7 +30,7 @@ pub struct FlamegraphProfile {
     total_cycles: usize,
 }
 
-/// The output format selected by [`FlamegraphProfile::write_to_path`].
+/// The output format selected by `FlamegraphProfile::write_to_path`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FlamegraphOutput {
     Svg,
@@ -99,7 +99,7 @@ impl FlamegraphProfile {
     /// Record `cycles` against a call stack from the debugger engine.
     pub fn record_call_stack(&mut self, frames: &[CallFrame], cycles: usize) {
         let path = build_stack_path(frames);
-        self.record_stack_path(path, cycles);
+        self.record_sanitized_path(path, cycles);
     }
 
     /// Record `cycles` against a stack of frame names.
@@ -111,17 +111,25 @@ impl FlamegraphProfile {
         S: AsRef<str>,
     {
         let path = build_stack_path_from_names(frames);
-        self.record_stack_path(path, cycles);
+        self.record_sanitized_path(path, cycles);
     }
 
     /// Record `cycles` against an already formatted folded-stack path.
+    ///
+    /// Folded stacks are one sample per line, so a line break in `stack_path` would split one
+    /// sample into several. Line breaks are replaced with spaces, as they are in frame names.
     pub fn record_stack_path(&mut self, stack_path: impl Into<String>, cycles: usize) {
+        self.record_sanitized_path(sanitize_stack_path(stack_path.into()), cycles);
+    }
+
+    /// Records a path whose frames already went through the folded-stack sanitization.
+    fn record_sanitized_path(&mut self, stack_path: String, cycles: usize) {
         if cycles == 0 {
             return;
         }
 
         self.total_cycles += cycles;
-        *self.samples.entry(stack_path.into()).or_default() += cycles;
+        *self.samples.entry(stack_path).or_default() += cycles;
     }
 
     pub fn samples(&self) -> &Samples {
@@ -132,12 +140,12 @@ impl FlamegraphProfile {
         self.total_cycles
     }
 
-    pub fn unique_stack_paths(&self) -> usize {
+    pub(crate) fn unique_stack_paths(&self) -> usize {
         self.samples.len()
     }
 
     /// Write this profile as an SVG when `path` ends in `.svg`, otherwise as folded stack text.
-    pub fn write_to_path(&self, path: impl AsRef<Path>) -> Result<FlamegraphOutput, Report> {
+    pub(crate) fn write_to_path(&self, path: impl AsRef<Path>) -> Result<FlamegraphOutput, Report> {
         let path = path.as_ref();
         if is_svg_path(path) {
             self.write_svg(path)?;
@@ -313,6 +321,15 @@ fn append_frame(path: &mut String, name: &str) {
         path.push(';');
     }
     append_sanitized_frame(path, name);
+}
+
+/// Replaces the line breaks that would split one folded-stack sample into several.
+fn sanitize_stack_path(stack_path: String) -> String {
+    if stack_path.contains(['\n', '\r']) {
+        stack_path.replace(['\n', '\r'], " ")
+    } else {
+        stack_path
+    }
 }
 
 fn append_sanitized_frame(path: &mut String, name: &str) {

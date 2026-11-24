@@ -40,7 +40,6 @@ pub struct App {
 pub type KeyBindings = HashMap<Mode, HashMap<Vec<KeyEvent>, Action>>;
 
 impl App {
-    #[allow(dead_code)]
     pub async fn new(config: Box<DebuggerConfig>) -> Result<Self, Report> {
         let state = State::new(config)?;
         Self::from_state(state).await

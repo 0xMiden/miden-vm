@@ -46,8 +46,8 @@ fn logger_filters_forwards_bounds_and_queries_captured_records() {
     assert_eq!(captured[0].line, Some(7));
     assert_eq!(logger.count_matching(|entry| entry.target == "test"), HISTORY_SIZE);
     assert!(logger.contains_matching(|entry| entry.message == "entry 1001"));
-    assert_eq!(logger.select_matching(|entry| entry.message == "entry 1001").len(), 1);
-    assert!(logger.select_matching(|entry| entry.level == Level::Error).is_empty());
+    assert_eq!(logger.count_matching(|entry| entry.message == "entry 1001"), 1);
+    assert!(!logger.contains_matching(|entry| entry.level == Level::Error));
     assert_eq!(logger.take_captured().len(), HISTORY_SIZE);
     assert!(logger.take_captured().is_empty());
     let file = String::from("owned.rs");

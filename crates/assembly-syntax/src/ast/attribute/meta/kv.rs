@@ -48,7 +48,7 @@ impl MetaKeyValue {
 
     /// Get the name of this metadata as a string
     #[inline]
-    pub fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         self.name.as_str()
     }
 

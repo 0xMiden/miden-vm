@@ -100,7 +100,7 @@ pub struct CurveCoefficient {
     /// VM-owned pointer for this coefficient value.
     pub ptr: u32,
     /// VM-owned pointer for the uint domain bound/modulus used by this coefficient.
-    pub bound_ptr: u32,
+    pub(crate) bound_ptr: u32,
     /// Canonical coefficient value, little-endian u32 limbs.
     pub value: Limbs,
 }
@@ -445,7 +445,7 @@ impl CurveId {
     }
 
     /// Returns whether `point` is a valid point on this curve.
-    pub fn is_on_curve(self, point: &CurvePoint) -> bool {
+    pub(crate) fn is_on_curve(self, point: &CurvePoint) -> bool {
         match self {
             Self::Secp256k1 => Secp256k1::is_on_curve(point),
             Self::Ed25519 => Ed25519::is_on_curve(point),
@@ -660,7 +660,7 @@ impl CurvePrecompile {
     ///
     /// This does not validate raw affine coordinates; registration and evaluation perform that
     /// validation before producing a canonical curve value.
-    pub fn value_node(curve: CurveId, point: CurvePoint) -> Node {
+    pub(crate) fn value_node(curve: CurveId, point: CurvePoint) -> Node {
         match point {
             CurvePoint::Identity => Self::identity_node(curve),
             CurvePoint::Affine { x, y } => Self::affine_node_from_digests(

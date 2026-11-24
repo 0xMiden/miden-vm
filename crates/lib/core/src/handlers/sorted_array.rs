@@ -32,7 +32,7 @@ enum KeySize {
 /// # Errors
 /// Returns an error if the provided word array is too large or is not sorted in non-decreasing
 /// order.
-pub fn handle_lowerbound_array(
+pub(crate) fn handle_lowerbound_array(
     process: &ProcessorState,
 ) -> Result<Vec<AdviceMutation>, EventError> {
     push_lowerbound_result(process, 4, KeySize::Full)
@@ -56,7 +56,7 @@ pub fn handle_lowerbound_array(
 /// # Errors
 /// Returns an error if the key-value array is too large or if its keys are not sorted in
 /// non-decreasing order.
-pub fn handle_lowerbound_key_value(
+pub(crate) fn handle_lowerbound_key_value(
     process: &ProcessorState,
 ) -> Result<Vec<AdviceMutation>, EventError> {
     let use_full_key = process.get_stack_item(7);

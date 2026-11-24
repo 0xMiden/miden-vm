@@ -75,7 +75,7 @@ impl MastForestRecorder {
 pub struct ReplaySnapshotWrite {
     pub path: Uri,
     pub event_count: usize,
-    pub forest_count: usize,
+    pub(crate) forest_count: usize,
 }
 
 /// Error metadata for a failed replay snapshot write.

@@ -250,7 +250,7 @@ impl PartialSmt {
 
     /// Returns an iterator over the [`InnerNode`] and the respective [`NodeIndex`] of the
     /// [`PartialSmt`].
-    pub fn inner_node_indices(&self) -> impl Iterator<Item = (NodeIndex, InnerNode)> + '_ {
+    pub(crate) fn inner_node_indices(&self) -> impl Iterator<Item = (NodeIndex, InnerNode)> + '_ {
         self.inner_nodes.iter().map(|(idx, inner)| (*idx, inner.clone()))
     }
 
@@ -293,7 +293,8 @@ impl PartialSmt {
     /// Note that if a partial SMT does not track leaves, its root is not necessarily the empty SMT
     /// root, since it could have been constructed from a different root but without tracking any
     /// leaves.
-    pub fn tracks_leaves(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn tracks_leaves(&self) -> bool {
         !self.leaves.is_empty()
     }
 

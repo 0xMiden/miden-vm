@@ -23,10 +23,10 @@ pub struct DynNode {
 /// Constants
 impl DynNode {
     /// The domain of the Dyn block (used for control block hashing).
-    pub const DYN_DOMAIN: Felt = Felt::new_unchecked(opcodes::DYN as u64);
+    pub(crate) const DYN_DOMAIN: Felt = Felt::new_unchecked(opcodes::DYN as u64);
 
     /// The domain of the Dyncall block (used for control block hashing).
-    pub const DYNCALL_DOMAIN: Felt = Felt::new_unchecked(opcodes::DYNCALL as u64);
+    pub(crate) const DYNCALL_DOMAIN: Felt = Felt::new_unchecked(opcodes::DYNCALL as u64);
 }
 
 /// Default digest constants
@@ -242,7 +242,7 @@ mod tests {
     /// Ensures that the hash of `DynNode` is indeed the hash of 2 empty words, in the `DynNode`
     /// domain.
     #[test]
-    pub fn test_dyn_node_digest() {
+    pub(crate) fn test_dyn_node_digest() {
         let mut forest = crate::mast::DenseMastForestBuilder::new();
         let dyn_node_id = forest.push_node(DynNodeBuilder::new_dyn()).unwrap();
         let dyn_node = forest.get_node_by_id(dyn_node_id).unwrap().unwrap_dyn();

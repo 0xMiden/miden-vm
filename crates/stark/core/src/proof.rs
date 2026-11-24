@@ -167,19 +167,13 @@ where
     /// [`from_data`](Self::from_data). Read its data through
     /// [`log_trace_heights`](Self::log_trace_heights) and
     /// [`air_order`](Self::air_order).
-    pub(crate) trace_order: TraceOrder,
+    trace_order: TraceOrder,
     /// Main trace commitment.
-    pub main_commit: L::Commitment,
-    /// Randomness sampled for auxiliary traces.
-    pub randomness: Vec<EF>,
+    pub(crate) main_commit: L::Commitment,
     /// Auxiliary trace commitment.
-    pub aux_commit: L::Commitment,
+    pub(crate) aux_commit: L::Commitment,
     /// Aux values per AIR instance, in the proof's AIR ordering.
     pub all_aux_values: Vec<Vec<EF>>,
-    /// Constraint folding challenge alpha.
-    pub alpha: EF,
-    /// AIR accumulation challenge beta.
-    pub beta: EF,
     /// Quotient polynomial commitment.
     pub quotient_commit: L::Commitment,
     /// Out-of-domain evaluation point z.
@@ -292,13 +286,14 @@ where
         // 1. Receive main trace commitment
         let main_commit = channel.receive_commitment()?.clone();
 
-        // 2. Sample randomness for aux traces
+        // 2. Sample randomness for aux traces. Nothing in this crate reads the samples, but
+        // sampling advances the transcript, so the draws must stay.
         let max_num_randomness =
             proof_ordered_airs.iter().map(|air| air.num_randomness()).max().unwrap_or(0);
 
-        let randomness: Vec<EF> = (0..max_num_randomness)
-            .map(|_| channel.sample_algebra_element::<EF>())
-            .collect();
+        for _ in 0..max_num_randomness {
+            let _: EF = channel.sample_algebra_element();
+        }
 
         // 3. Receive aux trace commitment
         let aux_commit = channel.receive_commitment()?.clone();
@@ -314,9 +309,10 @@ where
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        // 5. Sample constraint folding alpha and accumulation beta
-        let alpha: EF = channel.sample_algebra_element::<EF>();
-        let beta: EF = channel.sample_algebra_element::<EF>();
+        // 5. Sample constraint folding alpha and accumulation beta; the draws stay because
+        // they advance the transcript.
+        let _: EF = channel.sample_algebra_element();
+        let _: EF = channel.sample_algebra_element();
 
         // 6. Receive quotient commitment
         let quotient_commit = channel.receive_commitment()?.clone();
@@ -396,11 +392,8 @@ where
             Self {
                 trace_order,
                 main_commit,
-                randomness,
                 aux_commit,
                 all_aux_values,
-                alpha,
-                beta,
                 quotient_commit,
                 z,
                 pcs_proof,

@@ -69,8 +69,7 @@ pub enum DebugInfoEncodingError {
 /// The [`miden_core::serde::Deserializable::read_from`] and
 /// [`miden_core::serde::Deserializable::read_from_bytes`] implementations apply fixed resource
 /// limits for potentially adversarial input. Tools that deliberately accept the resource cost of
-/// larger debug information can use [`PackageDebugInfo::read_from_unmetered`] or
-/// [`PackageDebugInfo::read_from_bytes_unmetered`].
+/// larger debug information can use [`PackageDebugInfo::read_from_bytes_unmetered`].
 ///
 /// Strings are stored and serialized verbatim, including control characters, and consumers decide
 /// their validity for each use case (see [PR #3460]).

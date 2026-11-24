@@ -28,7 +28,8 @@ pub(crate) const PRECOMPILE_RELATION_DIGEST: RelationDigest = {
 };
 
 /// Default commitment hash for precompile proofs.
-pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
+#[cfg(all(test, feature = "prover"))]
+pub(crate) const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
     miden_core::proof::HashFunction::Eidos;
 
 /// Creates the Eidos configuration with the PVM transcript domain.
@@ -51,7 +52,7 @@ pub(crate) type TestConfig = EidosConfig;
 /// - log_final_degree: 3 (final poly = 8)
 /// - num_queries: 4
 #[cfg(all(test, feature = "prover"))]
-pub(crate) fn test_pcs_params() -> PcsParams {
+fn test_pcs_params() -> PcsParams {
     PcsParams::new(
         3, // log_blowup (must be >= log_quotient_degree)
         1, // log_folding_arity

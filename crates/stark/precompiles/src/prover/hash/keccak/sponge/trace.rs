@@ -373,12 +373,6 @@ fn compute_block_snapshots(inv: &Invocation, layout: &InvocationLayout) -> Vec<B
 // TRACE GENERATION
 // ================================================================================================
 
-/// Builds the main trace at its natural height.
-#[cfg(test)]
-pub fn generate_trace(requires: SpongeRequires) -> RowMajorMatrix<Felt> {
-    generate_trace_padded_to(requires, 0)
-}
-
 /// Build the sponge chiplet's main trace from the recorded
 /// invocations. Walks records in allocation order, stamping
 /// `SPONGE_PERIOD` rows per block; trailing rows up to the next power

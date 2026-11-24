@@ -116,10 +116,10 @@ impl EcStack {
         Self {
             store,
             fp,
-            adds: UintAddRequires::new(),
-            muls: UintMulRequires::new(),
-            ec: EcStoreRequires::new(),
-            ec_add: EcAddRequires::new(),
+            adds: UintAddRequires::default(),
+            muls: UintMulRequires::default(),
+            ec: EcStoreRequires::default(),
+            ec_add: EcAddRequires::default(),
         }
     }
 
@@ -594,8 +594,8 @@ fn empty_trace_holds() {
     // No ops: one all-zero pad block must satisfy every constraint and
     // touch no bus.
     let main = ec_add_trace(
-        EcAddRequires::new(),
-        &mut EcStoreRequires::new(),
+        EcAddRequires::default(),
+        &mut EcStoreRequires::default(),
         &mut BytePairLutRequires::new(),
     );
     assert_eq!(main.height(), PERIOD);
@@ -607,8 +607,8 @@ fn empty_trace_holds() {
 fn inactive_block_cannot_provide_ecgroupadd() {
     // This padding block has no active addition. A nonzero term count must fail.
     let mut main = ec_add_trace(
-        EcAddRequires::new(),
-        &mut EcStoreRequires::new(),
+        EcAddRequires::default(),
+        &mut EcStoreRequires::default(),
         &mut BytePairLutRequires::new(),
     );
     tamper_cell(&mut main, ROW_RES, CELL_GROUP, 7);

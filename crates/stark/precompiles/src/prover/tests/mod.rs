@@ -65,14 +65,6 @@ pub(crate) fn transcript_eval_main(traces: &SessionTraces) -> RowMajorMatrix<Fel
     traces.mains()[4].clone()
 }
 
-/// Return a replacement for the standalone transcript-eval main trace.
-pub(crate) fn with_transcript_eval_main(
-    _traces: &SessionTraces,
-    eval: RowMajorMatrix<Felt>,
-) -> RowMajorMatrix<Felt> {
-    eval
-}
-
 pub(crate) type SessionProof = (StarkProof, DeferredRoot);
 
 pub(crate) trait SessionTracesTestExt {
@@ -94,7 +86,7 @@ pub(crate) fn verify_deferred(proof: &SessionProof) -> Result<DeferredRoot, Veri
     Ok(proof.1)
 }
 
-pub(crate) fn assert_constraint_failure(check: impl FnOnce() + std::panic::UnwindSafe) {
+fn assert_constraint_failure(check: impl FnOnce() + std::panic::UnwindSafe) {
     let panic = std::panic::catch_unwind(check).expect_err("forged trace must fail a constraint");
     let message = panic
         .downcast_ref::<String>()
@@ -155,7 +147,7 @@ where
 }
 
 /// Assert that this local AIR check fails with a constraint diagnostic.
-pub(crate) fn assert_local_rejects<A>(air: A, main: &RowMajorMatrix<Felt>)
+fn assert_local_rejects<A>(air: A, main: &RowMajorMatrix<Felt>)
 where
     A: LiftedAir<Felt, QuadFelt>,
 {
@@ -185,7 +177,7 @@ where
 }
 
 /// Return an AIR's LogUp column shape without exposing its private backing constant.
-pub(crate) fn lookup_column_shape<A>(air: &A) -> &[usize]
+fn lookup_column_shape<A>(air: &A) -> &[usize]
 where
     A: for<'a> LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {

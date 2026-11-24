@@ -173,11 +173,6 @@ impl Default for EcStoreRequires {
 }
 
 impl EcStoreRequires {
-    #[cfg(test)]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub(crate) fn trace_height(&self) -> Option<usize> {
         Some(self.groups_trace_height()?.max(self.points_trace_height()?))
     }
@@ -197,7 +192,7 @@ impl EcStoreRequires {
     /// (its PAI rides [`add_pai`](Self::add_pai)'s own per-group dedup).
     /// Returns the group's handle.
     #[cfg(test)]
-    pub fn create_group(&mut self, a: UintPtr, b: UintPtr, bound: UintPtr) -> EcGroupPtr {
+    pub(crate) fn create_group(&mut self, a: UintPtr, b: UintPtr, bound: UintPtr) -> EcGroupPtr {
         if let Some(&existing) = self.by_curve.get(&(a, b, bound)) {
             return existing;
         }
@@ -373,23 +368,6 @@ impl EcStoreRequires {
             .copied()
             .unwrap_or_else(|| panic!("group {} has no PAI row", group.0))
     }
-}
-
-/// Build the standalone group and point-store traces for component tests.
-/// Callers must record all cross-chiplet requirements before consuming the
-/// accumulator here.
-#[cfg(test)]
-pub fn generate_traces(requires: EcStoreRequires) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
-    (groups_trace(&requires), points_trace(&requires))
-}
-
-/// The group table — one row per group in fixed/dense allocation order,
-/// padded to a power-of-two height (min 2). The ungated chain forces
-/// `ptr = row + 1` on every row, so pads carry their ptr too — they are
-/// simply rows whose `mult` (and params) stay zero, touching no bus.
-#[cfg(test)]
-fn groups_trace(requires: &EcStoreRequires) -> RowMajorMatrix<Felt> {
-    groups_trace_padded_to(requires, 0)
 }
 
 /// Builds the group table at a height of at least `min_height`. Padding rows

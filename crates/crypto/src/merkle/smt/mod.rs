@@ -61,7 +61,7 @@ pub use partial::{PartialSmt, SmtWitness, UniqueNodes};
 // ================================================================================================
 
 /// Minimum supported depth.
-pub const SMT_MIN_DEPTH: u8 = 1;
+pub(crate) const SMT_MIN_DEPTH: u8 = 1;
 
 /// Maximum supported depth.
 pub const SMT_MAX_DEPTH: u8 = 64;
@@ -948,7 +948,7 @@ mod tests {
 /// never share a leaf index, so these generate keys with deliberately colliding/sibling leaf
 /// positions to exercise `SmtLeaf::Multiple` and value-only-leaf serialization paths.
 #[cfg(any(test, feature = "arbitrary"))]
-pub(crate) mod test_gen {
+mod test_gen {
     extern crate alloc;
 
     use alloc::vec::Vec;

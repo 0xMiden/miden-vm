@@ -549,7 +549,7 @@ impl PersistentBackend {
     /// - [`BackendError::Internal`] if the database cannot be accessed at any point.
     /// - [`BackendError::Merkle`] if an error occurs with the merkle tree semantics.
     /// - [`BackendError::UnknownLineage`] if the provided `lineage` is not known by this backend.
-    pub(crate) fn update_tree(
+    fn update_tree(
         &mut self,
         lineage: LineageId,
         new_version: VersionId,
@@ -708,7 +708,7 @@ impl PersistentBackend {
     }
 
     // Triggers copy-on-write: clones the shared lineages map only if other references exist.
-    pub(crate) fn lineages_mut(&mut self) -> &mut HashMap<LineageId, TreeMetadata> {
+    fn lineages_mut(&mut self) -> &mut HashMap<LineageId, TreeMetadata> {
         Arc::make_mut(&mut self.lineages)
     }
 
