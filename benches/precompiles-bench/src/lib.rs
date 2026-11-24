@@ -59,8 +59,6 @@ impl PrecompileFixture {
             .with_advice(self.advice_inputs.clone())
             .with_options(self.execution_options.clone())
             .execute()
-            .prepare()
-            .expect("construct precompile workload processor")
             .run_sync(&mut host)
             .expect("execute precompile workload");
         let root = output.precompile_root();
@@ -154,8 +152,6 @@ pub fn prove_once(fixture: &PrecompileFixture) -> (StackOutputs, ExecutionProof)
         .with_advice(fixture.advice_inputs.clone())
         .with_options(fixture.execution_options.clone())
         .record_witness()
-        .prepare()
-        .expect("failed to initialize precompile benchmark processor")
         .run_sync(&mut host)
         .expect("failed to execute precompile benchmark")
         .witness;

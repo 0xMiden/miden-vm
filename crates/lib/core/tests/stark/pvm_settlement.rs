@@ -190,8 +190,6 @@ async fn run_settlement_in_masm(
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
         .execute()
-        .prepare()
-        .expect("processor construction")
         .run(&mut host)
         .await?;
     let precompile_proof = host

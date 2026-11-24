@@ -104,8 +104,6 @@ async fn ordinary_execution_accepts_empty_optional_debug_info() {
         let output = Processor::new(&program)
             .with_source_context(source)
             .execute()
-            .prepare()
-            .unwrap()
             .run(&mut DefaultHost::default())
             .await
             .unwrap();

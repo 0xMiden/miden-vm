@@ -139,8 +139,6 @@ pub fn execute_program(fixture: &Blake3Fixture) -> ExecutionOutput {
         .with_advice(fixture.advice_inputs.clone())
         .with_options(execution_options())
         .execute()
-        .prepare()
-        .expect("processor advice inputs should fit advice map limits")
         .run_sync(&mut host)
         .expect("failed to execute Blake3 benchmark")
 }

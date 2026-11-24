@@ -42,8 +42,6 @@ fn execute_sync(
         .with_advice(advice_inputs)
         .with_options(options)
         .execute()
-        .prepare()
-        .expect("processor construction")
         .run_sync(host)
 }
 

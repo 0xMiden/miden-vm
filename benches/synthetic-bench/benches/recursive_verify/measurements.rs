@@ -75,8 +75,6 @@ pub(super) fn execute_trace_inputs(case: RecursionCase, mut host: DefaultHost) -
     Processor::new(&case.program)
         .with_advice(case.advice_inputs)
         .record_witness()
-        .prepare()
-        .expect("recursive verifier advice should fit provider limits")
         .run_sync(&mut host)
         .expect("execute recursive verifier")
         .witness
