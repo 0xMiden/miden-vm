@@ -38,47 +38,46 @@ fn test_num_leaves_to_num_peaks() {
     build_test!(hash_size, &[0b0001_1111_1111_1111_1111]).expect_stack(&[17]);
 }
 
-/// Reads `expected` for `id` from the shared assembly cycle fixture TOML.
-fn fixture_expected_cycles(fixture_id: &str) -> u64 {
-    // Shared with processor assembly fixtures (`toml::Table`, same as the processor loader).
-    const FIXTURES: &str =
-        include_str!("../../../../../processor/src/tests/assembly-cycle-fixtures.toml");
+/// Reads the `#! Cycles: N` annotation immediately above `pub proc {proc_name}` in local MASM.
+///
+/// Generated docs under `crates/lib/core/docs/` come from these annotations, so measuring against
+/// them keeps the published cycle count tied to the same source of truth.
+fn masm_annotated_cycles(proc_name: &str) -> u64 {
+    // Packaged with miden-core-lib (not the processor crate).
+    const MASM: &str = include_str!("../../asm/collections/mmr.masm");
 
-    let table: toml::Table =
-        FIXTURES.parse().expect("assembly-cycle-fixtures.toml should be valid TOML");
-    let cases = table
-        .get("case")
-        .and_then(toml::Value::as_array)
-        .expect("assembly-cycle-fixtures.toml should contain a [[case]] array");
+    let proc_marker = format!("pub proc {proc_name}");
+    let proc_at = MASM
+        .find(&proc_marker)
+        .unwrap_or_else(|| panic!("procedure {proc_name:?} not found in mmr.masm"));
 
-    for case in cases {
-        let case = case.as_table().expect("each [[case]] entry should be a table");
-        let id = case.get("id").and_then(toml::Value::as_str);
-        if id != Some(fixture_id) {
-            continue;
+    for line in MASM[..proc_at].lines().rev() {
+        let trimmed = line.trim();
+        if let Some(raw) = trimmed.strip_prefix("#! Cycles:") {
+            let text = raw.trim();
+            return text
+                .split_whitespace()
+                .next()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or_else(|| {
+                    panic!("could not parse cycle count for {proc_name:?} from {trimmed:?}")
+                });
         }
-        let expected = case
-            .get("expected")
-            .and_then(toml::Value::as_str)
-            .unwrap_or_else(|| panic!("fixture {fixture_id:?} is missing `expected`"));
-        return expected
-            .split_whitespace()
-            .next()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or_else(|| {
-                panic!("could not parse cycle count from fixture {fixture_id}: {expected}")
-            });
+        // Stop at the previous procedure so we do not pick up an unrelated Cycles line.
+        if trimmed.starts_with("pub proc ") {
+            break;
+        }
     }
-    panic!("fixture id {fixture_id:?} not found in assembly-cycle-fixtures.toml");
+    panic!("no `#! Cycles:` annotation found above {proc_name:?} in mmr.masm");
 }
 
 /// Measures `mmr::num_leaves_to_num_peaks` via the core-library harness (real packaged exec).
 ///
-/// Expected count comes from `processor/src/tests/assembly-cycle-fixtures.toml`
-/// (`id = "num_leaves_to_num_peaks"`).
+/// Expected count is the `#! Cycles:` annotation on that procedure in
+/// `asm/collections/mmr.masm` (also the source for generated docs).
 #[test]
 fn test_num_leaves_to_num_peaks_cycle_count() {
-    let expected_cycles = fixture_expected_cycles("num_leaves_to_num_peaks");
+    let expected_cycles = masm_annotated_cycles("num_leaves_to_num_peaks");
 
     // Same wrap as processor `measure_program_cycles`: clk leaves one stack value,
     // so truncate to stay within the 16-element end-of-program limit.
@@ -119,7 +118,7 @@ fn test_num_leaves_to_num_peaks_cycle_count() {
     assert_eq!(
         delta, expected_cycles,
         "num_leaves_to_num_peaks cycle count changed (measured {measured}, baseline {base}); \
-         update assembly-cycle-fixtures.toml and the matching MASM/user docs together"
+         update the `#! Cycles:` annotation in asm/collections/mmr.masm (then regenerate docs)"
     );
 }
 

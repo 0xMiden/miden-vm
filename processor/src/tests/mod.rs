@@ -1539,9 +1539,9 @@ fn test_assert_message_without_debug_info_reports_error_code() {
 
 /// Verifies assembly instruction cycle fixtures referenced by user docs.
 ///
-/// Core-lib-only fixtures (no `doc`/`marker`) are measured in `miden-core-lib` tests so
-/// this crate does not need a `miden-core-lib` dependency (unpublished on crates.io during
-/// the 0.34 development cycle, which breaks `cargo package` / release dry-run).
+/// Core-lib procedure costs are measured in `miden-core-lib` against local MASM `#! Cycles:`
+/// annotations (not listed in this fixture file), so this crate does not need a
+/// `miden-core-lib` dependency.
 ///
 /// When the workspace `docs/` tree is present, also checks that each marked assembly user-doc
 /// row still shows the fixture's expected cycle text.
