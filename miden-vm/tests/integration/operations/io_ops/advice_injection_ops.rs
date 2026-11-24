@@ -2,7 +2,7 @@ use miden_assembly::Assembler;
 use miden_core::{Felt, Word};
 use miden_processor::{TestHost, advice::AdviceError};
 use miden_utils_testing::{build_test, crypto::MerkleStore};
-use miden_vm::{ExecutionError, ExecutionOptions, ExecutionRequest};
+use miden_vm::{ExecutionError, ExecutionOptions, Processor};
 
 // ADVICE INJECTION
 // ================================================================================================
@@ -556,10 +556,7 @@ fn run_insert_mem_with_max_value_elements_and_repeats(
     let options =
         ExecutionOptions::default().with_max_advice_size_bytes(base_store_bytes + map_entry_bytes);
 
-    ExecutionRequest::new(&program)
-        .with_options(options)
-        .execute()
-        .run_sync(&mut host)?;
+    Processor::new(&program).with_options(options).execute().run_sync(&mut host)?;
     Ok(())
 }
 
@@ -586,10 +583,7 @@ fn run_insert_mem_after_empty_insertion(range_len: u32) -> Result<(), ExecutionE
     let options = ExecutionOptions::default()
         .with_max_advice_size_bytes(base_store_bytes + Word::SERIALIZED_SIZE);
 
-    ExecutionRequest::new(&program)
-        .with_options(options)
-        .execute()
-        .run_sync(&mut host)?;
+    Processor::new(&program).with_options(options).execute().run_sync(&mut host)?;
     Ok(())
 }
 
@@ -616,9 +610,6 @@ fn run_conflicting_insert(max_advice_size_bytes: usize) -> Result<(), ExecutionE
     let mut host = TestHost::default();
     let options = ExecutionOptions::default().with_max_advice_size_bytes(max_advice_size_bytes);
 
-    ExecutionRequest::new(&program)
-        .with_options(options)
-        .execute()
-        .run_sync(&mut host)?;
+    Processor::new(&program).with_options(options).execute().run_sync(&mut host)?;
     Ok(())
 }

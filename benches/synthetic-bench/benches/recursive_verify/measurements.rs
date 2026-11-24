@@ -4,7 +4,7 @@ use std::{hint::black_box, time::Instant};
 
 use miden_core::program::ExecutionClaim;
 use miden_processor::{
-    DefaultHost, ExecutionRequest, Program,
+    DefaultHost, Processor, Program,
     advice::AdviceInputs,
     trace::{TraceLenSummary, build_trace},
 };
@@ -72,7 +72,7 @@ pub(super) fn trace_shape_summary_for(summary: &TraceLenSummary) -> TraceShape {
 }
 
 pub(super) fn execute_trace_inputs(case: RecursionCase, mut host: DefaultHost) -> ExecutionWitness {
-    ExecutionRequest::new(&case.program)
+    Processor::new(&case.program)
         .with_advice(case.advice_inputs)
         .record_witness()
         .prepare()
@@ -113,7 +113,7 @@ fn prove_recursive_trace(
     advice_inputs: AdviceInputs,
     host: &mut DefaultHost,
 ) -> (ExecutionClaim, ExecutionProof) {
-    let output = ExecutionRequest::new(program)
+    let output = Processor::new(program)
         .with_advice(advice_inputs)
         .build_trace(prover.trace_budget())
         .run_sync(host)

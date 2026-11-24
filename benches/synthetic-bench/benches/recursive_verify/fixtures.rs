@@ -18,7 +18,7 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_precompiles_stark::recursive::PvmRecursiveVerifierInputs;
-use miden_processor::{ExecutionRequest, WitnessOutput, trace::build_trace};
+use miden_processor::{Processor, WitnessOutput, trace::build_trace};
 use miden_verifier::Verifier;
 use miden_vm::{
     Assembler, ExecutionProof, PrecompileWitness, ProgramInfo, Prover, StackInputs, StackOutputs,
@@ -295,7 +295,7 @@ fn hex_prefix(bytes: &[u8]) -> String {
 
 fn print_tx_fixture_shape(program: &miden_vm::Program, stack_inputs: StackInputs, scenario: &str) {
     let mut host = recursive_host();
-    let witness = ExecutionRequest::new(program)
+    let witness = Processor::new(program)
         .with_stack_inputs(stack_inputs)
         .record_witness()
         .run_sync(&mut host)
@@ -352,7 +352,7 @@ pub(super) fn load_tx_fixtures(
                 (stack_outputs, proof, "hit")
             } else {
                 let mut host = recursive_host();
-                let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+                let WitnessOutput { claim, witness, .. } = Processor::new(&program)
                     .with_stack_inputs(stack_inputs)
                     .with_advice(advice_inputs)
                     .record_witness()

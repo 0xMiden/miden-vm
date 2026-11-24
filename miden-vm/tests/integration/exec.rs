@@ -4,7 +4,7 @@ use core::assert_matches;
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{ONE, Word, advice::AdviceMap, program::Program};
 use miden_processor::{advice::AdviceError, mast::MastForest};
-use miden_vm::{DefaultHost, ExecutionRequest};
+use miden_vm::{DefaultHost, Processor};
 
 #[test]
 fn advice_map_loaded_before_execution() {
@@ -24,7 +24,7 @@ fn advice_map_loaded_before_execution() {
     // Ordinary execution fails if the program has no required advice map.
     let mut host =
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
-    match ExecutionRequest::new(&program_without_advice_map).execute().run_sync(&mut host) {
+    match Processor::new(&program_without_advice_map).execute().run_sync(&mut host) {
         Ok(_) => panic!("Expected error"),
         Err(e) => {
             assert_matches!(
@@ -48,10 +48,7 @@ fn advice_map_loaded_before_execution() {
         Program::new(mast_forest.into(), program_without_advice_map.entrypoint());
 
     let mut host = DefaultHost::default();
-    ExecutionRequest::new(&program_with_advice_map)
-        .execute()
-        .run_sync(&mut host)
-        .unwrap();
+    Processor::new(&program_with_advice_map).execute().run_sync(&mut host).unwrap();
 }
 
 #[cfg(feature = "internal")]
@@ -115,7 +112,7 @@ fn canonical_deferred_ecdsa4_keccak100_example_executes() {
         .with_library(&core_lib)
         .expect("core library must load into the host");
 
-    ExecutionRequest::new(&program)
+    Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
         .execute()

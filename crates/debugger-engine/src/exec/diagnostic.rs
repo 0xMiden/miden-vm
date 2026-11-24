@@ -2,8 +2,8 @@ use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{Word, events::EventId, program::Program};
 use miden_processor::{
-    BaseHost, ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionRequest, Felt,
-    FutureMaybeSend, Host, LoadedMastForest, MastForestLoadError, ProcessorState, StackInputs,
+    BaseHost, ExecutionError, ExecutionOptions, ExecutionOutput, Felt, FutureMaybeSend, Host,
+    LoadedMastForest, MastForestLoadError, Processor, ProcessorState, StackInputs,
     advice::{AdviceInputs, AdviceMutation},
     event::{EventError, TraceError},
     trace::RowIndex,
@@ -155,7 +155,7 @@ impl DiagnosticExecutor {
     ) -> impl FutureMaybeSend<Result<ExecutionOutput, ExecutionError>> {
         async move {
             let mut wrapper = DiagnosticHostWrapper::new(host);
-            ExecutionRequest::new(program)
+            Processor::new(program)
                 .with_stack_inputs(self.stack_inputs)
                 .with_advice(self.advice_inputs)
                 .with_options(self.options)

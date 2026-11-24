@@ -24,8 +24,7 @@ use rstest::{fixture, rstest};
 
 use super::*;
 use crate::{
-    DefaultHost, ExecutionOptions, ExecutionRequest, HostLibrary,
-    trace::trace_state::MemoryReadsReplay,
+    DefaultHost, ExecutionOptions, HostLibrary, Processor, trace::trace_state::MemoryReadsReplay,
 };
 
 const DEFAULT_STACK: &[Felt] =
@@ -1365,7 +1364,7 @@ fn build_trace_for_program(
         .with_overlapped_trace_build(false);
     let mut host = DefaultHost::default();
     host.load_library(create_simple_library()).unwrap();
-    ExecutionRequest::new(program)
+    Processor::new(program)
         .with_stack_inputs(StackInputs::new(stack_inputs).unwrap())
         .with_options(options)
         .build_trace(miden_vm_stark::memory::default_budget())
@@ -1384,7 +1383,7 @@ fn record_vm_witness(
     let options = ExecutionOptions::default()
         .with_core_trace_fragment_size(fragment_size)
         .unwrap();
-    let output = ExecutionRequest::new(program)
+    let output = Processor::new(program)
         .with_stack_inputs(StackInputs::new(stack_inputs).unwrap())
         .with_options(options)
         .record_witness()

@@ -144,7 +144,7 @@ Each RPC accepts exactly one gRPC request message. Extra messages and trailing
 data are rejected before proving. The aggregate upload is bounded by its message
 limit plus the five-byte gRPC header, including fragmented HTTP/2 uploads.
 
-Configure an `ExecutionRequest::new(&program)`, then select `record_witness()` and run it with
+Configure an `Processor::new(&program)`, then select `record_witness()` and run it with
 `.run(&mut host).await` or `.run_sync(&mut host)` to obtain `WitnessOutput { claim, witness, advice }`.
 Send only the witness to the service and retain the final advice locally to
 build transaction outputs.

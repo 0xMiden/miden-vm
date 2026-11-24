@@ -23,7 +23,7 @@ async fn proving_with_debug_info_retains_advice(#[case] explicit_source_node: bo
         explicit_source_node.then_some(source_node),
     ));
     let request = |advice| {
-        ExecutionRequest::new(&fixture.program)
+        Processor::new(&fixture.program)
             .with_stack_inputs(stack_inputs)
             .with_advice(advice)
             .with_source_context(source_context)
@@ -48,7 +48,7 @@ async fn proving_with_advice_preserves_explicit_source_errors() {
         same_digest_entrypoint_fixture(vec![Operation::Assert(Felt::from_u32(9))], "assert");
     let mut sync_host = DefaultHost::default().with_source_manager(fixture.source_manager.clone());
     let mut async_host = DefaultHost::default().with_source_manager(fixture.source_manager);
-    let sync_error = ExecutionRequest::new(&fixture.program)
+    let sync_error = Processor::new(&fixture.program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &fixture.debug_info,
             Some(fixture.entrypoint_source_node_id),
@@ -56,7 +56,7 @@ async fn proving_with_advice_preserves_explicit_source_errors() {
         .record_witness()
         .run_sync(&mut sync_host)
         .unwrap_err();
-    let async_error = ExecutionRequest::new(&fixture.program)
+    let async_error = Processor::new(&fixture.program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &fixture.debug_info,
             Some(fixture.entrypoint_source_node_id),

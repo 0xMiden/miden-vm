@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use miden_assembly::Assembler;
-use miden_processor::{DefaultHost, ExecutionOptions, ExecutionRequest, Program};
+use miden_processor::{DefaultHost, ExecutionOptions, Processor, Program};
 use miden_prover::Prover;
 use tracing::{Event, Subscriber, span::Attributes};
 use tracing_subscriber::{
@@ -53,7 +53,7 @@ fn capture_proving(program: &Program, overlapped: bool, filter: &str) -> Vec<Rec
     let subscriber = Registry::default().with(EnvFilter::new(filter)).with(capture.clone());
     tracing::subscriber::with_default(subscriber, || {
         let prover = Prover::new();
-        let output = ExecutionRequest::new(program)
+        let output = Processor::new(program)
             .with_options(ExecutionOptions::default().with_overlapped_trace_build(overlapped))
             .build_trace(prover.trace_budget())
             .run_sync(&mut DefaultHost::default())

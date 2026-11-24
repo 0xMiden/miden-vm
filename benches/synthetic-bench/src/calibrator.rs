@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use miden_processor::{DefaultHost, ExecutionRequest, trace::build_trace};
+use miden_processor::{DefaultHost, Processor, trace::build_trace};
 use miden_vm::Assembler;
 
 use crate::{
@@ -27,7 +27,7 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
         .unwrap_program();
 
     let mut host = DefaultHost::default();
-    let witness = ExecutionRequest::new(&program)
+    let witness = Processor::new(&program)
         .record_witness()
         .run_sync(&mut host)
         .map_err(|e| MeasurementError::Execution(format!("{e}")))?

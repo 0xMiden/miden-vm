@@ -40,8 +40,7 @@ pub use miden_processor::{
 };
 #[cfg(not(target_family = "wasm"))]
 use miden_processor::{
-    DefaultHost, ExecutionOptions, ExecutionOutput, ExecutionRequest, WitnessOutput,
-    trace::build_trace,
+    DefaultHost, ExecutionOptions, ExecutionOutput, Processor, WitnessOutput, trace::build_trace,
 };
 use miden_processor::{
     Program,
@@ -408,7 +407,7 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         // execute the test
-        let execution_output = ExecutionRequest::new(&program)
+        let execution_output = Processor::new(&program)
             .with_stack_inputs(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
             .execute()
@@ -594,7 +593,7 @@ impl Test {
         let options = ExecutionOptions::default()
             .with_core_trace_fragment_size(FRAGMENT_SIZE)
             .unwrap();
-        let execution = ExecutionRequest::new(&program)
+        let execution = Processor::new(&program)
             .with_stack_inputs(stack_inputs)
             .with_advice(self.advice_inputs.clone())
             .with_options(options)
@@ -631,7 +630,7 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
 
-        ExecutionRequest::new(&program)
+        Processor::new(&program)
             .with_stack_inputs(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
             .with_source_context(debug_info.as_ref().map(|debug_info| {
@@ -654,7 +653,7 @@ impl Test {
         let (program, mut host, debug_info) = self.get_program_and_host();
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
         let stack_inputs = stack_inputs_from_ints(pub_inputs);
-        let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+        let WitnessOutput { claim, witness, .. } = Processor::new(&program)
             .with_stack_inputs(stack_inputs)
             .with_advice(self.advice_inputs.clone())
             .with_source_context(debug_info.as_ref().map(|debug_info| {
@@ -809,7 +808,7 @@ impl Test {
         let compare_error_diagnostics = debug_info.is_none();
 
         let fast_result_by_step: Result<StackOutputs, ExecutionError> = (|| {
-            let mut session = ExecutionRequest::new(&program)
+            let mut session = Processor::new(&program)
                 .with_stack_inputs(stack_inputs)
                 .with_advice(self.advice_inputs.clone())
                 .with_source_context(debug_info.as_ref().map(|debug_info| {

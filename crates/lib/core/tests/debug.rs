@@ -20,8 +20,8 @@ use miden_core_lib::{
     },
 };
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionRequest, HostLibrary,
-    MemoryError, Program, StackInputs, SyncHost,
+    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, HostLibrary, MemoryError,
+    Processor, Program, StackInputs, SyncHost,
     advice::{AdviceInputs, AdviceStack},
     event::{EventHandler, EventName},
 };
@@ -37,7 +37,7 @@ fn execute_sync(
     host: &mut impl SyncHost,
     options: ExecutionOptions,
 ) -> Result<ExecutionOutput, ExecutionError> {
-    ExecutionRequest::new(program)
+    Processor::new(program)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
         .with_options(options)

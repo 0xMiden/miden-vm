@@ -8,7 +8,7 @@ use miden_core::{
     proof::{ExecutionProof, HashFunction},
 };
 use miden_mast_package::Package;
-use miden_processor::{DefaultHost, ExecutionRequest, Program, WitnessOutput};
+use miden_processor::{DefaultHost, Processor, Program, WitnessOutput};
 use miden_utils_testing::{
     Prover, Test,
     recursive_verifier::{VerifierData, generate_advice_inputs},
@@ -405,7 +405,7 @@ fn generate_recursive_proof(
         host.load_library(kernel_lib.mast_forest()).unwrap();
     }
 
-    let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+    let WitnessOutput { claim, witness, .. } = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .record_witness()
         .run_sync(&mut host)

@@ -160,11 +160,8 @@ fn test_advice_provider() {
     };
 
     let mut fast_host = TestHost::with_kernel_forest(kernel_lib.mast_forest().clone());
-    let fast_stack_outputs = ExecutionRequest::new(&program)
-        .execute()
-        .run_sync(&mut fast_host)
-        .unwrap()
-        .stack;
+    let fast_stack_outputs =
+        Processor::new(&program).execute().run_sync(&mut fast_host).unwrap().stack;
 
     // check outputs
     insta::assert_debug_snapshot!("stack_outputs", fast_stack_outputs);

@@ -11,8 +11,8 @@ use miden_utils_testing::{
     PrimeField64, recursive_verifier::generate_request_inputs, stack_inputs_from_ints,
 };
 use miden_vm::{
-    DefaultHost, ExecutionRequest, HashFunction, Prover, StackInputs, VerificationOutcome,
-    Verifier, WitnessOutput,
+    DefaultHost, HashFunction, Processor, Prover, StackInputs, VerificationOutcome, Verifier,
+    WitnessOutput,
 };
 
 /// Applies the integration tests' policy to all STARK components in a verification outcome.
@@ -50,7 +50,7 @@ fn assert_prove_verify(
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
     println!("Proving with {hash_name}...");
     let prover = Prover::new().with_hash_fn(hash_fn);
-    let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+    let WitnessOutput { claim, witness, .. } = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .record_witness()
         .run_sync(&mut host)
@@ -198,7 +198,7 @@ fn test_keccak_precompile_wrapper_prove_verify_final() {
         .with_library(&core_lib)
         .expect("failed to load CoreLibrary into the host");
 
-    let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+    let WitnessOutput { claim, witness, .. } = Processor::new(&program)
         .record_witness()
         .run_sync(&mut host)
         .expect("failed to execute Keccak precompile program");
@@ -314,7 +314,7 @@ fn test_eidos_recursive_verify_with_precompile_requests() {
     let mut host = DefaultHost::default()
         .with_library(&core_lib)
         .expect("failed to load core library into the host");
-    let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+    let WitnessOutput { claim, witness, .. } = Processor::new(&program)
         .record_witness()
         .run_sync(&mut host)
         .expect("execution failed");
@@ -346,9 +346,9 @@ mod prover_api_lifecycle {
     };
     use miden_precompiles::{UintDomain, UintPrecompile};
     use miden_vm::{
-        DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionProof, ExecutionRequest,
-        ExecutionWitness, HashFunction, PrecompileLimits, PrecompileProof, PrecompileStatus,
-        PrecompileWitness, Program, Prover, ProverError, StackInputs, StackOutputs, StarkProof,
+        DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionProof, ExecutionWitness,
+        HashFunction, PrecompileLimits, PrecompileProof, PrecompileStatus, PrecompileWitness,
+        Processor, Program, Prover, ProverError, StackInputs, StackOutputs, StarkProof,
         TraceOutput, VerificationError, VerificationOutcome, Verifier, WitnessOutput,
     };
 
@@ -362,7 +362,7 @@ mod prover_api_lifecycle {
     }
 
     fn execute(program: &Program) -> ExecutionWitness {
-        ExecutionRequest::new(program)
+        Processor::new(program)
             .record_witness()
             .run_sync(&mut DefaultHost::default())
             .map(|output| output.witness)
@@ -504,24 +504,22 @@ mod prover_api_lifecycle {
 
         for program in [assemble("begin push.1 drop end"), u256_program(1)] {
             let mut buffered_host = DefaultHost::default();
-            let WitnessOutput { claim: buffered_claim, witness, .. } =
-                ExecutionRequest::new(&program)
-                    .with_options(execution_options.clone())
-                    .with_stack_inputs(stack_inputs)
-                    .record_witness()
-                    .run_sync(&mut buffered_host)
-                    .expect("buffered witness recording should succeed");
+            let WitnessOutput { claim: buffered_claim, witness, .. } = Processor::new(&program)
+                .with_options(execution_options.clone())
+                .with_stack_inputs(stack_inputs)
+                .record_witness()
+                .run_sync(&mut buffered_host)
+                .expect("buffered witness recording should succeed");
             let buffered_outputs = *buffered_claim.stack_outputs();
             let buffered_proof = prover.prove_full(witness).expect("witness should prove");
 
             let mut overlapped_host = DefaultHost::default();
-            let TraceOutput { claim: overlapped_claim, trace, .. } =
-                ExecutionRequest::new(&program)
-                    .with_options(execution_options.clone().with_overlapped_trace_build(true))
-                    .with_stack_inputs(stack_inputs)
-                    .build_trace(prover.trace_budget())
-                    .run_sync(&mut overlapped_host)
-                    .expect("overlapped trace building should succeed");
+            let TraceOutput { claim: overlapped_claim, trace, .. } = Processor::new(&program)
+                .with_options(execution_options.clone().with_overlapped_trace_build(true))
+                .with_stack_inputs(stack_inputs)
+                .build_trace(prover.trace_budget())
+                .run_sync(&mut overlapped_host)
+                .expect("overlapped trace building should succeed");
             let overlapped_outputs = *overlapped_claim.stack_outputs();
             let overlapped_proof = prover.prove_full_trace(trace).expect("trace should prove");
             let overlapped_proof = overlapped_proof.as_inner();
@@ -539,7 +537,7 @@ mod prover_api_lifecycle {
     #[test]
     fn delegated_and_batched_precompile_proving_composes_across_transport() {
         let prover = Prover::new();
-        let TraceOutput { claim: one_claim, trace, .. } = ExecutionRequest::new(&u256_program(1))
+        let TraceOutput { claim: one_claim, trace, .. } = Processor::new(&u256_program(1))
             .build_trace(prover.trace_budget())
             .run_sync(&mut DefaultHost::default())
             .expect("root-one trace should build");
@@ -757,7 +755,7 @@ mod execution_witness_serialization {
     #[cfg(feature = "arbitrary")]
     use miden_utils_testing::proptest::prelude::*;
     use miden_verifier::Verifier;
-    use miden_vm::{ExecutionRequest, ExecutionWitness, Program, WitnessOutput};
+    use miden_vm::{ExecutionWitness, Processor, Program, WitnessOutput};
 
     fn default_source_manager_host() -> DefaultHost {
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()))
@@ -815,7 +813,7 @@ mod execution_witness_serialization {
             .expect("program should compile")
             .unwrap_program();
         let mut host = default_source_manager_host();
-        ExecutionRequest::new(&program)
+        Processor::new(&program)
             .with_stack_inputs(stack_inputs)
             .record_witness()
             .run_sync(&mut host)
@@ -906,7 +904,7 @@ mod execution_witness_serialization {
         let mut host = default_source_manager_host();
         host.load_library(create_simple_library())
             .expect("failed to load test library into host");
-        let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+        let WitnessOutput { claim, witness, .. } = Processor::new(&program)
             .record_witness()
             .run_sync(&mut host)
             .expect("execution should produce a witness");
@@ -960,7 +958,7 @@ mod execution_witness_serialization {
             .expect("program should compile")
             .unwrap_program();
         let mut host = default_source_manager_host();
-        let witness = ExecutionRequest::new(&program)
+        let witness = Processor::new(&program)
             .record_witness()
             .run_sync(&mut host)
             .map(|output| output.witness)

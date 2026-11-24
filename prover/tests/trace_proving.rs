@@ -1,5 +1,5 @@
 use miden_assembly::Assembler;
-use miden_processor::{DefaultHost, ExecutionError, ExecutionRequest};
+use miden_processor::{DefaultHost, ExecutionError, Processor};
 use miden_prover::{CompleteProof, Prover, ProverError};
 
 #[test]
@@ -9,7 +9,7 @@ fn materialized_trace_proving_rechecks_the_provers_memory_budget() {
         .unwrap()
         .unwrap_program();
     let prover = Prover::new().with_max_prover_memory_bytes(0);
-    let capture = ExecutionRequest::new(&program)
+    let capture = Processor::new(&program)
         .build_trace(prover.trace_budget())
         .run_sync(&mut DefaultHost::default());
     assert_eq!(prover.trace_budget().limit_bytes(), 0);
@@ -23,7 +23,7 @@ fn materialized_trace_proving_rechecks_the_provers_memory_budget() {
     // Materialize under a larger budget to check that proving re-applies its own limit.
     let recording_prover = Prover::new();
     for complete in [false, true] {
-        let execution_trace = ExecutionRequest::new(&program)
+        let execution_trace = Processor::new(&program)
             .build_trace(recording_prover.trace_budget())
             .run_sync(&mut DefaultHost::default())
             .expect("trace capture should fit the normal budget")

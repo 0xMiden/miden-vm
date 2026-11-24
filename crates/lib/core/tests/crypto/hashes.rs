@@ -2,7 +2,7 @@ use miden_assembly::{Assembler, Linkage};
 use miden_core::{Felt, chiplets::eidos_compression, utils::bytes_to_packed_u32_elements};
 use miden_core_lib::CoreLibrary;
 use miden_crypto::hash::keccak::Keccak256;
-use miden_processor::{DefaultHost, ExecutionError, ExecutionOutput, ExecutionRequest};
+use miden_processor::{DefaultHost, ExecutionError, ExecutionOutput, Processor};
 
 use crate::helpers::{
     assert_precompile_witness_round_trips, masm_push_felts, masm_push_word, masm_store_felts,
@@ -328,7 +328,7 @@ fn run_core_program(source: &str) -> Result<ExecutionOutput, ExecutionError> {
         .with_library(&core_lib)
         .expect("failed to load CoreLibrary into the host");
 
-    let output = ExecutionRequest::new(&program).execute().run_sync(&mut host);
+    let output = Processor::new(&program).execute().run_sync(&mut host);
     if let Ok(output) = &output {
         assert!(output.advice.stack().is_empty(), "core hash wrappers must consume advice");
     }

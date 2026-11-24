@@ -5,15 +5,15 @@ This crate contains an implementation of Miden VM processor. The purpose of the 
 The processor provides multiple APIs depending on your use case:
 
 ### High-level API
-`ExecutionRequest::new(&program)` collects inputs, execution options, and source context before
+`Processor::new(&program)` collects inputs, execution options, and source context before
 choosing ordinary execution, witness recording, or trace construction. The live machine is
 initialized and advice is validated against the final options at `prepare`, `run_sync`, `run`, or
 `start`, independently of setter order.
 
 ```rust
-use miden_processor::{DefaultHost, ExecutionRequest, WitnessOutput};
+use miden_processor::{DefaultHost, Processor, WitnessOutput};
 # fn example(program: &miden_processor::Program) -> Result<(), miden_processor::ExecutionError> {
-let WitnessOutput { claim, witness, advice } = ExecutionRequest::new(program)
+let WitnessOutput { claim, witness, advice } = Processor::new(program)
     .record_witness()
     .run_sync(&mut DefaultHost::default())?;
 # Ok(())
@@ -30,7 +30,7 @@ Pass the program as `&Program`, its public inputs as `StackInputs`, and its priv
 
 ### Execution and sessions
 
-Use `Execution::prepare()` to initialize the machine before a run or session. Benchmarks can use it
+Use `ExecutionPlan::prepare()` to initialize the machine before a run or session. Benchmarks can use it
 to initialize the machine outside the measured section.
 
 Use `.with_source_context(Some(PackageSourceDebugContext::new(&debug_info, source_node)))` on the
@@ -43,7 +43,7 @@ that owns the machine, continuation, and recorder.
 execution and keep the session.
 
 `.run_to_completion_sync(&mut host)` and `.run_to_completion(&mut host).await` return
-`CompletedExecution` after successful termination. Its `state()` exposes the halted machine until
+`HaltedExecution` after successful termination. Its `state()` exposes the halted machine until
 `finish()` consumes it and exports the execution output and any recorded artifact. Deferred
 precompile witness export happens during `finish()`, so export failures occur after VM completion.
 Each stage returns `ExecutionError` on failure. Failed or cancelled sessions cannot resume or
@@ -62,7 +62,7 @@ The processor is separated into two main components: **execution** and **trace g
 it directly for raw stepping and machine inspection. Ordinary execution uses the no-op tracer.
 
 ### Trace generation with `build_trace()`
-Select `ExecutionRequest::build_trace(budget)` to return `TraceOutput` with the claim, final advice,
+Select `Processor::build_trace(budget)` to return `TraceOutput` with the claim, final advice,
 and an `ExecutionTrace` that pairs the VM trace with its optional precompile witness. Use
 `vm_trace()` to inspect the VM trace or `into_parts()` to take ownership of both components.
 For VM-only trace analysis from a saved witness, extract its `VmWitness` and use

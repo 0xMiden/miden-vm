@@ -10,8 +10,7 @@ use miden_core::{
 
 use super::VmTrace;
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, ExecutionRequest, Felt, StackInputs,
-    trace::build_trace,
+    AdviceInputs, DefaultHost, ExecutionOptions, Felt, Processor, StackInputs, trace::build_trace,
 };
 
 mod chiplets;
@@ -88,7 +87,7 @@ fn build_trace_from_program_with_advice(
         .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
         .unwrap()
         .with_overlapped_trace_build(false);
-    ExecutionRequest::new(program)
+    Processor::new(program)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
         .with_options(options)
@@ -111,7 +110,7 @@ fn non_empty_execution_witness_splits_with_matching_precompile_root() {
         StackInputs::new(&[0, 0, 0, 0, 1, 2, 3, 4].map(Felt::new_unchecked)).unwrap();
 
     let mut host = DefaultHost::default();
-    let execution_witness = ExecutionRequest::new(&program)
+    let execution_witness = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .record_witness()
         .run_sync(&mut host)
@@ -124,7 +123,7 @@ fn non_empty_execution_witness_splits_with_matching_precompile_root() {
 
     let precompile_witness = precompile_witness.expect("logged statement must be retained");
     assert_eq!(vm_witness.claim(), claim);
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .execute()
         .run_sync(&mut host)
@@ -147,7 +146,7 @@ fn empty_execution_witness_splits_and_replays_with_explicit_stack_inputs() {
     let stack_inputs = StackInputs::new(&[7, 9].map(Felt::new_unchecked)).unwrap();
 
     let mut host = DefaultHost::default();
-    let execution_witness = ExecutionRequest::new(&program)
+    let execution_witness = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .record_witness()
         .run_sync(&mut host)
@@ -168,7 +167,7 @@ fn empty_execution_witness_splits_and_replays_with_explicit_stack_inputs() {
     assert_eq!(vm_witness.claim(), claim);
     assert_eq!(vm_witness.precompile_root, TRUE_DIGEST);
     assert!(precompile_witness.is_none());
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .execute()
         .run_sync(&mut host)
@@ -208,7 +207,7 @@ fn clear_deferred_replays_across_fragments_and_retains_new_obligations() {
     let options = ExecutionOptions::default()
         .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
         .unwrap();
-    let witness = ExecutionRequest::new(&program)
+    let witness = Processor::new(&program)
         .with_options(options)
         .record_witness()
         .run_sync(&mut DefaultHost::default())

@@ -14,7 +14,7 @@ use miden_core::{
     proof::{ExecutionProof, HashFunction},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_processor::{DefaultHost, ExecutionRequest, StackInputs, TraceOutput};
+use miden_processor::{DefaultHost, Processor, StackInputs, TraceOutput};
 use miden_stark::verifier::VerifierError;
 use miden_verifier::{StarkVerificationError, VerificationError, Verifier};
 use miden_vm_stark::prover::prove;
@@ -50,7 +50,7 @@ fn verifier_rejects_forged_overflow_pop_order() {
     let stack_values = (1..17).rev().map(Felt::new_unchecked).collect::<Vec<_>>();
     let stack_inputs = StackInputs::new(&stack_values).unwrap();
     let mut host = DefaultHost::default();
-    let TraceOutput { trace: execution_trace, .. } = ExecutionRequest::new(&program)
+    let TraceOutput { trace: execution_trace, .. } = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .build_trace(miden_vm_stark::memory::default_budget())
         .run_sync(&mut host)

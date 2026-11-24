@@ -17,8 +17,8 @@ use miden_core::{Felt, Word, mast::MastNode, program::Program};
 use miden_debug_types::SourceManager;
 use miden_mast_package::Package;
 use miden_processor::{
-    BaseHost, DefaultHost, ExecutionError, ExecutionRequest, FastProcessor, FutureMaybeSend, Host,
-    LoadedMastForest, MastForestLoadError, ProcessorState, StackInputs, advice::AdviceMutation,
+    BaseHost, DefaultHost, ExecutionError, FastProcessor, FutureMaybeSend, Host, LoadedMastForest,
+    MastForestLoadError, Processor, ProcessorState, StackInputs, advice::AdviceMutation,
     event::EventError,
 };
 
@@ -1326,7 +1326,7 @@ fn stepper_async_step_and_output() {
     assert!(!poll_immediately(stepper.step(&mut DefaultHost::default(), |_| {})).unwrap());
     let output = stepper.into_output().unwrap();
 
-    let expected = ExecutionRequest::new(&package.unwrap_program())
+    let expected = Processor::new(&package.unwrap_program())
         .with_stack_inputs(StackInputs::new(&inputs(1, 3)).unwrap())
         .execute()
         .run_sync(&mut DefaultHost::default())
@@ -1350,7 +1350,7 @@ fn stepper_output_preserves_deferred_work_and_verification_limits() {
         .assemble_program("fixture", "begin log_deferred end")
         .unwrap();
     let inputs = StackInputs::new(TRUE_DIGEST.as_elements()).unwrap();
-    let expected = ExecutionRequest::new(&package.unwrap_program())
+    let expected = Processor::new(&package.unwrap_program())
         .with_stack_inputs(inputs)
         .execute()
         .run_sync(&mut DefaultHost::default())

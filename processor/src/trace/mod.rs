@@ -35,7 +35,7 @@ pub use miden_air_definitions::vm::{
 };
 pub use miden_core::deferred::PrecompileWitness;
 pub use parallel::{CORE_TRACE_WIDTH, build_trace};
-// Re-exported for the streamed `ExecutionRequest::build_trace` path, which is std-only; the
+// Re-exported for the streamed `Processor::build_trace` path, which is std-only; the
 // buffered path uses `build_hasher_chiplet` and `MAX_TRACE_LEN` directly within `parallel`.
 #[cfg(feature = "std")]
 pub(crate) use parallel::{MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_prebuilt_hasher};
@@ -320,9 +320,7 @@ mod wire_tests {
         ExecutionWitness, Serializable, build_trace,
         trace_state::{AeadStreamReplayEntry, BitwiseOp, BitwiseReplayEntry},
     };
-    use crate::{
-        DefaultHost, ExecutionError, ExecutionRequest, Felt, StackInputs, mast::MastNodeId,
-    };
+    use crate::{DefaultHost, ExecutionError, Felt, Processor, StackInputs, mast::MastNodeId};
 
     fn execution_witness(source: &str) -> ExecutionWitness {
         let program = Assembler::default()
@@ -330,7 +328,7 @@ mod wire_tests {
             .expect("program should compile")
             .unwrap_program();
         let mut host = DefaultHost::default();
-        ExecutionRequest::new(&program)
+        Processor::new(&program)
             .record_witness()
             .run_sync(&mut host)
             .map(|output| output.witness)
@@ -372,7 +370,7 @@ mod wire_tests {
         ]
         .map(Felt::new_unchecked);
         let mut host = DefaultHost::default();
-        ExecutionRequest::new(&program)
+        Processor::new(&program)
             .with_stack_inputs(StackInputs::new(&stack).unwrap())
             .record_witness()
             .run_sync(&mut host)

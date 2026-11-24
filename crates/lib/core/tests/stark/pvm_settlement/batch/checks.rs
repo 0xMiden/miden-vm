@@ -9,7 +9,7 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionRequest, Program, StackInputs, WitnessOutput,
+    DefaultHost, ExecutionError, Processor, Program, StackInputs, WitnessOutput,
     advice::AdviceInputs, operation::OperationError,
 };
 use miden_prover::Prover;
@@ -60,7 +60,7 @@ fn batch_root_and_response_checks() {
     prepared_advice.extend(pvm_advice);
     let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
 
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .with_advice(prepared_advice)
         .execute()
@@ -110,7 +110,7 @@ fn batch_root_and_response_checks() {
     let wrong_advice = advice_inputs
         .with_map([(wrong_commitment, Word::words_as_elements(&commitments).to_vec())]);
     let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
-    let error = ExecutionRequest::new(&program)
+    let error = Processor::new(&program)
         .with_stack_inputs(wrong_batch_input)
         .with_advice(wrong_advice)
         .execute()
@@ -120,7 +120,7 @@ fn batch_root_and_response_checks() {
 
     // Three valid claims must fail the even-count requirement.
     let (stack_inputs, advice_inputs) = batch_inputs(&core_lib, &[(&plain, &plain_claim); 3]);
-    let error = ExecutionRequest::new(&program)
+    let error = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
         .execute()
@@ -130,7 +130,7 @@ fn batch_root_and_response_checks() {
 
     // With only TRUE roots, the batch needs no PVM proof package in advice.
     let (stack_inputs, advice_inputs) = batch_inputs(&core_lib, &[(&plain, &plain_claim); 2]);
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
         .execute()
@@ -144,7 +144,7 @@ fn prove_without_precompiles() -> (ExecutionProof, ExecutionClaim) {
         .assemble_program("no_precompiles", "begin push.7 drop end")
         .unwrap()
         .unwrap_program();
-    let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+    let WitnessOutput { claim, witness, .. } = Processor::new(&program)
         .record_witness()
         .run_sync(&mut DefaultHost::default())
         .unwrap();
@@ -171,7 +171,7 @@ fn assert_rejects_pvm_response(
     map.insert(proof_request_key(verifier_root, expected_root), stream);
     advice_inputs.extend(AdviceInputs::new(stack, map, store));
     let mut host = DefaultHost::default().with_library(core_lib).unwrap();
-    let error = ExecutionRequest::new(program)
+    let error = Processor::new(program)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
         .execute()

@@ -14,7 +14,7 @@ use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
 };
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionRequest,
+    DefaultHost, ExecutionError, Processor,
     advice::{AdviceMutation, AdviceStack},
     event::EventHandler,
     operation::OperationError,
@@ -290,7 +290,7 @@ fn sha512_hash_bytes_mem_rejects_a_forged_upper_digest_half() {
         .unwrap_program();
     let mut host = DefaultHost::default().with_library(&library).unwrap();
     assert!(host.replace_handler(SHA512_DIGEST_EVENT_NAME, handler).unwrap());
-    let result = ExecutionRequest::new(&program).execute().prepare().unwrap().run_sync(&mut host);
+    let result = Processor::new(&program).execute().prepare().unwrap().run_sync(&mut host);
     assert!(result.is_err(), "the second SHA-512 output chunk must be authenticated");
 }
 
@@ -363,7 +363,7 @@ fn sha256_hash_bytes_mem_rejects_a_forged_digest() {
         .unwrap_program();
     let mut host = DefaultHost::default().with_library(&library).unwrap();
     assert!(host.replace_handler(SHA256_DIGEST_EVENT_NAME, handler).unwrap());
-    let result = ExecutionRequest::new(&program).execute().prepare().unwrap().run_sync(&mut host);
+    let result = Processor::new(&program).execute().prepare().unwrap().run_sync(&mut host);
     assert!(result.is_err(), "a forged SHA-256 digest must fail the deferred assertion");
 }
 

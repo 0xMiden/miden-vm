@@ -11,8 +11,8 @@ use miden_core::{
 };
 use miden_core_lib::{CoreLibrary, PVM_PROOF_REQUEST_EVENT_NAME};
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionRequest, ProcessorState, WitnessOutput,
-    advice::AdviceMutation, operation::OperationError,
+    DefaultHost, ExecutionError, Processor, ProcessorState, WitnessOutput, advice::AdviceMutation,
+    operation::OperationError,
 };
 use miden_prover::Prover;
 use miden_verifier::Verifier;
@@ -33,7 +33,7 @@ async fn live_accumulator_is_proved_before_clearing() {
         None,
         &clearing_epilogue(MIN_SECURITY_BITS),
     );
-    let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+    let WitnessOutput { claim, witness, .. } = Processor::new(&program)
         .with_advice(advice)
         .record_witness()
         .run(&mut host)
@@ -72,8 +72,7 @@ async fn live_accumulator_is_proved_before_clearing() {
         let (program, advice) =
             signature_execution_inputs(&core_lib, fixture, None, &clearing_epilogue(minimum));
         let (mut host, requested_root) = rejection_host(&core_lib, &pvm_proof);
-        let mut session =
-            ExecutionRequest::new(&program).with_advice(advice).execute().start().unwrap();
+        let mut session = Processor::new(&program).with_advice(advice).execute().start().unwrap();
         let error = session
             .run_until_halt_sync(&mut host)
             .expect_err("an invalid settlement must fail before clearing");

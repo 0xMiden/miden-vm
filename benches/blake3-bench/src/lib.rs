@@ -15,7 +15,7 @@ use miden_vm::{
         package::debug_info::{DebugSourceNodeId, PackageDebugInfo},
     },
     internal::InputFile,
-    processor::{ExecutionRequest, trace},
+    processor::{Processor, trace},
 };
 use serde::{Deserialize, Serialize};
 use tracing::{Subscriber, span};
@@ -117,7 +117,7 @@ pub fn execute_for_proving(fixture: &Blake3Fixture) -> ExecutionWitness {
             fixture.entrypoint_source_node,
         )
     });
-    let execution = ExecutionRequest::new(&fixture.program)
+    let execution = Processor::new(&fixture.program)
         .with_stack_inputs(fixture.stack_inputs)
         .with_advice(fixture.advice_inputs.clone())
         .with_options(execution_options())
@@ -134,7 +134,7 @@ pub fn execute_for_proving(fixture: &Blake3Fixture) -> ExecutionWitness {
 
 pub fn execute_program(fixture: &Blake3Fixture) -> ExecutionOutput {
     let mut host = host_for_fixture(fixture);
-    ExecutionRequest::new(&fixture.program)
+    Processor::new(&fixture.program)
         .with_stack_inputs(fixture.stack_inputs)
         .with_advice(fixture.advice_inputs.clone())
         .with_options(execution_options())

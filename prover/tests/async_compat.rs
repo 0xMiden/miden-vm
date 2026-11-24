@@ -3,8 +3,8 @@ use std::sync::Arc;
 use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
-    BaseHost, DefaultHost, ExecutionRequest, Felt, FutureMaybeSend, Host, LoadedMastForest,
-    MastForestLoadError, ProcessorState, WitnessOutput, Word,
+    BaseHost, DefaultHost, Felt, FutureMaybeSend, Host, LoadedMastForest, MastForestLoadError,
+    Processor, ProcessorState, WitnessOutput, Word,
     advice::AdviceMutation,
     event::{EventError, EventName},
 };
@@ -77,7 +77,7 @@ fn simple_program() -> miden_processor::Program {
 async fn async_and_sync_execution_witnesses_prove_equivalently() {
     let program = simple_program();
     let stack_inputs = StackInputs::new(&[Felt::new_unchecked(0), Felt::new_unchecked(1)]).unwrap();
-    let request = || ExecutionRequest::new(&program).with_stack_inputs(stack_inputs);
+    let request = || Processor::new(&program).with_stack_inputs(stack_inputs);
 
     let mut sync_host = DefaultHost::default();
     let WitnessOutput { claim: sync_claim, witness, .. } =
@@ -104,7 +104,7 @@ async fn proving_supports_witnesses_from_async_only_host_events() {
         .unwrap_program();
 
     let mut host = YieldingAsyncHost::new();
-    let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+    let WitnessOutput { claim, witness, .. } = Processor::new(&program)
         .record_witness()
         .run(&mut host)
         .await

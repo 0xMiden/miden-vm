@@ -16,7 +16,7 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, ExecutionRequest, Program, StackInputs, WitnessOutput, advice::AdviceInputs,
+    DefaultHost, Processor, Program, StackInputs, WitnessOutput, advice::AdviceInputs,
 };
 use miden_prover::Prover;
 use miden_verifier::Verifier;
@@ -58,7 +58,7 @@ fn batch_settles_deferred_obligations_with_one_pvm_proof() {
 
     // MASM derives the combined root from verified MVM proofs and checks the staged PVM proof.
     let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
-    let WitnessOutput { claim: batch_claim, witness, .. } = ExecutionRequest::new(&program)
+    let WitnessOutput { claim: batch_claim, witness, .. } = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
         .record_witness()

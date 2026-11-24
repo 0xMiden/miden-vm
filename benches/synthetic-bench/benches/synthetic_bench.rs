@@ -25,7 +25,7 @@ use std::{collections::BTreeSet, hint::black_box, path::PathBuf, time::Duration}
 use codspeed_criterion_compat as criterion;
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
 use miden_core::program::ExecutionClaim;
-use miden_processor::{DefaultHost, ExecutionRequest, StackInputs, advice::AdviceInputs};
+use miden_processor::{DefaultHost, Processor, StackInputs, advice::AdviceInputs};
 use miden_vm::{Assembler, ExecutionProof, HashFunction, Program, Prover, Verifier};
 use miden_vm_synthetic_bench::{
     calibrator::{Calibration, calibrate},
@@ -102,7 +102,7 @@ fn execute_and_prove(
     advice_inputs: AdviceInputs,
     host: &mut DefaultHost,
 ) -> (ExecutionClaim, ExecutionProof) {
-    let output = ExecutionRequest::new(program)
+    let output = Processor::new(program)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
         .build_trace(prover.trace_budget())
@@ -242,7 +242,7 @@ fn bench_one_scenario(
             b.iter_batched_ref(
                 || {
                     let host = DefaultHost::default();
-                    let execution = ExecutionRequest::new(&program).execute().prepare().unwrap();
+                    let execution = Processor::new(&program).execute().prepare().unwrap();
                     (host, Some(execution))
                 },
                 |(host, execution)| {
@@ -258,8 +258,7 @@ fn bench_one_scenario(
             b.iter_batched_ref(
                 || {
                     let host = DefaultHost::default();
-                    let execution =
-                        ExecutionRequest::new(&program).record_witness().prepare().unwrap();
+                    let execution = Processor::new(&program).record_witness().prepare().unwrap();
                     (host, Some(execution))
                 },
                 |(host, execution)| {

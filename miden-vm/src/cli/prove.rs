@@ -9,7 +9,7 @@ use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, PackageSourceDebugContext};
 use miden_vm::{
-    ExecutionRequest, HashFunction, PrecompileLimits, PrecompileStatus, Prover, WitnessOutput,
+    HashFunction, PrecompileLimits, PrecompileStatus, Processor, Prover, WitnessOutput,
     internal::InputFile,
 };
 
@@ -226,7 +226,7 @@ impl ProveCmd {
         let source = package_debug_info
             .as_ref()
             .map(|info| PackageSourceDebugContext::new_optional(info, entrypoint_source_node));
-        let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+        let WitnessOutput { claim, witness, .. } = Processor::new(&program)
             .with_options(execution_options)
             .with_stack_inputs(stack_inputs)
             .with_advice(advice_inputs)

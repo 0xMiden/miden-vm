@@ -23,7 +23,7 @@ use alloc::{format, vec, vec::Vec};
 
 use miden_air_definitions::vm::trace::RowIndex;
 use miden_core::{Felt, Word, field::Field, operations::opcodes, utils::RowMajorMatrix};
-use miden_processor::{DefaultHost, ExecutionRequest, StackInputs, TraceOutput};
+use miden_processor::{DefaultHost, Processor, StackInputs, TraceOutput};
 
 use crate::repro_harness::{ReproTrace, core_row_mut};
 
@@ -81,7 +81,7 @@ fn build_fixture_with_setup(dyncall_setup: &str, pre_dyncall_depth: u64) -> Fixt
     let stack_inputs = StackInputs::new(&stack_values).unwrap();
 
     let mut host = DefaultHost::default();
-    let TraceOutput { trace: execution_trace, .. } = ExecutionRequest::new(&program)
+    let TraceOutput { trace: execution_trace, .. } = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .build_trace(miden_vm_stark::memory::default_budget())
         .run_sync(&mut host)

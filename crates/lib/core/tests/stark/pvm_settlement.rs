@@ -18,8 +18,8 @@ use miden_precompiles_stark::recursive::{
     PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
 };
 use miden_processor::{
-    BaseHost, DefaultHost, ExecutionOutput, ExecutionRequest, FutureMaybeSend, Host,
-    LoadedMastForest, MastForestLoadError, ProcessorState, StackInputs, SyncHost, WitnessOutput,
+    BaseHost, DefaultHost, ExecutionOutput, FutureMaybeSend, Host, LoadedMastForest,
+    MastForestLoadError, Processor, ProcessorState, StackInputs, SyncHost, WitnessOutput,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
     event::EventError,
 };
@@ -96,7 +96,7 @@ fn prove_signature_execution(
     let mut host = DefaultHost::default()
         .with_library(core_lib)
         .expect("core library must load into the host");
-    let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+    let WitnessOutput { claim, witness, .. } = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
         .record_witness()
@@ -186,7 +186,7 @@ async fn run_settlement_in_masm(
     let mut host =
         PvmSettlementHost::new(core_lib, SettlementWitnesses::Supplied(vec![precompile_witness]));
 
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
         .execute()

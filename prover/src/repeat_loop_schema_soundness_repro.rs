@@ -23,7 +23,7 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_processor::{
-    DefaultHost, ExecutionRequest, StackInputs, TraceOutput,
+    DefaultHost, Processor, StackInputs, TraceOutput,
     trace::{VmTrace, chiplets::build_external_eidos_compression_traces},
 };
 use miden_stark::{
@@ -51,7 +51,7 @@ fn build_basic_program(ops: Vec<Operation>) -> Program {
 fn execute(program: &Program, stack: &[u64]) -> VmTrace {
     let stack = stack.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
     let mut host = DefaultHost::default();
-    let TraceOutput { trace: execution_trace, .. } = ExecutionRequest::new(program)
+    let TraceOutput { trace: execution_trace, .. } = Processor::new(program)
         .with_stack_inputs(StackInputs::new(&stack).unwrap())
         .build_trace(miden_vm_stark::memory::default_budget())
         .run_sync(&mut host)

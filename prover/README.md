@@ -18,18 +18,18 @@ Use `Prover::with_hash_fn` to select the proof hash function.
 
 Recording must be selected before execution starts. Ordinary processor execution uses a
 no-op tracer and returns `ExecutionOutput`, which contains no replay data. Use an
-`ExecutionRequest` and select `.record_witness()` for a portable execution witness or
+`Processor` and select `.record_witness()` for a portable execution witness or
 `.build_trace(budget)` for a materialized trace.
 
 ```rust
-use miden_processor::{ExecutionRequest, WitnessOutput};
+use miden_processor::{Processor, WitnessOutput};
 use miden_prover::Prover;
 # fn example(
 #     program: &miden_processor::Program,
 #     stack_inputs: miden_processor::StackInputs,
 #     host: &mut impl miden_processor::SyncHost,
 # ) -> Result<(), Box<dyn std::error::Error>> {
-let WitnessOutput { claim, witness, advice } = ExecutionRequest::new(program)
+let WitnessOutput { claim, witness, advice } = Processor::new(program)
     .with_stack_inputs(stack_inputs)
     .record_witness()
     .run_sync(host)?;
@@ -94,7 +94,7 @@ witness. `Prover::prove_full_trace(ExecutionTrace)` proves all work and returns 
 opaque wrapper guaranteeing that no deferred work remains. Its `as_inner()` and `into_inner()`
 methods expose the underlying `ExecutionProof`; verification establishes proof validity.
 
-Select `ExecutionRequest::build_trace(prover.trace_budget())` to use the same VM model and memory
+Select `Processor::build_trace(prover.trace_budget())` to use the same VM model and memory
 limit as the prover. Pass `TraceOutput::trace` to either proving method. A synchronous trace run can
 overlap execution and hasher trace construction when enabled and a separate Rayon worker is
 available. Other paths use buffered replay. Proving rechecks the trace against its memory budget.

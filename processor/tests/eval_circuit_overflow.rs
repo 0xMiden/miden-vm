@@ -4,7 +4,7 @@ use miden_core::{
     mast::{BasicBlockNodeBuilder, MastForest},
 };
 use miden_processor::{
-    AceError, DefaultHost, ExecutionError, ExecutionRequest, Felt, Program, StackInputs,
+    AceError, DefaultHost, ExecutionError, Felt, Processor, Program, StackInputs,
     operation::Operation,
     trace::chiplets::{MAX_EVAL_CIRCUIT_INVOCATIONS, MAX_EVAL_CIRCUIT_WIRES},
 };
@@ -20,7 +20,7 @@ fn eval_circuit_overflow_panic_check() {
     let program = eval_circuit_program();
 
     let mut host = DefaultHost::default();
-    let execution = ExecutionRequest::new(&program).with_stack_inputs(stack_inputs).execute();
+    let execution = Processor::new(&program).with_stack_inputs(stack_inputs).execute();
 
     // Namely, this checks that execution doesn't panic due to an overflow.
     assert!(matches!(
@@ -43,7 +43,7 @@ fn eval_circuit_rejects_excessive_wires_before_memory_access() {
         let stack_inputs =
             StackInputs::new(&[Felt::new_unchecked(1), Felt::from(num_read), Felt::from(num_eval)])
                 .unwrap();
-        let error = ExecutionRequest::new(&program)
+        let error = Processor::new(&program)
             .with_stack_inputs(stack_inputs)
             .execute()
             .run_sync(&mut DefaultHost::default())
@@ -77,7 +77,7 @@ fn eval_circuit_witness_invocation_limit_across_calls() {
             .unwrap()
             .unwrap_program();
         // Each call enters a fresh context, but all evaluations belong to the same witness.
-        let result = ExecutionRequest::new(&program)
+        let result = Processor::new(&program)
             .record_witness()
             .run_sync(&mut DefaultHost::default())
             .map(|output| output.witness);

@@ -34,15 +34,15 @@ pub use miden_precompiles::{
 };
 /// Low-level processor state, execution modes, and session interfaces.
 ///
-/// Use [`ExecutionRequest`] to configure and run a program, or this namespace
+/// Use [`Processor`] to configure and run a program, or this namespace
 /// to access lower-level machine controls.
 pub use miden_processor as processor;
 pub use miden_processor::{
-    BaseHost, CompletedExecution, DefaultHost, Execute, Execution, ExecutionError,
-    ExecutionOptions, ExecutionOutput, ExecutionRequest, ExecutionSession, ExecutionTrace,
-    ExecutionWitness, FutureMaybeSend, Host, Memory, PackageSourceDebugContext, StepStatus,
-    SyncHost, Trace, TraceOutput, VmTraceBudget, Witness, WitnessOutput, advice, crypto, field,
-    serde, trace, trace::VmTrace, utils,
+    BaseHost, BuildTrace, DefaultHost, Execute, ExecutionError, ExecutionOptions, ExecutionOutput,
+    ExecutionPlan, ExecutionSession, ExecutionTrace, ExecutionWitness, FutureMaybeSend,
+    HaltedExecution, Host, Memory, PackageSourceDebugContext, Processor, RecordWitness, StepStatus,
+    SyncHost, TraceOutput, VmTraceBudget, WitnessOutput, advice, crypto, field, serde, trace,
+    trace::VmTrace, utils,
 };
 pub use miden_prover::{CompleteProof, PrecompileProvingError, Prover, ProverError};
 pub use miden_verifier::{

@@ -4,7 +4,7 @@ use miden_core::{
     program::{KernelDescriptor, StackInputs, StackOutputs},
     proof::HashFunction,
 };
-use miden_processor::{DefaultHost, ExecutionRequest, WitnessOutput, trace::build_trace};
+use miden_processor::{DefaultHost, Processor, WitnessOutput, trace::build_trace};
 
 /// Explicit fixture maintenance; standard tests consume the checked-in proof instead.
 #[test]
@@ -22,7 +22,7 @@ fn regenerate_vm_advice_fixture() {
             .assemble_program("advice_fixture", "begin push.5 push.8 add drop end")
             .unwrap()
             .unwrap_program();
-        let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+        let WitnessOutput { claim, witness, .. } = Processor::new(&program)
             .record_witness()
             .run_sync(&mut DefaultHost::default())
             .unwrap();

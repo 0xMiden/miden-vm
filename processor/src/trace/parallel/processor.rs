@@ -43,7 +43,7 @@ use crate::{
 ///
 /// The replay structures and initial system and stack state are built by the
 /// [`crate::trace::execution_tracer::ExecutionTracer`] in conjunction with
-/// [`crate::ExecutionRequest::record_witness`].
+/// [`crate::Processor::record_witness`].
 #[derive(Debug)]
 pub(crate) struct ReplayProcessor {
     pub system: SystemState,
@@ -73,7 +73,7 @@ impl ReplayProcessor {
     ///
     /// The parameters are expected to be built by the
     /// [`crate::trace::execution_tracer::ExecutionTracer`] when used in conjunction with
-    /// [`crate::ExecutionRequest::record_witness`].
+    /// [`crate::Processor::record_witness`].
     pub fn new(
         initial_system: SystemState,
         initial_stack: StackState,

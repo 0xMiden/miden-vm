@@ -33,7 +33,7 @@ fn clear_deferred_rejects_invalid_context_or_root() {
             .assemble_program("program", source)
             .unwrap()
             .unwrap_program();
-        let error = ExecutionRequest::new(&program)
+        let error = Processor::new(&program)
             .execute()
             .run_sync(&mut DefaultHost::default())
             .unwrap_err();

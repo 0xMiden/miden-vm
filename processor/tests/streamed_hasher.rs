@@ -6,8 +6,7 @@
 
 use miden_assembly::Assembler;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, ExecutionRequest, Felt, Program, StackInputs,
-    advice::AdviceInputs,
+    DefaultHost, ExecutionOptions, Felt, Processor, Program, StackInputs, advice::AdviceInputs,
 };
 use miden_utils_testing::crypto::{MerkleTree, init_merkle_leaf, init_merkle_store};
 
@@ -50,12 +49,12 @@ begin
 end
 ";
 
-fn request<'p>(program: &'p Program, stack: &[u64], advice: AdviceInputs) -> ExecutionRequest<'p> {
+fn request<'p>(program: &'p Program, stack: &[u64], advice: AdviceInputs) -> Processor<'p> {
     let stack: Vec<Felt> = stack.iter().map(|&v| Felt::new(v).unwrap()).collect();
     let options = ExecutionOptions::default()
         .with_core_trace_fragment_size(64)
         .expect("valid fragment size");
-    ExecutionRequest::new(program)
+    Processor::new(program)
         .with_stack_inputs(StackInputs::new(&stack).unwrap())
         .with_advice(advice)
         .with_options(options)

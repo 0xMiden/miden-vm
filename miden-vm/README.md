@@ -44,7 +44,7 @@ Miden crate exposes types and functions for executing programs, generating proof
 
 ### Executing programs
 
-Create an `ExecutionRequest` for the program and configure its public stack inputs, private advice,
+Create a `Processor` for the program and configure its public stack inputs, private advice,
 execution options, and optional package source context. The selected execution validates the advice
 against the final options when the machine is initialized. Run it with `run_sync()` for a
 `SyncHost` or `run().await` for an asynchronous `Host`.
@@ -53,13 +53,13 @@ against the final options when the machine is initialized. Run it with `run_sync
 `record_witness()` before running if you need the replay data for proving.
 
 ```rust
-use miden_vm::{Assembler, DefaultHost, ExecutionRequest};
+use miden_vm::{Assembler, DefaultHost, Processor};
 
 let program = Assembler::default()
     .assemble_program("prg", "begin push.3 push.5 add swap drop end")
     .unwrap()
     .unwrap_program();
-let output = ExecutionRequest::new(&program)
+let output = Processor::new(&program)
     .execute()
     .run_sync(&mut DefaultHost::default())
     .unwrap();
@@ -74,14 +74,14 @@ claim and final advice locally.
 
 ```rust
 use miden_vm::{
-    Assembler, DefaultHost, ExecutionRequest, Prover, Verifier, WitnessOutput, field::PrimeField64,
+    Assembler, DefaultHost, Processor, Prover, Verifier, WitnessOutput, field::PrimeField64,
 };
 
 let program = Assembler::default()
     .assemble_program("prg", "begin push.3 push.5 add swap drop end")
     .unwrap()
     .unwrap_program();
-let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+let WitnessOutput { claim, witness, .. } = Processor::new(&program)
     .record_witness()
     .run_sync(&mut DefaultHost::default())
     .unwrap();
@@ -111,7 +111,7 @@ options enable it and a Rayon worker is available. Other runs build the trace fr
 
 ```rust,ignore
 let prover = Prover::new();
-let TraceOutput { claim, trace, .. } = ExecutionRequest::new(&program)
+let TraceOutput { claim, trace, .. } = Processor::new(&program)
     .build_trace(prover.trace_budget())
     .run_sync(&mut host)?;
 let proof = prover.prove_full_trace(trace)?;
@@ -127,7 +127,7 @@ Start a session to inspect the machine as it executes. The recorder stays with t
 can finish recording after stepping and pass that witness to the prover.
 
 ```rust,ignore
-let mut session = ExecutionRequest::new(&program).record_witness().start()?;
+let mut session = Processor::new(&program).record_witness().start()?;
 session.step_sync(&mut host)?;
 let clock = session.state().clock();
 let finished = session.run_to_completion_sync(&mut host)?;
@@ -185,7 +185,7 @@ Notice that except for the first 2 operations which initialize the stack, the se
 ```rust
 use miden_vm::{
     field::PrimeField64,
-    Assembler, DefaultHost, ExecutionRequest, StackInputs,
+    Assembler, DefaultHost, Processor, StackInputs,
 };
 
 // set the number of terms to compute
@@ -213,7 +213,7 @@ let mut host = DefaultHost::default();
 // initialize the stack with values 0 and 1
 let stack_inputs = StackInputs::new(&[1_u32.into(), 0_u32.into()]).unwrap();
 
-let output = ExecutionRequest::new(&program)
+let output = Processor::new(&program)
     .with_stack_inputs(stack_inputs)
     .execute()
     .run_sync(&mut host)

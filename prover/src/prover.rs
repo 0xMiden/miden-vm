@@ -124,7 +124,7 @@ impl Prover {
 
     /// Returns the canonical VM trace-building budget for this prover's memory limit.
     ///
-    /// Pass this to `ExecutionRequest::build_trace` to apply the same VM relation model and
+    /// Pass this to `Processor::build_trace` to apply the same VM relation model and
     /// byte limit as this prover. The precompile proving budget is configured independently.
     pub fn trace_budget(&self) -> VmTraceBudget {
         miden_vm_stark::memory::canonical_budget(self.max_prover_memory_bytes)

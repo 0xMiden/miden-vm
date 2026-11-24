@@ -27,7 +27,7 @@ use std::{sync::Arc, time::Duration};
 use criterion::{Criterion, criterion_group, criterion_main};
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_event_handler_abi::ABI_VERSION;
-use miden_processor::{DefaultHost, ExecutionRequest, Program, event::EventName};
+use miden_processor::{DefaultHost, Processor, Program, event::EventName};
 use miden_wasm_event_handlers::{WasmHandlerLimits, WasmHandlerModule};
 
 const EVENT: EventName = EventName::new("bench::wasm::handler");
@@ -152,7 +152,7 @@ fn bench_handlers(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(2));
 
     let program = populated_memory_program();
-    let start = || ExecutionRequest::new(&program).execute().start().expect("start bench session");
+    let start = || Processor::new(&program).execute().start().expect("start bench session");
     let processor = start();
     let mut populated = start();
     populated

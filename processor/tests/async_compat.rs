@@ -3,8 +3,8 @@ use std::sync::Arc;
 use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
-    BaseHost, DefaultHost, ExecutionRequest, Felt, FutureMaybeSend, Host, LoadedMastForest,
-    MastForestLoadError, ProcessorState, StackInputs, Word,
+    BaseHost, DefaultHost, Felt, FutureMaybeSend, Host, LoadedMastForest, MastForestLoadError,
+    Processor, ProcessorState, StackInputs, Word,
     advice::AdviceMutation,
     event::{EventError, EventName, TraceError},
 };
@@ -88,7 +88,7 @@ fn emit_trace_program() -> miden_processor::Program {
 async fn execute_async_matches_execute() {
     let program = simple_program();
     let stack_inputs = StackInputs::new(&[Felt::new_unchecked(3)]).unwrap();
-    let execute = || ExecutionRequest::new(&program).with_stack_inputs(stack_inputs).execute();
+    let execute = || Processor::new(&program).with_stack_inputs(stack_inputs).execute();
     let sync_output = execute().run_sync(&mut DefaultHost::default()).unwrap();
     let async_output = execute().run(&mut DefaultHost::default()).await.unwrap();
 
@@ -101,7 +101,7 @@ async fn witness_recording_async_matches_sync() {
     let stack_inputs = StackInputs::new(&[Felt::new_unchecked(3)]).unwrap();
 
     let mut sync_host = DefaultHost::default();
-    let sync_witness = ExecutionRequest::new(&program)
+    let sync_witness = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .record_witness()
         .run_sync(&mut sync_host)
@@ -109,7 +109,7 @@ async fn witness_recording_async_matches_sync() {
         .unwrap();
 
     let mut async_host = DefaultHost::default();
-    let async_witness = ExecutionRequest::new(&program)
+    let async_witness = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .record_witness()
         .run(&mut async_host)
@@ -143,7 +143,7 @@ async fn execute_async_supports_async_only_host_events() {
         .unwrap_program();
 
     let mut host = YieldingAsyncHost::new();
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .execute()
         .run(&mut host)
         .await
@@ -158,7 +158,7 @@ async fn execute_async_supports_async_only_host_traces() {
     let program = emit_trace_program();
 
     let mut host = YieldingAsyncHost::new();
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .execute()
         .run(&mut host)
         .await

@@ -168,7 +168,7 @@ pub trait SyncHost: BaseHost {
 ///
 /// ```
 /// use miden_processor::{
-///     BaseHost, ExecutionError, ExecutionRequest, FutureMaybeSend, Host,
+///     BaseHost, ExecutionError, Processor, FutureMaybeSend, Host,
 ///     LoadedMastForest, MastForestLoadError, ProcessorState, Word,
 ///     advice::AdviceMutation, event::EventError,
 /// };
@@ -198,7 +198,7 @@ pub trait SyncHost: BaseHost {
 /// # let program = miden_assembly::Assembler::default()
 /// #     .assemble_program("program", "begin dynexec end").unwrap().unwrap_program();
 /// let mut host = DatabaseHost;
-/// let error = ExecutionRequest::new(&program)
+/// let error = Processor::new(&program)
 ///     .execute()
 ///     .run(&mut host)
 ///     .await

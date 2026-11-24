@@ -1,6 +1,6 @@
 use miden_assembly::Assembler;
 use miden_crypto::merkle::{MerkleTree, NodeIndex, store::MerkleStore};
-use miden_processor::{DefaultHost, ExecutionRequest, Felt, StackInputs, WitnessOutput, Word};
+use miden_processor::{DefaultHost, Felt, Processor, StackInputs, WitnessOutput, Word};
 use miden_prover::{AdviceInputs, Prover};
 use miden_verifier::Verifier;
 
@@ -37,7 +37,7 @@ async fn execution_witness_retains_final_advice_and_proves() {
         .unwrap()
         .unwrap_program();
 
-    let request = || ExecutionRequest::new(&program).with_stack_inputs(stack_inputs);
+    let request = || Processor::new(&program).with_stack_inputs(stack_inputs);
     let sync_result = request()
         .with_advice(advice_inputs.clone())
         .record_witness()

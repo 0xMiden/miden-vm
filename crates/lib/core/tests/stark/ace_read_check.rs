@@ -16,8 +16,7 @@ use miden_core::{
 use miden_core_lib::CoreLibrary;
 use miden_crypto::field::Field;
 use miden_processor::{
-    ContextId, DefaultHost, Execute, ExecutionOptions, ExecutionRequest, ExecutionSession,
-    StackInputs,
+    ContextId, DefaultHost, Execute, ExecutionOptions, ExecutionSession, Processor, StackInputs,
 };
 use miden_stark::{quotient_recomposition_inputs, testing::canonical_domain};
 use miden_utils_testing::Test;
@@ -407,7 +406,7 @@ pub(super) fn execute_verifier(test: &Test) -> (ExecutionSession<Execute>, Conte
     for (event, handler) in &test.trace_handlers {
         host.register_trace_handler(event.clone(), handler.clone()).unwrap();
     }
-    let mut session = ExecutionRequest::new(&program)
+    let mut session = Processor::new(&program)
         .with_stack_inputs(test.stack_inputs)
         .with_advice(test.advice_inputs.clone())
         .execute()
@@ -569,7 +568,7 @@ fn lifted_selectors_match_native_domains_at_every_supported_height(#[case] full_
             ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
         )
         .unwrap();
-        let output = ExecutionRequest::new(&program)
+        let output = Processor::new(&program)
             .with_stack_inputs(StackInputs::from(caller.map(Felt::new_unchecked)))
             .with_options(options)
             .execute()

@@ -34,7 +34,7 @@ use miden_core::{
 };
 
 use crate::{
-    DefaultHost, ExecutionOptions, ExecutionRequest, ProcessorState,
+    DefaultHost, ExecutionOptions, Processor, ProcessorState,
     event::{NoopEventHandler, TraceError},
     trace::VmTrace,
 };
@@ -1665,7 +1665,7 @@ fn build_buffered_trace(
         .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
         .unwrap()
         .with_overlapped_trace_build(false);
-    ExecutionRequest::new(program)
+    Processor::new(program)
         .with_stack_inputs(stack_inputs)
         .with_options(options)
         .build_trace(miden_vm_stark::memory::default_budget())

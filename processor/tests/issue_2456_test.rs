@@ -1,7 +1,7 @@
 /// Test case for issue #2456: statically linked library calls should preserve valid MAST
 /// structure when copying nodes between forests.
 use miden_assembly::Assembler;
-use miden_processor::{DefaultHost, ExecutionRequest};
+use miden_processor::{DefaultHost, Processor};
 
 #[test]
 fn test_issue_2456_statically_linked_library_call() {
@@ -42,6 +42,6 @@ fn test_issue_2456_statically_linked_library_call() {
     let program = assembler.assemble_program("program", source).unwrap().unwrap_program();
 
     // Execute the program. This should succeed after static linking.
-    let result = ExecutionRequest::new(&program).execute().run_sync(&mut DefaultHost::default());
+    let result = Processor::new(&program).execute().run_sync(&mut DefaultHost::default());
     assert!(result.is_ok(), "Execution should succeed but got error: {:?}", result.err());
 }

@@ -8,7 +8,7 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_crypto::hash::eidos::Eidos;
-use miden_processor::{DefaultHost, ExecutionRequest};
+use miden_processor::{DefaultHost, Processor};
 use wycheproof_ng_core::TestResult;
 
 /// Run arbitrary-byte vectors through the public MASM ABI without prevalidating their points or
@@ -73,7 +73,7 @@ end
             advice.append_elements(key);
             advice.append_elements(bytes_to_packed_u32_elements(test.sig.as_ref()));
             let mut host = DefaultHost::default().with_library(&library).unwrap();
-            let result = ExecutionRequest::new(&program)
+            let result = Processor::new(&program)
                 .with_advice(AdviceInputs::default().with_stack(advice))
                 .execute()
                 .prepare()

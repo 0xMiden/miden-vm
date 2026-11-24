@@ -10,10 +10,10 @@ use miden_core::deferred::{PrecompileError, PrecompileLimitError, PrecompileLimi
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 use miden_processor::{
-    BaseHost, CompletedExecution, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput,
-    ExecutionRequest, Felt, FutureMaybeSend, Host, LoadedMastForest, MastForestLoadError,
-    PackageSourceDebugContext, ProcessorState, StepStatus, TraceOutput, Witness, WitnessOutput,
-    Word,
+    BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, Felt,
+    FutureMaybeSend, HaltedExecution, Host, LoadedMastForest, MastForestLoadError,
+    PackageSourceDebugContext, Processor, ProcessorState, RecordWitness, StepStatus, TraceOutput,
+    WitnessOutput, Word,
     advice::{AdviceError, AdviceInputs, AdviceMap, AdviceMutation, AdviceProvider},
     event::{EventError, EventName},
     operation::OperationError,
@@ -27,7 +27,7 @@ fn async_execution_futures_preserve_mode_outputs_and_send_bounds() {
         .assemble_program("execution_plan", "begin nop end")
         .unwrap()
         .unwrap_program();
-    let request = || ExecutionRequest::new(&program);
+    let request = || Processor::new(&program);
     let trace = || request().build_trace(miden_vm_stark::memory::default_budget());
     let mut host = DefaultHost::default();
     assert_future::<ExecutionOutput>(request().execute().run(&mut host));
@@ -38,7 +38,7 @@ fn async_execution_futures_preserve_mode_outputs_and_send_bounds() {
     let mut session = request().record_witness().start().unwrap();
     assert_future::<StepStatus>(session.step(&mut host));
     assert_future::<()>(session.run_until_halt(&mut host));
-    assert_future::<CompletedExecution<Witness>>(session.run_to_completion(&mut host));
+    assert_future::<HaltedExecution<RecordWitness>>(session.run_to_completion(&mut host));
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn preparing_execution_validates_initial_advice_before_program_advice() {
     };
     let options = options.with_max_advice_size_bytes(budget);
     let request = || {
-        ExecutionRequest::new(&program)
+        Processor::new(&program)
             .with_advice(advice.clone())
             .with_options(options.clone())
     };
@@ -83,11 +83,7 @@ fn preparing_execution_validates_initial_advice_before_program_advice() {
     assert_eq!(output.advice.get_mapped_values(&Word::empty()), Some([Felt::ONE].as_slice()));
 
     let program = program.with_advice_map(advice_map);
-    let prepared = ExecutionRequest::new(&program)
-        .with_options(options)
-        .execute()
-        .prepare()
-        .unwrap();
+    let prepared = Processor::new(&program).with_options(options).execute().prepare().unwrap();
     assert!(matches!(
         prepared.start(),
         Err(ExecutionError::AdviceError {
@@ -105,7 +101,7 @@ async fn ordinary_execution_accepts_empty_optional_debug_info() {
         .unwrap_program();
     let debug_info = PackageDebugInfo::default();
     for source in [None, Some(PackageSourceDebugContext::new_optional(&debug_info, None))] {
-        let output = ExecutionRequest::new(&program)
+        let output = Processor::new(&program)
             .with_source_context(source)
             .execute()
             .prepare()
@@ -128,13 +124,13 @@ fn paused_execution_preserves_trace_and_final_advice() {
     let budget = miden_vm_stark::memory::default_budget();
 
     // Preparing the VM before stepping preserves the trace and the final advice.
-    let direct = ExecutionRequest::new(&program)
+    let direct = Processor::new(&program)
         .with_advice(advice.clone())
         .with_options(options.clone())
         .build_trace(budget)
         .run_sync(&mut DefaultHost::default())
         .unwrap();
-    let mut session = ExecutionRequest::new(&program)
+    let mut session = Processor::new(&program)
         .with_advice(advice)
         .with_options(options)
         .build_trace(budget)
@@ -186,7 +182,7 @@ fn completed_execution_defers_precompile_witness_export_until_finish() {
         .unwrap_program();
     let options =
         ExecutionOptions::default().with_verification_precompile_limits(PrecompileLimits::new(0));
-    let completed = ExecutionRequest::new(&program)
+    let completed = Processor::new(&program)
         .with_options(options)
         .execute()
         .start()
@@ -212,7 +208,7 @@ fn failed_execution_retains_state_without_resuming_or_completing() {
         .assemble_program("execution_plan", "begin log_deferred dropw push.17 push.0 assert end")
         .unwrap()
         .unwrap_program();
-    let mut session = ExecutionRequest::new(&program).execute().start().unwrap();
+    let mut session = Processor::new(&program).execute().start().unwrap();
     let mut host = DefaultHost::default();
     let error = session.run_until_halt_sync(&mut host).expect_err("the assertion must fail");
     assert!(matches!(
@@ -275,7 +271,7 @@ async fn invalid_source_context_fails_before_execution() {
     let debug_info = package.debug_info().unwrap().unwrap();
     let program = package.unwrap_program();
     let source = PackageSourceDebugContext::new(&debug_info, 123_u32.into());
-    let request = || ExecutionRequest::new(&program).with_source_context(Some(source));
+    let request = || Processor::new(&program).with_source_context(Some(source));
     let mut host = PendingHost { event_calls: 0 };
     let errors = [
         request().execute().run_sync(&mut DefaultHost::default()).err(),
@@ -298,7 +294,7 @@ async fn invalid_source_context_fails_before_execution() {
 async fn cancelled_async_execution_cannot_be_resumed_or_completed() {
     let program = emitting_package().unwrap_program();
     for cancel_drain in [false, true] {
-        let mut session = ExecutionRequest::new(&program).record_witness().start().unwrap();
+        let mut session = Processor::new(&program).record_witness().start().unwrap();
         let mut host = PendingHost { event_calls: 0 };
         let mut context = Context::from_waker(Waker::noop());
 

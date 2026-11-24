@@ -26,7 +26,7 @@ use miden_precompiles_stark::{
     verifier::verify_deferred,
 };
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOutput, ExecutionRequest, MemoryError, ProcessorState,
+    DefaultHost, ExecutionError, ExecutionOutput, MemoryError, Processor, ProcessorState,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
     event::{EventError, EventHandler},
     operation::OperationError,
@@ -868,7 +868,7 @@ fn run_core_program(
 
     let mut advice_stack = AdviceStack::new();
     advice_stack.append_elements(advice.iter().copied());
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .with_advice(AdviceInputs::default().with_stack(advice_stack))
         .execute()
         .prepare()
