@@ -9,9 +9,7 @@ use miden_core::{
 };
 
 use super::VmTrace;
-use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, Felt, Processor, StackInputs, trace::build_trace,
-};
+use crate::{AdviceInputs, DefaultHost, ExecutionOptions, Felt, Processor, StackInputs};
 
 mod chiplets;
 mod decoder;
@@ -131,7 +129,7 @@ fn non_empty_execution_witness_splits_with_matching_precompile_root() {
     assert_eq!(output.precompile_root(), precompile_root);
     assert_eq!(output.precompile_witness.as_ref(), Some(&precompile_witness));
 
-    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
+    let trace = vm_witness.build_trace(&miden_vm_stark::memory::default_budget()).unwrap();
     assert_eq!(trace.precompile_root(), precompile_root);
 }
 
@@ -175,7 +173,7 @@ fn empty_execution_witness_splits_and_replays_with_explicit_stack_inputs() {
     assert_eq!(output.precompile_root(), TRUE_DIGEST);
     assert!(output.precompile_witness.is_none());
 
-    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
+    let trace = vm_witness.build_trace(&miden_vm_stark::memory::default_budget()).unwrap();
     assert_eq!(trace.init_stack_state(), stack_inputs);
     assert_eq!(trace.precompile_root(), TRUE_DIGEST);
     assert_eq!(trace.to_public_values(), expected_public_inputs.to_elements());
@@ -215,7 +213,7 @@ fn clear_deferred_replays_across_fragments_and_retains_new_obligations() {
         .witness;
     let restored = ExecutionWitness::read_from_bytes(&witness.to_bytes()).unwrap();
     let (vm_witness, precompile_witness) = restored.into_parts();
-    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
+    let trace = vm_witness.build_trace(&miden_vm_stark::memory::default_budget()).unwrap();
     let first_root = Node::and(TRUE_DIGEST, TRUE_DIGEST).digest();
     let expected_root = Node::and(TRUE_DIGEST, first_root).digest();
     assert_eq!(trace.precompile_root(), expected_root);

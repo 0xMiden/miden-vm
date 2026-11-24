@@ -19,7 +19,6 @@ use miden_core::{
     program::{KernelDescriptor, MIN_STACK_DEPTH},
     utils::Idx,
 };
-use miden_stark::memory::ProvingBudget;
 use p3_maybe_rayon::prelude::*;
 use tracing::instrument;
 
@@ -33,7 +32,7 @@ use super::{
     },
 };
 use crate::{
-    ContextId, ExecutionError,
+    ContextId, ExecutionError, VmTraceBudget,
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
     trace::{
@@ -51,13 +50,14 @@ pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STAC
 /// Physical row width of the core buffer: the per-AIR Core matrix consumed directly by proving.
 pub const CORE_STORAGE_WIDTH: usize = CORE_TRACE_WIDTH;
 
-/// `build_trace()` uses this as a hard cap on trace rows, independent of the memory budget.
+/// [`VmWitness::build_trace`] uses this as a hard cap on trace rows, independent of the memory
+/// budget.
 ///
 /// The code checks `core_trace_contexts.len() * fragment_size` before allocation. It checks the
 /// same cap again while replaying chiplet activity, and once more against each padded per-AIR
 /// height once they're known (see [`validate_heights_within_max_trace_len`]). Row indices are
 /// `u32`-backed, so this bound must hold regardless of budget; the actual memory bound is the
-/// tiered check in `build_trace_inner` using the supplied [`ProvingBudget`].
+/// tiered check in `build_trace_inner` using the supplied [`VmTraceBudget`].
 pub(crate) const MAX_TRACE_LEN: usize = 1 << 29;
 
 pub(crate) mod core_trace_fragment;
@@ -71,66 +71,59 @@ mod tests;
 // BUILD TRACE
 // ================================================================================================
 
-/// Builds the main trace from the provided trace states in parallel.
-///
-/// To build a trace and retain its precompile witness from a live execution, use
-/// [`Processor::build_trace`](crate::Processor::build_trace).
-///
-/// The caller supplies the relation's proof-memory model and byte limit. The model must describe
-/// the VM AIRs in [`AIRS`] order and match the intended prover configuration.
-/// `ProvingBudget<MIDEN_AIR_COUNT>` checks the number of AIRs, but does not check their identities,
-/// order, or configuration. For the production VM configuration, use
-/// `miden_vm_stark::memory::canonical_budget(limit_bytes)`, or
-/// `miden_vm_stark::memory::default_budget()` for the default limit.
-///
-/// The builder enforces this budget before final padded allocations, retaining independent
-/// row-index and raw-buffer guards. The supplied model determines the estimate's scope and
-/// excluded allocations.
-///
-/// # Example
-/// ```
-/// use miden_assembly::Assembler;
-/// use miden_processor::{DefaultHost, Processor};
-///
-/// let program = Assembler::default()
-///     .assemble_program("program", "begin push.1 drop end")
-///     .unwrap()
-///     .unwrap_program();
-/// let mut host = DefaultHost::default();
-///
-/// let execution_witness =
-///     Processor::new(&program).record_witness().run_sync(&mut host).unwrap().witness;
-/// let (vm_witness, _) = execution_witness.into_parts();
-/// let trace =
-///     miden_processor::trace::build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
-///         .unwrap();
-///
-/// assert_eq!(*trace.program_hash(), program.hash());
-/// ```
-pub fn build_trace(
-    witness: VmWitness,
-    budget: &ProvingBudget<MIDEN_AIR_COUNT>,
-) -> Result<VmTrace, ExecutionError> {
-    build_trace_inner(witness, None, budget)
-}
+impl VmWitness {
+    /// Materializes the VM trace from recorded execution data.
+    ///
+    /// For a live run that returns the VM trace and its optional precompile witness together, use
+    /// [`Processor::build_trace`](crate::Processor::build_trace).
+    ///
+    /// The caller supplies the relation's proof-memory model and byte limit. The model must
+    /// describe the VM AIRs in [`AIRS`] order and match the intended prover configuration. For
+    /// the production VM configuration, use
+    /// `miden_vm_stark::memory::canonical_budget(limit_bytes)` or
+    /// `miden_vm_stark::memory::default_budget()` for the default limit.
+    ///
+    /// The builder enforces the budget before final padded allocations and applies independent
+    /// row-index and raw-buffer limits.
+    ///
+    /// # Example
+    /// ```
+    /// use miden_assembly::Assembler;
+    /// use miden_processor::{DefaultHost, Processor};
+    ///
+    /// let program = Assembler::default()
+    ///     .assemble_program("program", "begin push.1 drop end")
+    ///     .unwrap()
+    ///     .unwrap_program();
+    /// let mut host = DefaultHost::default();
+    ///
+    /// let execution_witness =
+    ///     Processor::new(&program).record_witness().run_sync(&mut host).unwrap().witness;
+    /// let (vm_witness, _) = execution_witness.into_parts();
+    /// let trace = vm_witness.build_trace(&miden_vm_stark::memory::default_budget()).unwrap();
+    ///
+    /// assert_eq!(*trace.program_hash(), program.hash());
+    /// ```
+    pub fn build_trace(self, budget: &VmTraceBudget) -> Result<VmTrace, ExecutionError> {
+        build_trace_inner(self, None, budget)
+    }
 
-/// Same as [`build_trace`], but with a hasher chiplet that was already built — used
-/// by the streaming path, where the hasher builder runs concurrently with program execution
-/// ([`crate::Processor::build_trace`], std-only).
-#[cfg(feature = "std")]
-pub(crate) fn build_trace_with_prebuilt_hasher(
-    witness: VmWitness,
-    prebuilt_hasher: Hasher,
-    budget: &ProvingBudget<MIDEN_AIR_COUNT>,
-) -> Result<VmTrace, ExecutionError> {
-    build_trace_inner(witness, Some(prebuilt_hasher), budget)
+    /// Materializes the VM trace using a hasher chiplet already built during execution.
+    #[cfg(feature = "std")]
+    pub(crate) fn build_trace_with_prebuilt_hasher(
+        self,
+        prebuilt_hasher: Hasher,
+        budget: &VmTraceBudget,
+    ) -> Result<VmTrace, ExecutionError> {
+        build_trace_inner(self, Some(prebuilt_hasher), budget)
+    }
 }
 
 #[instrument(target = "miden::vm::trace", name = "build_vm_trace", level = "trace", skip_all)]
 fn build_trace_inner(
     witness: VmWitness,
     prebuilt_hasher: Option<Hasher>,
-    budget: &ProvingBudget<MIDEN_AIR_COUNT>,
+    budget: &VmTraceBudget,
 ) -> Result<VmTrace, ExecutionError> {
     let VmWitness {
         program_info,

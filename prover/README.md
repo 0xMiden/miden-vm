@@ -1,25 +1,21 @@
 # Miden prover
 
-This crate proves post-execution witnesses produced by the
-[Miden processor](../processor/) using [Plonky3](https://github.com/0xMiden/Plonky3). The
-synchronous `Prover` does not execute programs: it consumes `ExecutionWitness` values and owned
-batches of portable `PrecompileWitness` values, or materialized `ExecutionTrace` values.
+This crate proves execution witnesses and traces produced by the
+[Miden processor](../processor/) using [Plonky3](https://github.com/0xMiden/Plonky3). It also
+proves batches of portable precompile witnesses.
 
 ## Usage
 
-`Prover` is synchronous and consumes post-execution witnesses. `Prover::prove(ExecutionWitness)`
-proves the VM portion. Its `PrecompileStatus` is `Empty` when there is no deferred work, or
-`Deferred` with a portable singleton `PrecompileWitness`. `Prover::prove_full(ExecutionWitness)`
-proves the VM and any precompile work locally. `Prover::prove_precompiles(Vec<PrecompileWitness>)`
-imports a nonempty batch directly into one Session and returns one proof. Its root metadata preserves
-input order and repeated roots.
+The synchronous `Prover::prove` and `Prover::prove_full` methods accept either an `ExecutionWitness`
+or an `ExecutionTrace` and return an `ExecutionProof`. `prove` proves the VM portion. Its
+`PrecompileStatus` is `Empty` when there is no deferred work, or `Deferred` with a portable
+singleton `PrecompileWitness`. `prove_full` proves the VM and settles any deferred work locally.
+`Prover::prove_precompiles(Vec<PrecompileWitness>)` imports a nonempty batch into one Session and
+returns one proof. Its root metadata preserves input order and repeated roots.
 
 Use `Prover::with_hash_fn` to select the proof hash function.
 
-Recording must be selected before execution starts. Ordinary processor execution uses a
-no-op tracer and returns `ExecutionOutput`, which contains no replay data. Use an
-`Processor` and select `.record_witness()` for a portable execution witness or
-`.build_trace(budget)` for a materialized trace.
+Use `Processor::record_witness` before running the program to record a portable execution witness.
 
 ```rust
 use miden_processor::{Processor, WitnessOutput};
@@ -89,16 +85,12 @@ explains the claim list, ordered root fold, and host request.
 
 ### Direct trace proving
 
-`Prover::prove_trace(ExecutionTrace)` proves the VM portion and preserves any deferred precompile
-witness. `Prover::prove_full_trace(ExecutionTrace)` proves all work and returns `CompleteProof`, an
-opaque wrapper guaranteeing that no deferred work remains. Its `as_inner()` and `into_inner()`
-methods expose the underlying `ExecutionProof`; verification establishes proof validity.
-
-Select `Processor::build_trace(prover.trace_budget())` to use the same VM model and memory
-limit as the prover. Pass `TraceOutput::trace` to either proving method. A synchronous trace run can
-overlap execution and hasher trace construction when enabled and a separate Rayon worker is
-available. Other paths use buffered replay. Proving rechecks the trace against its memory budget.
-For a saved witness, use `prove` or `prove_full` directly.
+Select `Processor::build_trace(prover.trace_budget())` to use the prover's VM model and memory
+limit. Use `.run_sync(host)` for a synchronous host or `.run(host).await` for an asynchronous host.
+Synchronous execution can overlap hasher trace construction when enabled and a Rayon worker is
+available. The async driver builds the trace from buffered replay after execution. Pass
+`TraceOutput::trace` to `prove` or `prove_full`, which recheck the padded trace against the prover's
+memory budget.
 
 ## STARK Backend
 

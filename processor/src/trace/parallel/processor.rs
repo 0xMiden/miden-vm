@@ -32,9 +32,9 @@ use crate::{
 // REPLAY PROCESSOR
 // ================================================================================================
 
-/// A processor implementation used in conjunction with the [`CoreTraceGenerationTracer`] in
-/// [`super::build_trace`] to replay the execution of a fragment of execution for a predetermined
-/// number of clock cycles.
+/// A processor implementation used with [`CoreTraceGenerationTracer`] in
+/// [`VmWitness::build_trace`](crate::VmWitness::build_trace). It replays an execution fragment for
+/// a predetermined number of clock cycles.
 ///
 /// This processor uses various "replay" structures to provide the necessary state during execution,
 /// such as stack overflows, memory reads, advice provider values, hasher responses, execution

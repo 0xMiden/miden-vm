@@ -16,7 +16,7 @@ Low-level processor callers supply a budget before trace construction:
 
 ```rust,ignore
 let budget = miden_vm_stark::memory::canonical_budget(max_prover_memory_bytes);
-let trace = miden_processor::trace::build_trace(vm_witness, &budget)?;
+let trace = vm_witness.build_trace(&budget)?;
 let hash_lde_blocks = false;
 let proof = miden_vm_stark::prover::prove(trace, hash_function, hash_lde_blocks)?;
 ```

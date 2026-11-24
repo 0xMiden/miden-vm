@@ -77,8 +77,7 @@ fn assert_overlapped_matches_buffered(program_src: &str, stack: &[u64], advice: 
             .unwrap();
         let (vm_witness, precompiles_witness) = execution_witness.into_parts();
         assert!(precompiles_witness.is_none());
-        miden_processor::trace::build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
-            .unwrap()
+        vm_witness.build_trace(&miden_vm_stark::memory::default_budget()).unwrap()
     };
 
     let streamed = {

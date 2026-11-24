@@ -521,8 +521,7 @@ mod prover_api_lifecycle {
                 .run_sync(&mut overlapped_host)
                 .expect("overlapped trace building should succeed");
             let overlapped_outputs = *overlapped_claim.stack_outputs();
-            let overlapped_proof = prover.prove_full_trace(trace).expect("trace should prove");
-            let overlapped_proof = overlapped_proof.as_inner();
+            let overlapped_proof = prover.prove_full(trace).expect("trace should prove");
 
             assert_eq!(buffered_claim, overlapped_claim);
             assert_eq!(buffered_proof.vm().precompile_root, overlapped_proof.vm().precompile_root);
@@ -530,7 +529,7 @@ mod prover_api_lifecycle {
             // Parallel proof-of-work grinding may select different valid witnesses, so verify both
             // proofs instead of requiring byte-identical encodings.
             assert_complete(&program, stack_inputs, buffered_outputs, &buffered_proof);
-            assert_complete(&program, stack_inputs, overlapped_outputs, overlapped_proof);
+            assert_complete(&program, stack_inputs, overlapped_outputs, &overlapped_proof);
         }
     }
 
@@ -541,9 +540,8 @@ mod prover_api_lifecycle {
             .build_trace(prover.trace_budget())
             .run_sync(&mut DefaultHost::default())
             .expect("root-one trace should build");
-        let one_deferred = prover
-            .prove_trace(trace)
-            .expect("root-one execution should produce a deferred proof");
+        let one_deferred =
+            prover.prove(trace).expect("root-one execution should produce a deferred proof");
         assert!(matches!(one_deferred.precompile(), PrecompileStatus::Deferred(_)));
         let one_root = one_deferred.vm().precompile_root;
         let deferred_outcome = Verifier::new()
@@ -750,7 +748,7 @@ mod execution_witness_serialization {
         operations::Operation,
         serde::Serializable,
     };
-    use miden_processor::{DefaultHost, HostLibrary, StackInputs, trace::build_trace};
+    use miden_processor::{DefaultHost, HostLibrary, StackInputs};
     use miden_prover::{HashFunction, Prover};
     #[cfg(feature = "arbitrary")]
     use miden_utils_testing::proptest::prelude::*;
@@ -871,10 +869,12 @@ mod execution_witness_serialization {
 
             let (original_vm, _) = witness.into_parts();
             let (restored_vm, _) = restored.into_parts();
-            let original_trace =
-                build_trace(original_vm, &miden_vm_stark::memory::default_budget()).expect("original generated witness should build a trace");
-            let restored_trace =
-                build_trace(restored_vm, &miden_vm_stark::memory::default_budget()).expect("restored generated witness should build a trace");
+            let original_trace = original_vm
+                .build_trace(&miden_vm_stark::memory::default_budget())
+                .expect("original generated witness should build a trace");
+            let restored_trace = restored_vm
+                .build_trace(&miden_vm_stark::memory::default_budget())
+                .expect("restored generated witness should build a trace");
             prop_assert_eq!(restored_trace.stack_outputs(), original_trace.stack_outputs());
             prop_assert_eq!(restored_trace.program_info(), original_trace.program_info());
             prop_assert_eq!(
@@ -918,9 +918,11 @@ mod execution_witness_serialization {
         );
 
         let (vm, _) = witness.into_parts();
-        let original_trace = build_trace(vm, &miden_vm_stark::memory::default_budget())
+        let original_trace = vm
+            .build_trace(&miden_vm_stark::memory::default_budget())
             .expect("original witness builds trace");
-        let restored_trace = build_trace(restored_vm, &miden_vm_stark::memory::default_budget())
+        let restored_trace = restored_vm
+            .build_trace(&miden_vm_stark::memory::default_budget())
             .expect("restored witness builds trace");
         assert_eq!(restored_trace.stack_outputs(), original_trace.stack_outputs());
         assert_eq!(restored_trace.program_info(), original_trace.program_info());

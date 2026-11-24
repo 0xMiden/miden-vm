@@ -126,9 +126,7 @@ impl FastProcessor {
         budget: &miden_stark::memory::ProvingBudget<{ miden_air_definitions::vm::MIDEN_AIR_COUNT }>,
     ) -> Result<(crate::trace::VmTrace, Option<PrecompileWitness>, AdviceProvider), ExecutionError>
     {
-        use crate::trace::{
-            MAX_TRACE_LEN, build_hasher_chiplet, build_trace, build_trace_with_prebuilt_hasher,
-        };
+        use crate::trace::{MAX_TRACE_LEN, build_hasher_chiplet};
 
         if Self::rayon_has_no_parallel_worker() {
             let stack_inputs = self.initial_stack_inputs();
@@ -137,7 +135,7 @@ impl FastProcessor {
             let (witness, advice) =
                 Self::execution_witness_from_parts(program.to_info(), stack_inputs, output, tracer);
             let (vm_witness, precompiles_witness) = witness.into_parts();
-            let trace = build_trace(vm_witness, budget)?;
+            let trace = vm_witness.build_trace(budget)?;
             return Ok((trace, precompiles_witness, advice));
         }
 
@@ -208,7 +206,7 @@ impl FastProcessor {
             },
         };
 
-        let trace = build_trace_with_prebuilt_hasher(vm_witness, hasher?, budget)?;
+        let trace = vm_witness.build_trace_with_prebuilt_hasher(hasher?, budget)?;
         Ok((trace, precompiles_witness, advice))
     }
 

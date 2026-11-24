@@ -108,8 +108,8 @@ fn execute_and_prove(
         .build_trace(prover.trace_budget())
         .run_sync(host)
         .expect("execute program and build trace");
-    let proof = prover.prove_full_trace(output.trace).expect("prove program");
-    (output.claim, proof.into_inner())
+    let proof = prover.prove_full(output.trace).expect("prove program");
+    (output.claim, proof)
 }
 
 fn synthetic_bench(c: &mut Criterion) {

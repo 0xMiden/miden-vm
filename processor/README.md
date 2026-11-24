@@ -66,7 +66,7 @@ Select `Processor::build_trace(budget)` to return `TraceOutput` with the claim, 
 and an `ExecutionTrace` that pairs the VM trace with its optional precompile witness. Use
 `vm_trace()` to inspect the VM trace or `into_parts()` to take ownership of both components.
 For VM-only trace analysis from a saved witness, extract its `VmWitness` and use
-`trace::build_trace(vm_witness, &budget)`.
+`vm_witness.build_trace(&budget)`.
 
 Use `Prover::trace_budget()` when a configured prover will consume the trace. Standalone callers
 can use `miden_vm_stark::memory::default_budget()` or `canonical_budget(limit_bytes)` with the

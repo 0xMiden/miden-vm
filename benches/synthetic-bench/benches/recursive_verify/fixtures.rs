@@ -18,7 +18,7 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_precompiles_stark::recursive::PvmRecursiveVerifierInputs;
-use miden_processor::{Processor, WitnessOutput, trace::build_trace};
+use miden_processor::{Processor, WitnessOutput};
 use miden_verifier::Verifier;
 use miden_vm::{
     Assembler, ExecutionProof, PrecompileWitness, ProgramInfo, Prover, StackInputs, StackOutputs,
@@ -302,7 +302,8 @@ fn print_tx_fixture_shape(program: &miden_vm::Program, stack_inputs: StackInputs
         .expect("execute transaction fixture")
         .witness;
     let (vm_witness, _) = witness.into_parts();
-    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
+    let trace = vm_witness
+        .build_trace(&miden_vm_stark::memory::default_budget())
         .expect("build transaction fixture trace");
     let summary = trace.trace_len_summary();
     let record = format!("BENCH_TX_SHAPE scenario={scenario}");

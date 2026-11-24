@@ -2635,17 +2635,14 @@ fn test_prover_memory_budget_exceeded() {
     };
 
     let budget = miden_vm_stark::memory::default_budget();
-    let measured = crate::trace::build_trace(record_vm_witness(), &budget)
-        .expect("default budget must succeed");
+    let measured = record_vm_witness().build_trace(&budget).expect("default budget must succeed");
     let exact_peak = budget
         .prover_peak_bytes(measured.trace_len_summary().padded_heights())
         .expect("modelled peak fits in u64");
 
-    let err = crate::trace::build_trace(
-        record_vm_witness(),
-        &miden_vm_stark::memory::canonical_budget(exact_peak - 1),
-    )
-    .unwrap_err();
+    let err = record_vm_witness()
+        .build_trace(&miden_vm_stark::memory::canonical_budget(exact_peak - 1))
+        .unwrap_err();
 
     assert_matches!(
         err,
@@ -3013,7 +3010,8 @@ fn issue_2818_traced_execution_stack_grows_past_initial_buffer() {
         .expect("traced execution should grow the stack buffer past the initial buffer")
         .witness;
     let (vm_witness, _) = execution_witness.into_parts();
-    crate::trace::build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
+    vm_witness
+        .build_trace(&miden_vm_stark::memory::default_budget())
         .expect("trace replay should accept the same operand stack depth limit");
 }
 

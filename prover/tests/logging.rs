@@ -58,7 +58,7 @@ fn capture_proving(program: &Program, overlapped: bool, filter: &str) -> Vec<Rec
             .build_trace(prover.trace_budget())
             .run_sync(&mut DefaultHost::default())
             .unwrap();
-        prover.prove_full_trace(output.trace).unwrap();
+        prover.prove_full(output.trace).unwrap();
     });
     capture.0.lock().unwrap().clone()
 }

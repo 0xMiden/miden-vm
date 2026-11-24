@@ -7,7 +7,7 @@ use std::{
 use miden_core_lib::CoreLibrary;
 use miden_vm::{
     Assembler, DefaultHost, ExecutionOptions, ExecutionOutput, ExecutionProof, ExecutionWitness,
-    HashFunction, Program, Prover, StackInputs, StackOutputs, Verifier, VmTrace,
+    HashFunction, Program, Prover, StackInputs, StackOutputs, Verifier,
     advice::AdviceInputs,
     assembly::{
         DefaultSourceManager, Path as LibraryPath,
@@ -15,7 +15,7 @@ use miden_vm::{
         package::debug_info::{DebugSourceNodeId, PackageDebugInfo},
     },
     internal::InputFile,
-    processor::{Processor, trace},
+    processor::{Processor, trace::VmTrace},
 };
 use serde::{Deserialize, Serialize};
 use tracing::{Subscriber, span};
@@ -175,7 +175,8 @@ fn prove_trace_outputs(witness: ExecutionWitness) -> (StackOutputs, ExecutionPro
 
 pub fn build_trace(witness: ExecutionWitness) -> VmTrace {
     let (vm_witness, _) = witness.into_parts();
-    trace::build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
+    vm_witness
+        .build_trace(&miden_vm_stark::memory::default_budget())
         .expect("failed to build Blake3 execution trace")
 }
 

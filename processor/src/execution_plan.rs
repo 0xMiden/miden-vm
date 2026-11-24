@@ -14,7 +14,7 @@ use crate::{
     ResumeContext, StackInputs, StackOutputs, SyncHost, Word,
     errors::MapExecErrNoCtx,
     fast::{NoopTracer, ResumeOutcome},
-    trace::{VmTrace, build_trace, execution_tracer::ExecutionTracer},
+    trace::{VmTrace, execution_tracer::ExecutionTracer},
     tracer::Tracer,
 };
 
@@ -195,6 +195,7 @@ impl<'p, M: ExecutionMode> ExecutionPlan<'p, M> {
     }
 
     /// Awaits host callbacks, then prepares the mode's output on the calling thread.
+    /// Trace construction uses buffered replay after execution.
     pub async fn run(self, host: &mut impl Host) -> Result<M::Output, ExecutionError> {
         let processor = self.processor.into_processor()?;
         private::ExecutionModeImpl::run(
@@ -631,7 +632,7 @@ mod private {
             let WitnessOutput { claim, witness, advice } =
                 RecordWitness.prepare_output(program_info, stack_inputs, output, recorder)?;
             let (vm_witness, precompile) = witness.into_parts();
-            let vm = build_trace(vm_witness, &self.budget)?;
+            let vm = vm_witness.build_trace(&self.budget)?;
             Ok(TraceOutput {
                 claim,
                 trace: ExecutionTrace { vm, precompile },

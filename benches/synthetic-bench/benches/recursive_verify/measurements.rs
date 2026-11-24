@@ -6,9 +6,9 @@ use miden_core::program::ExecutionClaim;
 use miden_processor::{
     DefaultHost, Processor, Program,
     advice::AdviceInputs,
-    trace::{TraceLenSummary, build_trace},
+    trace::{TraceLenSummary, VmTrace},
 };
-use miden_vm::{ExecutionProof, ExecutionWitness, Prover, StackOutputs, Verifier, VmTrace};
+use miden_vm::{ExecutionProof, ExecutionWitness, Prover, StackOutputs, Verifier};
 
 use super::{RecursionCase, config::ProofComposition, recursive_host};
 
@@ -90,7 +90,8 @@ pub(super) fn execute_recursive_case(
 
 pub(super) fn build_trace_case(witness: ExecutionWitness) -> VmTrace {
     let (vm_witness, _) = witness.into_parts();
-    build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
+    vm_witness
+        .build_trace(&miden_vm_stark::memory::default_budget())
         .expect("build recursive verifier trace")
 }
 
@@ -118,8 +119,8 @@ fn prove_recursive_trace(
         .build_trace(prover.trace_budget())
         .run_sync(host)
         .expect("execute recursive verifier and build trace");
-    let proof = prover.prove_full_trace(output.trace).expect("prove recursive verifier");
-    (output.claim, proof.into_inner())
+    let proof = prover.prove_full(output.trace).expect("prove recursive verifier");
+    (output.claim, proof)
 }
 
 fn prove_recursive_once(prover: &Prover, case: &RecursionCase) -> (f64, usize) {

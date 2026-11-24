@@ -103,23 +103,25 @@ exported after execution. `Verifier::with_verification_precompile_limits` and
 `Prover::with_verification_precompile_limits` configure the per-singleton policy for transported
 witnesses. These logical limits apply separately from the prover's batch-wide peak-memory budget.
 
-#### Building a trace with synchronous overlap
+#### Building a trace before proving
 
 Select `build_trace` to materialize an `ExecutionTrace` with its matching precompile witness.
-Synchronous runs on `std` can overlap hasher trace construction with execution when the execution
-options enable it and a Rayon worker is available. Other runs build the trace from buffered replay.
+Use `run_sync()` with a `SyncHost` or `run().await` with an asynchronous `Host`. Synchronous runs on
+`std` can overlap hasher trace construction with execution when the execution options enable it and a
+Rayon worker is available. Async and stepped runs build the trace from buffered replay. Async runs
+await host callbacks and assemble the trace on the polling thread.
 
 ```rust,ignore
 let prover = Prover::new();
 let TraceOutput { claim, trace, .. } = Processor::new(&program)
     .build_trace(prover.trace_budget())
     .run_sync(&mut host)?;
-let proof = prover.prove_full_trace(trace)?;
-Verifier::new().verify(&claim, proof.as_inner())?;
+let proof = prover.prove_full(trace)?;
+Verifier::new().verify(&claim, &proof)?;
 ```
 
-`prove_full_trace` returns a `CompleteProof`. Use `prove_trace` to leave precompile work deferred.
-Both methods apply the prover's memory budget to the materialized trace.
+Both `prove` and `prove_full` accept a witness or a materialized trace and return an
+`ExecutionProof`. Both apply the prover's memory budget to the trace.
 
 #### Stepping a recording
 
