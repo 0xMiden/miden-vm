@@ -95,10 +95,10 @@ pub(super) fn prove_recursive_trace(
 ) -> (ExecutionClaim, ExecutionProof) {
     let output = Processor::new(program)
         .with_advice(advice_inputs)
-        .build_trace(prover.trace_budget())
+        .record_witness()
         .run_sync(host)
-        .expect("execute recursive verifier and build trace");
-    let proof = prover.prove_full(output.trace).expect("prove recursive verifier");
+        .expect("execute recursive verifier and record witness");
+    let proof = prover.prove_full(output.witness).expect("prove recursive verifier");
     (output.claim, proof)
 }
 

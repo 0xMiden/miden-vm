@@ -28,7 +28,7 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_crypto::merkle::{MerklePath, store::MerkleStore};
-use miden_processor::{DefaultHost, Processor, TraceOutput};
+use miden_processor::{DefaultHost, Processor, WitnessOutput};
 
 use crate::repro_harness::{ReproTrace, core_row_mut};
 
@@ -96,13 +96,12 @@ fn build_fixture() -> Fixture {
     let program = Program::new(forest.into(), mapping.get(root).unwrap());
 
     let mut host = DefaultHost::default();
-    let TraceOutput { trace: execution_trace, .. } = Processor::new(&program)
+    let WitnessOutput { witness, .. } = Processor::new(&program)
         .with_advice(AdviceInputs::default().with_merkle_store(store))
-        .build_trace(miden_vm_stark::memory::default_budget())
+        .record_witness()
         .run_sync(&mut host)
         .unwrap();
-    let (trace, precompile_witness) = execution_trace.into_parts();
-    assert!(precompile_witness.is_none());
+    let trace = crate::repro_harness::materialize_vm_trace(witness);
 
     let (core, chiplets, eidos_compression, and8) = trace.main_trace().clone().into_air_matrices();
     let honest_outputs =

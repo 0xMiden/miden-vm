@@ -6,7 +6,7 @@ The processor provides multiple APIs depending on your use case:
 
 ### High-level API
 `Processor::new(&program)` collects inputs, execution options, and source context before
-choosing ordinary execution, witness recording, or trace construction. The live machine is
+choosing ordinary execution or witness recording. The live machine is
 initialized and advice is validated against the final options at `prepare`, `run_sync`, `run`, or
 `start`, independently of setter order.
 
@@ -49,10 +49,8 @@ precompile witness export happens during `finish()`, so export failures occur af
 Each stage returns `ExecutionError` on failure. Failed or cancelled sessions cannot resume or
 complete.
 
-With the `std` feature, a synchronous `build_trace` run can overlap execution with hasher
-trace construction when enabled in `ExecutionOptions`. Execution stays on the calling thread while
-Rayon may run the hasher builder on a worker. A caller with no separate Rayon worker uses compact
-buffered replay. Async trace building and stepped trace sessions use buffered replay.
+On a halted witness recording, `trace_len_upper_bound()` reports the core and chiplet sizes from
+the live recorder. The Eidos compression count bounds the distinct requests that replay will keep.
 
 ## Processor components
 The processor is separated into two main components: **execution** and **trace generation**.
@@ -62,17 +60,14 @@ The processor is separated into two main components: **execution** and **trace g
 it directly for raw stepping and machine inspection. Ordinary execution uses the no-op tracer.
 
 ### Trace generation with `build_trace()`
-Select `Processor::build_trace(budget)` to return `TraceOutput` with the claim, final advice,
-and an `ExecutionTrace` that pairs the VM trace with its optional precompile witness. Use
-`vm_trace()` to inspect the VM trace or `into_parts()` to take ownership of both components.
-For VM-only trace analysis from a saved witness, extract its `VmWitness` and use
-`vm_witness.build_trace(&budget)`.
+The prover consumes the recorded witness and builds the trace after execution. For row-level
+inspection or AIR diagnostics, call `witness.into_parts()` to obtain the VM witness and the
+optional precompile witness. Then call `vm_witness.build_trace(&budget)`.
 
-Use `Prover::trace_budget()` when a configured prover will consume the trace. Standalone callers
-can use `miden_vm_stark::memory::default_budget()` or `canonical_budget(limit_bytes)` with the
-canonical proof configuration. Processor enforces the supplied model before final allocations and
-retains independent row-index and raw-buffer limits. When the `concurrent` feature is enabled,
-trace generation is parallelized.
+Use `miden_vm_stark::memory::default_budget()` or `canonical_budget(limit_bytes)` for the
+canonical VM proof configuration. The processor checks the model against the padded heights
+before final allocations and enforces independent row-index and raw-buffer limits.
+With `std`, the builder can replay core fragments and build chiplets in parallel.
 
 Trace generation produces the four matrices in the Miden proof statement:
 

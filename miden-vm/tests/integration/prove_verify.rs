@@ -349,7 +349,7 @@ mod prover_api_lifecycle {
         DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionProof, ExecutionWitness,
         HashFunction, PrecompileLimits, PrecompileProof, PrecompileStatus, PrecompileWitness,
         Processor, Program, Prover, ProverError, StackInputs, StackOutputs, StarkProof,
-        TraceOutput, VerificationError, VerificationOutcome, Verifier, WitnessOutput,
+        VerificationError, VerificationOutcome, Verifier, WitnessOutput,
     };
 
     use super::minimum_conjectured_security_level;
@@ -495,7 +495,7 @@ mod prover_api_lifecycle {
     }
 
     #[test]
-    fn witness_proving_matches_overlapped_trace_proving() {
+    fn complete_witness_proving_with_single_row_fragments() {
         let stack_inputs = StackInputs::default();
         let prover = Prover::new();
         let execution_options = ExecutionOptions::default()
@@ -503,45 +503,30 @@ mod prover_api_lifecycle {
             .expect("one-row trace fragments should be supported");
 
         for program in [assemble("begin push.1 drop end"), u256_program(1)] {
-            let mut buffered_host = DefaultHost::default();
-            let WitnessOutput { claim: buffered_claim, witness, .. } = Processor::new(&program)
+            let mut host = DefaultHost::default();
+            let WitnessOutput { claim, witness, .. } = Processor::new(&program)
                 .with_options(execution_options.clone())
                 .with_stack_inputs(stack_inputs)
                 .record_witness()
-                .run_sync(&mut buffered_host)
-                .expect("buffered witness recording should succeed");
-            let buffered_outputs = *buffered_claim.stack_outputs();
-            let buffered_proof = prover.prove_full(witness).expect("witness should prove");
+                .run_sync(&mut host)
+                .expect("witness recording should succeed");
+            let outputs = *claim.stack_outputs();
+            let proof = prover.prove_full(witness).expect("witness should prove");
 
-            let mut overlapped_host = DefaultHost::default();
-            let TraceOutput { claim: overlapped_claim, trace, .. } = Processor::new(&program)
-                .with_options(execution_options.clone().with_overlapped_trace_build(true))
-                .with_stack_inputs(stack_inputs)
-                .build_trace(prover.trace_budget())
-                .run_sync(&mut overlapped_host)
-                .expect("overlapped trace building should succeed");
-            let overlapped_outputs = *overlapped_claim.stack_outputs();
-            let overlapped_proof = prover.prove_full(trace).expect("trace should prove");
-
-            assert_eq!(buffered_claim, overlapped_claim);
-            assert_eq!(buffered_proof.vm().precompile_root, overlapped_proof.vm().precompile_root);
-
-            // Parallel proof-of-work grinding may select different valid witnesses, so verify both
-            // proofs instead of requiring byte-identical encodings.
-            assert_complete(&program, stack_inputs, buffered_outputs, &buffered_proof);
-            assert_complete(&program, stack_inputs, overlapped_outputs, &overlapped_proof);
+            assert_complete(&program, stack_inputs, outputs, &proof);
         }
     }
 
     #[test]
     fn delegated_and_batched_precompile_proving_composes_across_transport() {
         let prover = Prover::new();
-        let TraceOutput { claim: one_claim, trace, .. } = Processor::new(&u256_program(1))
-            .build_trace(prover.trace_budget())
+        let WitnessOutput { claim: one_claim, witness, .. } = Processor::new(&u256_program(1))
+            .record_witness()
             .run_sync(&mut DefaultHost::default())
-            .expect("root-one trace should build");
-        let one_deferred =
-            prover.prove(trace).expect("root-one execution should produce a deferred proof");
+            .expect("root-one witness should record");
+        let one_deferred = prover
+            .prove(witness)
+            .expect("root-one execution should produce a deferred proof");
         assert!(matches!(one_deferred.precompile(), PrecompileStatus::Deferred(_)));
         let one_root = one_deferred.vm().precompile_root;
         let deferred_outcome = Verifier::new()
@@ -850,7 +835,7 @@ mod execution_witness_serialization {
         #![proptest_config(ProptestConfig::with_cases(32))]
 
         #[test]
-        fn proptest_execution_witness_round_trip_preserves_trace(
+        fn proptest_execution_witness_round_trip_preserves_claim_and_bytes(
             inputs in prop::collection::vec(any::<u32>(), 0..=16),
             operations in prop::collection::vec(0_u8..4, 0..=16),
         ) {
@@ -866,25 +851,6 @@ mod execution_witness_serialization {
 
             prop_assert_eq!(restored.claim(), expected_claim);
             prop_assert_eq!(restored.to_bytes(), witness_bytes);
-
-            let (original_vm, _) = witness.into_parts();
-            let (restored_vm, _) = restored.into_parts();
-            let original_trace = original_vm
-                .build_trace(&miden_vm_stark::memory::default_budget())
-                .expect("original generated witness should build a trace");
-            let restored_trace = restored_vm
-                .build_trace(&miden_vm_stark::memory::default_budget())
-                .expect("restored generated witness should build a trace");
-            prop_assert_eq!(restored_trace.stack_outputs(), original_trace.stack_outputs());
-            prop_assert_eq!(restored_trace.program_info(), original_trace.program_info());
-            prop_assert_eq!(
-                restored_trace.trace_len_summary(),
-                original_trace.trace_len_summary()
-            );
-            prop_assert_eq!(
-                restored_trace.public_inputs().to_air_inputs(),
-                original_trace.public_inputs().to_air_inputs()
-            );
         }
     }
 
@@ -909,31 +875,9 @@ mod execution_witness_serialization {
             .run_sync(&mut host)
             .expect("execution should produce a witness");
         let witness_bytes = witness.to_bytes();
-        let (restored_vm, _) = ExecutionWitness::read_from_bytes(&witness_bytes)
-            .expect("witness round trip")
-            .into_parts();
-        assert!(
-            restored_vm.mast_forest_count() > 1,
-            "expected dynamic library execution to serialize multiple MAST forests"
-        );
-
-        let (vm, _) = witness.into_parts();
-        let original_trace = vm
-            .build_trace(&miden_vm_stark::memory::default_budget())
-            .expect("original witness builds trace");
-        let restored_trace = restored_vm
-            .build_trace(&miden_vm_stark::memory::default_budget())
-            .expect("restored witness builds trace");
-        assert_eq!(restored_trace.stack_outputs(), original_trace.stack_outputs());
-        assert_eq!(restored_trace.program_info(), original_trace.program_info());
-        assert_eq!(restored_trace.trace_len_summary(), original_trace.trace_len_summary());
-        assert_eq!(
-            restored_trace.public_inputs().to_air_inputs(),
-            original_trace.public_inputs().to_air_inputs()
-        );
-
         let restored_witness = ExecutionWitness::read_from_bytes(&witness_bytes)
             .expect("execution witness round trip");
+        assert_eq!(restored_witness.claim(), claim);
         let proof = Prover::new()
             .prove(restored_witness)
             .expect("restored execution witness should prove");

@@ -12,11 +12,12 @@ use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, Felt,
     FutureMaybeSend, HaltedExecution, Host, LoadedMastForest, MastForestLoadError,
-    PackageSourceDebugContext, Processor, ProcessorState, RecordWitness, StepStatus, TraceOutput,
-    WitnessOutput, Word,
+    PackageSourceDebugContext, Processor, ProcessorState, RecordWitness, StepStatus, WitnessOutput,
+    Word,
     advice::{AdviceError, AdviceInputs, AdviceMap, AdviceMutation, AdviceProvider},
     event::{EventError, EventName},
     operation::OperationError,
+    serde::Serializable,
 };
 
 #[test]
@@ -28,12 +29,10 @@ fn async_execution_futures_preserve_mode_outputs_and_send_bounds() {
         .unwrap()
         .unwrap_program();
     let request = || Processor::new(&program);
-    let trace = || request().build_trace(miden_vm_stark::memory::default_budget());
     let mut host = DefaultHost::default();
     assert_future::<ExecutionOutput>(request().execute().run(&mut host));
     assert_future::<WitnessOutput>(request().record_witness().run(&mut host));
-    assert_future::<TraceOutput>(trace().run(&mut host));
-    assert_future::<TraceOutput>(trace().start().unwrap().run(&mut host));
+    assert_future::<WitnessOutput>(request().record_witness().start().unwrap().run(&mut host));
 
     let mut session = request().record_witness().start().unwrap();
     assert_future::<StepStatus>(session.step(&mut host));
@@ -112,26 +111,25 @@ async fn ordinary_execution_accepts_empty_optional_debug_info() {
 }
 
 #[test]
-fn paused_execution_preserves_trace_and_final_advice() {
+fn paused_execution_preserves_witness_and_final_advice() {
     let program = Assembler::default()
         .assemble_program("execution_plan", "begin push.1 repeat.24 push.1 add end swap drop end")
         .unwrap()
         .unwrap_program();
     let advice = AdviceInputs::default().with_map([(Word::empty(), vec![Felt::ONE])]);
     let options = ExecutionOptions::default().with_core_trace_fragment_size(8).unwrap();
-    let budget = miden_vm_stark::memory::default_budget();
 
-    // Preparing the VM before stepping preserves the trace and the final advice.
+    // Preparing the VM before stepping preserves the witness and the final advice.
     let direct = Processor::new(&program)
         .with_advice(advice.clone())
         .with_options(options.clone())
-        .build_trace(budget)
+        .record_witness()
         .run_sync(&mut DefaultHost::default())
         .unwrap();
     let mut session = Processor::new(&program)
         .with_advice(advice)
         .with_options(options)
-        .build_trace(budget)
+        .record_witness()
         .prepare()
         .unwrap()
         .prepare()
@@ -164,12 +162,7 @@ fn paused_execution_preserves_trace_and_final_advice() {
     assert_eq!(direct.claim, stepped.claim);
     assert_eq!(direct.advice, stepped.advice);
     assert_eq!(stepped.advice.get_mapped_values(&Word::empty()), Some([Felt::ONE].as_slice()));
-    assert!(direct.trace.precompile_witness().is_none());
-    assert!(stepped.trace.precompile_witness().is_none());
-    assert_eq!(
-        direct.trace.into_vm_trace().into_air_matrices(),
-        stepped.trace.into_vm_trace().into_air_matrices()
-    );
+    assert_eq!(direct.witness.to_bytes(), stepped.witness.to_bytes());
 }
 
 #[test]
@@ -274,7 +267,7 @@ async fn invalid_source_context_fails_before_execution() {
     let errors = [
         request().execute().run_sync(&mut DefaultHost::default()).err(),
         request().record_witness().run(&mut host).await.err(),
-        request().build_trace(miden_vm_stark::memory::default_budget()).start().err(),
+        request().record_witness().start().err(),
         request().execute().prepare().unwrap().start().err(),
     ];
     for error in errors {

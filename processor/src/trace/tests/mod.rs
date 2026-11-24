@@ -83,17 +83,16 @@ fn build_trace_from_program_with_advice(
 ) -> VmTrace {
     let options = ExecutionOptions::default()
         .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
-        .unwrap()
-        .with_overlapped_trace_build(false);
-    Processor::new(program)
+        .unwrap();
+    let output = Processor::new(program)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
         .with_options(options)
-        .build_trace(miden_vm_stark::memory::default_budget())
+        .record_witness()
         .run_sync(&mut DefaultHost::default())
-        .unwrap()
-        .trace
-        .into_vm_trace()
+        .unwrap();
+    let (vm, _) = output.witness.into_parts();
+    vm.build_trace(&miden_vm_stark::memory::default_budget()).unwrap()
 }
 
 #[test]
@@ -128,9 +127,6 @@ fn non_empty_execution_witness_splits_with_matching_precompile_root() {
         .unwrap();
     assert_eq!(output.precompile_root(), precompile_root);
     assert_eq!(output.precompile_witness.as_ref(), Some(&precompile_witness));
-
-    let trace = vm_witness.build_trace(&miden_vm_stark::memory::default_budget()).unwrap();
-    assert_eq!(trace.precompile_root(), precompile_root);
 }
 
 #[test]

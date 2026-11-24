@@ -31,16 +31,15 @@ mod tests;
 
 pub(crate) use execution_tracer::TraceReplay;
 pub use miden_air_definitions::vm::{
-    ChipletsLengths, TraceLenSummary, TraceLenSummaryError, VmTrace, trace::RowIndex,
+    ChipletsLengths, TraceLenSummary, TraceLenSummaryError, VmTrace,
+    trace::{MIN_TRACE_LEN, RowIndex},
 };
 pub use miden_core::deferred::PrecompileWitness;
 pub use parallel::CORE_TRACE_WIDTH;
-// Re-exported for the streamed `Processor::build_trace` path, which is std-only; the
-// buffered path uses `build_hasher_chiplet` and `MAX_TRACE_LEN` directly within `parallel`.
-#[cfg(feature = "std")]
-pub(crate) use parallel::{MAX_TRACE_LEN, build_hasher_chiplet};
-#[cfg(feature = "std")]
-pub(crate) use trace_state::ResolvedHasherOp;
+
+/// The VM relation's trace-building memory model and caller-selected byte limit.
+pub type VmTraceBudget =
+    miden_stark::memory::ProvingBudget<{ miden_air_definitions::vm::MIDEN_AIR_COUNT }>;
 
 /// Complete in-memory witness produced by a traced program execution.
 ///
@@ -249,15 +248,6 @@ impl VmWitness {
         self.precompile_root
     }
 
-    /// Takes the hasher replay out, leaving an empty buffered one.
-    ///
-    /// The streaming path uses this to drop the replay's channel sender once execution has
-    /// finished, so the concurrently running hasher builder sees its input stream end.
-    #[cfg(feature = "std")]
-    pub(crate) fn take_hasher_replay(&mut self) -> trace_state::HasherRequestReplay {
-        core::mem::take(&mut self.trace.hasher_for_chiplet)
-    }
-
     /// Returns the replay data captured during execution.
     #[cfg(any(test, feature = "testing"))]
     #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
@@ -270,15 +260,6 @@ impl VmWitness {
     #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
     fn trace_replay_mut(&mut self) -> &mut TraceReplay {
         &mut self.trace
-    }
-
-    /// Returns the number of sparse MAST forests captured in the replay.
-    ///
-    /// Available under the `testing` feature for external tests that check which replay data a
-    /// serialized witness preserves.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn mast_forest_count(&self) -> usize {
-        self.trace.mast_forest_store.len()
     }
 }
 
@@ -465,28 +446,22 @@ mod wire_tests {
     }
 
     #[test]
-    fn aead_stream_witness_round_trip_rebuilds_the_same_trace() {
+    fn aead_stream_witness_round_trip_builds_valid_trace() {
         let witness = aead_stream_witness();
         let bytes = witness.to_bytes();
         let claim = witness.claim();
-        let (original_vm, original_precompile) = witness.into_parts();
-        assert!(original_precompile.is_none());
-        let original_trace = original_vm
-            .build_trace(&miden_vm_stark::memory::default_budget())
-            .expect("original trace should build");
-
         let restored =
             ExecutionWitness::read_from_bytes(&bytes).expect("witness should round trip");
         assert_eq!(restored.claim(), claim);
+        assert_eq!(restored.to_bytes(), bytes);
         let (restored_vm, restored_precompile) = restored.into_parts();
         assert!(restored_precompile.is_none());
         let restored_trace = restored_vm
             .build_trace(&miden_vm_stark::memory::default_budget())
             .expect("restored trace should build");
 
-        assert_eq!(restored_trace.public_inputs(), original_trace.public_inputs());
-        assert_eq!(restored_trace.trace_len_summary(), original_trace.trace_len_summary());
-        assert_eq!(restored_trace.into_air_matrices(), original_trace.into_air_matrices());
+        assert_eq!(restored_trace.stack_outputs(), claim.stack_outputs());
+        miden_vm_stark::debug::check_constraints(&restored_trace);
     }
 
     #[rstest]

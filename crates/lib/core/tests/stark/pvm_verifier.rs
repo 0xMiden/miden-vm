@@ -61,7 +61,7 @@ fn pvm_keccak_only_recursive_verifier_cost_is_bounded() {
     let initial_stack: [u64; 4] = inputs.claim_commitment().into();
     let mut test = build_test!(SOURCE, initial_stack);
     test.advice_inputs = inputs.advice().clone();
-    let trace = test.execute().expect("Keccak-only PVM proof must verify");
+    let trace = test.build_trace().expect("Keccak-only PVM proof must verify");
     let summary = trace.trace_len_summary();
     eprintln!("Keccak-only PVM recursive trace: {summary:?}");
     assert!(

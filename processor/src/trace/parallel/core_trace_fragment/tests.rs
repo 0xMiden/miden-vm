@@ -1626,7 +1626,8 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
     )
     .unwrap();
 
-    let trace = build_buffered_trace(program, StackInputs::new(&stack_inputs).unwrap(), &mut host);
+    let trace =
+        record_and_build_trace(program, StackInputs::new(&stack_inputs).unwrap(), &mut host);
 
     // `core_rows()` is the actual program row count before padding.
     let trace_len = trace.trace_len_summary().core_rows();
@@ -1639,7 +1640,8 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
 
 /// Builds both system and decoder traces for CALL/SYSCALL operations.
 fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usize) {
-    let trace = build_buffered_trace(program, StackInputs::default(), &mut DefaultHost::default());
+    let trace =
+        record_and_build_trace(program, StackInputs::default(), &mut DefaultHost::default());
 
     // `core_rows()` is the actual program row count before padding.
     let trace_len = trace.trace_len_summary().core_rows();
@@ -1650,23 +1652,22 @@ fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usi
     (sys_trace, decoder_trace, trace_len)
 }
 
-fn build_buffered_trace(
+fn record_and_build_trace(
     program: &Program,
     stack_inputs: StackInputs,
     host: &mut DefaultHost,
 ) -> VmTrace {
     let options = ExecutionOptions::default()
         .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
-        .unwrap()
-        .with_overlapped_trace_build(false);
-    Processor::new(program)
+        .unwrap();
+    let output = Processor::new(program)
         .with_stack_inputs(stack_inputs)
         .with_options(options)
-        .build_trace(miden_vm_stark::memory::default_budget())
+        .record_witness()
         .run_sync(host)
-        .unwrap()
-        .trace
-        .into_vm_trace()
+        .unwrap();
+    let (vm, _) = output.witness.into_parts();
+    vm.build_trace(&miden_vm_stark::memory::default_budget()).unwrap()
 }
 
 /// Extracts the decoder trace columns from the execution trace.

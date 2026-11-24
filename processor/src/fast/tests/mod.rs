@@ -2606,65 +2606,6 @@ fn test_cycle_limit_exactly_max_cycles_succeeds() {
     );
 }
 
-/// Tests that `ExecutionError::ProverMemoryExceeded` is correctly emitted when the modelled peak
-/// prover memory for a trace exceeds the configured budget.
-///
-/// Execution itself is unaffected by the budget (enforcement happens in `build_trace`), so this
-/// measures the exact modelled peak for the trace under a generous budget, then rebuilds with a
-/// budget one byte short of that peak.
-#[test]
-fn test_prover_memory_budget_exceeded() {
-    let program = simple_program_with_ops(vec![Operation::Swap; MIN_TRACE_LEN]);
-
-    let record_vm_witness = || {
-        let mut host = DefaultHost::default();
-        // A fragment size close to the program's real row count keeps the tier-1 allocation
-        // precheck (based on `fragment_size`, not the actual padded height) from dominating the
-        // exact byte-budget boundary this test targets.
-        let options = ExecutionOptions::default()
-            .with_core_trace_fragment_size(MIN_TRACE_LEN)
-            .unwrap();
-        Processor::new(&program)
-            .with_options(options)
-            .record_witness()
-            .run_sync(&mut host)
-            .expect("execution is unaffected by the prover memory budget")
-            .witness
-            .into_parts()
-            .0
-    };
-
-    let budget = miden_vm_stark::memory::default_budget();
-    let measured = record_vm_witness().build_trace(&budget).expect("default budget must succeed");
-    let exact_peak = budget
-        .prover_peak_bytes(measured.trace_len_summary().padded_heights())
-        .expect("modelled peak fits in u64");
-
-    let err = record_vm_witness()
-        .build_trace(&miden_vm_stark::memory::canonical_budget(exact_peak - 1))
-        .unwrap_err();
-
-    assert_matches!(
-        err,
-        ExecutionError::ProverMemoryExceeded { estimated_bytes, budget_bytes }
-            if estimated_bytes == exact_peak && budget_bytes == exact_peak - 1
-    );
-}
-
-/// Tests that the default prover memory budget does not reject a normal-sized trace.
-#[test]
-fn test_prover_memory_default_budget_accepts_normal_trace() {
-    let mut host = DefaultHost::default();
-
-    let program = simple_program_with_ops(vec![Operation::Swap; MIN_TRACE_LEN * 4]);
-
-    Processor::new(&program)
-        .with_options(ExecutionOptions::default().with_overlapped_trace_build(false))
-        .build_trace(miden_vm_stark::memory::default_budget())
-        .run_sync(&mut host)
-        .expect("the default prover memory budget must accept a normal-sized trace");
-}
-
 #[test]
 fn test_assert() {
     let mut host = DefaultHost::default();

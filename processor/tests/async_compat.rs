@@ -3,10 +3,11 @@ use std::sync::Arc;
 use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
-    BaseHost, DefaultHost, ExecutionOptions, Felt, FutureMaybeSend, Host, LoadedMastForest,
-    MastForestLoadError, Processor, ProcessorState, StackInputs, Word,
+    BaseHost, DefaultHost, Felt, FutureMaybeSend, Host, LoadedMastForest, MastForestLoadError,
+    Processor, ProcessorState, StackInputs, Word,
     advice::{AdviceInputs, AdviceMutation},
     event::{EventError, EventName, TraceError},
+    serde::Serializable,
 };
 
 struct YieldingAsyncHost {
@@ -117,38 +118,20 @@ async fn witness_recording_async_matches_sync() {
         .map(|output| output.witness)
         .unwrap();
 
-    assert_eq!(sync_witness.claim().stack_outputs(), async_witness.claim().stack_outputs());
-    let (sync_vm_witness, _) = sync_witness.into_parts();
-    let (async_vm_witness, _) = async_witness.into_parts();
-    let budget = miden_vm_stark::memory::default_budget();
-    let sync_trace = sync_vm_witness.build_trace(&budget).unwrap();
-    let async_trace = async_vm_witness.build_trace(&budget).unwrap();
-
-    assert_eq!(sync_trace.public_inputs(), async_trace.public_inputs());
-    assert_eq!(sync_trace.trace_len_summary(), async_trace.trace_len_summary());
-    for (sync_column, async_column) in
-        sync_trace.main_trace().columns().zip(async_trace.main_trace().columns())
-    {
-        assert_eq!(sync_column, async_column);
-    }
+    assert_eq!(sync_witness.to_bytes(), async_witness.to_bytes());
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn trace_building_with_async_only_host_matches_buffered_sync() {
+async fn witness_recording_with_async_only_host_preserves_advice() {
     let program = emit_trace_program();
-    let budget = miden_vm_stark::memory::default_budget();
     let processor = || {
         Processor::new(&program)
             .with_advice(AdviceInputs::default().with_map([(Word::empty(), vec![Felt::ONE])]))
     };
 
-    let sync_output = processor()
-        .with_options(ExecutionOptions::default().with_overlapped_trace_build(false))
-        .build_trace(budget)
-        .run_sync(&mut DefaultHost::default())
-        .unwrap();
+    let sync_output = processor().record_witness().run_sync(&mut DefaultHost::default()).unwrap();
     let mut async_host = YieldingAsyncHost::new();
-    let async_output = processor().build_trace(budget).run(&mut async_host).await.unwrap();
+    let async_output = processor().record_witness().run(&mut async_host).await.unwrap();
 
     assert_eq!(async_host.trace_calls, 1);
     assert_eq!(async_output.claim, sync_output.claim);
@@ -157,10 +140,7 @@ async fn trace_building_with_async_only_host_matches_buffered_sync() {
         async_output.advice.get_mapped_values(&Word::empty()),
         Some([Felt::ONE].as_slice())
     );
-    assert_eq!(
-        async_output.trace.into_vm_trace().into_air_matrices(),
-        sync_output.trace.into_vm_trace().into_air_matrices(),
-    );
+    assert_eq!(async_output.witness.to_bytes(), sync_output.witness.to_bytes(),);
 }
 
 #[tokio::test(flavor = "current_thread")]

@@ -5,14 +5,11 @@ use miden_core::{
     deferred::PrecompileLimits,
     proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus, VmProof},
 };
-use miden_processor::{
-    ExecutionError, ExecutionTrace, ExecutionWitness, PrecompileWitness, VmTraceBudget, VmWitness,
-    trace::VmTrace,
-};
+use miden_processor::{ExecutionError, ExecutionWitness, PrecompileWitness, VmWitness};
 
 use crate::PrecompileProvingError;
 
-/// A synchronous, configurable prover for Miden VM execution witnesses and traces.
+/// A synchronous, configurable prover for Miden VM execution witnesses.
 ///
 /// This type does not execute programs. It owns proof-generation policy — including the memory
 /// budget for materializing a VM execution trace — and consumes artifacts produced by the
@@ -24,27 +21,6 @@ pub struct Prover {
     max_prover_memory_bytes: u64,
     max_precompile_prover_memory_bytes: u64,
     verification_precompile_limits: PrecompileLimits,
-}
-
-/// The execution artifact consumed by [`Prover::prove`] or [`Prover::prove_full`].
-#[derive(Debug)]
-pub enum ProvingInput {
-    /// A recorded execution witness whose VM trace the prover will build.
-    Witness(ExecutionWitness),
-    /// A materialized execution trace paired with its optional precompile witness.
-    Trace(ExecutionTrace),
-}
-
-impl From<ExecutionWitness> for ProvingInput {
-    fn from(witness: ExecutionWitness) -> Self {
-        Self::Witness(witness)
-    }
-}
-
-impl From<ExecutionTrace> for ProvingInput {
-    fn from(trace: ExecutionTrace) -> Self {
-        Self::Trace(trace)
-    }
 }
 
 impl Prover {
@@ -111,14 +87,6 @@ impl Prover {
         self.max_prover_memory_bytes
     }
 
-    /// Returns the canonical VM trace-building budget for this prover's memory limit.
-    ///
-    /// Pass this to `Processor::build_trace` to apply the same VM relation model and
-    /// byte limit as this prover. The precompile proving budget is configured independently.
-    pub fn trace_budget(&self) -> VmTraceBudget {
-        miden_vm_stark::memory::canonical_budget(self.max_prover_memory_bytes)
-    }
-
     /// Sets the maximum modelled peak memory, in bytes, for proving a precompile witness.
     #[must_use]
     pub const fn with_max_precompile_prover_memory_bytes(
@@ -134,34 +102,28 @@ impl Prover {
         self.max_precompile_prover_memory_bytes
     }
 
-    /// Proves the VM portion of a recorded witness or materialized execution trace.
+    /// Proves the VM portion of a recorded execution witness.
     ///
     /// If the execution authenticated deferred precompile work, the returned proof carries its
     /// portable singleton witness for later proving. Otherwise, it is complete.
     ///
-    /// The prover builds traces from witnesses under its configured budget and checks the padded
-    /// shape of materialized traces against the same budget before proof generation.
-    pub fn prove(&self, input: impl Into<ProvingInput>) -> Result<ExecutionProof, ProverError> {
-        let (trace, precompile) = self.prepare_input(input.into())?;
-        let vm = self.prove_vm_trace(trace)?;
+    /// The prover builds the VM trace under its configured memory budget.
+    pub fn prove(&self, witness: ExecutionWitness) -> Result<ExecutionProof, ProverError> {
+        let (vm, precompile) = witness.into_parts();
+        let vm = self.prove_vm(vm)?;
         let status = precompile.map_or(PrecompileStatus::Empty, PrecompileStatus::Deferred);
         Ok(ExecutionProof::new(vm, status))
     }
 
-    /// Proves a recorded witness or materialized execution trace and all authenticated precompile
-    /// work.
+    /// Proves a recorded execution witness and all authenticated precompile work.
     ///
     /// The returned execution proof has an empty or proven precompile status. The VM trace is
     /// subject to the same budget checks as in [`Self::prove`].
-    pub fn prove_full(
-        &self,
-        input: impl Into<ProvingInput>,
-    ) -> Result<ExecutionProof, ProverError> {
-        let (trace, precompile) = self.prepare_input(input.into())?;
-        let precompile_root = trace.precompile_root();
-        let vm = self.prove_vm_trace(trace)?;
+    pub fn prove_full(&self, witness: ExecutionWitness) -> Result<ExecutionProof, ProverError> {
+        let (vm, precompile) = witness.into_parts();
+        let vm = self.prove_vm(vm)?;
         let precompile = precompile
-            .map(|witness| self.prove_precompile_for_root(witness, precompile_root))
+            .map(|witness| self.prove_precompile_for_root(witness, vm.precompile_root))
             .transpose()?;
         let status = precompile.map_or(PrecompileStatus::Empty, PrecompileStatus::Proven);
         Ok(ExecutionProof::new(vm, status))
@@ -176,25 +138,8 @@ impl Prover {
             return Err(ProverError::VmWitnessHasPrecompiles);
         }
 
-        let vm = self.prove_vm_trace(self.build_vm_trace(witness)?)?;
+        let vm = self.prove_vm(witness)?;
         Ok(ExecutionProof::new(vm, PrecompileStatus::Empty))
-    }
-
-    fn prepare_input(
-        &self,
-        input: ProvingInput,
-    ) -> Result<(VmTrace, Option<PrecompileWitness>), ProverError> {
-        match input {
-            ProvingInput::Witness(witness) => {
-                let (vm, precompile) = witness.into_parts();
-                Ok((self.build_vm_trace(vm)?, precompile))
-            },
-            ProvingInput::Trace(trace) => Ok(trace.into_parts()),
-        }
-    }
-
-    fn build_vm_trace(&self, witness: VmWitness) -> Result<VmTrace, ProverError> {
-        witness.build_trace(&self.trace_budget()).map_err(ProverError::TraceGeneration)
     }
 
     /// Proves an owned batch of singleton execution obligations in one STARK.
@@ -236,24 +181,9 @@ impl Prover {
         .map_err(ProverError::PrecompileProofGeneration)
     }
 
-    /// Proves a fully materialized VM trace.
-    ///
-    /// Buffered and overlapped trace construction share this private implementation so STARK
-    /// generation and VM proof packaging cannot diverge.
-    fn prove_vm_trace(&self, trace: VmTrace) -> Result<VmProof, ProverError> {
-        let budget = self.trace_budget();
-        let estimated_bytes = budget
-            .prover_peak_bytes(trace.trace_len_summary().padded_heights())
-            .ok_or(ProverError::VmProofGeneration(ExecutionError::ProverMemoryExceeded {
-                estimated_bytes: u64::MAX,
-                budget_bytes: self.max_prover_memory_bytes,
-            }))?;
-        if estimated_bytes > self.max_prover_memory_bytes {
-            return Err(ProverError::VmProofGeneration(ExecutionError::ProverMemoryExceeded {
-                estimated_bytes,
-                budget_bytes: self.max_prover_memory_bytes,
-            }));
-        }
+    fn prove_vm(&self, witness: VmWitness) -> Result<VmProof, ProverError> {
+        let budget = miden_vm_stark::memory::canonical_budget(self.max_prover_memory_bytes);
+        let trace = witness.build_trace(&budget).map_err(ProverError::TraceGeneration)?;
         miden_vm_stark::prover::prove(trace, self.hash_fn, self.hash_lde_blocks).map_err(|error| {
             ProverError::VmProofGeneration(ExecutionError::ProvingError(error.to_string()))
         })

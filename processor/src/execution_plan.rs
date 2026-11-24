@@ -10,17 +10,13 @@ use miden_core::mast::MastForest;
 use crate::{
     AdviceInputs, AdviceProvider, ExecutionClaim, ExecutionError, ExecutionOptions,
     ExecutionOutput, ExecutionWitness, FastProcessor, Host, KernelDescriptor,
-    PackageSourceDebugContext, PrecompileWitness, ProcessorState, Program, ProgramInfo,
-    ResumeContext, StackInputs, StackOutputs, SyncHost, Word,
+    PackageSourceDebugContext, ProcessorState, Program, ProgramInfo, ResumeContext, StackInputs,
+    StackOutputs, SyncHost, Word,
     errors::MapExecErrNoCtx,
     fast::{NoopTracer, ResumeOutcome},
-    trace::{VmTrace, execution_tracer::ExecutionTracer},
+    trace::execution_tracer::ExecutionTracer,
     tracer::Tracer,
 };
-
-/// The VM relation's trace-building memory model and caller-selected byte limit.
-pub type VmTraceBudget =
-    miden_stark::memory::ProvingBudget<{ miden_air_definitions::vm::MIDEN_AIR_COUNT }>;
 
 /// Program-bound configuration before selecting an execution mode.
 ///
@@ -91,11 +87,6 @@ impl<'p> Processor<'p> {
     /// Selects a compact execution witness with its claim and final advice.
     pub fn record_witness(self) -> ExecutionPlan<'p, RecordWitness> {
         self.with_mode(RecordWitness)
-    }
-
-    /// Selects VM trace construction under the supplied relation-compatible budget.
-    pub fn build_trace(self, budget: VmTraceBudget) -> ExecutionPlan<'p, BuildTrace> {
-        self.with_mode(BuildTrace { budget })
     }
 
     fn with_mode<M: ExecutionMode>(self, mode: M) -> ExecutionPlan<'p, M> {
@@ -183,29 +174,30 @@ impl<'p, M: ExecutionMode> ExecutionPlan<'p, M> {
     /// ```
     pub fn run_sync(self, host: &mut impl SyncHost) -> Result<M::Output, ExecutionError> {
         let processor = self.processor.into_processor()?;
-        // Full synchronous execution retains each mode's optimized path, including overlapped
-        // hasher trace construction. Stepped execution deliberately uses buffered recording.
-        private::ExecutionModeImpl::run_sync(
-            self.mode,
-            processor,
+        let stack_inputs = processor.initial_stack_inputs();
+        let mut recorder = self.mode.recorder(&processor);
+        let output = processor.run_with_tracer_sync(
             self.program,
             self.source_context,
             host,
-        )
+            &mut recorder,
+        )?;
+        Ok(self
+            .mode
+            .prepare_output(|| self.program.to_info(), stack_inputs, output, recorder))
     }
 
     /// Awaits host callbacks, then prepares the mode's output on the calling thread.
-    /// Trace construction uses buffered replay after execution.
     pub async fn run(self, host: &mut impl Host) -> Result<M::Output, ExecutionError> {
         let processor = self.processor.into_processor()?;
-        private::ExecutionModeImpl::run(
-            self.mode,
-            processor,
-            self.program,
-            self.source_context,
-            host,
-        )
-        .await
+        let stack_inputs = processor.initial_stack_inputs();
+        let mut recorder = self.mode.recorder(&processor);
+        let output = processor
+            .run_with_tracer(self.program, self.source_context, host, &mut recorder)
+            .await?;
+        Ok(self
+            .mode
+            .prepare_output(|| self.program.to_info(), stack_inputs, output, recorder))
     }
 
     /// Starts a session without invoking the host. The recorder is retained across pauses.
@@ -214,7 +206,7 @@ impl<'p, M: ExecutionMode> ExecutionPlan<'p, M> {
         let context = processor.start_context(self.program, self.source_context)?;
         let program_hash = self.program.hash();
         let stack_inputs = processor.initial_stack_inputs();
-        let recorder = private::ExecutionModeImpl::recorder(&self.mode, &processor);
+        let recorder = self.mode.recorder(&processor);
         Ok(ExecutionSession {
             mode: self.mode,
             processor,
@@ -236,15 +228,6 @@ pub struct Execute;
 #[derive(Debug, Clone, Copy)]
 pub struct RecordWitness;
 
-/// Execution producing a VM trace under a supplied memory budget.
-///
-/// Synchronous full runs may overlap hasher building with execution when execution options allow
-/// it. Async execution and stepped sessions prepare the same trace from buffered replay.
-#[derive(Debug, Clone, Copy)]
-pub struct BuildTrace {
-    budget: VmTraceBudget,
-}
-
 /// A portable replay witness with its claim and final advice from the same execution.
 #[derive(Debug)]
 pub struct WitnessOutput {
@@ -253,19 +236,9 @@ pub struct WitnessOutput {
     pub advice: AdviceProvider,
 }
 
-/// A materialized execution trace with its claim and final advice.
-#[derive(Debug)]
-pub struct TraceOutput {
-    pub claim: ExecutionClaim,
-    pub trace: ExecutionTrace,
-    pub advice: AdviceProvider,
-}
-
 /// An execution mode owned by the processor crate.
 ///
-/// Select a mode through [`Processor::execute`], [`Processor::record_witness`],
-/// or [`Processor::build_trace`]. The sealed implementation selects a recorder and prepares
-/// the output.
+/// Select a mode through [`Processor::execute`] or [`Processor::record_witness`].
 pub trait ExecutionMode: private::ExecutionModeImpl {
     type Output;
 }
@@ -276,41 +249,6 @@ impl ExecutionMode for Execute {
 
 impl ExecutionMode for RecordWitness {
     type Output = WitnessOutput;
-}
-
-impl ExecutionMode for BuildTrace {
-    type Output = TraceOutput;
-}
-
-/// The VM trace and its optional portable precompile witness from the same execution.
-///
-/// Produced by the execution mode selected with [`Processor::build_trace`].
-#[derive(Debug)]
-pub struct ExecutionTrace {
-    vm: VmTrace,
-    precompile: Option<PrecompileWitness>,
-}
-
-impl ExecutionTrace {
-    /// Borrows the VM trace.
-    pub fn vm_trace(&self) -> &VmTrace {
-        &self.vm
-    }
-
-    /// Borrows the witness for authenticated precompile work, when present.
-    pub fn precompile_witness(&self) -> Option<&PrecompileWitness> {
-        self.precompile.as_ref()
-    }
-
-    /// Extracts the VM trace and discards the precompile witness.
-    pub fn into_vm_trace(self) -> VmTrace {
-        self.vm
-    }
-
-    /// Separates the trace from its optional precompile witness.
-    pub fn into_parts(self) -> (VmTrace, Option<PrecompileWitness>) {
-        (self.vm, self.precompile)
-    }
 }
 
 /// Reports progress; the session retains the state required to obtain [`HaltedExecution`].
@@ -508,16 +446,25 @@ impl<M: ExecutionMode> HaltedExecution<M> {
 
     /// Exports the execution outputs and prepares the selected artifact.
     ///
-    /// Precompile witness export and trace construction still enforce their configured limits.
+    /// Precompile witness export enforces the configured limits.
     pub fn finish(self) -> Result<M::Output, ExecutionError> {
         let output = self.processor.into_execution_output(self.stack)?;
-        private::ExecutionModeImpl::prepare_output(
-            self.mode,
-            || self.program_info,
-            self.stack_inputs,
-            output,
-            self.recorder,
-        )
+        Ok(self
+            .mode
+            .prepare_output(|| self.program_info, self.stack_inputs, output, self.recorder))
+    }
+}
+
+impl HaltedExecution<RecordWitness> {
+    /// Reports trace rows and padded heights from live recording metadata.
+    ///
+    /// Core rows include HALT. Chiplet counts include controller alignment, AEAD expansion
+    /// and the mandatory padding row. Only the Eidos compression rows and their padded height
+    /// are upper bounds, since trace construction deduplicates compression requests.
+    /// Returns `None` if a row count or padded height exceeds `usize`.
+    pub fn trace_len_upper_bound(&self) -> Option<crate::trace::TraceLenSummary> {
+        self.recorder
+            .trace_len_upper_bound(self.state().clock(), self.program_info.kernel())
     }
 }
 
@@ -537,45 +484,9 @@ mod private {
             stack_inputs: StackInputs,
             output: ExecutionOutput,
             recorder: Self::Recorder,
-        ) -> Result<<Self as ExecutionMode>::Output, ExecutionError>
+        ) -> <Self as ExecutionMode>::Output
         where
             Self: ExecutionMode;
-
-        fn run_sync(
-            self,
-            processor: FastProcessor,
-            program: &Program,
-            source_context: Option<PackageSourceDebugContext<'_>>,
-            host: &mut impl SyncHost,
-        ) -> Result<<Self as ExecutionMode>::Output, ExecutionError>
-        where
-            Self: ExecutionMode,
-        {
-            let stack_inputs = processor.initial_stack_inputs();
-            let mut recorder = self.recorder(&processor);
-            let output =
-                processor.run_with_tracer_sync(program, source_context, host, &mut recorder)?;
-            self.prepare_output(|| program.to_info(), stack_inputs, output, recorder)
-        }
-
-        fn run(
-            self,
-            processor: FastProcessor,
-            program: &Program,
-            source_context: Option<PackageSourceDebugContext<'_>>,
-            host: &mut impl Host,
-        ) -> impl Future<Output = Result<<Self as ExecutionMode>::Output, ExecutionError>>
-        where
-            Self: ExecutionMode,
-        {
-            async move {
-                let stack_inputs = processor.initial_stack_inputs();
-                let mut recorder = self.recorder(&processor);
-                let output =
-                    processor.run_with_tracer(program, source_context, host, &mut recorder).await?;
-                self.prepare_output(|| program.to_info(), stack_inputs, output, recorder)
-            }
-        }
     }
 
     impl ExecutionModeImpl for Execute {
@@ -589,8 +500,8 @@ mod private {
             _: StackInputs,
             output: ExecutionOutput,
             _: NoopTracer,
-        ) -> Result<ExecutionOutput, ExecutionError> {
-            Ok(output)
+        ) -> ExecutionOutput {
+            output
         }
     }
 
@@ -605,68 +516,15 @@ mod private {
             stack_inputs: StackInputs,
             output: ExecutionOutput,
             recorder: ExecutionTracer,
-        ) -> Result<WitnessOutput, ExecutionError> {
-            let (witness, advice) = FastProcessor::execution_witness_from_parts(
+        ) -> WitnessOutput {
+            let (witness, advice) = ExecutionWitness::from_execution(
                 program_info(),
                 stack_inputs,
                 output,
-                recorder,
+                recorder.into_trace_replay(),
             );
             let claim = witness.claim();
-            Ok(WitnessOutput { claim, witness, advice })
-        }
-    }
-
-    impl ExecutionModeImpl for BuildTrace {
-        type Recorder = ExecutionTracer;
-        fn recorder(&self, processor: &FastProcessor) -> Self::Recorder {
-            processor.new_tracer()
-        }
-        fn prepare_output(
-            self,
-            program_info: impl FnOnce() -> ProgramInfo,
-            stack_inputs: StackInputs,
-            output: ExecutionOutput,
-            recorder: ExecutionTracer,
-        ) -> Result<TraceOutput, ExecutionError> {
-            let WitnessOutput { claim, witness, advice } =
-                RecordWitness.prepare_output(program_info, stack_inputs, output, recorder)?;
-            let (vm_witness, precompile) = witness.into_parts();
-            let vm = vm_witness.build_trace(&self.budget)?;
-            Ok(TraceOutput {
-                claim,
-                trace: ExecutionTrace { vm, precompile },
-                advice,
-            })
-        }
-
-        #[cfg(feature = "std")]
-        fn run_sync(
-            self,
-            processor: FastProcessor,
-            program: &Program,
-            source_context: Option<PackageSourceDebugContext<'_>>,
-            host: &mut impl SyncHost,
-        ) -> Result<TraceOutput, ExecutionError> {
-            let stack_inputs = processor.initial_stack_inputs();
-            if processor.overlapped_trace_build() {
-                let (vm, precompile, advice) =
-                    processor.build_trace_sync(program, source_context, host, &self.budget)?;
-                let claim = ExecutionClaim::from_program_info(
-                    program.to_info(),
-                    stack_inputs,
-                    *vm.stack_outputs(),
-                );
-                return Ok(TraceOutput {
-                    claim,
-                    trace: ExecutionTrace { vm, precompile },
-                    advice,
-                });
-            }
-            let mut recorder = self.recorder(&processor);
-            let output =
-                processor.run_with_tracer_sync(program, source_context, host, &mut recorder)?;
-            self.prepare_output(|| program.to_info(), stack_inputs, output, recorder)
+            WitnessOutput { claim, witness, advice }
         }
     }
 }

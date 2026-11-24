@@ -3,7 +3,11 @@ use std::{path::PathBuf, time::Instant};
 use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{DefaultHost, ExecutionOptions, PackageSourceDebugContext, trace::VmTrace};
+use miden_processor::{
+    DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionPlan, PackageSourceDebugContext,
+    RecordWitness,
+    trace::{MIN_TRACE_LEN, TraceLenSummary},
+};
 use miden_vm::{Processor, internal::InputFile};
 use miden_vm_stark::memory::{DEFAULT_MAX_PROVER_MEMORY_BYTES, canonical_budget};
 use tracing::instrument;
@@ -44,9 +48,8 @@ pub struct RunCmd {
     #[arg(long = "max-advice-size", default_value_t = ExecutionOptions::DEFAULT_MAX_ADVICE_SIZE_BYTES)]
     max_advice_size: usize,
 
-    /// Maximum modelled peak memory for VM trace construction (512M, 32Gi)
-    ///
-    /// Does not cover precompile proving or total process memory.
+    /// VM prover memory limit for the recorded execution (512M, 32Gi).
+    /// A definite overrun fails the run. A possible overrun emits a warning.
     #[arg(
         long = "max-prover-memory",
         default_value_t = DEFAULT_MAX_PROVER_MEMORY_BYTES,
@@ -99,7 +102,7 @@ impl RunCmd {
         let now = Instant::now();
 
         // use a single match expression based on file extension
-        let (trace, program_hash) = match ext.as_str() {
+        let (claim, summary) = match ext.as_str() {
             "masp" => run_masp_program(self, execution_options)?,
             "masm" => run_masm_program(self, execution_options)?,
             _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),
@@ -107,50 +110,66 @@ impl RunCmd {
 
         println!(
             "Executed the program with hash {} in {} ms",
-            hex::encode(program_hash),
+            hex::encode(claim.program_root().as_bytes()),
             now.elapsed().as_millis()
         );
 
-        if let Some(output_path) = &self.output_file {
-            // write outputs to file if one was specified
-            OutputFile::write(trace.stack_outputs(), output_path).map_err(Report::msg)?;
-        } else {
-            // write the stack outputs to the terminal
-            println!("Output: {:?}", trace.stack_outputs().get_num_elements(self.num_outputs));
+        let budget = canonical_budget(self.max_prover_memory);
+        if budget
+            .prover_peak_bytes(summary.padded_heights())
+            .is_none_or(|bytes| bytes > self.max_prover_memory)
+        {
+            let [core, chiplets, _, lookup] = *summary.padded_heights();
+            let min_bytes = budget.prover_peak_bytes(&[core, chiplets, MIN_TRACE_LEN, lookup]);
+            if min_bytes.is_none_or(|bytes| bytes > self.max_prover_memory) {
+                return Err(Report::msg(format!(
+                    "VM trace requires more than the {} byte prover memory limit even at the minimum Eidos height",
+                    self.max_prover_memory,
+                )));
+            }
+            eprintln!(
+                "Warning: VM prover memory upper bound exceeds the {} byte limit. The prover checks the exact padded heights.",
+                self.max_prover_memory
+            );
         }
 
-        let summary = trace.trace_len_summary();
+        if let Some(output_path) = &self.output_file {
+            // write outputs to file if one was specified
+            OutputFile::write(claim.stack_outputs(), output_path).map_err(Report::msg)?;
+        } else {
+            // write the stack outputs to the terminal
+            println!("Output: {:?}", claim.stack_outputs().get_num_elements(self.num_outputs));
+        }
+
         let chiplets = summary.chiplets();
-        let padding_percentage =
-            |rows: usize, height: usize| (height.saturating_sub(rows)) * 100 / height;
+        let padding_percent =
+            |rows: usize, height: usize| (height - rows) as u128 * 100 / height as u128;
 
         // print the required cycles for each component
         println!(
             "VM trace rows:
 ├── Core rows: {} extended to {} ({}% padding)
 ├── Chiplets rows: {} extended to {} ({}% padding)
-    ├── Hash chiplet rows: {}
-    ├── Bitwise chiplet rows: {}
-    ├── Memory chiplet rows: {}
-    └── Kernel ROM rows: {}
-├── Eidos compression rows: {} extended to {} ({}% padding)
+│   ├── Hash chiplet rows: {}
+│   ├── Bitwise chiplet rows (including AEAD): {}
+│   ├── Memory chiplet rows: {}
+│   ├── ACE chiplet rows: {}
+│   └── Kernel ROM rows: {}
+├── Eidos compression rows: at most {} (padded height at most {})
 └── Byte-pair lookup rows: {} (fixed table)",
             summary.core_rows(),
             summary.core_height(),
-            padding_percentage(summary.core_rows(), summary.core_height()),
+            padding_percent(summary.core_rows(), summary.core_height()),
             summary.chiplets_rows(),
             summary.chiplets_height(),
-            padding_percentage(summary.chiplets_rows(), summary.chiplets_height()),
+            padding_percent(summary.chiplets_rows(), summary.chiplets_height()),
             chiplets.hash_chiplet_len(),
             chiplets.bitwise_chiplet_len(),
             chiplets.memory_chiplet_len(),
+            chiplets.ace_chiplet_len(),
             chiplets.kernel_rom_len(),
             summary.eidos_compression_rows(),
             summary.eidos_compression_height(),
-            padding_percentage(
-                summary.eidos_compression_rows(),
-                summary.eidos_compression_height()
-            ),
             summary.byte_pair_lookup_rows(),
         );
 
@@ -165,7 +184,7 @@ impl RunCmd {
 fn run_masp_program(
     params: &RunCmd,
     exec_options: ExecutionOptions,
-) -> Result<(VmTrace, [u8; 32]), Report> {
+) -> Result<(ExecutionClaim, TraceLenSummary), Report> {
     if params.kernel_file.is_some() {
         return Err(Report::msg(
             "The `--kernel` option does not apply to a `.masp` package: the package fixes its own kernel.",
@@ -185,29 +204,19 @@ fn run_masp_program(
     let mut host = DefaultHost::default().with_library(&CoreLibrary::default())?;
     load_program_package_with_handlers(&mut host, &package, &mut Vec::new())?;
 
-    let program_hash: [u8; 32] = program.hash().into();
-
-    let witness = Processor::new(&program)
+    let plan = Processor::new(&program)
         .with_options(exec_options)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
-        .record_witness()
-        .run_sync(&mut host)
-        .wrap_err("Failed to execute program")?
-        .witness;
-    let (vm_witness, _) = witness.into_parts();
-    let trace = vm_witness
-        .build_trace(&canonical_budget(params.max_prover_memory))
-        .wrap_err("Failed to build trace")?;
-
-    Ok((trace, program_hash))
+        .record_witness();
+    run_recording(plan, &mut host)
 }
 
 #[instrument(target = "miden::cli", level = "trace", name = "run_program", skip_all)]
 fn run_masm_program(
     params: &RunCmd,
     exec_options: ExecutionOptions,
-) -> Result<(VmTrace, [u8; 32]), Report> {
+) -> Result<(ExecutionClaim, TraceLenSummary), Report> {
     for lib in &params.library_paths {
         if !lib.is_file() {
             let name = lib.display();
@@ -250,24 +259,29 @@ fn run_masm_program(
         load_package_with_handlers(&mut host, kernel_package, &mut loaded_handler_sections)?;
     }
 
-    let program_hash: [u8; 32] = program.hash().into();
-
     let source = package_debug_info
         .as_ref()
         .map(|info| PackageSourceDebugContext::new_optional(info, entrypoint_source_node));
-    let witness = Processor::new(&program)
+    let plan = Processor::new(&program)
         .with_options(exec_options)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
         .with_source_context(source)
-        .record_witness()
-        .run_sync(&mut host)
-        .wrap_err("Failed to execute program")?
-        .witness;
-    let (vm_witness, _) = witness.into_parts();
-    let trace = vm_witness
-        .build_trace(&canonical_budget(params.max_prover_memory))
-        .wrap_err("Failed to build trace")?;
+        .record_witness();
+    run_recording(plan, &mut host)
+}
 
-    Ok((trace, program_hash))
+fn run_recording(
+    plan: ExecutionPlan<'_, RecordWitness>,
+    host: &mut DefaultHost,
+) -> Result<(ExecutionClaim, TraceLenSummary), Report> {
+    let halted = plan
+        .start()
+        .and_then(|session| session.run_to_completion_sync(host))
+        .wrap_err("Failed to execute program")?;
+    let summary = halted
+        .trace_len_upper_bound()
+        .ok_or_else(|| Report::msg("Trace size estimate exceeds the platform row limit"))?;
+    let output = halted.finish().wrap_err("Failed to export execution witness")?;
+    Ok((output.claim, summary))
 }

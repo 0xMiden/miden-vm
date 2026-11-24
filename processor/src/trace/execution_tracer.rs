@@ -5,6 +5,7 @@ use miden_air_definitions::vm::trace::chiplets::hasher::{
 };
 use miden_core::{
     FMP_ADDR, FMP_INIT_VALUE,
+    field::PrimeCharacteristicRing,
     operations::Operation,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
@@ -301,20 +302,6 @@ pub struct ExecutionTracer {
 }
 
 impl ExecutionTracer {
-    /// Creates a tracer whose hasher-chiplet requests stream to `hasher_sender` as they are
-    /// recorded, instead of buffering for post-execution replay. Everything else records as in
-    /// [`Self::new`].
-    #[cfg(feature = "std")]
-    pub(crate) fn new_with_streamed_hasher(
-        fragment_size: usize,
-        max_stack_depth: usize,
-        hasher_sender: std::sync::mpsc::Sender<crate::trace::ResolvedHasherOp<'static>>,
-    ) -> Self {
-        let mut tracer = Self::new(fragment_size, max_stack_depth);
-        tracer.hasher_for_chiplet = HasherRequestReplay::streamed(hasher_sender);
-        tracer
-    }
-
     /// Creates a new `ExecutionTracer` with the given fragment size.
     #[inline(always)]
     pub fn new(fragment_size: usize, max_stack_depth: usize) -> Self {
@@ -420,6 +407,54 @@ impl ExecutionTracer {
             translated.push_continuation(translated_cont);
         }
         translated
+    }
+
+    pub(crate) fn trace_len_upper_bound(
+        &self,
+        clock: RowIndex,
+        kernel: &crate::KernelDescriptor,
+    ) -> Option<super::TraceLenSummary> {
+        use miden_air_definitions::vm::trace::{
+            MIN_TRACE_LEN, and8_lookup::AND8_LOOKUP_TRACE_HEIGHT,
+            chiplets::hasher::CONTROLLER_TRACE_ALIGNMENT,
+            eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN,
+        };
+
+        let core_rows = clock.as_usize().checked_add(1)?; // final HALT row
+        // Controller addresses start at one. The shim has already charged every basic-block
+        // batch and every Merkle path level (both paths for an update).
+        let controller_rows = usize::try_from(self.hasher_chiplet_shim.addr - 1).ok()?;
+        let chiplets = super::parallel::recorded_chiplet_lengths(
+            controller_rows.checked_next_multiple_of(CONTROLLER_TRACE_ALIGNMENT)?,
+            kernel,
+            self.fragment_contexts
+                .iter()
+                .map(|ctx| &ctx.replay.memory_reads)
+                .chain(core::iter::once(&self.memory_reads)),
+            &self.memory_writes,
+            &self.bitwise,
+            &self.ace,
+        )?;
+        // One compression per controller request, plus XOF requests which bypass the
+        // controller. The Eidos AIR coalesces repeated requests when building the trace.
+        let eidos_rows = (controller_rows / CONTROLLER_ROWS_PER_HASHER_OP)
+            .checked_add(self.hasher_for_chiplet.aead_xof_count())?
+            .checked_mul(EIDOS_COMPRESSION_CYCLE_LEN)?;
+        let padded = |rows: usize| Some(rows.checked_next_power_of_two()?.max(MIN_TRACE_LEN));
+        let heights = [
+            padded(core_rows)?,
+            padded(chiplets.checked_trace_len()?)?,
+            padded(eidos_rows)?,
+            AND8_LOOKUP_TRACE_HEIGHT,
+        ];
+        super::TraceLenSummary::new(
+            core_rows,
+            chiplets,
+            eidos_rows,
+            AND8_LOOKUP_TRACE_HEIGHT,
+            heights,
+        )
+        .ok()
     }
 
     /// Converts the `ExecutionTracer` into a [`TraceReplay`] using the data accumulated during
@@ -824,7 +859,7 @@ impl Tracer for ExecutionTracer {
                     self.hasher_for_chiplet.record_hash_basic_block(
                         forest_id,
                         mast_node_id,
-                        basic_block_node,
+                        basic_block_node.digest(),
                     );
                     let block_addr =
                         self.hasher_chiplet_shim.record_hash_basic_block(basic_block_node);
@@ -1219,8 +1254,7 @@ fn node_id_for_visit<F>(continuation: &Continuation<F>) -> Option<MastNodeId> {
 // HASHER CHIPLET SHIM
 // ================================================================================================
 
-/// The number of controller rows per hasher request, as u32.
-const NUM_HASHER_ROWS_PER_OP: u32 = CONTROLLER_ROWS_PER_HASHER_OP as u32;
+const NUM_HASHER_ROWS_PER_OP: u64 = CONTROLLER_ROWS_PER_HASHER_OP as u64;
 
 /// Implements a shim for the hasher chiplet, where the responses of the hasher chiplet are emulated
 /// and recorded for later replay.
@@ -1232,8 +1266,10 @@ const NUM_HASHER_ROWS_PER_OP: u32 = CONTROLLER_ROWS_PER_HASHER_OP as u32;
 pub struct HasherChipletShim {
     /// The address of the next MAST node encountered during execution. This field is used to keep
     /// track of the number of rows in the hasher chiplet, from which the address of the next MAST
-    /// node is derived.
-    addr: u32,
+    /// node is derived. A Merkle update can consume 128 controller rows in one VM cycle, so the
+    /// cycle limit alone does not keep this counter within 32 bits. Trace construction enforces
+    /// its own row limit during replay.
+    addr: u64,
     /// Replay for the hasher chiplet responses, recording only the hasher chiplet responses.
     hasher_replay: HasherResponseReplay,
     block_addr_replay: BlockAddressReplay,
@@ -1251,7 +1287,7 @@ impl HasherChipletShim {
 
     /// Records the address returned from a call to `Hasher::hash_control_block()`.
     pub fn record_hash_control_block(&mut self) -> Felt {
-        let block_addr = Felt::from_u32(self.addr);
+        let block_addr = Felt::from_u64(self.addr);
 
         self.block_addr_replay.record_block_address(block_addr);
         self.addr += NUM_HASHER_ROWS_PER_OP;
@@ -1261,33 +1297,33 @@ impl HasherChipletShim {
 
     /// Records the address returned from a call to `Hasher::hash_basic_block()`.
     pub fn record_hash_basic_block(&mut self, basic_block_node: &BasicBlockNode) -> Felt {
-        let block_addr = Felt::from_u32(self.addr);
+        let block_addr = Felt::from_u64(self.addr);
 
         self.block_addr_replay.record_block_address(block_addr);
-        self.addr += NUM_HASHER_ROWS_PER_OP * basic_block_node.num_op_batches() as u32;
+        self.addr += NUM_HASHER_ROWS_PER_OP * basic_block_node.num_op_batches() as u64;
 
         block_addr
     }
     /// Records the output of one Eidos compression request.
     pub fn record_compression_output(&mut self, hashed_state: [Felt; 12]) {
-        self.hasher_replay.record_compression(Felt::from_u32(self.addr), hashed_state);
+        self.hasher_replay.record_compression(Felt::from_u64(self.addr), hashed_state);
         self.addr += NUM_HASHER_ROWS_PER_OP;
     }
 
     /// Records the result of a call to `Hasher::build_merkle_root()`.
     pub fn record_build_merkle_root(&mut self, path: &MerklePath, computed_root: Word) {
         self.hasher_replay
-            .record_build_merkle_root(Felt::from_u32(self.addr), computed_root);
-        self.addr += NUM_HASHER_ROWS_PER_OP * path.depth() as u32;
+            .record_build_merkle_root(Felt::from_u64(self.addr), computed_root);
+        self.addr += NUM_HASHER_ROWS_PER_OP * u64::from(path.depth());
     }
 
     /// Records the result of a call to `Hasher::update_merkle_root()`.
     pub fn record_update_merkle_root(&mut self, path: &MerklePath, old_root: Word, new_root: Word) {
         self.hasher_replay
-            .record_update_merkle_root(Felt::from_u32(self.addr), old_root, new_root);
+            .record_update_merkle_root(Felt::from_u64(self.addr), old_root, new_root);
 
         // The Merkle path is verified twice: once for the old root and once for the new root.
-        self.addr += 2 * NUM_HASHER_ROWS_PER_OP * path.depth() as u32;
+        self.addr += 2 * NUM_HASHER_ROWS_PER_OP * u64::from(path.depth());
     }
 
     pub fn extract_replay(&mut self) -> (HasherResponseReplay, BlockAddressReplay) {
@@ -1446,7 +1482,7 @@ mod serialization_tests {
         context.hasher_for_chiplet.record_hash_basic_block(
             MastForestId::from(1u32),
             MastNodeId::from(0),
-            &basic_block,
+            basic_block.digest(),
         );
 
         assert_context_read_rejects_bad_forest_id(context, "hasher HashBasicBlock replay");

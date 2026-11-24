@@ -60,9 +60,8 @@ pub use errors::{
 };
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use execution_plan::{
-    BuildTrace, Execute, ExecutionMode, ExecutionPlan, ExecutionSession, ExecutionTrace,
-    HaltedExecution, Processor, RecordWitness, StepStatus, TraceOutput, VmTraceBudget,
-    WitnessOutput,
+    Execute, ExecutionMode, ExecutionPlan, ExecutionSession, HaltedExecution, Processor,
+    RecordWitness, StepStatus, WitnessOutput,
 };
 pub(crate) use fast::BreakReason;
 pub use fast::{

@@ -5,6 +5,7 @@ use miden_core::{
     proof::HashFunction,
 };
 use miden_processor::{DefaultHost, Processor, WitnessOutput};
+use miden_prover::Prover;
 
 /// Explicit fixture maintenance; standard tests consume the checked-in proof instead.
 #[test]
@@ -29,10 +30,8 @@ fn regenerate_vm_advice_fixture() {
         assert_eq!(*claim.kernel(), KernelDescriptor::default());
         assert_eq!(*claim.stack_inputs(), StackInputs::default());
         assert_eq!(*claim.stack_outputs(), StackOutputs::default());
-        let (vm_witness, _) = witness.into_parts();
-        let trace = vm_witness.build_trace(&miden_vm_stark::memory::default_budget()).unwrap();
-        let proof = miden_vm_stark::prover::prove(trace, HashFunction::Eidos, false).unwrap();
-        std::fs::write(directory.join("vm_eidos_v1_0.bin"), proof.to_bytes()).unwrap();
+        let proof = Prover::new().with_hash_fn(HashFunction::Eidos).prove(witness).unwrap();
+        std::fs::write(directory.join("vm_eidos_v1_0.bin"), proof.vm().to_bytes()).unwrap();
         std::fs::write(directory.join("vm_eidos_v1_0.program"), claim.program_root().to_bytes())
             .unwrap();
     });

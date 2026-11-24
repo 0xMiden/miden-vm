@@ -564,21 +564,13 @@ impl Deserializable for HasherOp {
 
 impl Serializable for HasherRequestReplay {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        match &self.sink {
-            HasherOpSink::Buffered(ops) => ops.write_into(target),
-            #[cfg(feature = "std")]
-            HasherOpSink::Streamed(_) => {
-                panic!("cannot serialize streamed hasher request replay")
-            },
-        }
+        self.ops.write_into(target);
     }
 }
 
 impl Deserializable for HasherRequestReplay {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        Ok(Self {
-            sink: HasherOpSink::Buffered(VecDeque::read_from(source)?),
-        })
+        Ok(Self { ops: Vec::read_from(source)? })
     }
 }
 

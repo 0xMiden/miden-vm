@@ -453,20 +453,20 @@ impl Test {
 
     /// Executes the test with the provided stack inputs and asserts the final stack state.
     ///
-    /// This preserves the same execution coverage as [`expect_stack`](Self::expect_stack): traced
-    /// execution, step/resume execution comparison, and trace construction are all still run.
+    /// As in [`Self::expect_stack`], witness recording and step/resume execution must agree.
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
     pub fn expect_stack_with_inputs(&self, stack_inputs: &[u64], final_stack: &[u64]) {
-        let trace = self
-            .execute_with_stack_inputs(stack_inputs)
+        let inputs = stack_inputs_from_ints(stack_inputs.iter().copied());
+        let output = self
+            .record_with_stack_inputs(inputs)
             .inspect_err(|_err| {
                 #[cfg(feature = "std")]
                 std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
             })
             .expect("failed to execute");
 
-        let result = stack_outputs_as_int_vec(&trace.last_stack_state());
+        let result = stack_outputs_as_int_vec(output.claim.stack_outputs());
         let expected = resize_to_min_stack_depth(final_stack);
         assert_eq!(expected, result, "Expected stack to be {:?}, found {:?}", expected, result);
     }
@@ -547,37 +547,30 @@ impl Test {
         Ok(result)
     }
 
-    /// Compiles the test's source to a Program and executes it with the tests inputs. Returns a
-    /// resulting execution trace or error.
-    ///
-    /// Internally, this also checks that traced execution and step/resume execution agree on the
-    /// stack outputs.
+    /// Records the execution and compares its stack outputs with step/resume execution.
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
-    pub fn execute(&self) -> Result<VmTrace, ExecutionError> {
-        self.execute_with_stack_inputs_inner(self.stack_inputs)
+    pub fn execute(&self) -> Result<ExecutionClaim, ExecutionError> {
+        Ok(self.record_with_stack_inputs(self.stack_inputs)?.claim)
     }
 
-    /// Compiles the test's source and executes it with the provided stack inputs.
-    ///
-    /// This uses the same traced execution, step/resume comparison, and trace construction path as
-    /// [`execute`](Self::execute).
+    /// Builds a VM trace for AIR checks and assertions on trace rows.
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
-    pub(crate) fn execute_with_stack_inputs(
-        &self,
-        stack_inputs: &[u64],
-    ) -> Result<VmTrace, ExecutionError> {
-        let stack_inputs = stack_inputs_from_ints(stack_inputs.iter().copied());
-        self.execute_with_stack_inputs_inner(stack_inputs)
+    pub fn build_trace(&self) -> Result<VmTrace, ExecutionError> {
+        let output = self.record_with_stack_inputs(self.stack_inputs)?;
+        let (vm, _) = output.witness.into_parts();
+        let trace = vm.build_trace(&miden_vm_stark::memory::default_budget())?;
+        assert_eq!(output.claim.program_root(), *trace.program_hash(), "inconsistent program hash");
+        Ok(trace)
     }
 
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
-    fn execute_with_stack_inputs_inner(
+    fn record_with_stack_inputs(
         &self,
         stack_inputs: StackInputs,
-    ) -> Result<VmTrace, ExecutionError> {
+    ) -> Result<WitnessOutput, ExecutionError> {
         // Note: we fix a large fragment size here, as we're not testing the fragment boundaries
         // with these tests (which are tested separately), but rather only the per-fragment trace
         // generation logic - though not too big so as to over-allocate memory.
@@ -600,23 +593,12 @@ impl Test {
             }))
             .record_witness()
             .prepare()?;
-        let recorded = execution
-            .run_sync(&mut host)
-            .map(|WitnessOutput { claim, witness, .. }| (*claim.stack_outputs(), witness));
-
-        // Compare traced full execution and step/resume execution stack outputs.
+        let recorded = execution.run_sync(&mut host);
         self.assert_result_with_step_execution(
             stack_inputs,
-            recorded.as_ref().map(|(stack, _)| *stack),
+            recorded.as_ref().map(|output| *output.claim.stack_outputs()),
         );
-
-        recorded.and_then(|(_, witness)| {
-            let (vm_witness, _) = witness.into_parts();
-            let trace = vm_witness.build_trace(&miden_vm_stark::memory::default_budget())?;
-
-            assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
-            Ok(trace)
-        })
+        recorded
     }
 
     /// Compiles the test's source to a Program and executes it with the tests inputs.
@@ -692,7 +674,7 @@ impl Test {
     #[track_caller]
     pub fn check_constraints(&self) {
         let trace = self
-            .execute()
+            .build_trace()
             .inspect_err(|_err| {
                 #[cfg(feature = "std")]
                 std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
@@ -705,7 +687,7 @@ impl Test {
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
     pub fn get_last_stack_state(&self) -> StackOutputs {
-        let trace = self
+        let claim = self
             .execute()
             .inspect_err(|_err| {
                 #[cfg(feature = "std")]
@@ -713,7 +695,7 @@ impl Test {
             })
             .expect("failed to execute");
 
-        trace.last_stack_state()
+        *claim.stack_outputs()
     }
 
     // HELPERS

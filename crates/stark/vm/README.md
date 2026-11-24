@@ -26,7 +26,7 @@ commitment scheme supports it.
 
 `memory::default_budget()` uses a 64 GiB limit. The supplied value carries a shared
 `miden_stark::memory::ProverMemoryModel` and the caller's byte limit. Processor applies an early
-chiplet cap, a raw fragment-buffer check, a padded-height check, and a streaming hasher cap.
+chiplet cap, a raw fragment-buffer check, and a budget check on the final padded heights.
 The model estimates dominant VM proving allocations, including preprocessing and hash scratch.
 It does not bound total process memory, concurrent proofs, or cached setups for other configurations.
 

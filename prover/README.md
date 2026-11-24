@@ -1,13 +1,13 @@
 # Miden prover
 
-This crate proves execution witnesses and traces produced by the
+This crate proves execution witnesses recorded by the
 [Miden processor](../processor/) using [Plonky3](https://github.com/0xMiden/Plonky3). It also
 proves batches of portable precompile witnesses.
 
 ## Usage
 
-The synchronous `Prover::prove` and `Prover::prove_full` methods accept either an `ExecutionWitness`
-or an `ExecutionTrace` and return an `ExecutionProof`. `prove` proves the VM portion. Its
+The synchronous `Prover::prove` and `Prover::prove_full` methods accept an `ExecutionWitness`
+and return an `ExecutionProof`. `prove` proves the VM portion. Its
 `PrecompileStatus` is `Empty` when there is no deferred work, or `Deferred` with a portable
 singleton `PrecompileWitness`. `prove_full` proves the VM and settles any deferred work locally.
 `Prover::prove_precompiles(Vec<PrecompileWitness>)` imports a nonempty batch into one Session and
@@ -83,14 +83,11 @@ proves the batcher itself, leaving no deferred work for the recipient. The
 [MASM verification guide](../docs/src/user_docs/core_lib/recursive_verification.md#example-batch-n-executions)
 explains the claim list, ordered root fold, and host request.
 
-### Direct trace proving
+### VM trace construction
 
-Select `Processor::build_trace(prover.trace_budget())` to use the prover's VM model and memory
-limit. Use `.run_sync(host)` for a synchronous host or `.run(host).await` for an asynchronous host.
-Synchronous execution can overlap hasher trace construction when enabled and a Rayon worker is
-available. The async driver builds the trace from buffered replay after execution. Pass
-`TraceOutput::trace` to `prove` or `prove_full`, which recheck the padded trace against the prover's
-memory budget.
+`Prover::prove` and `Prover::prove_full` consume an `ExecutionWitness` and build the VM trace
+under the configured prover memory limit. The processor replays the core fragments and chiplets
+after execution and checks the padded AIR heights before allocating the final matrices.
 
 ## STARK Backend
 

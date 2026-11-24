@@ -1,60 +1,43 @@
 use miden_assembly::Assembler;
-use miden_processor::{DefaultHost, ExecutionError, Processor};
+use miden_processor::{DefaultHost, ExecutionError, ExecutionOptions, Processor};
 use miden_prover::{Prover, ProverError};
 
 #[test]
-fn materialized_trace_proving_rechecks_the_provers_memory_budget() {
+fn witness_proving_enforces_the_provers_memory_budget() {
     let program = Assembler::default()
         .assemble_program("trace_budget", "begin push.1 drop end")
         .unwrap()
         .unwrap_program();
-    let prover = Prover::new().with_max_prover_memory_bytes(0);
-    let capture = Processor::new(&program)
-        .build_trace(prover.trace_budget())
-        .run_sync(&mut DefaultHost::default());
-    assert_eq!(prover.trace_budget().limit_bytes(), 0);
-    // A zero budget can reject the trace at the row-allocation guard before the peak check.
-    assert!(matches!(
-        capture,
-        Err(ExecutionError::TraceLenExceeded(0)
-            | ExecutionError::ProverMemoryExceeded { budget_bytes: 0, .. })
-    ));
-
-    let witness = Processor::new(&program)
-        .record_witness()
-        .run_sync(&mut DefaultHost::default())
-        .unwrap()
-        .witness;
-    assert!(matches!(
-        prover.prove(witness),
-        Err(ProverError::TraceGeneration(
-            ExecutionError::TraceLenExceeded(0)
-                | ExecutionError::ProverMemoryExceeded { budget_bytes: 0, .. }
-        ))
-    ));
-
-    // Materialize under a larger budget to check that proving re-applies its own limit.
-    let recording_prover = Prover::new();
-    for complete in [false, true] {
-        let execution_trace = Processor::new(&program)
-            .build_trace(recording_prover.trace_budget())
+    let record = || {
+        Processor::new(&program)
+            .with_options(ExecutionOptions::default().with_core_trace_fragment_size(8).unwrap())
+            .record_witness()
             .run_sync(&mut DefaultHost::default())
-            .expect("trace capture should fit the normal budget")
-            .trace;
+            .unwrap()
+            .witness
+    };
+    let budget = miden_vm_stark::memory::default_budget();
+    let (vm, _) = record().into_parts();
+    let exact_peak = {
+        let trace = vm.build_trace(&budget).unwrap();
+        budget.prover_peak_bytes(trace.trace_len_summary().padded_heights()).unwrap()
+    };
+
+    // Both entrypoints must enforce the padded shape even when the raw buffers fit.
+    let limit = exact_peak - 1;
+    let prover = Prover::new().with_max_prover_memory_bytes(limit);
+    for complete in [false, true] {
+        let witness = record();
         let result = if complete {
-            prover.prove_full(execution_trace)
+            prover.prove_full(witness)
         } else {
-            prover.prove(execution_trace)
+            prover.prove(witness)
         };
-        assert!(
-            matches!(
-                result,
-                Err(ProverError::VmProofGeneration(ExecutionError::ProverMemoryExceeded {
-                    estimated_bytes,
-                    budget_bytes: 0,
-                })) if estimated_bytes > 0
-            ),
-            "materialized trace proving must enforce its own budget (complete={complete})"
-        );
+        assert!(matches!(
+            result,
+            Err(ProverError::TraceGeneration(
+                ExecutionError::ProverMemoryExceeded { estimated_bytes, budget_bytes }
+            )) if estimated_bytes == exact_peak && budget_bytes == limit
+        ));
     }
 }

@@ -103,25 +103,9 @@ exported after execution. `Verifier::with_verification_precompile_limits` and
 `Prover::with_verification_precompile_limits` configure the per-singleton policy for transported
 witnesses. These logical limits apply separately from the prover's batch-wide peak-memory budget.
 
-#### Building a trace before proving
-
-Select `build_trace` to materialize an `ExecutionTrace` with its matching precompile witness.
-Use `run_sync()` with a `SyncHost` or `run().await` with an asynchronous `Host`. Synchronous runs on
-`std` can overlap hasher trace construction with execution when the execution options enable it and a
-Rayon worker is available. Async and stepped runs build the trace from buffered replay. Async runs
-await host callbacks and assemble the trace on the polling thread.
-
-```rust,ignore
-let prover = Prover::new();
-let TraceOutput { claim, trace, .. } = Processor::new(&program)
-    .build_trace(prover.trace_budget())
-    .run_sync(&mut host)?;
-let proof = prover.prove_full(trace)?;
-Verifier::new().verify(&claim, &proof)?;
-```
-
-Both `prove` and `prove_full` accept a witness or a materialized trace and return an
-`ExecutionProof`. Both apply the prover's memory budget to the trace.
+Both proving methods build the trace from the recorded witness under the prover's VM memory
+budget. For AIR diagnostics, split the witness with `into_parts()` and materialize the VM
+component with `vm_witness.build_trace(&budget)`.
 
 #### Stepping a recording
 

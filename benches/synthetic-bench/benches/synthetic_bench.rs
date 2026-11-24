@@ -105,10 +105,10 @@ fn execute_and_prove(
     let output = Processor::new(program)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
-        .build_trace(prover.trace_budget())
+        .record_witness()
         .run_sync(host)
-        .expect("execute program and build trace");
-    let proof = prover.prove_full(output.trace).expect("prove program");
+        .expect("execute program and record witness");
+    let proof = prover.prove_full(output.witness).expect("prove program");
     (output.claim, proof)
 }
 
@@ -235,7 +235,7 @@ fn bench_one_scenario(
     // Four axes per scenario:
     //   exec       -- ordinary execution (no trace data)
     //   trace_prep -- record_witness (post-execution witness creation)
-    //   prove      -- configured complete proving with overlapped trace construction
+    //   prove      -- configured complete proving from a recorded witness
     //   verify     -- Verifier::new().verify against a proof generated once outside the timed loop
     if axes.contains("exec") {
         group.bench_function("exec", |b| {

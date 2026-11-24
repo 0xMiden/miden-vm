@@ -114,12 +114,14 @@ impl ReplaySnapshotRecorder {
     }
 }
 
-/// Magic bytes identifying a replay snapshot file, followed by a format version. Bumping the
-/// version invalidates older snapshots, whose serialized shape may differ.
+/// Magic bytes identifying a replay snapshot file, followed by a format version.
 const SNAPSHOT_MAGIC: [u8; 6] = *b"MDNSNP";
-const SNAPSHOT_VERSION: u8 = 4;
+const SNAPSHOT_VERSION_WITH_OVERLAP: u8 = 4;
+const SNAPSHOT_VERSION: u8 = 5;
 
 /// Everything needed to replay a recorded execution in the debugger.
+///
+/// The writer emits version 5. The reader supports versions 4 and 5.
 pub struct ReplaySnapshot {
     /// The program that was executed (for a transaction, the transaction kernel).
     pub package: Arc<Package>,
@@ -171,8 +173,7 @@ impl ReplaySnapshot {
 
     /// Serialize the snapshot, rejecting custom precompile policies before writing any bytes.
     ///
-    /// Miden VM 1.0.0-rc.0 cannot serialize these policies through its public API. Restoring
-    /// defaults for a custom policy would change replay behavior, so only defaults are supported.
+    /// The snapshot format restores the default precompile policies.
     pub fn write_into<W: ByteWriter>(
         &self,
         target: &mut W,
@@ -218,15 +219,16 @@ impl Deserializable for ReplaySnapshot {
             ));
         }
         let version = source.read_u8()?;
-        if version != SNAPSHOT_VERSION {
+        if !matches!(version, SNAPSHOT_VERSION_WITH_OVERLAP | SNAPSHOT_VERSION) {
             return Err(DeserializationError::InvalidValue(format!(
-                "unsupported replay snapshot version {version} (expected {SNAPSHOT_VERSION})"
+                "unsupported replay snapshot version {version} (expected \
+                 {SNAPSHOT_VERSION_WITH_OVERLAP} or {SNAPSHOT_VERSION})"
             )));
         }
         let package = Arc::new(Package::read_from_trusted(source)?);
         let stack_inputs = StackInputs::read_from(source)?;
         let advice_inputs = AdviceInputs::read_from(source)?;
-        let options = read_execution_options(source)?;
+        let options = read_execution_options(source, version)?;
         let forest_count = source.read_usize()?;
         let mut mast_forests = Vec::with_capacity(forest_count);
         for _ in 0..forest_count {
@@ -256,7 +258,6 @@ fn write_execution_options<W: ByteWriter>(options: &ExecutionOptions, target: &m
     target.write_usize(options.core_trace_fragment_size());
     target.write_usize(options.max_advice_size_bytes());
     target.write_usize(options.max_hash_len_bytes());
-    target.write_bool(options.overlapped_trace_build());
     target.write_usize(options.max_num_continuations());
     target.write_usize(options.max_stack_depth());
     target.write_usize(options.max_memory_elements());
@@ -264,13 +265,16 @@ fn write_execution_options<W: ByteWriter>(options: &ExecutionOptions, target: &m
 
 fn read_execution_options<R: ByteReader>(
     source: &mut R,
+    version: u8,
 ) -> Result<ExecutionOptions, DeserializationError> {
     let max_cycles = source.read_u32()?;
     let expected_cycles = source.read_u32()?;
     let core_trace_fragment_size = source.read_usize()?;
     let max_advice_size_bytes = source.read_usize()?;
     let max_hash_len_bytes = source.read_usize()?;
-    let overlapped_trace_build = source.read_bool()?;
+    if version == SNAPSHOT_VERSION_WITH_OVERLAP {
+        source.read_bool()?;
+    }
     let max_num_continuations = source.read_usize()?;
     let max_stack_depth = source.read_usize()?;
     let max_memory_elements = source.read_usize()?;
@@ -283,7 +287,6 @@ fn read_execution_options<R: ByteReader>(
             options
                 .with_max_advice_size_bytes(max_advice_size_bytes)
                 .with_max_hash_len_bytes(max_hash_len_bytes)
-                .with_overlapped_trace_build(overlapped_trace_build)
                 .with_max_num_continuations(max_num_continuations)
                 .with_max_memory_elements(max_memory_elements)
                 .with_max_stack_depth(max_stack_depth)
@@ -296,7 +299,7 @@ fn read_execution_options<R: ByteReader>(
 /// Error encoding a [ReplaySnapshot].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ReplaySnapshotEncodeError {
-    #[error("replay snapshots do not support custom precompile limits with Miden VM 1.0.0-rc.0")]
+    #[error("replay snapshots require default precompile limits")]
     UnsupportedPrecompileLimits,
 }
 

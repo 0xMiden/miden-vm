@@ -38,11 +38,10 @@ pub use miden_precompiles::{
 /// to access lower-level machine controls.
 pub use miden_processor as processor;
 pub use miden_processor::{
-    BaseHost, BuildTrace, DefaultHost, Execute, ExecutionError, ExecutionOptions, ExecutionOutput,
-    ExecutionPlan, ExecutionSession, ExecutionTrace, ExecutionWitness, FutureMaybeSend,
-    HaltedExecution, Host, Memory, PackageSourceDebugContext, Processor, RecordWitness, StepStatus,
-    SyncHost, TraceOutput, VmTraceBudget, WitnessOutput, advice, crypto, field, serde, trace,
-    utils,
+    BaseHost, DefaultHost, Execute, ExecutionError, ExecutionOptions, ExecutionOutput,
+    ExecutionPlan, ExecutionSession, ExecutionWitness, FutureMaybeSend, HaltedExecution, Host,
+    Memory, PackageSourceDebugContext, Processor, RecordWitness, StepStatus, SyncHost,
+    WitnessOutput, advice, crypto, field, serde, trace, utils,
 };
 pub use miden_prover::{PrecompileProvingError, Prover, ProverError};
 pub use miden_verifier::{

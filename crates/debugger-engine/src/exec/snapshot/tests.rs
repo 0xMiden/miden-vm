@@ -42,7 +42,6 @@ fn replay_snapshot_round_trips() {
             .unwrap()
             .with_max_advice_size_bytes(256)
             .with_max_hash_len_bytes(512)
-            .with_overlapped_trace_build(false)
             .with_max_num_continuations(128)
             .with_max_memory_elements(1024)
             .with_max_stack_depth(128)
@@ -51,8 +50,31 @@ fn replay_snapshot_round_trips() {
         event_log,
     };
 
-    let restored = ReplaySnapshot::read_from_bytes(&snapshot.to_bytes().unwrap())
-        .expect("snapshot failed to deserialize");
+    let bytes = snapshot.to_bytes().unwrap();
+    let restored = ReplaySnapshot::read_from_bytes(&bytes).expect("snapshot failed to deserialize");
+    assert_eq!(bytes[SNAPSHOT_MAGIC.len()], 5);
+
+    // v4 put the overlap flag after the hash limit in the snapshot's options.
+    let overlap_offset = SNAPSHOT_MAGIC.len()
+        + 1
+        + snapshot.package.to_bytes().len()
+        + snapshot.stack_inputs.to_bytes().len()
+        + snapshot.advice_inputs.to_bytes().len()
+        + 2 * size_of::<u32>()
+        + snapshot.options.core_trace_fragment_size().get_size_hint()
+        + snapshot.options.max_advice_size_bytes().get_size_hint()
+        + snapshot.options.max_hash_len_bytes().get_size_hint();
+    let mut legacy = bytes.clone();
+    legacy[SNAPSHOT_MAGIC.len()] = 4;
+    legacy.insert(overlap_offset, 0);
+    for overlap in [0, 1] {
+        legacy[overlap_offset] = overlap;
+        let old_snapshot = ReplaySnapshot::read_from_bytes(&legacy).unwrap();
+        assert_eq!(old_snapshot.options, snapshot.options);
+        assert_eq!(old_snapshot.to_bytes().unwrap(), bytes);
+    }
+    legacy[overlap_offset] = 2;
+    assert!(ReplaySnapshot::read_from_bytes(&legacy).is_err());
 
     assert_eq!(restored.package.commitment(), snapshot.package.commitment());
     assert_eq!(restored.stack_inputs, snapshot.stack_inputs);
@@ -129,12 +151,13 @@ fn replay_snapshot_rejects_custom_precompile_limits() {
 
 /// Older snapshots may contain incompatible package formats and opcode semantics.
 #[test]
-fn replay_snapshot_rejects_previous_version() {
-    let mut bytes = SNAPSHOT_MAGIC.to_vec();
-    bytes.push(SNAPSHOT_VERSION - 1);
-
-    let Err(err) = ReplaySnapshot::read_from_bytes(&bytes) else {
-        panic!("expected deserialization to reject a snapshot from a previous version");
-    };
-    assert!(err.to_string().contains("unsupported replay snapshot version"));
+fn replay_snapshot_rejects_unsupported_versions() {
+    for version in [3, SNAPSHOT_VERSION + 1] {
+        let mut bytes = SNAPSHOT_MAGIC.to_vec();
+        bytes.push(version);
+        let Err(err) = ReplaySnapshot::read_from_bytes(&bytes) else {
+            panic!("expected deserialization to reject snapshot version {version}");
+        };
+        assert!(err.to_string().contains("unsupported replay snapshot version"));
+    }
 }

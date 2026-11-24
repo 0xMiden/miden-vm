@@ -508,8 +508,8 @@ fn test_nested_loop_end_flags_stable_across_fragmentation() {
 }
 
 #[test]
-fn test_partial_last_fragment_exists_for_h0_inversion_path() {
-    // Keep this > 1 and non-dividing for join_program() to guarantee a short final fragment.
+fn test_h0_inversion_with_partial_last_fragment() {
+    // A short final fragment exercises the uninitialized-tail regression under Miri.
     const FRAGMENT_SIZE: usize = 11;
 
     let program = join_program();
@@ -524,30 +524,13 @@ fn test_partial_last_fragment_exists_for_h0_inversion_path() {
     );
 
     let trace = vm_witness.build_trace(&miden_vm_stark::memory::default_budget()).unwrap();
-    let total_rows_without_halt = trace.main_trace().core_height() - 1;
+    let total_rows_without_halt = trace.trace_len_summary().core_rows() - 1;
 
     assert_ne!(
         total_rows_without_halt % FRAGMENT_SIZE,
         0,
         "repro precondition requires a short final fragment"
     );
-}
-
-#[cfg(miri)]
-#[test]
-fn miri_repro_uninitialized_tail_read_during_h0_inversion() {
-    // This reproducer intentionally constructs a short final fragment. Before the fix in
-    // generate_core_trace_columns(), miri should flag an uninitialized read in the inversion pass.
-    const FRAGMENT_SIZE: usize = 11;
-
-    let program = join_program();
-    let mut host = DefaultHost::default();
-    host.load_library(create_simple_library()).unwrap();
-    let vm_witness = record_vm_witness(&program, DEFAULT_STACK, FRAGMENT_SIZE, &mut host);
-
-    assert!(vm_witness.trace_replay().core_trace_contexts.len() > 1);
-
-    let _ = vm_witness.build_trace(&miden_vm_stark::memory::default_budget());
 }
 
 /// Creates a library with a single procedure containing just a SWAP operation.
@@ -934,12 +917,10 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
     // is well past any node actually in the sparse forest.
     let bogus_node_id = MastNodeId::new_unchecked(u32::MAX);
     let forest_id = MastForestId::from(0u32);
-    vm_witness.trace_replay_mut().hasher_for_chiplet.record_raw(
-        crate::trace::trace_state::HasherOp::HashBasicBlock((
-            forest_id,
-            bogus_node_id,
-            [ZERO; 4].into(),
-        )),
+    vm_witness.trace_replay_mut().hasher_for_chiplet.record_hash_basic_block(
+        forest_id,
+        bogus_node_id,
+        [ZERO; 4].into(),
     );
 
     let result = vm_witness.build_trace(&miden_vm_stark::memory::default_budget());
@@ -1283,13 +1264,13 @@ fn test_build_trace_returns_err_on_inconsistent_continuation(
     );
 }
 
-fn replayed_merkle_path_op(update: bool, depth: usize, index: u64) -> ResolvedHasherOp<'static> {
+fn replayed_merkle_path_op(update: bool, depth: usize, index: u64) -> HasherOp {
     let path = MerklePath::new(alloc::vec![Word::default(); depth]);
     let index = Felt::new_unchecked(index);
     if update {
-        ResolvedHasherOp::UpdateMerkleRoot((Word::default(), Word::default(), path, index))
+        HasherOp::UpdateMerkleRoot((Word::default(), Word::default(), path, index))
     } else {
-        ResolvedHasherOp::BuildMerkleRoot((Word::default(), path, index))
+        HasherOp::BuildMerkleRoot((Word::default(), path, index))
     }
 }
 
@@ -1307,7 +1288,7 @@ fn test_build_hasher_chiplet_rejects_invalid_replayed_merkle_path(
     #[case] index: u64,
 ) {
     let op = replayed_merkle_path_op(update, depth, index);
-    let err = build_hasher_chiplet([Ok(op)], usize::MAX, usize::MAX).err();
+    let err = build_hasher_chiplet([op], &[], usize::MAX, usize::MAX).err();
     assert!(
         matches!(err, Some(ExecutionError::Internal(_))),
         "expected ExecutionError::Internal, got: {err:?}"
@@ -1320,7 +1301,7 @@ fn test_build_hasher_chiplet_rejects_invalid_replayed_merkle_path(
 #[case::update_root(true)]
 fn test_build_hasher_chiplet_accepts_replayed_merkle_path_at_max_index(#[case] update: bool) {
     let op = replayed_merkle_path_op(update, 3, 7);
-    assert!(build_hasher_chiplet([Ok(op)], usize::MAX, usize::MAX).is_ok());
+    assert!(build_hasher_chiplet([op], &[], usize::MAX, usize::MAX).is_ok());
 }
 
 /// Verifies that `build_trace` returns `ExecutionError::Internal` when `core_trace_contexts` is
@@ -1359,20 +1340,11 @@ fn build_trace_for_program(
     stack_inputs: &[Felt],
     fragment_size: usize,
 ) -> VmTrace {
-    let options = ExecutionOptions::default()
-        .with_core_trace_fragment_size(fragment_size)
-        .unwrap()
-        .with_overlapped_trace_build(false);
     let mut host = DefaultHost::default();
     host.load_library(create_simple_library()).unwrap();
-    Processor::new(program)
-        .with_stack_inputs(StackInputs::new(stack_inputs).unwrap())
-        .with_options(options)
-        .build_trace(miden_vm_stark::memory::default_budget())
-        .run_sync(&mut host)
+    record_vm_witness(program, stack_inputs, fragment_size, &mut host)
+        .build_trace(&miden_vm_stark::memory::default_budget())
         .unwrap()
-        .trace
-        .into_vm_trace()
 }
 
 fn record_vm_witness(

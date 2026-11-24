@@ -36,7 +36,7 @@ use miden_core::{
     operations::{Operation, opcodes},
     program::Program,
 };
-use miden_processor::{DefaultHost, Processor, StackInputs, TraceOutput};
+use miden_processor::{DefaultHost, Processor, StackInputs, WitnessOutput};
 
 use crate::repro_harness::{ReproTrace, core_row_mut};
 
@@ -91,13 +91,12 @@ fn build_basic_harness() -> (ReproTrace, BasicRows) {
     let stack_values = (1..17).rev().map(Felt::new_unchecked).collect::<Vec<_>>();
     let stack_inputs = StackInputs::new(&stack_values).unwrap();
     let mut host = DefaultHost::default();
-    let TraceOutput { trace: execution_trace, .. } = Processor::new(&program)
+    let WitnessOutput { witness, .. } = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
-        .build_trace(miden_vm_stark::memory::default_budget())
+        .record_witness()
         .run_sync(&mut host)
         .unwrap();
-    let (trace, precompile_witness) = execution_trace.into_parts();
-    assert!(precompile_witness.is_none());
+    let trace = crate::repro_harness::materialize_vm_trace(witness);
 
     let main = trace.main_trace();
     let height = main.core_height();
@@ -224,12 +223,9 @@ fn build_call_harness() -> (ReproTrace, CallRows) {
         .unwrap_program();
 
     let mut host = DefaultHost::default();
-    let TraceOutput { trace: execution_trace, .. } = Processor::new(&program)
-        .build_trace(miden_vm_stark::memory::default_budget())
-        .run_sync(&mut host)
-        .unwrap();
-    let (trace, precompile_witness) = execution_trace.into_parts();
-    assert!(precompile_witness.is_none());
+    let WitnessOutput { witness, .. } =
+        Processor::new(&program).record_witness().run_sync(&mut host).unwrap();
+    let trace = crate::repro_harness::materialize_vm_trace(witness);
 
     let main = trace.main_trace();
     let height = main.core_height();
