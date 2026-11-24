@@ -1,6 +1,6 @@
 //! Generates metadata for the diagnostic forms used by the VM.
 
-use proc_macro2::TokenStream;
+use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::{
     Attribute, Data, DeriveInput, Fields, Ident, LitStr, Member, Token, Type,
@@ -195,6 +195,7 @@ fn expand_fields(
     fields: &Fields,
     attrs: &[Attribute],
 ) -> syn::Result<(TokenStream, TokenStream, TokenStream)> {
+    let details = Ident::new("details", Span::mixed_site());
     let options = attribute(attrs, "diagnostic")?
         .map(Attribute::parse_args::<Options>)
         .transpose()?
@@ -254,12 +255,12 @@ fn expand_fields(
             } else {
                 quote!(::core::option::Option::Some(&**#binding))
             };
-            assignments.push(quote!(details.source = #source;));
+            assignments.push(quote!(#details.source = #source;));
         }
         if let Some(attr) = attribute(&field.attrs, "related")? {
             set_once(&mut related_seen, &format_ident!("related", span = attr.span()))?;
             assignments.push(quote! {
-                details.related = #binding.iter()
+                #details.related = #binding.iter()
                     .map(|error| error as &dyn ::miden_utils_diagnostics::Diagnostic).collect();
             });
         }
@@ -270,7 +271,7 @@ fn expand_fields(
             } else {
                 quote!(::core::option::Option::Some(#binding.as_str().into()))
             };
-            assignments.push(quote!(details.help = #help;));
+            assignments.push(quote!(#details.help = #help;));
         }
         if let Some(attr) = attribute(&field.attrs, "label")? {
             let label = if attr.tokens.is_empty() {
@@ -320,24 +321,24 @@ fn expand_fields(
     }
     if !labels.is_empty() {
         assignments
-            .push(quote!(details.labels = ::miden_utils_diagnostics::vec![#(#labels,)*].into();));
+            .push(quote!(#details.labels = ::miden_utils_diagnostics::vec![#(#labels,)*].into();));
         if let Some(collection) = collection {
-            assignments.push(quote!(details.labels.to_mut().extend_from_slice(#collection);));
+            assignments.push(quote!(#details.labels.to_mut().extend_from_slice(#collection);));
         }
     } else if let Some(collection) = collection {
         assignments.push(quote! {
-            details.labels = ::core::convert::Into::into(
+            #details.labels = ::core::convert::Into::into(
                 #collection as &[::miden_utils_diagnostics::Label]
             );
         });
     }
     if let Some(help) = options.help {
         let help = formatted(help);
-        assignments.push(quote!(details.help = ::core::option::Option::Some(#help.into());));
+        assignments.push(quote!(#details.help = ::core::option::Option::Some(#help.into());));
     }
     if let Some(code) = options.code {
         let code = LitStr::new(&quote!(#code).to_string().replace(' ', ""), code.span());
-        assignments.push(quote!(details.code = ::core::option::Option::Some(#code);));
+        assignments.push(quote!(#details.code = ::core::option::Option::Some(#code);));
     }
     let initial = match forwarded {
         Some(binding) => {
@@ -355,7 +356,7 @@ fn expand_fields(
     let metadata = if assignments.is_empty() {
         initial
     } else {
-        quote!({ let mut details = #initial; #(#assignments)* details })
+        quote!({ let mut #details = #initial; #(#assignments)* #details })
     };
     Ok((pattern, metadata, severity))
 }
