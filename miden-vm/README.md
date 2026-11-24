@@ -253,7 +253,7 @@ replaced the previous file.
 
 ### Compiling Miden VM
 
-First, make sure you have Rust [installed](https://www.rust-lang.org/tools/install). The current version of Miden VM requires Rust version **1.96** or later.
+First, make sure you have Rust [installed](https://www.rust-lang.org/tools/install). The current version of Miden VM requires Rust version **1.96.1** or later.
 
 Then, to compile Miden VM into a binary, run the following `make` command:
 
@@ -299,8 +299,7 @@ Currently, Miden VM can be executed with the following subcommands:
 - `prove` executes a Miden assembly program and generates a STARK proof.
 - `verify` verifies a previously generated proof for a given program.
 - `compile` compiles a Miden assembly program and reports compilation statistics.
-- `debug` starts a CLI debugger for the specified Miden assembly program and inputs.
-- `analyze` runs a Miden assembly program against specific inputs and reports execution statistics.
+- `bundle` combines Miden assembly modules into a `.masp` library or kernel package.
 
 All of the above subcommands require various parameters to be provided. To get more detailed help on what is needed for a given subcommand, you can run the following:
 
@@ -316,7 +315,7 @@ For example:
 
 ### Fibonacci example
 
-In the `miden-vm/masm-examples/fib` directory, we provide a very simple Fibonacci calculator example. This example computes the 1000th term of the Fibonacci sequence. You can execute this example on Miden VM like so:
+In the `miden-vm/masm-examples/fib` directory, we provide a very simple Fibonacci calculator example. This example computes the 1001st Fibonacci number modulo the VM field. You can execute this example on Miden VM like so:
 
 ```shell
 ./target/optimized/miden-vm run miden-vm/masm-examples/fib/fib.masm -n 1
@@ -331,11 +330,9 @@ Miden VM can be compiled with the following features:
 - `std` is enabled by default and relies on the Rust standard library.
 - `concurrent` implies `std` and enables multithreaded proof generation.
 - `executable` is required for building the Miden VM binary as described above. It implies `std`.
-- `metal` enables [Metal](<https://en.wikipedia.org/wiki/Metal_(API)>)-based acceleration of proof generation for recursive proofs on supported platforms such as Apple silicon.
-- `no_std` does not rely on the Rust standard library and enables compilation to WebAssembly.
-  - Only the `wasm32-unknown-unknown` and `wasm32-wasip1` targets are officially supported.
 
-To compile with `no_std`, disable default features via `--no-default-features` flag.
+For a `no_std` build, disable default features with `--no-default-features`. Only the
+`wasm32-unknown-unknown` and `wasm32-wasip1` targets are officially supported for this configuration.
 
 ### Concurrent proof generation
 
