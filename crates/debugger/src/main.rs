@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, process::ExitCode};
 
 use clap::Parser;
 #[cfg(feature = "flamegraph")]
@@ -35,7 +35,17 @@ enum Commands {
     Flamegraph(FlamegraphArgs),
 }
 
-pub fn main() -> Result<(), Report> {
+pub fn main() -> ExitCode {
+    match run_cli() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprint!("{error:?}");
+            ExitCode::FAILURE
+        },
+    }
+}
+
+fn run_cli() -> Result<(), Report> {
     // Initialize logger, but do not install it, leave that up to the command handler
     let mut builder = env_logger::Builder::from_env("MIDENC_TRACE");
     builder.format_indent(Some(2));

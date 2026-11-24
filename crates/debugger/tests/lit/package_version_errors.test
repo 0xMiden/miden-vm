@@ -3,7 +3,7 @@
 # RUN: printf 'MASP\000\006\000\000' > %t.old.masp
 # RUN: miden-debug --repl %t.old.masp 2>&1 | filecheck %s --check-prefix=OLD
 
-# OLD: error[miden_debug::incompatible_package_format]:
+# OLD: {{^}}error[miden_debug::incompatible_package_format]:
 # OLD-SAME: uses unsupported package format 6.0.0
 # OLD: package, MAST, and debug-info formats are tied to the Miden
 # OLD: `miden +0.16.0 debug <FILE>`
@@ -13,5 +13,5 @@
 # RUN: printf 'not a package' > %t.corrupt.masp
 # RUN: miden-debug --repl %t.corrupt.masp 2>&1 | filecheck %s --check-prefix=CORRUPT
 
-# CORRUPT: failed to load Miden package from
+# CORRUPT: {{^}}error: failed to load Miden package from
 # CORRUPT-NOT: miden +0.16.0 debug
