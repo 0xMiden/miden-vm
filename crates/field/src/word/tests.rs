@@ -231,6 +231,11 @@ fn word_macro_endianness(#[case] input: &str, #[case] expected: Word) {
     assert_eq!(uut, expected);
 }
 
+#[test]
+fn word_order_prioritizes_high_limbs() {
+    assert!(Word::from([0, 0, 0, 1u32]) > Word::from([1, 1, 1, 0u32]));
+}
+
 proptest! {
     #[test]
     fn word_order_matches_canonical_limbs(a in any::<Word>(), b in any::<Word>()) {
