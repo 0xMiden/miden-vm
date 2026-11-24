@@ -361,14 +361,6 @@ mod prover_api_lifecycle {
             .unwrap_program()
     }
 
-    fn execute(program: &Program) -> ExecutionWitness {
-        Processor::new(program)
-            .record_witness()
-            .run_sync(&mut DefaultHost::default())
-            .map(|output| output.witness)
-            .expect("execution should produce a witness")
-    }
-
     fn word_literal(word: Word) -> String {
         format!(
             "[{}, {}, {}, {}]",
@@ -413,7 +405,11 @@ mod prover_api_lifecycle {
     }
 
     fn u256_witness(value: u64) -> ExecutionWitness {
-        execute(&u256_program(value))
+        Processor::new(&u256_program(value))
+            .record_witness()
+            .run_sync(&mut DefaultHost::default())
+            .expect("execution should produce a witness")
+            .witness
     }
 
     fn assert_execution_security_levels(
@@ -465,7 +461,11 @@ mod prover_api_lifecycle {
     #[test]
     fn vm_witness_can_be_proved_directly() {
         let program = assemble("begin push.1 drop end");
-        let witness = execute(&program);
+        let witness = Processor::new(&program)
+            .record_witness()
+            .run_sync(&mut DefaultHost::default())
+            .expect("execution should produce a witness")
+            .witness;
         let claim = witness.claim();
         let (vm_witness, precompile_witness) = witness.into_parts();
         assert!(precompile_witness.is_none());

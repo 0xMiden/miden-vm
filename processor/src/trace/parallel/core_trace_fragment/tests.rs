@@ -1474,7 +1474,7 @@ fn test_dyn_node_decoding() {
 
     let program = Program::new(mast_forest.into(), program_root_node_id);
 
-    let (trace, trace_len) = build_dyn_trace_helper(
+    let (trace, trace_len) = build_trace_helper(
         &[
             FOO_ROOT_NODE_ADDR,
             foo_root_node.digest()[0].as_canonical_u64(),
@@ -1635,12 +1635,6 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
     let decoder_trace = extract_decoder_trace(&trace);
 
     (decoder_trace, trace_len)
-}
-
-/// Builds the trace for DYN operations.
-fn build_dyn_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
-    // DYN trace uses the same infrastructure
-    build_trace_helper(stack_inputs, program)
 }
 
 /// Builds both system and decoder traces for CALL/SYSCALL operations.

@@ -20,30 +20,13 @@ use miden_core_lib::{
     },
 };
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, HostLibrary, MemoryError,
-    Processor, Program, StackInputs, SyncHost,
+    DefaultHost, ExecutionError, ExecutionOutput, HostLibrary, MemoryError, Processor,
     advice::{AdviceInputs, AdviceStack},
     event::{EventHandler, EventName},
 };
 
 // HARNESS
 // ================================================================================================
-
-/// Configures and runs `program` against `host`.
-fn execute_sync(
-    program: &Program,
-    stack_inputs: StackInputs,
-    advice_inputs: AdviceInputs,
-    host: &mut impl SyncHost,
-    options: ExecutionOptions,
-) -> Result<ExecutionOutput, ExecutionError> {
-    Processor::new(program)
-        .with_stack_inputs(stack_inputs)
-        .with_advice(advice_inputs)
-        .with_options(options)
-        .execute()
-        .run_sync(host)
-}
 
 /// A [`fmt::Write`] that appends into a shared, thread-safe string buffer.
 #[derive(Clone)]
@@ -89,14 +72,11 @@ fn run(source: &str, advice: AdviceInputs) -> (String, ExecutionOutput) {
     };
     let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
 
-    let output = execute_sync(
-        &program,
-        StackInputs::default(),
-        advice,
-        &mut host,
-        ExecutionOptions::default(),
-    )
-    .expect("execution failed");
+    let output = Processor::new(&program)
+        .with_advice(advice)
+        .execute()
+        .run_sync(&mut host)
+        .expect("execution failed");
 
     let captured = buf.lock().unwrap().clone();
     // Echo to stdout so the debug output is visible when running with `cargo test -- --nocapture`
@@ -125,7 +105,10 @@ fn run_with_default_core_handlers(source: &str, advice: AdviceInputs) -> Executi
         .with_library(&core_lib)
         .expect("failed to load core library handlers");
 
-    execute_sync(&program, StackInputs::default(), advice, &mut host, ExecutionOptions::default())
+    Processor::new(&program)
+        .with_advice(advice)
+        .execute()
+        .run_sync(&mut host)
         .expect("execution failed")
 }
 
@@ -314,13 +297,7 @@ fn print_mem_rejects_out_of_bounds_range_end() {
     };
     let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
 
-    match execute_sync(
-        &program,
-        StackInputs::default(),
-        AdviceInputs::default(),
-        &mut host,
-        ExecutionOptions::default(),
-    ) {
+    match Processor::new(&program).execute().run_sync(&mut host) {
         Err(ExecutionError::EventError { error, .. }) => {
             let err = error.downcast_ref::<MemoryError>().expect("expected a MemoryError");
             assert!(matches!(err, MemoryError::AddressOutOfBounds { .. }));
@@ -357,13 +334,7 @@ fn print_mem_rejects_oversized_range() {
     };
     let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
 
-    match execute_sync(
-        &program,
-        StackInputs::default(),
-        AdviceInputs::default(),
-        &mut host,
-        ExecutionOptions::default(),
-    ) {
+    match Processor::new(&program).execute().run_sync(&mut host) {
         Err(ExecutionError::EventError { error, .. }) => {
             assert_eq!(error.to_string(), "print_mem range length 1025 exceeds maximum of 1024");
         },
@@ -400,13 +371,7 @@ fn print_mem_rejects_full_range() {
     };
     let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
 
-    match execute_sync(
-        &program,
-        StackInputs::default(),
-        AdviceInputs::default(),
-        &mut host,
-        ExecutionOptions::default(),
-    ) {
+    match Processor::new(&program).execute().run_sync(&mut host) {
         Err(ExecutionError::EventError { error, .. }) => {
             assert_eq!(
                 error.to_string(),
@@ -606,14 +571,11 @@ fn debug_handlers_compose_with_default_core_handlers() {
     };
     let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
 
-    let output = execute_sync(
-        &program,
-        StackInputs::default(),
-        advice,
-        &mut host,
-        ExecutionOptions::default(),
-    )
-    .expect("execution failed");
+    let output = Processor::new(&program)
+        .with_advice(advice)
+        .execute()
+        .run_sync(&mut host)
+        .expect("execution failed");
     assert_eq!(output.stack.get_element(0), Some(Felt::new_unchecked(0)));
 }
 
@@ -676,14 +638,10 @@ fn noop_debug_handlers_run_print_stack_without_output() {
     };
     let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
 
-    let output = execute_sync(
-        &program,
-        StackInputs::default(),
-        AdviceInputs::default(),
-        &mut host,
-        ExecutionOptions::default(),
-    )
-    .expect("execution failed");
+    let output = Processor::new(&program)
+        .execute()
+        .run_sync(&mut host)
+        .expect("execution failed");
 
     assert_eq!(output.stack.get_element(0), Some(Felt::new_unchecked(0)));
 }

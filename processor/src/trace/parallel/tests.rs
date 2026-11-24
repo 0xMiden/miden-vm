@@ -1204,10 +1204,6 @@ fn test_build_trace_returns_err_when_eidos_compression_trace_exceeds_budget() {
     let program = dyn_program();
     let stack_inputs = dyn_target_proc_hash();
 
-    fn build_witness(program: &Program, stack_inputs: &[Felt]) -> VmWitness {
-        record_vm_witness(program, stack_inputs, MIN_TRACE_LEN, &mut DefaultHost::default())
-    }
-
     // Inject enough unique compression requests that the padded Eidos compression trace is strictly
     // taller than the fixed And8 table as well as the core and chiplets traces. Unique states
     // prevent replay deduplication from weakening the test.
@@ -1221,7 +1217,8 @@ fn test_build_trace_returns_err_when_eidos_compression_trace_exceeds_budget() {
     }
 
     // Measure the actual padded per-AIR heights under the default (generous) budget.
-    let mut measuring_witness = build_witness(&program, stack_inputs);
+    let mut measuring_witness =
+        record_vm_witness(&program, stack_inputs, MIN_TRACE_LEN, &mut DefaultHost::default());
     inject_extra_compressions(&mut measuring_witness);
     let measured = measuring_witness
         .build_trace(&miden_vm_stark::memory::default_budget())
@@ -1239,7 +1236,8 @@ fn test_build_trace_returns_err_when_eidos_compression_trace_exceeds_budget() {
         .prover_peak_bytes(summary.padded_heights())
         .expect("modelled peak fits in u64");
 
-    let mut vm_witness = build_witness(&program, stack_inputs);
+    let mut vm_witness =
+        record_vm_witness(&program, stack_inputs, MIN_TRACE_LEN, &mut DefaultHost::default());
     inject_extra_compressions(&mut vm_witness);
     let result = vm_witness.build_trace(&miden_vm_stark::memory::canonical_budget(exact_peak - 1));
 

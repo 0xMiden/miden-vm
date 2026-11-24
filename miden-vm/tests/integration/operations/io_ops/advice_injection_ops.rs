@@ -419,14 +419,16 @@ fn advice_insert_hqword() {
 #[test]
 fn test_adv_insert_mem_at_boundary() {
     let max_size = 8;
-    run_insert_mem_with_max_value_elements(max_size as u32, max_size).unwrap();
+    run_insert_mem_with_max_value_elements_and_repeats(max_size as u32, max_size, 1).unwrap();
 }
 
 /// Inserting one element over the combined advice-provider boundary must be rejected.
 #[test]
 fn test_adv_insert_mem_over_boundary() {
     let max_size = 8;
-    let err = run_insert_mem_with_max_value_elements((max_size + 1) as u32, max_size).unwrap_err();
+    let err =
+        run_insert_mem_with_max_value_elements_and_repeats((max_size + 1) as u32, max_size, 1)
+            .unwrap_err();
     let msg = format!("{err:?}");
     assert!(msg.contains("SizeBudgetExceeded"), "expected size-exceeded error, got: {msg}");
 }
@@ -435,7 +437,7 @@ fn test_adv_insert_mem_over_boundary() {
 #[test]
 fn test_adv_insert_mem_reinsert_at_boundary() {
     let max_size = 8;
-    run_insert_mem_twice_with_max_value_elements(max_size as u32, max_size).unwrap();
+    run_insert_mem_with_max_value_elements_and_repeats(max_size as u32, max_size, 2).unwrap();
 }
 
 /// An existing map key must not bypass the advice budget for a larger memory range.
@@ -503,20 +505,6 @@ fn test_adv_insert_mem_conflict_with_spare_budget_reports_values() {
 // ================================================================================================
 
 /// Runs `adv.insert_mem` with a budget sized for a map value of `max_value_elements`.
-fn run_insert_mem_with_max_value_elements(
-    range_len: u32,
-    max_value_elements: usize,
-) -> Result<(), ExecutionError> {
-    run_insert_mem_with_max_value_elements_and_repeats(range_len, max_value_elements, 1)
-}
-
-fn run_insert_mem_twice_with_max_value_elements(
-    range_len: u32,
-    max_value_elements: usize,
-) -> Result<(), ExecutionError> {
-    run_insert_mem_with_max_value_elements_and_repeats(range_len, max_value_elements, 2)
-}
-
 fn run_insert_mem_with_max_value_elements_and_repeats(
     range_len: u32,
     max_value_elements: usize,

@@ -143,26 +143,17 @@ pub fn execute_program(fixture: &Blake3Fixture) -> ExecutionOutput {
         .expect("failed to execute Blake3 benchmark")
 }
 
-pub fn prove_program(fixture: &Blake3Fixture) {
-    let _span = tracing::trace_span!(target: "miden::bench", "prove_program_sync").entered();
-    prove_trace(execute_for_proving(fixture));
-}
-
-pub fn prove_trace(witness: ExecutionWitness) -> (StackOutputs, ExecutionProof) {
-    prove_trace_outputs(witness)
-}
-
 pub fn prove_and_verify_once(fixture: &Blake3Fixture) {
     let witness = execute_for_proving(fixture);
     let claim = witness.claim();
-    let (_, proof) = prove_trace_outputs(witness);
+    let (_, proof) = prove_witness(witness);
     let outcome = Verifier::new()
         .verify(&claim, &proof)
         .expect("failed to verify Blake3 benchmark proof");
     assert!(outcome.is_complete(), "prove_full must settle all precompile work");
 }
 
-fn prove_trace_outputs(witness: ExecutionWitness) -> (StackOutputs, ExecutionProof) {
+pub fn prove_witness(witness: ExecutionWitness) -> (StackOutputs, ExecutionProof) {
     let stack_outputs = *witness.claim().stack_outputs();
     let proof = Prover::new()
         .with_hash_fn(HashFunction::Blake3_256)
@@ -258,7 +249,10 @@ where
 pub fn collect_trace_spans(fixture: &Blake3Fixture) -> Vec<SpanRecord> {
     let recorder = SpanRecorder::default();
     let subscriber = Registry::default().with(recorder.clone());
-    tracing::subscriber::with_default(subscriber, || prove_program(fixture));
+    tracing::subscriber::with_default(subscriber, || {
+        let _span = tracing::trace_span!(target: "miden::bench", "prove_program_sync").entered();
+        prove_witness(execute_for_proving(fixture));
+    });
     recorder.records()
 }
 

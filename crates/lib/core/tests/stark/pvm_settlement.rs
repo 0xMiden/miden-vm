@@ -75,15 +75,6 @@ async fn mixed_signatures_deferred_obligation_is_settled_end_to_end() {
     assert!(outcome.is_complete(), "the PVM proof must discharge the obligation");
 }
 
-/// Proves an ECDSA execution and returns its portable precompile witness for the PVM prover.
-fn prove_ecdsa_execution(
-    core_lib: &CoreLibrary,
-    fixture: EcdsaFixture,
-    stack_inputs: StackInputs,
-) -> (ExecutionProof, ExecutionClaim, PrecompileWitness) {
-    prove_signature_execution(core_lib, fixture, None, stack_inputs)
-}
-
 /// Proves an ECDSA execution, optionally followed by an Ed25519 verification of the same message,
 /// and returns its portable precompile witness for the PVM prover.
 fn prove_signature_execution(

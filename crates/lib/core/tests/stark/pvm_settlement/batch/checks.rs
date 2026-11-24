@@ -14,7 +14,7 @@ use miden_processor::{
 };
 use miden_prover::Prover;
 
-use super::{assemble_batch, batch_inputs, prove_ecdsa_execution, pvm_proof_advice};
+use super::{assemble_batch, batch_inputs, prove_signature_execution, pvm_proof_advice};
 use crate::support::ecdsa::{generator_public_key_fixture, valid_fixture};
 
 #[test]
@@ -22,12 +22,20 @@ fn batch_root_and_response_checks() {
     let core_lib = CoreLibrary::default();
     let program = assemble_batch(&core_lib);
     let (first, first_claim, first_witness) =
-        prove_ecdsa_execution(&core_lib, valid_fixture(), StackInputs::default());
-    let (second, second_claim, second_witness) =
-        prove_ecdsa_execution(&core_lib, generator_public_key_fixture(), StackInputs::default());
+        prove_signature_execution(&core_lib, valid_fixture(), None, StackInputs::default());
+    let (second, second_claim, second_witness) = prove_signature_execution(
+        &core_lib,
+        generator_public_key_fixture(),
+        None,
+        StackInputs::default(),
+    );
     // A different public input gives a different claim with the same ECDSA work.
-    let (repeated, repeated_claim, repeated_witness) =
-        prove_ecdsa_execution(&core_lib, valid_fixture(), StackInputs::new(&[Felt::ONE]).unwrap());
+    let (repeated, repeated_claim, repeated_witness) = prove_signature_execution(
+        &core_lib,
+        valid_fixture(),
+        None,
+        StackInputs::new(&[Felt::ONE]).unwrap(),
+    );
     let (plain, plain_claim) = prove_without_precompiles();
     assert_ne!(first_claim.commitment(), repeated_claim.commitment());
     let first_root = first.vm().precompile_root;

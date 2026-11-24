@@ -22,7 +22,7 @@ use miden_prover::Prover;
 use miden_verifier::Verifier;
 use miden_vm_stark::recursive::RecursiveVerifierInputs;
 
-use super::{prove_ecdsa_execution, pvm_proof_advice};
+use super::{prove_signature_execution, pvm_proof_advice};
 use crate::support::ecdsa::{generator_public_key_fixture, valid_fixture};
 
 mod checks;
@@ -34,9 +34,13 @@ fn batch_settles_deferred_obligations_with_one_pvm_proof() {
 
     // Each returned witness contains the precompile inputs needed by the PVM prover.
     let (first_proof, first_claim, first_witness) =
-        prove_ecdsa_execution(&core_lib, valid_fixture(), StackInputs::default());
-    let (second_proof, second_claim, second_witness) =
-        prove_ecdsa_execution(&core_lib, generator_public_key_fixture(), StackInputs::default());
+        prove_signature_execution(&core_lib, valid_fixture(), None, StackInputs::default());
+    let (second_proof, second_claim, second_witness) = prove_signature_execution(
+        &core_lib,
+        generator_public_key_fixture(),
+        None,
+        StackInputs::default(),
+    );
     let roots = [first_proof.vm().precompile_root, second_proof.vm().precompile_root];
     assert_ne!(roots[0], roots[1]);
 

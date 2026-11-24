@@ -8,7 +8,7 @@ use miden_processor::{
     advice::AdviceInputs,
     trace::{TraceLenSummary, VmTrace},
 };
-use miden_vm::{ExecutionProof, ExecutionWitness, Prover, StackOutputs, Verifier};
+use miden_vm::{ExecutionProof, ExecutionWitness, Prover, Verifier};
 
 use super::{RecursionCase, config::ProofComposition, recursive_host};
 
@@ -80,12 +80,6 @@ pub(super) fn execute_trace_inputs(case: RecursionCase, mut host: DefaultHost) -
         .witness
 }
 
-pub(super) fn execute_recursive_case(
-    (case, host): (RecursionCase, DefaultHost),
-) -> ExecutionWitness {
-    execute_trace_inputs(case, host)
-}
-
 pub(super) fn build_trace_case(witness: ExecutionWitness) -> VmTrace {
     let (vm_witness, _) = witness.into_parts();
     vm_witness
@@ -93,20 +87,7 @@ pub(super) fn build_trace_case(witness: ExecutionWitness) -> VmTrace {
         .expect("build recursive verifier trace")
 }
 
-pub(super) fn execute_and_build_case((case, host): (RecursionCase, DefaultHost)) -> VmTrace {
-    build_trace_case(execute_trace_inputs(case, host))
-}
-
-pub(super) fn prove_recursive_case(
-    prover: &Prover,
-    (case, mut host): (RecursionCase, DefaultHost),
-) -> (StackOutputs, ExecutionProof) {
-    let (claim, proof) =
-        prove_recursive_trace(prover, &case.program, case.advice_inputs, &mut host);
-    (*claim.stack_outputs(), proof)
-}
-
-fn prove_recursive_trace(
+pub(super) fn prove_recursive_trace(
     prover: &Prover,
     program: &Program,
     advice_inputs: AdviceInputs,
