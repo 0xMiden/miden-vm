@@ -17,15 +17,6 @@ fn any_word_elements_u64_canonical() -> BoxedStrategy<[u64; Word::NUM_ELEMENTS]>
 
 proptest! {
     #[test]
-    fn word_is_equal_to_itself(word in any::<Word>()) {
-        use core::cmp::Ordering;
-
-        prop_assert_eq!(word, word);
-        prop_assert_eq!(word.cmp(&word), Ordering::Equal);
-        prop_assert_eq!(word.partial_cmp(&word), Some(Ordering::Equal));
-    }
-
-    #[test]
     fn word_serialization_roundtrip(word in any::<Word>()) {
         let mut bytes = Vec::new();
         word.write_into(&mut bytes);
@@ -35,13 +26,6 @@ proptest! {
         let mut reader = SliceReader::new(&bytes);
         let round_trip = Word::read_from(&mut reader).unwrap();
 
-        prop_assert_eq!(word, round_trip);
-    }
-
-    #[test]
-    fn word_encoding_roundtrip(word in any::<Word>()) {
-        let string: String = word.into();
-        let round_trip: Word = string.try_into().expect("decoding failed");
         prop_assert_eq!(word, round_trip);
     }
 
@@ -117,14 +101,15 @@ proptest! {
     }
 
     #[test]
-    fn word_string_conversion_roundtrip(word in any::<Word>()) {
-        let string: String = word.into();
-        let round_trip: Word = string.try_into().unwrap();
-        prop_assert_eq!(word, round_trip);
+    fn word_string_conversion_roundtrip(words in prop::array::uniform2(any::<Word>())) {
+        // Preserve the two original properties' combined random-case budget.
+        for word in words {
+            let string: String = word.into();
+            prop_assert_eq!(word, Word::try_from(string).unwrap());
 
-        let string: String = (&word).into();
-        let round_trip: Word = (&string).try_into().unwrap();
-        prop_assert_eq!(word, round_trip);
+            let string: String = (&word).into();
+            prop_assert_eq!(word, Word::try_from(&string).unwrap());
+        }
     }
 
     #[test]
@@ -246,13 +231,34 @@ fn word_macro_endianness(#[case] input: &str, #[case] expected: Word) {
     assert_eq!(uut, expected);
 }
 
+#[test]
+fn word_order_prioritizes_high_limbs() {
+    assert!(Word::from([0, 0, 0, 1u32]) > Word::from([1, 1, 1, 0u32]));
+}
+
 proptest! {
     #[test]
-    fn word_ord_is_consistent_with_partialeq(a in any::<Word>(), b in any::<Word>()) {
-        use core::cmp::Ordering;
-
-        prop_assert_eq!(a == b, a.cmp(&b) == Ordering::Equal);
-        prop_assert_eq!(b == a, b.cmp(&a) == Ordering::Equal);
+    fn word_order_matches_canonical_limbs(a in any::<Word>(), b in any::<Word>()) {
+        let a = a.into_elements();
+        let original_b = b.into_elements();
+        for equal_high_limbs in 0..=Word::NUM_ELEMENTS {
+            // Exercise every comparison position and equality on every generated pair.
+            let start = Word::NUM_ELEMENTS - equal_high_limbs;
+            let mut b = original_b;
+            b[start..].copy_from_slice(&a[start..]);
+            let mut lhs = a.map(|element| element.as_canonical_u64());
+            let mut rhs = b.map(|element| element.as_canonical_u64());
+            lhs.reverse();
+            rhs.reverse();
+            let expected = lhs.cmp(&rhs);
+            let (a, b) = (Word::new(a), Word::new(b));
+            prop_assert_eq!(a.cmp(&b), expected);
+            prop_assert_eq!(b.cmp(&a), expected.reverse());
+            prop_assert_eq!(a.partial_cmp(&b), Some(expected));
+            prop_assert_eq!(b.partial_cmp(&a), Some(expected.reverse()));
+            prop_assert_eq!(a == b, expected == Ordering::Equal);
+            prop_assert_eq!(b == a, expected == Ordering::Equal);
+        }
     }
 
     #[test]
@@ -271,29 +277,5 @@ proptest! {
         map.insert(key2, 2);
         prop_assert_eq!(map.len(), 1);
         prop_assert_eq!(map.get(&word), Some(&2));
-    }
-}
-
-#[test]
-fn word_is_ordered_lexicographically() {
-    for (expected, key0, key1) in [
-        (Ordering::Equal, [0, 0, 0, 0u32], [0, 0, 0, 0u32]),
-        (Ordering::Greater, [1, 0, 0, 0u32], [0, 0, 0, 0u32]),
-        (Ordering::Greater, [0, 1, 0, 0u32], [0, 0, 0, 0u32]),
-        (Ordering::Greater, [0, 0, 1, 0u32], [0, 0, 0, 0u32]),
-        (Ordering::Greater, [0, 0, 0, 1u32], [0, 0, 0, 0u32]),
-        (Ordering::Less, [0, 0, 0, 0u32], [1, 0, 0, 0u32]),
-        (Ordering::Less, [0, 0, 0, 0u32], [0, 1, 0, 0u32]),
-        (Ordering::Less, [0, 0, 0, 0u32], [0, 0, 1, 0u32]),
-        (Ordering::Less, [0, 0, 0, 0u32], [0, 0, 0, 1u32]),
-        (Ordering::Greater, [0, 0, 0, 1u32], [1, 1, 1, 0u32]),
-        (Ordering::Greater, [0, 0, 1, 0u32], [1, 1, 0, 0u32]),
-        (Ordering::Less, [1, 1, 1, 0u32], [0, 0, 0, 1u32]),
-        (Ordering::Less, [1, 1, 0, 0u32], [0, 0, 1, 0u32]),
-    ] {
-        assert_eq!(
-            Word::from(key0.map(Felt::from_u32)).cmp(&Word::from(key1.map(Felt::from_u32))),
-            expected
-        );
     }
 }

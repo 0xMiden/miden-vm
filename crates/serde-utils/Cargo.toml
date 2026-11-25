@@ -25,6 +25,7 @@ wincode.workspace       = true
 rustix = { workspace = true, optional = true }
 
 [dev-dependencies]
+proptest = { workspace = true, features = ["std"] }
 serde-wincode.workspace = true
 tempfile.workspace      = true
 

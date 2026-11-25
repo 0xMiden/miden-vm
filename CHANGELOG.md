@@ -7,6 +7,7 @@
 #### Changes
 
 - [BREAKING] Replaced Miette with local diagnostic types in `miden-utils-diagnostics`. Use the existing Miden `Report` re-export, implement `Diagnostic` for custom error metadata, and use `diagnostic!` for messages with labels. The renderer emits plain text ([#4246](https://github.com/0xMiden/miden-vm/pull/4246)).
+- Consolidated Word conversion, Word ordering and String/Arc serialization tests using Proptest ([#4252](https://github.com/0xMiden/miden-vm/pull/4252)).
 
 - Applied the routine-logging changes from [#4238](https://github.com/0xMiden/miden-vm/pull/4238) to the current VM and STARK crates. Successful proving is silent at `INFO`; profiling remains available at `TRACE`.
 
