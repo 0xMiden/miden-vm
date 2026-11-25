@@ -196,23 +196,27 @@ pub enum TraceLenSummaryError {
     },
 }
 
-/// Row counts for the AIR segments produced by trace generation.
+/// Row counts and padded heights for the VM AIR segments.
 ///
-/// Dynamic AIRs store their unpadded row counts. Use the `*_height()` accessors for their padded
-/// power-of-two AIR matrix heights. The byte-pair lookup stores its fixed physical row count.
+/// A [`VmTrace`] summary has exact counts and heights. A live execution recording reports upper
+/// bounds for Eidos compression rows and height because trace construction deduplicates requests.
+/// Core and chiplet counts and heights are exact in both cases. Dynamic AIR row counts exclude
+/// power-of-two padding. The byte-pair lookup has a fixed physical height.
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub struct TraceLenSummary {
     core_rows: usize,
     chiplets: ChipletsLengths,
     eidos_compression_rows: usize,
     byte_pair_lookup_rows: usize,
-    /// Actual padded heights in [`crate::vm::AIRS`] order.
+    /// Padded heights in [`crate::vm::AIRS`] order.
     padded_heights: [usize; MIDEN_AIR_COUNT],
 }
 
 impl TraceLenSummary {
-    /// Builds a summary after the trace builder has computed the padded per-AIR heights, in
-    /// [`crate::vm::AIRS`] order: Core, Chiplets, Eidos compression, then And8 lookup.
+    /// Builds a summary from unpadded row counts and padded heights in [`crate::vm::AIRS`] order.
+    ///
+    /// For a live recording, supply the Eidos compression row and height bounds in place of the
+    /// materialized counts.
     ///
     /// # Errors
     ///
@@ -267,13 +271,13 @@ impl TraceLenSummary {
         self.chiplets.trace_len()
     }
 
-    /// Returns the unpadded Eidos compression AIR rows.
+    /// Returns the unpadded Eidos compression AIR rows, or their upper bound for a live recording.
     pub fn eidos_compression_rows(&self) -> usize {
         self.eidos_compression_rows
     }
 
     /// Returns the number of Eidos compression blocks represented by the standalone compression
-    /// AIR rows.
+    /// AIR rows, or its upper bound for a live recording.
     pub fn eidos_compression_count(&self) -> usize {
         debug_assert_eq!(self.eidos_compression_rows % EIDOS_COMPRESSION_CYCLE_LEN, 0);
         self.eidos_compression_rows / EIDOS_COMPRESSION_CYCLE_LEN
@@ -286,7 +290,7 @@ impl TraceLenSummary {
         self.byte_pair_lookup_rows
     }
 
-    /// Returns the maximum unpadded row count among the four AIRs.
+    /// Returns the maximum of the reported unpadded row counts among the four AIRs.
     pub fn trace_len(&self) -> usize {
         self.core_rows
             .max(self.chiplets_rows())
@@ -304,22 +308,26 @@ impl TraceLenSummary {
         self.padded_heights[MidenAir::CHIPLETS.instance_index()]
     }
 
-    /// Returns the padded height of the Eidos compression AIR.
+    /// Returns the padded Eidos compression AIR height, or its upper bound for a live recording.
     pub fn eidos_compression_height(&self) -> usize {
         self.padded_heights[MidenAir::EIDOS_COMPRESSION.instance_index()]
     }
 
-    /// Returns the greatest padded height among the four AIRs.
+    /// Returns the greatest of the reported padded heights among the four AIRs.
     pub fn padded_trace_len(&self) -> usize {
         self.padded_heights.into_iter().max().expect("heights is non-empty")
     }
 
-    /// Returns the actual padded per-AIR heights, in [`crate::vm::AIRS`] order.
+    /// Returns the padded heights in [`crate::vm::AIRS`] order.
+    ///
+    /// The Eidos compression height is an upper bound in summaries from live recordings.
     pub fn padded_heights(&self) -> &[usize; MIDEN_AIR_COUNT] {
         &self.padded_heights
     }
 
     /// Returns the percent (0 - 100) of rows added by padding.
+    ///
+    /// This uses the reported maximum row count and height, including any Eidos bounds.
     ///
     /// This cannot underflow, overflow, or divide by zero: [`Self::new`] guarantees that every
     /// padded height is nonzero and covers the unpadded rows of its AIR.

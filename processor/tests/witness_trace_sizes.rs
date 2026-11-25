@@ -54,7 +54,7 @@ fn check_trace_sizes(program_src: &str, stack: &[u64], advice: &AdviceInputs) {
     let (vm, precompile) = output.witness.into_parts();
     assert!(precompile.is_none());
     let trace = vm.build_trace(&miden_vm_stark::memory::default_budget()).unwrap();
-    assert_eq!(output.claim.stack_outputs(), trace.stack_outputs());
+    assert_eq!(*output.claim.stack_outputs(), trace.last_stack_state());
     let actual = trace.trace_len_summary();
     assert_eq!(estimate.core_rows(), actual.core_rows());
     assert_eq!(estimate.core_height(), actual.core_height());

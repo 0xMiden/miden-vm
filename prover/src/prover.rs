@@ -5,7 +5,9 @@ use miden_core::{
     deferred::PrecompileLimits,
     proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus, VmProof},
 };
-use miden_processor::{ExecutionError, ExecutionWitness, PrecompileWitness, VmWitness};
+use miden_processor::{
+    ExecutionError, ExecutionWitness, PrecompileWitness, VmWitness, trace::VmTraceBudget,
+};
 
 use crate::PrecompileProvingError;
 
@@ -85,6 +87,14 @@ impl Prover {
     /// Returns the maximum modelled peak memory, in bytes, for proving a VM execution trace.
     pub const fn max_prover_memory_bytes(&self) -> u64 {
         self.max_prover_memory_bytes
+    }
+
+    /// Returns the canonical VM trace-building budget with this prover's configured byte limit.
+    ///
+    /// Pass it to [`VmWitness::build_trace`] to use the same budget when materializing a trace
+    /// for diagnostics.
+    pub fn trace_budget(&self) -> VmTraceBudget {
+        miden_vm_stark::memory::canonical_budget(self.max_prover_memory_bytes)
     }
 
     /// Sets the maximum modelled peak memory, in bytes, for proving a precompile witness.
@@ -182,8 +192,9 @@ impl Prover {
     }
 
     fn prove_vm(&self, witness: VmWitness) -> Result<VmProof, ProverError> {
-        let budget = miden_vm_stark::memory::canonical_budget(self.max_prover_memory_bytes);
-        let trace = witness.build_trace(&budget).map_err(ProverError::TraceGeneration)?;
+        let trace = witness
+            .build_trace(&self.trace_budget())
+            .map_err(ProverError::TraceGeneration)?;
         miden_vm_stark::prover::prove(trace, self.hash_fn, self.hash_lde_blocks).map_err(|error| {
             ProverError::VmProofGeneration(ExecutionError::ProvingError(error.to_string()))
         })
@@ -231,9 +242,11 @@ mod tests {
     fn prover_uses_canonical_memory_budget_and_allows_override() {
         let prover = Prover::new();
         assert_eq!(prover.max_prover_memory_bytes(), Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES);
+        assert_eq!(prover.trace_budget(), miden_vm_stark::memory::default_budget());
 
         let prover = prover.with_max_prover_memory_bytes(1 << 20);
         assert_eq!(prover.max_prover_memory_bytes(), 1 << 20);
+        assert_eq!(prover.trace_budget(), miden_vm_stark::memory::canonical_budget(1 << 20));
     }
 
     #[test]
