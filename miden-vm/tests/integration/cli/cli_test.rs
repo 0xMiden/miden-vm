@@ -205,7 +205,7 @@ fn run_warns_when_only_the_eidos_upper_bound_exceeds_the_budget() {
     let budget = miden_vm_stark::memory::default_budget();
     let (vm, _) = output.witness.into_parts();
     let trace = vm.build_trace(&budget).unwrap();
-    let exact_peak = budget.prover_peak_bytes(trace.trace_len_summary().padded_heights()).unwrap();
+    let exact_peak = budget.prover_peak_bytes(&trace.trace_len_summary().padded_heights()).unwrap();
 
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("program.masm"), source).unwrap();

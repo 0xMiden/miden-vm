@@ -115,11 +115,12 @@ impl RunCmd {
         );
 
         let budget = canonical_budget(self.max_prover_memory);
+        let padded_heights = summary.padded_heights();
         if budget
-            .prover_peak_bytes(summary.padded_heights())
+            .prover_peak_bytes(&padded_heights)
             .is_none_or(|bytes| bytes > self.max_prover_memory)
         {
-            let [core, chiplets, _, lookup] = *summary.padded_heights();
+            let [core, chiplets, _, lookup] = padded_heights;
             let min_bytes = budget.prover_peak_bytes(&[core, chiplets, MIN_TRACE_LEN, lookup]);
             if min_bytes.is_none_or(|bytes| bytes > self.max_prover_memory) {
                 return Err(Report::msg(format!(
