@@ -2034,10 +2034,20 @@ fn render_signature_list_item(
     }
 
     let mut same_line = !trailing_comma && !lines.is_empty();
+    // Newlines since the last rendered line; two or more mean the source had a blank line, which
+    // is kept (as one blank line) so separated comments stay separated.
+    let mut newlines = 0usize;
     for token in trailing {
         match token.kind() {
-            SyntaxKind::Newline => same_line = false,
+            SyntaxKind::Newline => {
+                same_line = false;
+                newlines += 1;
+            },
             SyntaxKind::Comment | SyntaxKind::DocComment => {
+                if newlines > 1 && !lines.is_empty() {
+                    push_blank_line(&mut lines);
+                }
+                newlines = 0;
                 let comment = trimmed_comment(token);
                 match lines.last_mut() {
                     Some(last_line) if same_line => append_inline_comment(last_line, &comment),
@@ -2568,6 +2578,40 @@ proc foo(
 end
 ";
         let formatted = assert_format_idempotent(source, "comment before signature comma");
+        assert_eq!(
+            print_parsed_module(&formatted, "formatted signature"),
+            print_parsed_module(source, "source signature"),
+        );
+    }
+
+    #[test]
+    fn keeps_blank_lines_between_relocated_signature_comments() {
+        let source = "\
+proc foo(
+    a: felt # first
+
+    # second
+    ,
+    b: felt,
+) -> (
+    felt # result first
+
+    # result second
+    ,
+    felt
+)
+    nop
+end
+";
+        let formatted = assert_format_idempotent(source, "blank line between signature comments");
+        assert!(
+            formatted.contains("    a: felt,\n    # first\n\n    # second\n    b: felt\n"),
+            "blank line between parameter comments was lost:\n{formatted}"
+        );
+        assert!(
+            formatted.contains("    felt,\n    # result first\n\n    # result second\n    felt\n"),
+            "blank line between result comments was lost:\n{formatted}"
+        );
         assert_eq!(
             print_parsed_module(&formatted, "formatted signature"),
             print_parsed_module(source, "source signature"),
