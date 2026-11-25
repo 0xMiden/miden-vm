@@ -3,6 +3,7 @@ mod events;
 mod ext2_ops;
 mod field_ops;
 mod fri_ops;
+mod immediate_forms;
 mod io_ops;
 mod stack_ops;
 mod sys_ops;
