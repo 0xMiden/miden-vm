@@ -453,12 +453,12 @@ impl MerkleStore {
         Ok(root)
     }
 
-    /// Adds all the nodes of multiple Merkle paths into the store.
+    /// Inserts the parent entries for each Merkle opening in `paths` in iteration order.
+    /// Each tuple contains the node position, node digest, and path for [`Self::add_merkle_path`].
     ///
-    /// This will compute the sibling elements for each Merkle `path` and include all the nodes
-    /// into the store.
-    ///
-    /// For further reference, check [MerkleStore::add_merkle_path].
+    /// # Errors
+    /// Returns an error at the first invalid opening. The store retains entries added for
+    /// earlier openings.
     pub fn add_merkle_paths<I>(&mut self, paths: I) -> Result<(), MerkleError>
     where
         I: IntoIterator<Item = (u64, Word, MerklePath)>,
