@@ -54,9 +54,66 @@ impl SourcePathTrimmer {
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::ToString;
+
     use miden_mast_package::debug_info::PackageDebugInfoBuilder;
 
     use super::*;
+    use crate::Assembler;
+
+    #[cfg(unix)]
+    const MISSING_CWD_CHILD_ENV: &str = "MIDEN_MISSING_CWD_TEST_CHILD";
+    #[cfg(unix)]
+    const MISSING_CWD_MARKER_ENV: &str = "MIDEN_MISSING_CWD_TEST_MARKER";
+    #[cfg(unix)]
+    const MISSING_CWD_CHILD_TEST: &str =
+        "assembler::debuginfo::tests::source_path_trimmer_missing_cwd_child";
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "invoked by source_path_trimmer_reports_missing_cwd"]
+    fn source_path_trimmer_missing_cwd_child() {
+        let (Some(_), Some(marker_path)) = (
+            std::env::var_os(MISSING_CWD_CHILD_ENV),
+            std::env::var_os(MISSING_CWD_MARKER_ENV),
+        ) else {
+            return;
+        };
+
+        let cwd = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(cwd.path()).unwrap();
+        std::fs::remove_dir(cwd.path()).unwrap();
+        let current_dir_error = std::env::current_dir().unwrap_err();
+
+        let assembler = Assembler { trim_paths: true, ..Default::default() };
+        let err = assembler.source_path_trimmer().unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "failed to get current directory for debug source path trimming: \
+                 {current_dir_error}"
+            )
+        );
+        std::fs::write(marker_path, b"verified").unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_path_trimmer_reports_missing_cwd() {
+        let cwd = tempfile::tempdir().unwrap();
+        let marker = tempfile::NamedTempFile::new().unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg(MISSING_CWD_CHILD_TEST)
+            .arg("--ignored")
+            .env(MISSING_CWD_CHILD_ENV, "1")
+            .env(MISSING_CWD_MARKER_ENV, marker.path())
+            .current_dir(cwd.path())
+            .status()
+            .unwrap();
+        assert!(status.success(), "missing-cwd child test failed");
+        assert_eq!(std::fs::read(marker.path()).unwrap(), b"verified");
+    }
 
     #[cfg(unix)]
     #[test]
