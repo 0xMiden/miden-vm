@@ -31,6 +31,7 @@
 #### Fixes
 
 - Fixed `PartialMmr::untrack` panicking in debug builds on a leaf position invalid for the forest. The position is now validated against the forest before `InOrderIndex::from_leaf_pos` runs, so invalid positions return the documented empty vec ([#4244](https://github.com/0xMiden/miden-vm/issues/4244)).
+- Fixed `Forest::trees_larger_than(u32::MAX)` panicking in debug builds and returning the input forest unchanged in release builds. It now returns the empty forest, since no tree has an index larger than `u32::MAX` ([#4166](https://github.com/0xMiden/miden-vm/issues/4166)).
 - [BREAKING] Rejected unused opcode 47, required zero padding in LOOP, CALL and SYSCALL hash inputs, and required short operation batches to be final in the VM decoder AIR. The VM proof relation and recursive VM verifier root change ([#4239](https://github.com/0xMiden/miden-vm/pull/4239)).
 - Restored `no_std` builds for VM libraries by using `alloc` in the constraint compiler, building processor traces serially without `std`, and gating diagnostic rendering behind `std` ([#3934](https://github.com/0xMiden/miden-vm/pull/3934)).
 - Enabled `miden-test-utils` builds without `std` by keeping logging and test-only dependencies behind its `std` feature ([#3934](https://github.com/0xMiden/miden-vm/pull/3934)).
