@@ -15,6 +15,7 @@
 
 - [BREAKING] Recreate serialized execution options in v1 format and re-record v4 debugger replay snapshots as v5. The readers reject unversioned execution options and v4 snapshots. The new encodings omit the overlap flag ([#4232](https://github.com/0xMiden/miden-vm/pull/4232)).
 - `run` reports core and chiplet sizes from the recording and an upper bound for Eidos compression rows. It warns when only the upper bound exceeds `--max-prover-memory`. Trace construction now runs entirely after execution and retains parallel replay ([#4232](https://github.com/0xMiden/miden-vm/pull/4232)).
+- [BREAKING] `TraceLenSummary::new` requires power-of-two padded heights. `padded_heights()` returns the array by value ([#4254](https://github.com/0xMiden/miden-vm/pull/4254)).
 - Applied the routine-logging changes from [#4238](https://github.com/0xMiden/miden-vm/pull/4238) to the current VM and STARK crates. Successful proving is silent at `INFO`; profiling remains available at `TRACE`.
 
 - [BREAKING] Changed `Host::get_mast_forest` and `SyncHost::get_mast_forest` to return `Result<Option<LoadedMastForest>, MastForestLoadError>`. Retrieval failures preserve their source in `ExecutionError::MastForestError`, while `Ok(None)` still reports a missing procedure ([#4237](https://github.com/0xMiden/miden-vm/pull/4237)).

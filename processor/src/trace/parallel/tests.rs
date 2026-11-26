@@ -1083,7 +1083,7 @@ fn test_build_trace_corner_cases(
         .expect("default budget must succeed");
     let summary = measured.trace_len_summary();
     let exact_peak = miden_vm_stark::memory::default_budget()
-        .prover_peak_bytes(summary.padded_heights())
+        .prover_peak_bytes(&summary.padded_heights())
         .expect("modelled peak fits in u64");
     let budget = exact_peak.checked_add_signed(budget_offset_from_exact_peak).unwrap();
 
@@ -1137,7 +1137,7 @@ fn test_build_trace_accepts_small_program_at_default_fragment_size() {
         .expect("default budget must succeed");
     let summary = measured.trace_len_summary();
     let exact_peak = miden_vm_stark::memory::default_budget()
-        .prover_peak_bytes(summary.padded_heights())
+        .prover_peak_bytes(&summary.padded_heights())
         .expect("modelled peak fits in u64");
 
     // A budget well above the exact peak, but that the buggy tier-1 cap (`max_any_height_for_
@@ -1205,7 +1205,7 @@ fn test_build_trace_returns_err_when_eidos_compression_trace_exceeds_budget() {
         .build_trace(&miden_vm_stark::memory::default_budget())
         .expect("default budget must succeed");
     let summary = measured.trace_len_summary();
-    let heights = *summary.padded_heights();
+    let heights = summary.padded_heights();
     let eidos_compression_height = heights[MidenAir::EIDOS_COMPRESSION.instance_index()];
     assert!(
         eidos_compression_height > heights[MidenAir::CORE.instance_index()]
@@ -1214,7 +1214,7 @@ fn test_build_trace_returns_err_when_eidos_compression_trace_exceeds_budget() {
         "test setup must make the EidosCompression AIR the dominant height: {heights:?}"
     );
     let exact_peak = miden_vm_stark::memory::default_budget()
-        .prover_peak_bytes(summary.padded_heights())
+        .prover_peak_bytes(&heights)
         .expect("modelled peak fits in u64");
 
     let mut vm_witness =

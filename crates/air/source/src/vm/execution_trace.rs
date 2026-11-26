@@ -1,6 +1,7 @@
 //! Materialized VM relation data and trace diagnostics shared by execution and proving.
 
 use alloc::vec::Vec;
+use core::fmt;
 #[cfg(any(test, feature = "testing"))]
 use core::ops::Range;
 
@@ -184,6 +185,14 @@ pub enum TraceLenSummaryError {
         /// Name of the AIR with the invalid height.
         air: &'static str,
     },
+    /// The padded height of an AIR is not a power of two.
+    #[error("padded height {padded_height} of the {air} AIR is not a power of two")]
+    NonPowerOfTwoHeight {
+        /// Name of the AIR with the invalid height.
+        air: &'static str,
+        /// The rejected padded height.
+        padded_height: usize,
+    },
     /// The padded height of an AIR is smaller than its number of unpadded rows.
     #[error("padded height {padded_height} of the {air} AIR is below its {rows} unpadded rows")]
     HeightBelowRows {
@@ -202,14 +211,26 @@ pub enum TraceLenSummaryError {
 /// bounds for Eidos compression rows and height because trace construction deduplicates requests.
 /// Core and chiplet counts and heights are exact in both cases. Dynamic AIR row counts exclude
 /// power-of-two padding. The byte-pair lookup has a fixed physical height.
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+#[derive(Eq, PartialEq, Clone, Copy)]
 pub struct TraceLenSummary {
     core_rows: usize,
     chiplets: ChipletsLengths,
     eidos_compression_rows: usize,
     byte_pair_lookup_rows: usize,
-    /// Padded heights in [`crate::vm::AIRS`] order.
-    padded_heights: [usize; MIDEN_AIR_COUNT],
+    /// Base-2 logarithms of padded heights in [`crate::vm::AIRS`] order.
+    padded_log_heights: [u8; MIDEN_AIR_COUNT],
+}
+
+impl fmt::Debug for TraceLenSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TraceLenSummary")
+            .field("core_rows", &self.core_rows)
+            .field("chiplets", &self.chiplets)
+            .field("eidos_compression_rows", &self.eidos_compression_rows)
+            .field("byte_pair_lookup_rows", &self.byte_pair_lookup_rows)
+            .field("padded_heights", &self.padded_heights())
+            .finish()
+    }
 }
 
 impl TraceLenSummary {
@@ -220,9 +241,8 @@ impl TraceLenSummary {
     ///
     /// # Errors
     ///
-    /// Returns an error if the chiplet row counts overflow `usize`, or if a padded height is zero
-    /// or smaller than the unpadded row count of its AIR. These checks keep
-    /// [`Self::padding_percentage`] from underflowing or dividing by zero.
+    /// Returns an error if the chiplet row counts overflow `usize`, or if a padded height is not
+    /// a power of two large enough to cover the unpadded row count of its AIR.
     pub fn new(
         core_rows: usize,
         chiplets: ChipletsLengths,
@@ -238,13 +258,20 @@ impl TraceLenSummary {
             ("Eidos compression", eidos_compression_rows),
             ("byte-pair lookup", byte_pair_lookup_rows),
         ];
-        for ((air, rows), padded_height) in unpadded_rows.into_iter().zip(padded_heights) {
+        let mut padded_log_heights = [0; MIDEN_AIR_COUNT];
+        for (index, ((air, rows), padded_height)) in
+            unpadded_rows.into_iter().zip(padded_heights).enumerate()
+        {
             if padded_height == 0 {
                 return Err(TraceLenSummaryError::ZeroHeight { air });
             }
             if padded_height < rows {
                 return Err(TraceLenSummaryError::HeightBelowRows { air, padded_height, rows });
             }
+            if !padded_height.is_power_of_two() {
+                return Err(TraceLenSummaryError::NonPowerOfTwoHeight { air, padded_height });
+            }
+            padded_log_heights[index] = padded_height.ilog2() as u8;
         }
 
         Ok(TraceLenSummary {
@@ -252,7 +279,7 @@ impl TraceLenSummary {
             chiplets,
             eidos_compression_rows,
             byte_pair_lookup_rows,
-            padded_heights,
+            padded_log_heights,
         })
     }
 
@@ -300,29 +327,29 @@ impl TraceLenSummary {
 
     /// Returns the padded height of the core AIR.
     pub fn core_height(&self) -> usize {
-        self.padded_heights[MidenAir::CORE.instance_index()]
+        1 << self.padded_log_heights[MidenAir::CORE.instance_index()]
     }
 
     /// Returns the padded height of the chiplets AIR.
     pub fn chiplets_height(&self) -> usize {
-        self.padded_heights[MidenAir::CHIPLETS.instance_index()]
+        1 << self.padded_log_heights[MidenAir::CHIPLETS.instance_index()]
     }
 
     /// Returns the padded Eidos compression AIR height, or its upper bound for a live recording.
     pub fn eidos_compression_height(&self) -> usize {
-        self.padded_heights[MidenAir::EIDOS_COMPRESSION.instance_index()]
+        1 << self.padded_log_heights[MidenAir::EIDOS_COMPRESSION.instance_index()]
     }
 
     /// Returns the greatest of the reported padded heights among the four AIRs.
     pub fn padded_trace_len(&self) -> usize {
-        self.padded_heights.into_iter().max().expect("heights is non-empty")
+        1 << self.padded_log_heights.into_iter().max().expect("heights is non-empty")
     }
 
     /// Returns the padded heights in [`crate::vm::AIRS`] order.
     ///
     /// The Eidos compression height is an upper bound in summaries from live recordings.
-    pub fn padded_heights(&self) -> &[usize; MIDEN_AIR_COUNT] {
-        &self.padded_heights
+    pub fn padded_heights(&self) -> [usize; MIDEN_AIR_COUNT] {
+        self.padded_log_heights.map(|log_height| 1 << log_height)
     }
 
     /// Returns the percent (0 - 100) of rows added by padding.
@@ -459,7 +486,7 @@ mod tests {
         assert_eq!(summary.chiplets_rows(), 20);
         assert_eq!(summary.eidos_compression_rows(), 3 * EIDOS_COMPRESSION_CYCLE_LEN);
         assert_eq!(summary.byte_pair_lookup_rows(), 1 << 16);
-        assert_eq!(summary.padded_heights(), &heights);
+        assert_eq!(summary.padded_heights(), heights);
         assert_eq!(summary.core_height(), heights[0]);
         assert_eq!(summary.chiplets_height(), heights[1]);
         assert_eq!(summary.eidos_compression_height(), heights[2]);
@@ -497,6 +524,20 @@ mod tests {
                 padded_height: MIN_TRACE_LEN,
                 rows,
             })
+        );
+    }
+
+    #[test]
+    fn trace_len_summary_rejects_non_power_of_two_height() {
+        let mut heights = [MIN_TRACE_LEN; MIDEN_AIR_COUNT];
+        let padded_height = MIN_TRACE_LEN + 1;
+        heights[MidenAir::EIDOS_COMPRESSION.instance_index()] = padded_height;
+        assert_eq!(
+            TraceLenSummary::new(0, ChipletsLengths::default(), 0, 0, heights),
+            Err(TraceLenSummaryError::NonPowerOfTwoHeight {
+                air: "Eidos compression",
+                padded_height
+            }),
         );
     }
 

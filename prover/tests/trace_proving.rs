@@ -22,7 +22,7 @@ fn witness_proving_enforces_the_provers_memory_budget() {
     let (vm, _) = record().into_parts();
     let exact_peak = {
         let trace = vm.build_trace(&budget).unwrap();
-        budget.prover_peak_bytes(trace.trace_len_summary().padded_heights()).unwrap()
+        budget.prover_peak_bytes(&trace.trace_len_summary().padded_heights()).unwrap()
     };
 
     // Both entrypoints must enforce the padded shape even when the raw buffers fit.

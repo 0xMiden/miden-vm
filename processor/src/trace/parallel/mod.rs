@@ -224,7 +224,7 @@ impl VmWitness {
             byte_pair_lookup_rows,
             heights,
         )
-        .expect("trace builder pads every AIR to at least its unpadded row count");
+        .expect("trace builder pads every AIR to a power of two that covers its unpadded rows");
 
         // Each segment is built at its own per-AIR height (no cross-padding to the unified max).
         let ((chiplets_trace, eidos_compression_trace, mut and8_counts), ()) = join(
