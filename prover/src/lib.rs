@@ -14,7 +14,10 @@ pub use miden_core::{
     advice::AdviceInputs,
     deferred::{PrecompileLimits, PrecompileWitness},
     program::{ExecutionClaim, InputError, Program, ProgramInfo, StackInputs, StackOutputs},
-    proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof},
+    proof::{
+        CompleteProof, ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus, StarkProof,
+        VmProof,
+    },
     serde::DeserializationError,
 };
 pub use miden_precompiles_stark::prover::PrecompileProvingError;
@@ -22,7 +25,7 @@ pub use miden_processor::{
     ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionWitness, FutureMaybeSend, Host,
     SyncHost, VmWitness,
 };
-pub use prover::{CompleteProof, Prover, ProverError};
+pub use prover::{Prover, ProverError};
 
 #[cfg(all(test, feature = "std"))]
 mod block_stack_entry_kind_repro;

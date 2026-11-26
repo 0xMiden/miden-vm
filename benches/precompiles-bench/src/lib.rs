@@ -165,7 +165,7 @@ pub fn prove_once(fixture: &PrecompileFixture) -> (StackOutputs, ExecutionProof)
         .with_verification_precompile_limits(fixture.verification_limits.clone())
         .prove_full(witness)
         .expect("failed to prove precompile benchmark");
-    (stack_outputs, proof)
+    (stack_outputs, proof.into())
 }
 
 pub fn verify_once(

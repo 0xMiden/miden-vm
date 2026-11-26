@@ -6,7 +6,12 @@ error[E0423]: cannot initialize a tuple struct which contains private fields
   |
   = note: a struct named `CompleteProof` exists in another namespace
 note: constructor is not visible here due to private fields
- --> $WORKSPACE/prover/src/prover.rs
+ --> $WORKSPACE/core/src/proof.rs
   |
   | pub struct CompleteProof(ExecutionProof);
   |                          ^^^^^^^^^^^^^^ private field
+help: you might have meant to use the `new` associated function
+  |
+4 -     let _ = CompleteProof(proof);
+4 +     let _ = CompleteProof::new(_, _);
+  |

@@ -10,7 +10,8 @@ batches of portable `PrecompileWitness` values, or materialized `ExecutionTrace`
 `Prover` is synchronous and consumes post-execution witnesses. `Prover::prove(ExecutionWitness)`
 proves the VM portion. Its `PrecompileStatus` is `Empty` when there is no deferred work, or
 `Deferred` with a portable singleton `PrecompileWitness`. `Prover::prove_full(ExecutionWitness)`
-proves the VM and any precompile work locally. `Prover::prove_precompiles(Vec<PrecompileWitness>)`
+returns a `CompleteProof` after proving the VM and any precompile work locally.
+`Prover::prove_precompiles(Vec<PrecompileWitness>)`
 imports a nonempty batch directly into one Session and returns one proof. Its root metadata preserves
 input order and repeated roots.
 

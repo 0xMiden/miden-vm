@@ -170,7 +170,7 @@ fn prove_trace_outputs(witness: ExecutionWitness) -> (StackOutputs, ExecutionPro
         .with_hash_fn(HashFunction::Blake3_256)
         .prove_full(witness)
         .expect("failed to prove Blake3 benchmark witness");
-    (stack_outputs, proof)
+    (stack_outputs, proof.into())
 }
 
 pub fn build_trace(witness: ExecutionWitness) -> VmTrace {

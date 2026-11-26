@@ -26,8 +26,9 @@ pub use miden_core::{
         StackOutputs,
     },
     proof::{
-        ExecutionProof, ExecutionProofCompatibility, ExecutionProofCompatibilityError,
-        ExecutionProofError, HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof,
+        CompleteProof, ExecutionProof, ExecutionProofCompatibility,
+        ExecutionProofCompatibilityError, ExecutionProofError, HashFunction, PrecompileProof,
+        PrecompileStatus, StarkProof, VmProof,
     },
 };
 pub use miden_core_lib::{conjectured_security_estimator_root, proven_security_estimator_root};
@@ -48,7 +49,7 @@ pub use miden_processor::{
     TraceOutput, VmTraceBudget, Witness, WitnessOutput, advice, crypto, field, serde, trace,
     trace::VmTrace, utils,
 };
-pub use miden_prover::{CompleteProof, PrecompileProvingError, Prover, ProverError};
+pub use miden_prover::{PrecompileProvingError, Prover, ProverError};
 pub use miden_verifier::{
     PrecompileVerificationError, ProofSecurityParameters, ProvenSecurityReport, SecurityReport,
     StarkVerificationError, VerificationError, VerificationOutcome, Verifier,
