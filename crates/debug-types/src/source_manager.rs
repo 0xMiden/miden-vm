@@ -194,7 +194,10 @@ pub trait SourceManager: Debug {
         range: Option<Selection>,
         version: i32,
     ) -> Result<(), SourceManagerError>;
-    /// Get the [SourceFile] corresponding to `id`
+    /// Returns a handle to the [SourceFile] for `id`.
+    ///
+    /// The handle keeps this version of the file alive across updates. Use [`SourceFile::as_str()`]
+    /// or [`SourceFile::source_slice()`] to read its text.
     fn get(&self, id: SourceId) -> Result<Arc<SourceFile>, SourceManagerError>;
     /// Get the most recent [SourceFile] whose URI is `uri`
     fn get_by_uri(&self, uri: &Uri) -> Option<Arc<SourceFile>> {
@@ -210,10 +213,6 @@ pub trait SourceManager: Debug {
     fn location_to_span(&self, loc: Location) -> Option<SourceSpan>;
     /// Convert a [SourceSpan] to an equivalent [Location], if the span is valid
     fn location(&self, span: SourceSpan) -> Result<Location, SourceManagerError>;
-    /// Get the source associated with `id` as a string slice
-    fn source(&self, id: SourceId) -> Result<&str, SourceManagerError>;
-    /// Get the source corresponding to `span` as a string slice
-    fn source_slice(&self, span: SourceSpan) -> Result<&str, SourceManagerError>;
 }
 
 impl<T: ?Sized + SourceManager> SourceManager for Arc<T> {
@@ -270,14 +269,6 @@ impl<T: ?Sized + SourceManager> SourceManager for Arc<T> {
     #[inline(always)]
     fn location(&self, span: SourceSpan) -> Result<Location, SourceManagerError> {
         (**self).location(span)
-    }
-    #[inline(always)]
-    fn source(&self, id: SourceId) -> Result<&str, SourceManagerError> {
-        (**self).source(id)
-    }
-    #[inline(always)]
-    fn source_slice(&self, span: SourceSpan) -> Result<&str, SourceManagerError> {
-        (**self).source_slice(span)
     }
 }
 
@@ -457,10 +448,8 @@ impl SourceManager for DefaultSourceManager {
         version: i32,
     ) -> Result<(), SourceManagerError> {
         let mut manager = self.0.write();
-        let source_file = &mut manager.files[id];
-        let source_file_cloned = Arc::make_mut(source_file);
-        source_file_cloned
-            .content_mut()
+        let file = Arc::make_mut(&mut manager.files[id]);
+        file.content_mut()
             .update(text, range, version)
             .map_err(SourceManagerError::InvalidContentUpdate)
     }
@@ -498,27 +487,6 @@ impl SourceManager for DefaultSourceManager {
     fn location(&self, span: SourceSpan) -> Result<Location, SourceManagerError> {
         let manager = self.0.read();
         manager.location(span)
-    }
-
-    fn source(&self, id: SourceId) -> Result<&str, SourceManagerError> {
-        let manager = self.0.read();
-        let ptr = manager
-            .files
-            .get(id)
-            .ok_or(SourceManagerError::InvalidSourceId)
-            .map(|file| file.as_str() as *const str)?;
-        drop(manager);
-        // SAFETY: Because the lifetime of the returned reference is bound to the manager, and
-        // because we can only ever add files, not modify/remove them, this is safe. Exclusive
-        // access to the manager does _not_ mean exclusive access to the contents of previously
-        // added source files
-        Ok(unsafe { &*ptr })
-    }
-
-    fn source_slice(&self, span: SourceSpan) -> Result<&str, SourceManagerError> {
-        self.source(span.source_id())?
-            .get(span.into_slice_index())
-            .ok_or(SourceManagerError::InvalidBounds)
     }
 }
 
