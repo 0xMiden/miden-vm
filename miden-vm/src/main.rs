@@ -1,6 +1,9 @@
 extern crate alloc;
 
-use std::ffi::{OsStr, OsString};
+use std::{
+    ffi::{OsStr, OsString},
+    process::ExitCode,
+};
 
 use clap::{FromArgMatches, Parser, Subcommand};
 use miden_assembly::diagnostics::Report;
@@ -120,14 +123,22 @@ impl Cli {
 }
 
 /// Executable entry point
-pub fn main() -> Result<(), Report> {
+pub fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprint!("{error:?}");
+            ExitCode::FAILURE
+        },
+    }
+}
+
+fn run() -> Result<(), Report> {
     // read command-line args
     let cli = <MidenVmCli as clap::CommandFactory>::command();
     let matches = cli.get_matches();
     let parsed = MidenVmCli::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
     let cli: Cli = parsed.try_into()?;
-
-    initialize_diagnostics();
 
     // configure logging
     // if logging level is not specified, set level to "warn"
@@ -155,23 +166,6 @@ pub fn main() -> Result<(), Report> {
 
     // execute cli action
     cli.execute()
-}
-
-fn initialize_diagnostics() {
-    use miden_assembly::diagnostics::reporting::{self, ReportHandlerOpts};
-
-    #[cfg(feature = "std")]
-    {
-        let result = reporting::set_hook(Box::new(|_| Box::new(ReportHandlerOpts::new().build())));
-        if result.is_ok() {
-            reporting::set_panic_hook();
-        }
-    }
-
-    #[cfg(not(feature = "std"))]
-    {
-        let _ = reporting::set_hook(Box::new(|_| Box::new(ReportHandlerOpts::new().build())));
-    }
 }
 
 // TESTS

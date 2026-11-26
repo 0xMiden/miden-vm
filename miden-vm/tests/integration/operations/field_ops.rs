@@ -200,11 +200,10 @@ fn div_b() {
         assert_assembler_diagnostic!(
             test,
             "invalid constant expression: division by zero",
-            regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+            regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
             "12 |",
             "13 | begin div.0 exec.truncate_stack end",
-            "   :           ^",
-            "   `----"
+            "   :           ^"
         );
     }
 
@@ -268,12 +267,10 @@ fn neg_fail() {
     assert_assembler_diagnostic!(
         test,
         "invalid syntax",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+        regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
         "12 |",
         "13 | begin neg.1 exec.truncate_stack end",
-        "   :       ^^|^^",
-        "   :         `-- invalid instruction `neg` or malformed operands",
-        "   `----"
+        "   :       ^^^^^ invalid instruction `neg` or malformed operands"
     );
 }
 
@@ -311,12 +308,10 @@ fn inv_fail() {
     assert_assembler_diagnostic!(
         test,
         "invalid syntax",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+        regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
         "12 |",
         "13 | begin inv.1 exec.truncate_stack end",
-        "   :       ^^|^^",
-        "   :         `-- invalid instruction `inv` or malformed operands",
-        "   `----"
+        "   :       ^^^^^ invalid instruction `inv` or malformed operands"
     );
 }
 
@@ -389,11 +384,10 @@ fn exp_bits_length_fail() {
         assert_assembler_diagnostic!(
             test,
             "invalid literal: expected value to be a valid bit size, e.g. 0..63",
-            regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+            regex!(r#"--> test[\d]+:[\d]+:[\d]+$"#),
             "12 |",
             "13 | begin exp.u64 exec.truncate_stack end",
-            "   :            ^^",
-            "   `----"
+            "   :            ^^"
         );
     }
 }

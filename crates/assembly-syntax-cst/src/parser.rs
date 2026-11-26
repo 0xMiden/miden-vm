@@ -6,7 +6,7 @@ use rowan::{GreenNodeBuilder, NodeOrToken, TextRange};
 use crate::{
     MAX_CONTROL_FLOW_NESTING, MasmLanguage,
     ast::AstNode,
-    diagnostics::{LabeledSpan, Severity, diagnostic, miette::MietteDiagnostic as Diagnostic},
+    diagnostics::{Label, MessageDiagnostic, diagnostic},
     lexer::{Token, tokenize},
     syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken},
 };
@@ -19,7 +19,7 @@ use crate::{
 pub struct Parse {
     source: Arc<SourceFile>,
     green_node: rowan::GreenNode,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<MessageDiagnostic>,
 }
 
 impl Parse {
@@ -35,12 +35,12 @@ impl Parse {
     }
 
     /// Returns any syntax diagnostics emitted while building the CST.
-    pub fn diagnostics(&self) -> &[Diagnostic] {
+    pub fn diagnostics(&self) -> &[MessageDiagnostic] {
         &self.diagnostics
     }
 
     /// Removes and returns any syntax diagnostics emitted while building the CST.
-    pub fn take_diagnostics(&mut self) -> Vec<Diagnostic> {
+    pub fn take_diagnostics(&mut self) -> Vec<MessageDiagnostic> {
         core::mem::take(&mut self.diagnostics)
     }
 
@@ -138,7 +138,7 @@ struct Parser<'input> {
     tokens: Vec<Token<'input>>,
     pos: usize,
     builder: GreenNodeBuilder<'static>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<MessageDiagnostic>,
     eof_span: SourceSpan,
 }
 
@@ -1616,8 +1616,7 @@ impl<'input> Parser<'input> {
             let text = token.text();
             if kind == SyntaxKind::Error {
                 self.diagnostics.push(diagnostic!(
-                    severity = Severity::Error,
-                    labels = vec![LabeledSpan::at(span, format!("unrecognized token `{text}`"))],
+                    labels = vec![diagnostic_label(span, format!("unrecognized token `{text}`"))],
                     "syntax error"
                 ));
             }
@@ -1645,18 +1644,21 @@ impl<'input> Parser<'input> {
 
     fn error_at_span(&mut self, span: SourceSpan, message: impl Into<String>) {
         self.diagnostics.push(diagnostic!(
-            severity = Severity::Error,
-            labels = vec![LabeledSpan::at(span, message.into())],
+            labels = vec![diagnostic_label(span, message.into())],
             "syntax error"
         ));
     }
 
     fn error_at_eof(&mut self, message: impl Into<String>) {
-        self.diagnostics.push(diagnostic!(
-            severity = Severity::Error,
-            labels = vec![LabeledSpan::at(self.eof_span, message.into())],
-            "syntax error"
-        ));
+        self.error_at_span(self.eof_span, message);
+    }
+}
+
+fn diagnostic_label(span: SourceSpan, message: String) -> Label {
+    if span.source_id().is_unknown() {
+        Label::detached(span.into_range(), message)
+    } else {
+        Label::new(span, message)
     }
 }
 
@@ -1787,7 +1789,7 @@ mod tests {
 
     use crate::{
         ast::{ImportKind, Item, SourceFile as AstSourceFile},
-        parse_source_file, parse_text,
+        parse_inline_masm, parse_source_file, parse_text,
         parser::parse_inline_masm_text,
         syntax::SyntaxKind,
     };
@@ -2901,29 +2903,52 @@ end
             "proc foo\n    §\nend\n".to_string().into_boxed_str(),
         ));
 
-        let parse = parse_source_file(source.clone());
-        assert!(parse.has_errors());
-
-        let diagnostic = parse
-            .diagnostics()
-            .iter()
-            .find(|diag| {
-                diag.labels.as_ref().is_some_and(|labels| {
-                    labels.iter().any(|l| {
-                        l.label().is_some_and(|label| label.contains("unrecognized token"))
-                    })
-                })
-            })
-            .expect("invalid-token diagnostic");
         let offset = source.as_str().find('§').expect("invalid token offset");
         let expected =
             SourceSpan::try_from_range(source.id(), offset..offset + '§'.len_utf8()).unwrap();
-        let label_span = diagnostic.labels.as_deref().unwrap()[0].inner();
-        let actual = SourceSpan::new(
-            source.id(),
-            (label_span.offset() as u32)..((label_span.offset() + label_span.len()) as u32),
-        );
-        assert_eq!(actual, expected);
+        for parse in [parse_source_file(source.clone()), parse_inline_masm(source, Some(expected))]
+        {
+            let label = parse
+                .diagnostics()
+                .iter()
+                .filter_map(|diag| diag.labels.as_deref())
+                .flatten()
+                .find(|label| label.label() == Some("unrecognized token `§`"))
+                .expect("invalid-token diagnostic");
+            assert_eq!(label.span, expected);
+        }
+    }
+
+    #[test]
+    fn detached_eof_diagnostic_renders_its_zero_length_source_location() {
+        let parse = parse_text("@");
+        let diagnostic = parse
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| {
+                diagnostic
+                    .labels
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|label| label.span.is_unknown())
+            })
+            .expect("end-of-input diagnostic at the start of the detached source");
+
+        let rebound = Arc::new(ManagedSourceFile::new(
+            SourceId::new(13),
+            SourceLanguage::Masm,
+            Uri::new("memory:///rebound.masm"),
+            "@",
+        ));
+        for source in [parse.source_file(), rebound] {
+            let expected_location = format!("{}:1:1", source.uri());
+            let report =
+                miden_utils_diagnostics::Report::from(diagnostic.clone()).with_source_code(source);
+            let rendered = format!("{report:?}");
+            assert!(rendered.contains(&expected_location), "{rendered}");
+            assert!(rendered.contains("1 | @\n   : ^"), "{rendered}");
+        }
     }
 
     #[test]
@@ -2957,8 +2982,8 @@ end
             .last()
             .map(|(offset, _)| offset)
             .expect("source should be non-empty");
-        let label_span = diagnostic.labels.as_deref().unwrap()[0].inner();
-        assert_eq!(label_span.offset(), last_char_offset);
+        let label_span = diagnostic.labels.as_deref().unwrap()[0].span;
+        assert_eq!(label_span.start().to_usize(), last_char_offset);
         assert_eq!(label_span.len(), 0);
     }
 

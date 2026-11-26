@@ -1,14 +1,11 @@
-// Allow unused assignments - required by miette::Diagnostic derive macro
-#![allow(unused_assignments)]
-
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
     Felt, Path, Word,
     ast::{ModuleIndex, SymbolResolutionError, constants::ConstEvalError},
     debuginfo::{SourceFile, SourceSpan},
-    diagnostics::{Diagnostic, RelatedError, RelatedLabel, miette},
 };
+use miden_utils_diagnostics::{Diagnostic, RelatedError, RelatedLabel};
 
 // LINKER ERROR
 // ================================================================================================
@@ -18,7 +15,6 @@ use miden_assembly_syntax::{
 #[non_exhaustive]
 pub enum LinkerError {
     #[error("there are no modules to analyze")]
-    #[diagnostic()]
     Empty,
     #[error(transparent)]
     #[diagnostic(transparent)]
@@ -39,16 +35,12 @@ pub enum LinkerError {
         labels: Box<[RelatedLabel]>,
     },
     #[error("found a cycle in the call graph, involving these procedures: {}", nodes.join(", "))]
-    #[diagnostic()]
     Cycle { nodes: Box<[String]> },
     #[error("duplicate definition found for module '{path}'")]
-    #[diagnostic()]
     DuplicateModule { path: Arc<Path> },
     #[error("too many modules in the graph (maximum: {})", ModuleIndex::MAX_MODULES)]
-    #[diagnostic()]
     TooManyModules,
     #[error("invalid module surface metadata for package '{package}': {reason}")]
-    #[diagnostic()]
     InvalidPackageModuleSurface { package: String, reason: String },
     #[error("ambiguous module path resolution for '{path}'")]
     #[diagnostic(help("matching module prefixes: {}", matches.join(", ")))]
@@ -61,7 +53,6 @@ pub enum LinkerError {
         matches: Box<[String]>,
     },
     #[error("undefined module '{path}'")]
-    #[diagnostic()]
     UndefinedModule {
         #[label]
         span: SourceSpan,
@@ -94,7 +85,6 @@ pub enum LinkerError {
     #[error(
         "name conflict in module '{module}': {kind} '{name}' conflicts with an existing item, import, or submodule"
     )]
-    #[diagnostic()]
     NamespaceNameConflict {
         #[label("conflicting namespace member")]
         span: SourceSpan,
@@ -212,7 +202,6 @@ pub enum LinkerError {
         path: Arc<Path>,
     },
     #[error("invalid syscall: '{callee}' is not an exported kernel procedure")]
-    #[diagnostic()]
     InvalidSysCallTarget {
         #[label("call occurs here")]
         span: SourceSpan,
@@ -221,7 +210,6 @@ pub enum LinkerError {
         callee: Arc<Path>,
     },
     #[error("kernel procedure '{callee}' can only be invoked via syscall")]
-    #[diagnostic()]
     KernelProcNotSyscall {
         #[label("non-syscall reference to kernel procedure")]
         span: SourceSpan,
@@ -230,7 +218,6 @@ pub enum LinkerError {
         callee: Arc<Path>,
     },
     #[error("invalid procedure reference: path refers to a non-procedure item")]
-    #[diagnostic()]
     InvalidInvokeTarget {
         #[label("this path resolves to {path}, which is not a procedure")]
         span: SourceSpan,
@@ -248,7 +235,6 @@ pub enum LinkerError {
         new_values: Vec<Felt>,
     },
     #[error("undefined type alias")]
-    #[diagnostic()]
     UndefinedType {
         #[label]
         span: SourceSpan,

@@ -14,12 +14,11 @@ fn unused_constant_warning() {
         "syntax error",
         "help: see emitted diagnostics for details",
         "unused constant",
-        regex!(r#",-\[test[\d]+:2:1\]"#),
+        regex!(r#"--> test[\d]+:2:1$"#),
         "1 |",
         "2 | const UNUSED = 42",
         "  : ^^^^^^^^^^^^^^^^^",
         "3 |",
-        "  `----",
         " help: this constant is never used and can be safely removed"
     );
 }
@@ -860,12 +859,10 @@ fn constant_not_found() {
         "syntax error",
         "help: see emitted diagnostics for details",
         "undefined constant 'CONSTANT'",
-        regex!(r#",-\[test[\d]+:2:16\]"#),
+        regex!(r#"--> test[\d]+:2:16$"#),
         "1 |",
         "2 |     begin push.CONSTANT end",
-        "  :                ^^^^|^^^",
-        "  :                    `-- the constant referenced here is not defined in the current scope",
-        "  `----",
+        "  :                ^^^^^^^^ the constant referenced here is not defined in the current scope",
         "help: are you missing an import?"
     );
 }
@@ -1013,12 +1010,11 @@ fn const_conversion_failed_to_u16() {
         "syntax error",
         "help: see emitted diagnostics for details",
         "invalid immediate: value is larger than expected range",
-        regex!(r#",-\[test[\d]+:5:18\]"#),
+        regex!(r#"--> test[\d]+:5:18$"#),
         "4 |     proc test_constant_overflow",
         "5 |         loc_load.CONSTANT",
         "  :                  ^^^^^^^^",
-        "6 |     end",
-        "  `----"
+        "6 |     end"
     );
 }
 
@@ -1047,12 +1043,11 @@ fn const_conversion_failed_to_u32() {
         "syntax error",
         "help: see emitted diagnostics for details",
         "invalid immediate: value is larger than expected range",
-        regex!(r#",-\[test[\d]+:4:18\]"#),
+        regex!(r#"--> test[\d]+:4:18$"#),
         "3 |     begin",
         "4 |         mem_load.CONSTANT",
         "  :                  ^^^^^^^^",
-        "5 |     end",
-        "  `----"
+        "5 |     end"
     );
 }
 
@@ -1073,13 +1068,11 @@ fn deprecated_mem_loadw_instruction() {
         context,
         source,
         "deprecated instruction: `mem_loadw` has been removed",
-        regex!(r#",-\[test[\d]+:2:9\]"#),
+        regex!(r#"--> test[\d]+:2:9$"#),
         "1 | begin",
         "2 |         mem_loadw",
-        regex!(r#"^ *: *\^+"#),
-        regex!(r#"this instruction is no longer supported"#),
+        regex!(r#"^ *: *\^+ this instruction is no longer supported"#),
         "3 |     end",
-        "  `----",
         regex!(r#"help:.*use.*mem_loadw_be.*instead"#)
     );
 }
@@ -1105,13 +1098,11 @@ fn deprecated_loc_loadw_instruction() {
         context,
         source,
         "deprecated instruction: `loc_loadw` has been removed",
-        regex!(r#",-\[test[\d]+:3:9\]"#),
+        regex!(r#"--> test[\d]+:3:9$"#),
         "2 |     proc foo",
         "3 |         loc_loadw.0",
-        regex!(r#"^ *: *\^+"#),
-        regex!(r#"this instruction is no longer supported"#),
+        regex!(r#"^ *: *\^+ this instruction is no longer supported"#),
         "4 |     end",
-        "  `----",
         regex!(r#"help:.*use.*loc_loadw_be.*instead"#)
     );
 }
@@ -1137,13 +1128,11 @@ fn deprecated_loc_storew_instruction() {
         context,
         source,
         "deprecated instruction: `loc_storew` has been removed",
-        regex!(r#",-\[test[\d]+:3:9\]"#),
+        regex!(r#"--> test[\d]+:3:9$"#),
         "2 |     proc foo",
         "3 |         loc_storew.0",
-        regex!(r#"^ *: *\^+"#),
-        regex!(r#"this instruction is no longer supported"#),
+        regex!(r#"^ *: *\^+ this instruction is no longer supported"#),
         "4 |     end",
-        "  `----",
         regex!(r#"help:.*use.*loc_storew_be.*instead"#)
     );
 }
@@ -1470,11 +1459,10 @@ fn link_time_const_evaluation_undefined_symbol() -> TestResult {
     assert_diagnostic_lines!(
         error,
         "undefined item 'lib::a::FOO'",
-        regex!(r#",-\[test[\d]+:1:6\]"#),
+        regex!(r#"--> test[\d]+:1:6$"#),
         "1 | use {FOO} from lib::a",
         "  :      ^^^",
         "2 |         begin",
-        "  `----",
         "help: you might be missing an import, or the containing library has not been linked"
     );
 
@@ -1512,14 +1500,13 @@ fn link_time_const_evaluation_invalid_constant() -> TestResult {
 
     assert_diagnostic_lines!(
         error,
-        "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
-        "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
-        regex!(r#",-\[test[\d]+:3:14\]"#),
+        "error: invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
+        "caused by: invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
+        regex!(r#"--> test[\d]+:3:14$"#),
         "2 |     begin",
         "3 |         push.f",
         "  :              ^",
         "4 |     end",
-        "  `----",
         "help: bare identifiers must be lowercase alphanumeric with '_', quoted identifiers can include any graphical character"
     );
 

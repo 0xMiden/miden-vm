@@ -7,12 +7,12 @@ mod instructions;
 use alloc::{collections::BTreeSet, string::String, sync::Arc, vec::Vec};
 
 use miden_debug_types::{SourceFile, SourceSpan};
-use miden_utils_diagnostics::LabeledSpan;
+use miden_utils_diagnostics::Label;
 
 use self::{context::LoweringContext, forms::lower_source_file};
 use crate::{
     Report, ast,
-    diagnostics::{Diagnostic, Severity, miette, miette::MietteDiagnostic},
+    diagnostics::{Diagnostic, MessageDiagnostic, Severity},
 };
 
 /// User-facing syntax diagnostics produced by the CST-backed parser entry point.
@@ -27,7 +27,7 @@ pub enum SyntaxError {
     Error {
         message: String,
         #[label(collection)]
-        labels: Vec<LabeledSpan>,
+        labels: Vec<Label>,
         #[help]
         help: Option<String>,
     },
@@ -36,7 +36,7 @@ pub enum SyntaxError {
     Warning {
         message: String,
         #[label(collection)]
-        labels: Vec<LabeledSpan>,
+        labels: Vec<Label>,
         #[help]
         help: Option<String>,
     },
@@ -45,7 +45,7 @@ pub enum SyntaxError {
     Advice {
         message: String,
         #[label(collection)]
-        labels: Vec<LabeledSpan>,
+        labels: Vec<Label>,
         #[help]
         help: Option<String>,
     },
@@ -104,8 +104,8 @@ pub fn parse_inline_masm(
 }
 
 /// Converts recovered CST diagnostics into the user-facing syntax error surface.
-impl From<Vec<MietteDiagnostic>> for SyntaxError {
-    fn from(mut diagnostics: Vec<MietteDiagnostic>) -> Self {
+impl From<Vec<MessageDiagnostic>> for SyntaxError {
+    fn from(mut diagnostics: Vec<MessageDiagnostic>) -> Self {
         if diagnostics.len() == 1 {
             Self::from(diagnostics.pop().unwrap())
         } else {
@@ -117,16 +117,9 @@ impl From<Vec<MietteDiagnostic>> for SyntaxError {
 }
 
 /// Converts a single CST diagnostic into the parser's severity-preserving syntax error wrapper.
-impl From<MietteDiagnostic> for SyntaxError {
-    fn from(value: MietteDiagnostic) -> Self {
-        let MietteDiagnostic {
-            message,
-            code: _,
-            severity,
-            help,
-            url: _,
-            labels,
-        } = value;
+impl From<MessageDiagnostic> for SyntaxError {
+    fn from(value: MessageDiagnostic) -> Self {
+        let MessageDiagnostic { message, severity, help, labels, .. } = value;
 
         let severity = severity.unwrap_or(Severity::Error);
         match severity {

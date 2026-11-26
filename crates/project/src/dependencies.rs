@@ -1,7 +1,9 @@
 #[cfg(all(feature = "std", feature = "serde"))]
 mod graph;
 
-use alloc::{format, sync::Arc, vec};
+#[cfg(feature = "serde")]
+use alloc::format;
+use alloc::sync::Arc;
 use core::fmt;
 
 use miden_assembly_syntax::debuginfo::Spanned;
@@ -9,7 +11,7 @@ pub use miden_package_registry::{SemVer, Version, VersionReq, VersionRequirement
 
 #[cfg(all(feature = "std", feature = "serde"))]
 pub use self::graph::*;
-use crate::{Diagnostic, Linkage, SourceSpan, Span, Uri, miette};
+use crate::{Diagnostic, Linkage, SourceSpan, Span, Uri};
 
 /// Represents a project/package dependency declaration
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -292,8 +294,6 @@ impl DependencyVersionScheme {
         spec: Span<&crate::ast::DependencySpec>,
         workspace: &crate::ast::WorkspaceFile,
     ) -> Result<Self, InvalidDependencySpecError> {
-        use alloc::format;
-
         match Self::try_from(spec)? {
             Self::Path { path: uri, version } => {
                 let workspace_path =

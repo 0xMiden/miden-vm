@@ -22,16 +22,18 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_assembly_syntax::{
     Report,
     debuginfo::{SourceSpan, Span},
-    diagnostics::{Diagnostic, miette},
 };
 // Re-exported for consistency
 pub use miden_assembly_syntax::{Word, debuginfo::Uri, semver};
 #[cfg(feature = "serde")]
 use miden_assembly_syntax::{
     debuginfo::{SourceFile, SourceId},
-    diagnostics::{Label, RelatedError, RelatedLabel},
+    diagnostics::{RelatedError, RelatedLabel},
 };
 pub use miden_mast_package::TargetType;
+use miden_utils_diagnostics::Diagnostic;
+#[cfg(feature = "serde")]
+use miden_utils_diagnostics::Label;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 pub use toml::Value;

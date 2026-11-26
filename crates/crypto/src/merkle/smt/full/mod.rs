@@ -704,6 +704,13 @@ mod arbitrary {
         Smt::with_entries(entries).expect("keys are distinct")
     }
 
+    fn absent_key(smt: &Smt, mut key: Word) -> Word {
+        while smt.get_value(&key) != Smt::EMPTY_VALUE {
+            key[0] += crate::ONE;
+        }
+        key
+    }
+
     /// Uniform-random entries. Collisions into the same leaf are practically impossible, so this
     /// branch is mixed with deliberately colliding entries below.
     pub(super) fn random_pairs(
@@ -783,9 +790,8 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            // Sound by construction: open a proof against a real Smt, either for a present key
-            // (inclusion proof) or a fresh key (exclusion proof; absent with overwhelming
-            // probability). Path and leaf are consistent because they come from the same open.
+            // Open a proof against a real Smt for a present key (inclusion proof) or an absent
+            // key (exclusion proof). Path and leaf are consistent because they share an open.
             prop_oneof![
                 // Inclusion proof for a present key of a tree with independent keys.
                 random_pairs(1usize..=6)
@@ -805,15 +811,28 @@ mod arbitrary {
                         smt.open(k)
                     })
                     .boxed(),
-                // Exclusion proof for a fresh key (absent with overwhelming probability).
+                // Exclusion proof for a key guaranteed to be absent.
                 (random_pairs(1usize..=6), any::<Word>())
                     .prop_map(|(pairs, fresh_key)| {
                         let smt = smt_from_pairs(pairs);
+                        let fresh_key = absent_key(&smt, fresh_key);
                         smt.open(&fresh_key)
                     })
                     .boxed(),
             ]
             .boxed()
+        }
+    }
+
+    #[test]
+    fn absent_key_skips_consecutive_stored_keys() {
+        let keys = [Word::empty(), Word::from([1u32, 0, 0, 0])];
+        let smt = smt_from_pairs(keys.map(|key| (key, Word::from([1u32; 4]))).to_vec());
+
+        for key in keys {
+            let key = absent_key(&smt, key);
+            assert_eq!(smt.get_value(&key), Smt::EMPTY_VALUE);
+            smt.open(&key).verify_unset(&key, &smt.root()).unwrap();
         }
     }
 }

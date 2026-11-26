@@ -541,12 +541,6 @@ impl SourceSpan {
     }
 }
 
-impl From<SourceSpan> for miette::SourceSpan {
-    fn from(span: SourceSpan) -> Self {
-        Self::new(miette::SourceOffset::from(span.start().to_usize()), span.len())
-    }
-}
-
 impl Serializable for SourceSpan {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_u32(self.source_id.to_u32());

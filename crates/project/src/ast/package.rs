@@ -505,10 +505,8 @@ impl SetSourceId for ProjectFile {
 #[derive(Debug, thiserror::Error, Diagnostic)]
 #[error("build target conflicts found")]
 struct TargetConflictError {
-    #[label]
-    label: Label,
     #[label(collection)]
-    conflicts: Vec<Label>,
+    labels: Vec<Label>,
 }
 
 impl Validate for ProjectFile {
@@ -557,7 +555,7 @@ impl Validate for ProjectFile {
                     let path = entry.key().clone();
                     match entry.get_mut() {
                         Some(error) => {
-                            error.conflicts.push(conflict_label);
+                            error.labels.push(conflict_label);
                         },
                         opt => {
                             let label = Label::new(
@@ -566,8 +564,8 @@ impl Validate for ProjectFile {
                                     "the path for this target, `{path}`, conflicts with other targets"
                                 ),
                             );
-                            let conflicts = vec![conflict_label];
-                            *opt = Some(TargetConflictError { label, conflicts });
+                            *opt =
+                                Some(TargetConflictError { labels: vec![label, conflict_label] });
                         },
                     }
                 },
@@ -588,7 +586,7 @@ impl Validate for ProjectFile {
                     let ns = entry.key().clone();
                     match entry.get_mut() {
                         Some(error) => {
-                            error.conflicts.push(conflict_label);
+                            error.labels.push(conflict_label);
                         },
                         opt => {
                             let label = Label::new(
@@ -597,8 +595,8 @@ impl Validate for ProjectFile {
                                     "the name for this target, `{ns}`, conflicts with other targets"
                                 ),
                             );
-                            let conflicts = vec![conflict_label];
-                            *opt = Some(TargetConflictError { label, conflicts });
+                            *opt =
+                                Some(TargetConflictError { labels: vec![label, conflict_label] });
                         },
                     }
                 },

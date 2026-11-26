@@ -474,8 +474,8 @@ mod arbitrary {
 
     use super::{MerklePath, SparseMerklePath};
     use crate::{
-        Word,
-        merkle::{MerkleProof, RootPath, smt::SMT_MAX_DEPTH},
+        ONE, Word,
+        merkle::{EmptySubtreeRoots, MerkleProof, RootPath, smt::SMT_MAX_DEPTH},
     };
 
     impl Arbitrary for MerkleProof {
@@ -536,7 +536,22 @@ mod arbitrary {
                         let non_empty_count = depth.saturating_sub(empty_count);
 
                         prop::collection::vec(any::<Word>(), non_empty_count).prop_map(
-                            move |nodes| SparseMerklePath::from_parts(mask, nodes).unwrap(),
+                            move |mut nodes| {
+                                // Generate canonical paths: explicit nodes must be nonempty at
+                                // their depth so conversion preserves the chosen mask.
+                                for (node_depth, node) in (1..=depth)
+                                    .rev()
+                                    .filter(|d| mask & (1u64 << (d - 1)) == 0)
+                                    .zip(nodes.iter_mut())
+                                {
+                                    if *node
+                                        == *EmptySubtreeRoots::entry(depth as u8, node_depth as u8)
+                                    {
+                                        node[0] += ONE;
+                                    }
+                                }
+                                SparseMerklePath::from_parts(mask, nodes).unwrap()
+                            },
                         )
                     })
                 })
@@ -917,9 +932,13 @@ mod tests {
                     _ => prop_assert!(false, "Inconsistent verify results"),
                 }
 
-                // Test with wrong node - both should fail
-                let wrong_verify = path.verify(leaf_index, node, &root);
-                let wrong_sparse_verify = sparse.verify(leaf_index, node, &root);
+                // Generate a wrong node even when the strategy repeats an existing leaf.
+                let mut wrong_node = node;
+                if wrong_node == leaf {
+                    wrong_node[0] += ONE;
+                }
+                let wrong_verify = path.verify(leaf_index, wrong_node, &root);
+                let wrong_sparse_verify = sparse.verify(leaf_index, wrong_node, &root);
 
                 match (wrong_verify, wrong_sparse_verify) {
                     (Ok(()), Ok(())) => prop_assert!(false, "Verification should have failed with wrong node"),

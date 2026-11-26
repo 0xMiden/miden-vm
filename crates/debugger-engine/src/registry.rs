@@ -2,10 +2,7 @@ use alloc::{collections::BTreeMap, sync::Arc};
 #[cfg(feature = "std")]
 use std::path::{Path, PathBuf};
 
-use miden_assembly_syntax::{
-    Report,
-    diagnostics::{Diagnostic, miette},
-};
+use miden_assembly_syntax::{Report, diagnostics::Diagnostic};
 use miden_mast_package::Package;
 use miden_package_registry::{
     PackageCache, PackageId, PackageIndex, PackageProvider, PackageRecord, PackageRegistry,

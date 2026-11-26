@@ -8,6 +8,19 @@ pub struct ArrayType {
 }
 
 impl ArrayType {
+    /// Whether `len` elements of `ty`, each padded to the element's alignment, fit in `u32::MAX`
+    /// bytes. This is the rule the decoder applies to an array, so every other place that builds
+    /// one (closing a template, decoding a recursive group) uses it too.
+    pub(crate) fn fits_in_u32_bytes(ty: &Type, len: usize) -> bool {
+        let Some(element_size) = ty.checked_size_in_bytes() else {
+            return false;
+        };
+        element_size
+            .checked_next_multiple_of(ty.min_alignment())
+            .and_then(|padded| padded.checked_mul(len))
+            .is_some_and(|size| u32::try_from(size).is_ok())
+    }
+
     /// Create a new [ArrayType] of length `len` and element type of `ty`
     pub fn new(ty: Type, len: usize) -> Self {
         Self { ty, len }
@@ -47,6 +60,59 @@ impl ArrayType {
                 let element_size = self.ty.size_in_bits();
                 let padded_element_size = element_size.align_up(min_align);
                 element_size + (padded_element_size * (n - 1))
+            },
+        }
+    }
+
+    /// Returns the size in bytes of this array type
+    ///
+    /// Every element after the first is padded to its alignment, which is a whole number of
+    /// bytes, so this is [Self::size_in_bits] rounded up to whole bytes, computed without the
+    /// bit count.
+    pub fn size_in_bytes(&self) -> usize {
+        match self.len {
+            0 => 0,
+            1 => self.ty.size_in_bytes(),
+            n => {
+                let element_size = self.ty.size_in_bytes();
+                let padded_element_size = element_size.align_up(self.ty.min_alignment());
+                element_size + (padded_element_size * (n - 1))
+            },
+        }
+    }
+
+    /// Returns the size in bits of this array type, or `None` if it does not fit in a `usize`.
+    ///
+    /// [Self::size_in_bits] multiplies the padded element size by the length without checking,
+    /// so a large enough array (such as `[[felt; 2^30]; 2^29]`, 2^64 bits) overflows: a panic in
+    /// debug builds and a wrapped, wrong size in release builds.
+    pub fn checked_size_in_bits(&self) -> Option<usize> {
+        match self.len {
+            0 => Some(0),
+            1 => self.ty.checked_size_in_bits(),
+            n => {
+                let min_align = self.ty.min_alignment().checked_mul(8)?;
+                let element_size = self.ty.checked_size_in_bits()?;
+                let padded_element_size = element_size.checked_next_multiple_of(min_align)?;
+                padded_element_size.checked_mul(n - 1)?.checked_add(element_size)
+            },
+        }
+    }
+
+    /// Returns the size in bytes of this array type, or `None` if it does not fit in a `usize`.
+    ///
+    /// This is [Self::checked_size_in_bits] rounded up to whole bytes, computed in bytes so that
+    /// it does not overflow when only the bit count exceeds `usize`. Every element after the
+    /// first starts on a byte boundary, so only the first element's size needs rounding.
+    pub fn checked_size_in_bytes(&self) -> Option<usize> {
+        match self.len {
+            0 => Some(0),
+            1 => self.ty.checked_size_in_bytes(),
+            n => {
+                let element_size = self.ty.checked_size_in_bytes()?;
+                let padded_element_size =
+                    element_size.checked_next_multiple_of(self.ty.min_alignment())?;
+                padded_element_size.checked_mul(n - 1)?.checked_add(element_size)
             },
         }
     }

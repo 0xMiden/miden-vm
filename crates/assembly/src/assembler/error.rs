@@ -3,7 +3,7 @@ use alloc::sync::Arc;
 use miden_assembly_syntax::{
     Path,
     debuginfo::{SourceFile, SourceSpan},
-    diagnostics::{Diagnostic, miette},
+    diagnostics::Diagnostic,
 };
 
 #[derive(Debug, thiserror::Error, Diagnostic)]
@@ -18,7 +18,6 @@ pub(crate) enum AssemblerError {
         max_depth: usize,
     },
     #[error("duplicate definition found for export path '{path}'")]
-    #[diagnostic()]
     DuplicateExportPath { path: Arc<Path> },
     #[error("invalid `@source_name` procedure attribute")]
     #[diagnostic(help(
