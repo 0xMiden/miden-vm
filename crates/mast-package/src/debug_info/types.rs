@@ -503,7 +503,7 @@ pub struct DebugSourceAsmOp {
     pub op_name_idx: DebugStringIdx,
     /// Number of VM cycles taken by the operation.
     pub num_cycles: u8,
-    _padding: [u8; 3],
+    pub(super) _padding: [u8; 3],
 }
 
 impl DebugSourceAsmOp {
@@ -608,7 +608,7 @@ pub struct DebugErrorMessage {
     /// String table index of the error message content
     pub message: DebugStringIdx,
     /// Pads out this struct to a multiple of its alignment
-    _padding: [u8; 4],
+    pub(super) _padding: [u8; 4],
 }
 
 impl DebugErrorMessage {
