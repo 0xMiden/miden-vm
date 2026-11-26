@@ -12,7 +12,7 @@ use super::{
     smt::{SimpleSmt, Smt},
 };
 use crate::{
-    Map,
+    Map, map_entries_in_key_order,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -613,7 +613,7 @@ impl Serializable for MerkleStore {
         target.write_bytes(&Self::FORMAT_MAGIC);
         target.write_u8(Self::FORMAT_VERSION);
         static EMPTY_NODES: Lazy<Map<Word, StoreNode>> = Lazy::new(|| empty_hashes().collect());
-        // Count omissions with a fixed number of lookups, without scanning the entire store.
+        // Count omissions with one lookup per canonical empty node.
         let omitted = EMPTY_NODES
             .iter()
             .filter(|(key, node)| self.nodes.get(*key) == Some(*node))
@@ -621,12 +621,12 @@ impl Serializable for MerkleStore {
 
         target.write_u64((self.nodes.len() - omitted) as u64);
 
-        for (key, node) in &self.nodes {
-            // Only nodes with equal children can be canonical empty nodes.
-            if node.left != node.right || EMPTY_NODES.get(key) != Some(node) {
-                key.write_into(target);
-                node.write_into(target);
-            }
+        // A canonical empty node has identical children.
+        let nodes = map_entries_in_key_order(&self.nodes)
+            .filter(|&(key, node)| node.left != node.right || EMPTY_NODES.get(key) != Some(node));
+        for (key, node) in nodes {
+            key.write_into(target);
+            node.write_into(target);
         }
     }
 }

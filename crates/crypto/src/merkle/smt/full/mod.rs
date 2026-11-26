@@ -14,7 +14,10 @@ pub use leaf::SmtLeaf;
 mod proof;
 pub use proof::SmtProof;
 
-use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
+use crate::{
+    map_entries_in_key_order,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 // Concurrent implementation
 #[cfg(feature = "concurrent")]
@@ -624,18 +627,15 @@ impl From<Word> for LeafIndex<SMT_DEPTH> {
 
 impl Serializable for Smt {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        // Write the number of filled leaves for this Smt
-        target.write_usize(self.entries().count());
-
-        // Write each (key, value) pair
-        for (key, value) in self.entries() {
-            target.write(key);
-            target.write(value);
-        }
+        // The most significant key element determines the leaf index and is compared first.
+        // Entries within each leaf are already sorted by key.
+        let entries = map_entries_in_key_order(&self.leaves).flat_map(|(_, leaf)| leaf.entries());
+        target.write_usize(self.num_entries());
+        target.write_many(entries);
     }
 
     fn get_size_hint(&self) -> usize {
-        let entries_count = self.entries().count();
+        let entries_count = self.num_entries();
 
         // Each entry is the size of a digest plus a word.
         entries_count.get_size_hint()
@@ -645,12 +645,11 @@ impl Serializable for Smt {
 
 impl Deserializable for Smt {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        // Read the number of filled leaves for this Smt
-        let num_filled_leaves = source.read_usize()?;
+        let num_entries = source.read_usize()?;
 
         // Use read_many_iter to avoid eager allocation and respect BudgetedReader limits
         let entries: Vec<(Word, Word)> =
-            source.read_many_iter(num_filled_leaves)?.collect::<Result<_, _>>()?;
+            source.read_many_iter(num_entries)?.collect::<Result<_, _>>()?;
 
         Self::with_entries(entries)
             .map_err(|err| DeserializationError::InvalidValue(err.to_string()))
