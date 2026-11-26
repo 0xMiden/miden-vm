@@ -4,11 +4,11 @@ use rand::{RngExt, prelude::IteratorRandom, rng};
 
 use super::{IN_MEMORY_DEPTH, MemoryStorage, SmtStorage, SmtStorageReader};
 use crate::{
-    EMPTY_WORD, Felt, ONE, Word,
+    EMPTY_WORD, Felt, Map, ONE, Word,
     merkle::{
         InnerNodeInfo,
         smt::{
-            LargeSmt, LeafIndex, SMT_DEPTH, SmtLeaf,
+            LargeSmt, LeafIndex, MAX_LEAF_ENTRIES, SMT_DEPTH, SmtLeaf,
             full::{Smt, concurrent::COLS_PER_SUBTREE},
         },
     },
@@ -169,6 +169,59 @@ fn test_compute_mutations() {
     assert_eq!(mutations.old_root(), control_mutations.old_root());
     assert_eq!(mutations.node_mutations(), control_mutations.node_mutations());
     assert_eq!(mutations.new_pairs(), control_mutations.new_pairs());
+}
+
+#[test]
+fn test_compute_mutations_replaces_entry_in_full_leaf() {
+    let key = |i: usize| Word::new([ONE, ONE, Felt::new_unchecked(i as u64), ONE]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let entries: Vec<_> = (1..=MAX_LEAF_ENTRIES).map(|i| (key(i), value)).collect();
+
+    let control_smt = Smt::with_entries(entries.clone()).unwrap();
+    let large_tree = LargeSmt::<_>::with_entries(MemoryStorage::new(), entries).unwrap();
+
+    // The inserted key 0 sorts before the removed key 5.
+    let updates = [(key(0), value), (key(5), EMPTY_WORD)];
+    let control_mutations = control_smt.compute_mutations(updates).unwrap();
+    let mutations = large_tree.compute_mutations(updates).unwrap();
+    assert_eq!(mutations, control_mutations);
+}
+
+#[test]
+fn test_apply_mutations_replaces_entry_in_full_leaf() {
+    let key = |i: usize| Word::new([ONE, ONE, Felt::new_unchecked(i as u64), ONE]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
+
+    // Assign the insertion to the first key in this map's iteration order.
+    let mut pairs = Map::from([(key(0), EMPTY_WORD), (key(1), EMPTY_WORD)]);
+    let mut keys = pairs.keys().copied();
+    let inserted = keys.next().unwrap();
+    let removed = keys.next().unwrap();
+    *pairs.get_mut(&inserted).unwrap() = value;
+    assert_eq!(pairs.iter().next(), Some((&inserted, &value)));
+
+    let entries = (2..=MAX_LEAF_ENTRIES).map(|i| (key(i), value)).chain([(removed, value)]);
+    let mut tree = LargeSmt::with_entries(MemoryStorage::new(), entries).unwrap();
+    let old_root = tree.root();
+    let old_leaf = tree.get_leaf(&removed);
+
+    let mut mutations = tree.compute_mutations([(inserted, value), (removed, EMPTY_WORD)]).unwrap();
+    assert_eq!(mutations.new_pairs(), &pairs);
+    mutations.new_pairs = pairs;
+    let new_root = mutations.root();
+
+    let reverse = tree.apply_mutations_with_reversion(mutations).unwrap();
+    assert_eq!(tree.root(), new_root);
+    assert_eq!(tree.get_value(&inserted), value);
+    assert_eq!(tree.get_value(&removed), EMPTY_WORD);
+    assert_eq!(tree.num_entries(), MAX_LEAF_ENTRIES);
+    assert_eq!(tree.num_leaves(), 1);
+
+    tree.apply_mutations(reverse).unwrap();
+    assert_eq!(tree.root(), old_root);
+    assert_eq!(tree.get_leaf(&removed), old_leaf);
+    assert_eq!(tree.num_entries(), MAX_LEAF_ENTRIES);
+    assert_eq!(tree.num_leaves(), 1);
 }
 
 #[test]

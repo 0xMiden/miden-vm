@@ -170,8 +170,12 @@ pub(crate) trait SparseMerkleTreeReader<const DEPTH: u8> {
     ) -> Result<MutationSet<DEPTH, Self::Key, Self::Value>, MerkleError> {
         use NodeMutation::*;
 
+        let mut kv_pairs: Vec<_> = kv_pairs.into_iter().collect();
+        sort_removals_first(&mut kv_pairs, &Self::EMPTY_VALUE);
+
         let mut new_root = self.root();
         let mut new_pairs: Map<Self::Key, Self::Value> = Default::default();
+        let mut new_leaves = Leaves::new();
         let mut node_mutations: NodeMutations = NodeMutations::new();
         let mut seen_keys: Set<Self::Key> = Set::new();
 
@@ -183,31 +187,15 @@ pub(crate) trait SparseMerkleTreeReader<const DEPTH: u8> {
                 ));
             }
 
-            // If the old value and the new value are the same, there is nothing to update.
-            let old_value = new_pairs.get(&key).cloned().unwrap_or_else(|| self.get_value(&key));
-            if value == old_value {
+            if value == self.get_value(&key) {
                 continue;
             }
 
             let leaf_index = Self::key_to_leaf_index(&key);
             let mut node_index = NodeIndex::from(leaf_index);
 
-            // We need the current leaf's hash to calculate the new leaf, but in the rare case that
-            // `kv_pairs` has multiple pairs that go into the same leaf, then those pairs are also
-            // part of the "current leaf".
-            let old_leaf = {
-                let pairs_at_index = new_pairs
-                    .iter()
-                    .filter(|&(new_key, _)| Self::key_to_leaf_index(new_key) == leaf_index);
-
-                pairs_at_index.fold(self.get_leaf(&key), |acc, (k, v)| {
-                    // Most of the time `pairs_at_index` should only contain a single entry (or
-                    // none at all), as multi-leaves should be really rare.
-                    let existing_leaf = acc;
-                    self.construct_prospective_leaf(existing_leaf, k, v)
-                        .expect("current leaf should be valid")
-                })
-            };
+            let old_leaf =
+                new_leaves.remove(&leaf_index.position()).unwrap_or_else(|| self.get_leaf(&key));
 
             let new_leaf =
                 self.construct_prospective_leaf(old_leaf, &key, &value).map_err(|e| match e {
@@ -218,6 +206,7 @@ pub(crate) trait SparseMerkleTreeReader<const DEPTH: u8> {
                 })?;
 
             let mut new_child_hash = Self::hash_leaf(&new_leaf);
+            new_leaves.insert(leaf_index.position(), new_leaf);
 
             for node_depth in (0..node_index.depth()).rev() {
                 // Whether the node we're replacing is the right child or the left child.
@@ -417,17 +406,11 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
         self.set_root(node_hash);
     }
 
-    /// Applies the prospective mutations computed with [`SparseMerkleTree::compute_mutations()`] to
-    /// this tree.
+    /// Applies a mutation set to this tree.
     ///
     /// # Errors
-    /// If `mutations` was computed on a tree with a different root than this one, returns
-    /// [`MerkleError::ConflictingRoots`] with a two-item [`Vec`]. The first item is the root hash
-    /// the `mutations` were computed against, and the second item is the actual current root of
-    /// this tree.
-    /// If mutations would exceed [`crate::merkle::smt::MAX_LEAF_ENTRIES`] (1024 entries) in a leaf,
-    /// returns
-    /// [`MerkleError::TooManyLeafEntries`].
+    /// Leaves the tree unchanged if the old root differs from the current root or a leaf update
+    /// fails.
     fn apply_mutations(
         &mut self,
         mutations: MutationSet<DEPTH, Self::Key, Self::Value>,
@@ -452,6 +435,9 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
             });
         }
 
+        // Only the leaf updates can fail, so they come before the node changes.
+        self.apply_leaf_updates(new_pairs)?;
+
         for (index, mutation) in node_mutations {
             match mutation {
                 Removal => {
@@ -463,24 +449,17 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
             }
         }
 
-        for (key, value) in removals_first(new_pairs, &Self::EMPTY_VALUE) {
-            self.insert_value(key, value)?;
-        }
-
         self.set_root(new_root);
 
         Ok(())
     }
 
-    /// Applies the prospective mutations computed with [`SparseMerkleTree::compute_mutations()`] to
-    /// this tree and returns the reverse mutation set. Applying the reverse mutation sets to the
-    /// updated tree will revert the changes.
+    /// Applies a mutation set and returns a set that reverts the changes when applied to the
+    /// updated tree.
     ///
     /// # Errors
-    /// If `mutations` was computed on a tree with a different root than this one, returns
-    /// [`MerkleError::ConflictingRoots`] with a two-item [`Vec`]. The first item is the root hash
-    /// the `mutations` were computed against, and the second item is the actual current root of
-    /// this tree.
+    /// Leaves the tree unchanged if the old root differs from the current root or a leaf update
+    /// fails.
     fn apply_mutations_with_reversion(
         &mut self,
         mutations: MutationSet<DEPTH, Self::Key, Self::Value>,
@@ -505,6 +484,9 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
             });
         }
 
+        // Only the leaf updates can fail, so they come before the node changes.
+        let reverse_pairs = self.apply_leaf_updates(new_pairs)?.into_iter().collect();
+
         let mut reverse_mutations = NodeMutations::new();
         for (index, mutation) in node_mutations {
             match mutation {
@@ -523,18 +505,6 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
             }
         }
 
-        let mut reverse_pairs = Map::new();
-        for (key, value) in removals_first(new_pairs, &Self::EMPTY_VALUE) {
-            match self.insert_value(key.clone(), value)? {
-                Some(old_value) => {
-                    reverse_pairs.insert(key, old_value);
-                },
-                None => {
-                    reverse_pairs.insert(key, Self::EMPTY_VALUE);
-                },
-            }
-        }
-
         self.set_root(new_root);
 
         Ok(MutationSet {
@@ -543,6 +513,33 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
             new_pairs: reverse_pairs,
             new_root: old_root,
         })
+    }
+
+    /// Updates the leaves and returns the previous value of each key in write order.
+    ///
+    /// # Errors
+    /// If a leaf update fails, restores earlier writes before returning the error. This relies on
+    /// [`Self::insert_value()`] leaving the leaf unchanged on error.
+    fn apply_leaf_updates(
+        &mut self,
+        new_pairs: Map<Self::Key, Self::Value>,
+    ) -> Result<Vec<(Self::Key, Self::Value)>, MerkleError> {
+        let mut old_pairs = Vec::with_capacity(new_pairs.len());
+        for (key, value) in removals_first(new_pairs, &Self::EMPTY_VALUE) {
+            match self.insert_value(key.clone(), value) {
+                Ok(old_value) => old_pairs.push((key, old_value.unwrap_or(Self::EMPTY_VALUE))),
+                Err(err) => {
+                    // Undo insertions before restoring removed entries to stay within capacity.
+                    for (key, old_value) in old_pairs.into_iter().rev() {
+                        self.insert_value(key, old_value)
+                            .expect("restoring an earlier value should succeed");
+                    }
+                    return Err(err);
+                },
+            }
+        }
+
+        Ok(old_pairs)
     }
 
     // REQUIRED METHODS
@@ -557,7 +554,9 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
     /// Removes an inner node at the given index
     fn remove_inner_node(&mut self, index: NodeIndex) -> Option<InnerNode>;
 
-    /// Inserts a leaf node, and returns the value at the key if already exists
+    /// Updates the value at a key and returns its previous value, if present.
+    ///
+    /// An empty value removes the key.
     fn insert_value(
         &mut self,
         key: Self::Key,
@@ -763,6 +762,11 @@ impl<const DEPTH: u8, K: Eq + Hash, V> MutationSet<DEPTH, K, V> {
             new_root,
         }
     }
+}
+
+/// Moves removals first so the final entry count determines whether a batch fits a leaf.
+fn sort_removals_first<K, V: PartialEq>(pairs: &mut [(K, V)], empty: &V) {
+    pairs.sort_by_key(|(_, value)| value != empty);
 }
 
 /// Yields removals before insertions so a leaf has room for replacement entries.

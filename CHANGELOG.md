@@ -32,6 +32,7 @@
 - Fixed `PartialMerkleTree::update_leaf` to leave an empty tree unchanged when the update fails ([#4221](https://github.com/0xMiden/miden-vm/issues/4221)).
 - Fixed `Alignable::prev_power_of_two` to round down inputs above the largest representable power of two ([#4265](https://github.com/0xMiden/miden-vm/pull/4265)).
 - Fixed `Smt::apply_mutations` and `Smt::apply_mutations_with_reversion` to handle a mutation set that replaces one key with another in a full leaf ([#4265](https://github.com/0xMiden/miden-vm/pull/4265)).
+- Fixed `Smt::compute_mutations` and `LargeSmt` batch updates to handle replacements in a full leaf. `Smt` leaves the tree unchanged if applying a mutation set returns an error.
 
 ## v1.0.0-rc.1 (2026-11-14)
 

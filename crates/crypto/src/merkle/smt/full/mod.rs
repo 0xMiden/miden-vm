@@ -384,7 +384,8 @@ impl Smt {
     ///
     /// - [`MerkleError::DuplicateValuesForIndex`] if `kv_pairs` contains the same key more than
     ///   once.
-    /// - [`MerkleError::TooManyLeafEntries`] if mutations would exceed 1024 entries in a leaf.
+    /// - [`MerkleError::TooManyLeafEntries`] if a leaf would contain more than [`MAX_LEAF_ENTRIES`]
+    ///   after the changes.
     ///
     /// # Example
     ///
@@ -415,10 +416,12 @@ impl Smt {
     /// Applies the prospective mutations computed with [`Smt::compute_mutations()`] to this tree.
     ///
     /// # Errors
-    /// If `mutations` was computed on a tree with a different root than this one, returns
-    /// [`MerkleError::ConflictingRoots`] with a two-item [`Vec`]. The first item is the root hash
-    /// the `mutations` were computed against, and the second item is the actual current root of
-    /// this tree.
+    /// - [`MerkleError::ConflictingRoots`] if the mutation set's old root differs from the current
+    ///   tree root.
+    /// - [`MerkleError::TooManyLeafEntries`] if a leaf would contain more than [`MAX_LEAF_ENTRIES`]
+    ///   after applying the set.
+    ///
+    /// If an error is returned, the tree is unchanged.
     pub fn apply_mutations(
         &mut self,
         mutations: MutationSet<SMT_DEPTH, Word, Word>,
@@ -429,13 +432,11 @@ impl Smt {
     /// Applies the prospective mutations computed with [`Smt::compute_mutations()`] to this tree
     /// and returns the reverse mutation set.
     ///
-    /// Applying the reverse mutation sets to the updated tree will revert the changes.
+    /// Applying the reverse set to the updated tree reverts the changes.
     ///
     /// # Errors
-    /// If `mutations` was computed on a tree with a different root than this one, returns
-    /// [`MerkleError::ConflictingRoots`] with a two-item [`Vec`]. The first item is the root hash
-    /// the `mutations` were computed against, and the second item is the actual current root of
-    /// this tree.
+    /// Returns the same errors as [`Self::apply_mutations()`]. If an error is returned, the tree is
+    /// unchanged.
     pub fn apply_mutations_with_reversion(
         &mut self,
         mutations: MutationSet<SMT_DEPTH, Word, Word>,
