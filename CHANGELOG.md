@@ -8,6 +8,8 @@
 
 #### Fixes
 
+- Fixed path trimming keeping absolute source paths in packages, so builds from different checkout folders now produce the same package bytes ([#4258](https://github.com/0xMiden/miden-vm/pull/4258)).
+
 ## v0.36.5 (2026-11-18)
 
 #### Changes
