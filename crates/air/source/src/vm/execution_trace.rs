@@ -203,6 +203,12 @@ pub enum TraceLenSummaryError {
         /// The unpadded row count that the padded height must cover.
         rows: usize,
     },
+    /// The Eidos compression row count is not a whole number of compression cycles.
+    #[error("Eidos compression rows {rows} is not a whole number of compression cycles")]
+    EidosRowsNotCycleMultiple {
+        /// The rejected Eidos compression row count.
+        rows: usize,
+    },
 }
 
 /// Row counts and padded heights for the VM AIR segments.
@@ -241,8 +247,9 @@ impl TraceLenSummary {
     ///
     /// # Errors
     ///
-    /// Returns an error if the chiplet row counts overflow `usize`, or if a padded height is not
-    /// a power of two large enough to cover the unpadded row count of its AIR.
+    /// Returns an error if the chiplet row counts overflow `usize`, if a padded height is not
+    /// a power of two large enough to cover the unpadded row count of its AIR, or if the Eidos
+    /// compression row count is not a whole number of compression cycles.
     pub fn new(
         core_rows: usize,
         chiplets: ChipletsLengths,
@@ -272,6 +279,13 @@ impl TraceLenSummary {
                 return Err(TraceLenSummaryError::NonPowerOfTwoHeight { air, padded_height });
             }
             padded_log_heights[index] = padded_height.ilog2() as u8;
+        }
+        // Eidos compression rows arrive in whole compression cycles; a partial cycle would make
+        // `eidos_compression_count()` truncate (release) or trip its debug assertion.
+        if !eidos_compression_rows.is_multiple_of(EIDOS_COMPRESSION_CYCLE_LEN) {
+            return Err(TraceLenSummaryError::EidosRowsNotCycleMultiple {
+                rows: eidos_compression_rows,
+            });
         }
 
         Ok(TraceLenSummary {
@@ -539,6 +553,65 @@ mod tests {
                 padded_height
             }),
         );
+    }
+
+    #[test]
+    fn trace_len_summary_rejects_non_power_of_two_padded_height() {
+        // The exact case from #4153: 24 is above the 8 core rows but not a power of
+        // two, and every consumer assumes power-of-two heights.
+        let result = TraceLenSummary::new(8, ChipletsLengths::default(), 0, 0, [24, 8, 8, 8]);
+        assert_eq!(
+            result,
+            Err(TraceLenSummaryError::NonPowerOfTwoHeight { air: "Core", padded_height: 24 })
+        );
+
+        for air in 0..MIDEN_AIR_COUNT {
+            let mut heights = [MIN_TRACE_LEN; MIDEN_AIR_COUNT];
+            heights[air] = 3 * MIN_TRACE_LEN;
+            let result = TraceLenSummary::new(0, ChipletsLengths::default(), 0, 0, heights);
+            assert_eq!(
+                result,
+                Err(TraceLenSummaryError::NonPowerOfTwoHeight {
+                    air: ["Core", "Chiplets", "Eidos compression", "byte-pair lookup"][air],
+                    padded_height: 3 * MIN_TRACE_LEN,
+                }),
+                "AIR {air}: {result:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn trace_len_summary_rejects_eidos_rows_not_a_cycle_multiple() {
+        for rows in [1, 3, EIDOS_COMPRESSION_CYCLE_LEN - 1, EIDOS_COMPRESSION_CYCLE_LEN + 1] {
+            let result = TraceLenSummary::new(
+                8,
+                ChipletsLengths::default(),
+                rows,
+                0,
+                [MIN_TRACE_LEN; MIDEN_AIR_COUNT],
+            );
+            assert_eq!(
+                result,
+                Err(TraceLenSummaryError::EidosRowsNotCycleMultiple { rows }),
+                "eidos rows {rows}: {result:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn trace_len_summary_accepts_whole_eidos_cycles() {
+        for rows in [0, EIDOS_COMPRESSION_CYCLE_LEN, 2 * EIDOS_COMPRESSION_CYCLE_LEN] {
+            let heights = [
+                MIN_TRACE_LEN,
+                MIN_TRACE_LEN,
+                rows.next_power_of_two().max(MIN_TRACE_LEN),
+                MIN_TRACE_LEN,
+            ];
+            let summary = TraceLenSummary::new(8, ChipletsLengths::default(), rows, 0, heights)
+                .expect("whole-cycle Eidos rows with power-of-two heights are valid");
+            assert_eq!(summary.eidos_compression_rows(), rows);
+            assert_eq!(summary.eidos_compression_count(), rows / EIDOS_COMPRESSION_CYCLE_LEN);
+        }
     }
 
     #[test]
