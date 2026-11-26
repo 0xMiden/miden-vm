@@ -444,41 +444,40 @@ impl PartialMerkleTree {
         Ok(())
     }
 
-    /// Updates value of the leaf at the specified index returning the old leaf value.
+    /// Updates a leaf, recomputes its ancestor hashes, and returns the previous leaf value.
     ///
-    /// By default the specified index is assumed to belong to the deepest layer. If the considered
-    /// node does not belong to the tree, the first node on the way to the root will be changed.
-    ///
-    /// This also recomputes all hashes between the leaf and the root, updating the root itself.
+    /// The index is relative to the deepest layer. The update applies to the leaf at that index
+    /// or the first ancestor marked as a leaf in this partial tree.
     ///
     /// # Errors
     /// Returns an error if:
-    /// - No entry exists at the specified index.
-    /// - The specified index is greater than the maximum number of nodes on the deepest layer.
+    /// - The tree is empty.
+    /// - The index is out of bounds for the deepest layer.
+    ///
+    /// If an error is returned, the tree is unchanged.
     pub fn update_leaf(&mut self, index: u64, value: Word) -> Result<Word, MerkleError> {
         let mut node_index = NodeIndex::new(self.max_depth(), index)?;
 
-        // proceed to the leaf
-        for _ in 0..node_index.depth() {
-            if !self.leaves.contains(&node_index) {
-                node_index.move_up();
-            }
+        while !node_index.is_root() && !self.leaves.contains(&node_index) {
+            node_index.move_up();
         }
 
-        // add node value to the nodes Map
-        let old_value = self
+        let node = self
             .nodes
-            .insert(node_index, value)
+            .get_mut(&node_index)
             .ok_or(MerkleError::NodeIndexNotFoundInTree(node_index))?;
+        let old_value = core::mem::replace(node, value);
 
-        // if the old value and new value are the same, there is nothing to update
         if value == old_value {
             return Ok(old_value);
         }
 
         let mut value = value;
         for _ in 0..node_index.depth() {
-            let sibling = self.nodes.get(&node_index.sibling()).expect("sibling should exist");
+            let sibling = self
+                .nodes
+                .get(&node_index.sibling())
+                .expect("the tree stores every sibling on a leaf's opening path");
             value = Eidos::merge(&node_index.build_node(value, *sibling));
             node_index.move_up();
             self.nodes.insert(node_index, value);

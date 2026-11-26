@@ -29,6 +29,7 @@
 - Fixed `SourceContent` ordering to distinguish entries with the same URI and text in different languages.
 - Fixed `MerkleStore::add_merkle_path` to return the opening node as the root of an empty path. Updating at the root index with `MerkleStore::set_node` returns the replacement value as the new root ([#4144](https://github.com/0xMiden/miden-vm/issues/4144)).
 - Fixed `ExecutionOptions::new` to return `ExpectedCyclesTooBig` when rounding `expected_cycles` up to a power of two overflows ([#4151](https://github.com/0xMiden/miden-vm/issues/4151)).
+- Fixed `PartialMerkleTree::update_leaf` to leave an empty tree unchanged when the update fails ([#4221](https://github.com/0xMiden/miden-vm/issues/4221)).
 
 ## v1.0.0-rc.1 (2026-11-14)
 
