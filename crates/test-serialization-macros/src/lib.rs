@@ -9,6 +9,8 @@ use syn::{AttributeArgs, Ident, Item, Lit, Meta, MetaList, NestedMeta, Type, par
 /// Generates a property test which round-trips arbitrary values through
 /// `Serializable::to_bytes` and `Deserializable::read_from_bytes`.
 ///
+/// Decoding must preserve the value, and re-encoding must reproduce the serializer's output.
+///
 /// Generic types can be supplied with one or more `types(...)` arguments:
 /// ```rust
 /// # use miden_test_serialization_macros::serialization_test;
@@ -70,8 +72,9 @@ pub fn serialization_test(args: TokenStream, input: TokenStream) -> TokenStream 
                 #[test]
                 fn #test_name(obj in proptest::prelude::any::#ty()) {
                     let bytes = obj.to_bytes();
-                    let deser = #ty::read_from_bytes(&bytes).unwrap();
-                    proptest::prop_assert_eq!(obj, deser);
+                    let decoded = #ty::read_from_bytes(&bytes).unwrap();
+                    proptest::prop_assert_eq!(&obj, &decoded);
+                    proptest::prop_assert_eq!(bytes, decoded.to_bytes());
                 }
             }
         };

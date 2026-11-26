@@ -4,7 +4,7 @@ use seq_macro::seq;
 #[cfg(feature = "std")]
 use {
     super::{Deserializable, DeserializationError, Serializable},
-    alloc::boxed::Box,
+    alloc::{boxed::Box, collections::BTreeMap},
     std::error::Error,
 };
 
@@ -1010,15 +1010,11 @@ fn test_serialization() -> Result<(), Box<dyn Error>> {
         let mtree = MerkleTree::new(leaves)?;
         let store = MerkleStore::from(&mtree);
         let bytes = store.to_bytes();
-        let unique_nodes = mtree.inner_nodes().map(|node| node.value).collect::<crate::Set<_>>();
-        assert!(bytes.starts_with(STORE_HEADER));
-        assert_eq!(bytes.len(), STORE_HEADER.len() + 8 + unique_nodes.len() * 96);
-
-        // The optimization must preserve every byte emitted by the original canonical filter.
-        let empty_nodes: crate::Map<_, _> = super::empty_hashes().collect();
-        let nodes = store.nodes.iter().filter(|(key, node)| empty_nodes.get(*key) != Some(*node));
+        // Only the tree's distinct inner nodes should appear in the payload.
+        let nodes: BTreeMap<_, _> =
+            mtree.inner_nodes().map(|node| (node.value, (node.left, node.right))).collect();
         let mut expected_bytes = STORE_HEADER.to_vec();
-        (nodes.clone().count() as u64).write_into(&mut expected_bytes);
+        (nodes.len() as u64).write_into(&mut expected_bytes);
         for (key, node) in nodes {
             key.write_into(&mut expected_bytes);
             node.write_into(&mut expected_bytes);
@@ -1036,6 +1032,7 @@ fn test_serialization() -> Result<(), Box<dyn Error>> {
         for payload in [&bytes, &full_bytes] {
             let mut decoded = MerkleStore::read_from_bytes(payload)?;
             assert_eq!(store, decoded);
+            assert_eq!(decoded.to_bytes(), bytes);
             for (position, leaf) in leaves.into_iter().enumerate() {
                 let index = NodeIndex::new(2, position as u64)?;
                 let proof = decoded.get_path(mtree.root(), index)?;

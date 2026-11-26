@@ -10,6 +10,7 @@ use super::{EmptySubtreeRoots, InnerNodeInfo, MerkleError, NodeIndex, SparseMerk
 use crate::{
     EMPTY_WORD, Map, Set, Word,
     hash::eidos::Eidos,
+    map_entries_in_key_order,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -807,20 +808,23 @@ impl Deserializable for NodeMutation {
     }
 }
 
-impl<const DEPTH: u8, K: Serializable + Eq + Hash, V: Serializable> Serializable
+impl<const DEPTH: u8, K: Serializable + Ord + Hash, V: Serializable> Serializable
     for MutationSet<DEPTH, K, V>
 {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write(self.old_root);
         target.write(self.new_root);
 
-        let inner_removals: Vec<_> = self
+        // Removals and additions are separate lists in the wire format, each ordered by node
+        // index.
+        let mut inner_removals: Vec<_> = self
             .node_mutations
             .iter()
             .filter(|(_, value)| matches!(value, NodeMutation::Removal))
             .map(|(key, _)| key)
             .collect();
-        let inner_additions: Vec<_> = self
+        inner_removals.sort_unstable();
+        let mut inner_additions: Vec<_> = self
             .node_mutations
             .iter()
             .filter_map(|(key, value)| match value {
@@ -828,12 +832,12 @@ impl<const DEPTH: u8, K: Serializable + Eq + Hash, V: Serializable> Serializable
                 _ => None,
             })
             .collect();
-
+        inner_additions.sort_unstable_by_key(|(key, _)| **key);
         target.write(inner_removals);
         target.write(inner_additions);
 
         target.write_usize(self.new_pairs.len());
-        target.write_many(&self.new_pairs);
+        target.write_many(map_entries_in_key_order(&self.new_pairs));
     }
 }
 

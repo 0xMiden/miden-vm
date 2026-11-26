@@ -69,6 +69,22 @@ pub use std::collections::hash_map::Entry as MapEntry;
 #[cfg(feature = "std")]
 pub use std::collections::hash_map::IntoIter as MapIntoIter;
 
+/// Iterates over the entries of a [`Map`] in ascending key order.
+///
+/// A `HashMap` has no order, so its entries are sorted. A `BTreeMap` is already in key order.
+pub(crate) fn map_entries_in_key_order<K: Ord, V>(
+    map: &Map<K, V>,
+) -> impl Iterator<Item = (&K, &V)> {
+    #[cfg(feature = "std")]
+    {
+        let mut entries: alloc::vec::Vec<_> = map.iter().collect();
+        entries.sort_unstable_by_key(|&(key, _)| key);
+        entries.into_iter()
+    }
+    #[cfg(not(feature = "std"))]
+    map.iter()
+}
+
 /// An alias for a simple set.
 ///
 /// When the `std` feature is enabled, this is an alias for [`std::collections::HashSet`].

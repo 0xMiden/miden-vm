@@ -9,12 +9,12 @@ use crate::{
     merkle::{
         EmptySubtreeRoots,
         smt::{
-            Map, MutationSet, NodeMutation, SmtLeafError, SmtProofError, SparseMerkleTree,
-            SparseMerkleTreeReader, full::MAX_LEAF_ENTRIES,
+            InnerNode, Map, MutationSet, NodeMutation, SmtLeafError, SmtProofError,
+            SparseMerkleTree, SparseMerkleTreeReader, full::MAX_LEAF_ENTRIES,
         },
         store::MerkleStore,
     },
-    utils::{Deserializable, DeserializationError, Serializable},
+    utils::{ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // SMT
@@ -594,6 +594,51 @@ fn test_mutations_revert() {
     smt.apply_mutations(revert).unwrap();
 
     assert_eq!(smt, original, "SMT with applied revert mutations did not match original SMT");
+}
+
+#[test]
+fn test_smt_serialization_canonicalizes_entry_order() {
+    let key =
+        |low, high| Word::new([Felt::new_unchecked(low), ONE, ONE, Felt::new_unchecked(high)]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
+    // Eight leaves with two entries each. The most significant key element orders the leaves.
+    let entries: Vec<_> =
+        (0..8).flat_map(|high| [(key(1, high), value), (key(7, high), value)]).collect();
+    let legacy_entries: Vec<_> = entries.iter().rev().copied().collect();
+
+    let smt = Smt::read_from_bytes(&legacy_entries.to_bytes()).unwrap();
+
+    assert_eq!(smt.to_bytes(), entries.to_bytes());
+}
+
+#[test]
+fn test_mutation_set_serialization_canonicalizes_entry_order() {
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let node = InnerNode { left: value, right: value };
+    let encode = |positions: &[u64]| {
+        let removals: Vec<_> = positions.iter().map(|&i| NodeIndex::new(5, i).unwrap()).collect();
+        let additions: Vec<_> =
+            positions.iter().map(|&i| (NodeIndex::new(5, i + 16).unwrap(), &node)).collect();
+        let pairs: Vec<_> = positions
+            .iter()
+            .map(|&i| (Word::new([ONE, ONE, ONE, Felt::new_unchecked(i)]), value))
+            .collect();
+        let mut bytes = Vec::new();
+        bytes.write(EMPTY_WORD);
+        bytes.write(value);
+        bytes.write(removals);
+        bytes.write(additions);
+        bytes.write(pairs);
+        bytes
+    };
+    let mut positions: Vec<_> = (0..16).collect();
+    let canonical = encode(&positions);
+    positions.reverse();
+    let legacy = encode(&positions);
+
+    let decoded = MutationSet::<SMT_DEPTH, Word, Word>::read_from_bytes(&legacy).unwrap();
+
+    assert_eq!(decoded.to_bytes(), canonical);
 }
 
 #[test]
