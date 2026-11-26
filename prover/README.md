@@ -1,36 +1,35 @@
 # Miden prover
 
-This crate proves post-execution witnesses produced by the
-[Miden processor](../processor/) using [Plonky3](https://github.com/0xMiden/Plonky3). The
-synchronous `Prover` does not execute programs: it consumes `ExecutionWitness` values and owned
-batches of portable `PrecompileWitness` values, or materialized `ExecutionTrace` values.
+This crate proves execution witnesses recorded by the
+[Miden processor](../processor/) using [Plonky3](https://github.com/0xMiden/Plonky3). It also
+proves batches of portable precompile witnesses.
 
 ## Usage
 
-`Prover` is synchronous and consumes post-execution witnesses. `Prover::prove(ExecutionWitness)`
-proves the VM portion. Its `PrecompileStatus` is `Empty` when there is no deferred work, or
-`Deferred` with a portable singleton `PrecompileWitness`. `Prover::prove_full(ExecutionWitness)`
-returns a `CompleteProof` after proving the VM and any precompile work locally.
-`Prover::prove_precompiles(Vec<PrecompileWitness>)`
-imports a nonempty batch directly into one Session and returns one proof. Its root metadata preserves
-input order and repeated roots.
+The synchronous `Prover::prove` and `Prover::prove_full` methods accept an `ExecutionWitness`.
+`prove` proves the VM portion and returns an `ExecutionProof`. Its `PrecompileStatus` is
+`Empty` when there is no deferred work, or `Deferred` with a portable singleton
+`PrecompileWitness`. `prove_full` proves the VM and settles any deferred work locally, returning
+a `CompleteProof`. Convert it to an `ExecutionProof` with `.into()`. For imported proofs,
+`CompleteProof::try_from(proof)` accepts empty or proven precompile status and returns the
+original proof on deferred status. The verifier checks the proof against its claim.
+
+`Prover::prove_precompiles(Vec<PrecompileWitness>)` imports a nonempty batch into one Session and
+returns one proof. Its root metadata preserves input order and repeated roots.
 
 Use `Prover::with_hash_fn` to select the proof hash function.
 
-Recording must be selected before execution starts. Ordinary processor execution uses a
-no-op tracer and returns `ExecutionOutput`, which contains no replay data. Use an
-`ExecutionRequest` and select `.record_witness()` for a portable execution witness or
-`.build_trace(budget)` for a materialized trace.
+Use `Processor::record_witness` before running the program to record a portable execution witness.
 
 ```rust
-use miden_processor::{ExecutionRequest, WitnessOutput};
+use miden_processor::{Processor, WitnessOutput};
 use miden_prover::Prover;
 # fn example(
 #     program: &miden_processor::Program,
 #     stack_inputs: miden_processor::StackInputs,
 #     host: &mut impl miden_processor::SyncHost,
 # ) -> Result<(), Box<dyn std::error::Error>> {
-let WitnessOutput { claim, witness, advice } = ExecutionRequest::new(program)
+let WitnessOutput { claim, witness, advice } = Processor::new(program)
     .with_stack_inputs(stack_inputs)
     .record_witness()
     .run_sync(host)?;
@@ -88,27 +87,11 @@ proves the batcher itself, leaving no deferred work for the recipient. The
 [MASM verification guide](../docs/src/user_docs/core_lib/recursive_verification.md#example-batch-n-executions)
 explains the claim list, ordered root fold, and host request.
 
-### Direct trace proving
+### VM trace construction
 
-`Prover::prove_trace(ExecutionTrace)` proves the VM portion and preserves any deferred precompile
-witness. `Prover::prove_full_trace(ExecutionTrace)` proves all work and returns `CompleteProof`, an
-opaque wrapper guaranteeing that no deferred work remains. Its `as_inner()` and `into_inner()`
-methods expose the underlying `ExecutionProof`; verification establishes proof validity.
-
-Use `Prover::trace_budget()` to build traces with this prover's canonical VM model and memory
-limit. Pass the `trace` field from `TraceOutput` directly to either proving method. If you
-already have an `ExecutionWitness`, `witness.build_trace(prover.trace_budget())` checks the pairing
-and returns an `ExecutionTrace`. A synchronous `build_trace` task overlaps execution and
-hasher trace construction when enabled and a separate Rayon worker is available. Other paths use
-buffered replay. Proving rechecks the trace against its memory budget.
-`ExecutionTrace::try_new` checks that a separately supplied VM trace and optional precompile witness
-have matching roots and consistent presence before accepting them as proving input.
-
-For execution and proving in one operation, use the [`miden-vm` builder](../miden-vm/):
-`Processor::new(&program).prove_complete(&prover).run_sync(&mut host)`.
-The facade supplies proving tasks to the processor's shared execution and session pipeline;
-its `ProveComplete` and `ProveDeferred` tasks retain a concrete `&Prover` and finalize the original
-execution trace after successful VM termination.
+`Prover::prove` and `Prover::prove_full` consume an `ExecutionWitness` and build the VM trace
+under the configured prover memory limit. The processor replays the core fragments and chiplets
+after execution and checks the padded AIR heights before allocating the final matrices.
 
 ## STARK Backend
 

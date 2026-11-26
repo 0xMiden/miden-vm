@@ -4,7 +4,7 @@ use core::ops::ControlFlow;
 use miden_core::{
     Word, ZERO,
     mast::{MastForest, MastNodeId},
-    program::{MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs},
+    program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
 };
 use miden_mast_package::debug_info::{
     DebugSourceGraphLookupError, DebugSourceNodeId, PackageDebugInfo,
@@ -15,11 +15,8 @@ use super::{
     external::maybe_use_caller_error_context,
     step::{BreakReason, NeverStopper, ResumeContext, ResumeOutcome, StepStopper},
 };
-#[cfg(feature = "std")]
-use crate::PrecompileWitness;
 use crate::{
-    AdviceProvider, ExecutionError, ExecutionOutput, ExecutionWitness, Host, LoadedMastForest,
-    Stopper, SyncHost,
+    ExecutionError, ExecutionOutput, Host, LoadedMastForest, Stopper, SyncHost,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
     errors::{
@@ -111,107 +108,6 @@ impl FastProcessor {
         Self::execution_result_from_flow(flow, self)
     }
 
-    #[cfg(feature = "std")]
-    #[tracing::instrument(
-        target = "miden::vm",
-        level = "trace",
-        name = "build_trace_sync",
-        skip_all
-    )]
-    pub(crate) fn build_trace_sync(
-        self,
-        program: &Program,
-        source_context: Option<PackageSourceDebugContext<'_>>,
-        host: &mut impl SyncHost,
-        budget: &miden_stark::memory::ProvingBudget<{ miden_air_definitions::vm::MIDEN_AIR_COUNT }>,
-    ) -> Result<(crate::trace::VmTrace, Option<PrecompileWitness>, AdviceProvider), ExecutionError>
-    {
-        use crate::trace::{
-            MAX_TRACE_LEN, build_hasher_chiplet, build_trace, build_trace_with_prebuilt_hasher,
-        };
-
-        if Self::rayon_has_no_parallel_worker() {
-            let stack_inputs = self.initial_stack_inputs();
-            let mut tracer = self.new_tracer();
-            let output = self.run_with_tracer_sync(program, source_context, host, &mut tracer)?;
-            let (witness, advice) =
-                Self::execution_witness_from_parts(program.to_info(), stack_inputs, output, tracer);
-            let (vm_witness, precompiles_witness) = witness.into_parts();
-            let trace = build_trace(vm_witness, budget)?;
-            return Ok((trace, precompiles_witness, advice));
-        }
-
-        let stack_inputs = self.initial_stack_inputs();
-        let max_trace_len = MAX_TRACE_LEN.min(budget.max_any_height());
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let mut tracer = ExecutionTracer::new_with_streamed_hasher(
-            self.options.core_trace_fragment_size(),
-            self.options.max_stack_depth(),
-            sender,
-        );
-
-        let mut hasher = None;
-        let hasher_slot = &mut hasher;
-        // Keep `tracer` owned by the scope body. If execution unwinds, dropping the body closes the
-        // stream before Rayon waits for the builder, so the builder cannot remain blocked on input.
-        let execution_output = rayon::in_place_scope(move |scope| {
-            // Execution and the host remain on the calling thread. An idle Rayon worker can steal
-            // only the builder task.
-            let span = tracing::Span::current();
-            let hasher_span =
-                tracing::trace_span!(target: "miden::vm::trace", "build_streamed_hasher");
-            scope.spawn(move |_| {
-                let _span = span.entered();
-                let _hasher_span = hasher_span.entered();
-                let result = build_hasher_chiplet(
-                    receiver.into_iter().map(Ok),
-                    max_trace_len,
-                    max_trace_len,
-                );
-                *hasher_slot = Some(result);
-            });
-
-            let execution_output =
-                self.run_with_tracer_sync(program, source_context, host, &mut tracer);
-
-            match execution_output {
-                Ok(output) => {
-                    let (witness, advice) = Self::execution_witness_from_parts(
-                        program.to_info(),
-                        stack_inputs,
-                        output,
-                        tracer,
-                    );
-                    let (mut vm_witness, precompiles_witness) = witness.into_parts();
-                    // End the stream before this scope waits for the builder.
-                    drop(vm_witness.take_hasher_replay());
-                    Ok((vm_witness, precompiles_witness, advice))
-                },
-                Err(err) => {
-                    // Dropping the tracer closes the stream and lets the builder finish. The
-                    // execution error remains the root cause even if the partial replay also
-                    // failed.
-                    drop(tracer);
-                    Err(err)
-                },
-            }
-        });
-
-        let hasher = hasher.expect("hasher builder did not run");
-        let (vm_witness, precompiles_witness, advice) = match execution_output {
-            Ok(output) => output,
-            Err(err) => {
-                if let Err(builder_err) = hasher {
-                    tracing::debug!(%builder_err, "hasher builder also failed");
-                }
-                return Err(err);
-            },
-        };
-
-        let trace = build_trace_with_prebuilt_hasher(vm_witness, hasher?, budget)?;
-        Ok((trace, precompiles_witness, advice))
-    }
-
     pub(crate) fn step_with_tracer_sync<T>(
         &mut self,
         host: &mut impl SyncHost,
@@ -290,12 +186,6 @@ impl FastProcessor {
         Self::resume_outcome_from_flow(flow, context)
     }
 
-    #[cfg(feature = "std")]
-    fn rayon_has_no_parallel_worker() -> bool {
-        // `current_num_threads` initializes Rayon's global fallback before the thread-index check.
-        rayon::current_num_threads() == 1 && rayon::current_thread_index().is_some()
-    }
-
     /// Executes a single clock cycle synchronously.
     pub fn step_sync(
         &mut self,
@@ -347,22 +237,6 @@ impl FastProcessor {
             package_debug_info,
         )?;
         self.step(host, resume_ctx).await
-    }
-
-    /// Pairs execution output with the initial inputs and replay witness captured during execution.
-    #[inline(always)]
-    pub(crate) fn execution_witness_from_parts(
-        program_info: ProgramInfo,
-        stack_inputs: StackInputs,
-        execution_output: ExecutionOutput,
-        tracer: ExecutionTracer,
-    ) -> (ExecutionWitness, AdviceProvider) {
-        ExecutionWitness::from_execution(
-            program_info,
-            stack_inputs,
-            execution_output,
-            tracer.into_trace_replay(),
-        )
     }
 
     /// Returns the current top 16 stack elements in public input order.
@@ -952,19 +826,5 @@ impl FastProcessor {
         };
 
         Ok((Some(package_debug_info), source_node_id))
-    }
-}
-
-#[cfg(all(test, feature = "std"))]
-mod tests {
-    use super::FastProcessor;
-
-    #[test]
-    fn sole_rayon_worker_requires_buffered_trace_building() {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(1)
-            .build()
-            .unwrap()
-            .install(|| assert!(FastProcessor::rayon_has_no_parallel_worker()));
     }
 }

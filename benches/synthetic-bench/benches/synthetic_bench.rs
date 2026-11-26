@@ -25,10 +25,8 @@ use std::{collections::BTreeSet, hint::black_box, path::PathBuf, time::Duration}
 use codspeed_criterion_compat as criterion;
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
 use miden_core::program::ExecutionClaim;
-use miden_processor::{DefaultHost, ExecutionRequest, StackInputs, advice::AdviceInputs};
-use miden_vm::{
-    Assembler, ExecutionProof, HashFunction, Processor, Program, Prover, ProvingOutput, Verifier,
-};
+use miden_processor::{DefaultHost, Processor, StackInputs, advice::AdviceInputs};
+use miden_vm::{Assembler, ExecutionProof, HashFunction, Program, Prover, Verifier};
 use miden_vm_synthetic_bench::{
     calibrator::{Calibration, calibrate},
     snapshot::{DEFAULT_SCENARIOS, TraceSnapshot},
@@ -104,13 +102,14 @@ fn execute_and_prove(
     advice_inputs: AdviceInputs,
     host: &mut DefaultHost,
 ) -> (ExecutionClaim, ExecutionProof) {
-    let ProvingOutput { claim, proof, .. } = Processor::new(program)
+    let output = Processor::new(program)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
-        .prove_complete(prover)
+        .record_witness()
         .run_sync(host)
-        .expect("execute and prove program");
-    (claim, proof.into_inner())
+        .expect("execute program and record witness");
+    let proof = prover.prove_full(output.witness).expect("prove program");
+    (output.claim, proof.into())
 }
 
 fn synthetic_bench(c: &mut Criterion) {
@@ -236,14 +235,14 @@ fn bench_one_scenario(
     // Four axes per scenario:
     //   exec       -- ordinary execution (no trace data)
     //   trace_prep -- record_witness (post-execution witness creation)
-    //   prove      -- configured complete proving with overlapped trace construction
+    //   prove      -- configured complete proving from a recorded witness
     //   verify     -- Verifier::new().verify against a proof generated once outside the timed loop
     if axes.contains("exec") {
         group.bench_function("exec", |b| {
             b.iter_batched_ref(
                 || {
                     let host = DefaultHost::default();
-                    let execution = ExecutionRequest::new(&program).execute().prepare().unwrap();
+                    let execution = Processor::new(&program).execute().prepare().unwrap();
                     (host, Some(execution))
                 },
                 |(host, execution)| {
@@ -259,8 +258,7 @@ fn bench_one_scenario(
             b.iter_batched_ref(
                 || {
                     let host = DefaultHost::default();
-                    let execution =
-                        ExecutionRequest::new(&program).record_witness().prepare().unwrap();
+                    let execution = Processor::new(&program).record_witness().prepare().unwrap();
                     (host, Some(execution))
                 },
                 |(host, execution)| {

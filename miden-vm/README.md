@@ -44,275 +44,87 @@ Miden crate exposes types and functions for executing programs, generating proof
 
 ### Executing programs
 
-For ordinary execution, create `Processor::new(&program)`, configure its inputs and execution
-options, and select `.execute().run(...).await` or `.execute().run_sync(...)`.
-These interfaces take the following inputs:
+Create a `Processor` for the program and configure its public stack inputs, private advice,
+execution options, and optional package source context. The selected execution validates the advice
+against the final options when the machine is initialized. Run it with `run_sync()` for a
+`SyncHost` or `run().await` for an asynchronous `Host`.
 
-- `program: &Program` is a reference to the Miden program.
-- `stack_inputs: StackInputs` contains the public inputs.
-- `advice_inputs: AdviceInputs` contains the private inputs used to build the advice provider. Use `AdviceInputs::default()` when no private inputs are needed.
-- `host` is a `Host` for `run()` or a `SyncHost` for `run_sync()`. It supplies nondeterministic inputs to the VM and receives messages from it.
-- `options: ExecutionOptions` controls execution settings such as the maximum cycle count.
-
-Ordinary execution returns a `Result<ExecutionOutput, ExecutionError>` containing the final stack
-state and other execution outputs, or an error if execution failed. Its memory snapshot uses the
-`Memory` type reexported by both `miden_vm` and `miden_processor`. Ordinary execution does not
-record a proving witness.
-
-An `ExecutionOutput` cannot be converted into an `ExecutionWitness` after execution. The ordinary
-path selects `NoopTracer` before the program runs, so it does not retain the replay data needed to
-materialize the VM trace. If the execution will be proved, select tracing up front with
-`.record_witness().run(...)` / `.record_witness().run_sync(...)`, then pass the returned `witness` to
-`Prover::prove()`. You can also execute and prove directly with
-`.prove_complete(&prover).run_sync(...)` or select `.prove_deferred(&prover)` to retain
-precompile work.
-To materialize a VM trace directly, select `.build_trace(budget)`. Its result contains an
-`ExecutionTrace` with the VM trace and matching optional precompile witness. A stored
-`ExecutionWitness` can materialize both artifacts later with `witness.build_trace(budget)`.
-
-Each `Processor` binds one program and collects inputs, execution options, and optional package
-source context before task selection. Advice is validated against the final options when the machine
-is initialized. Select `.execute()`, `.record_witness()`,
-`.build_trace(budget)`, `.prove_complete(&prover)`, or `.prove_deferred(&prover)` before running or
-starting a session.
-Create a new builder for each execution; shared `ExecutionOptions` can be cloned explicitly.
-
-`Processor` wraps the processor crate's `ExecutionRequest` and adds complete and deferred proving
-tasks. `Execution`, `ExecutionSession`, `CompletedExecution`, `WitnessOutput`, and `TraceOutput`
-are the same processor-owned types reexported by this crate. The processor owns initialization,
-execution, recording, and session completion. Proving tasks pass the resulting `ExecutionTrace`
-to a concrete `&Prover`.
-
-Tasks can also use `.start()` to create a session. The session owns its machine and recorder, so
-the program can go out of scope. `state()` returns a processor view while running and after halt,
-failure, or a cancelled async step. A `CompletedExecution` permits final inspection before
-`.finish()` exports execution outputs, prepares the requested artifact, and performs proving.
-
-For example:
+`execute()` returns an `ExecutionOutput` with the final stack, advice, and memory. Select
+`record_witness()` before running if you need the replay data for proving.
 
 ```rust
-use miden_vm::{
-    advice::AdviceInputs,
-    Assembler, DefaultHost, ExecutionOptions, ExecutionOutput, Processor, StackInputs,
-};
+use miden_vm::{Assembler, DefaultHost, Processor};
 
-// instantiate the assembler
-let assembler = Assembler::default();
-
-// compile Miden assembly source code into a program
-let program = assembler.assemble_program(
-    "prg",
-    "begin push.3 push.5 add swap drop end",
-).unwrap();
-
-// use an empty list as initial stack
-let stack_inputs = StackInputs::default();
-
-// do not include any initial advice data
-let advice_inputs = AdviceInputs::default();
-
-// instantiate a default host (with an empty advice provider)
-let mut host = DefaultHost::default();
-
-// instantiate default execution options
-let exec_options = ExecutionOptions::default();
-
-// execute the program with no inputs
-let program = program.unwrap_program();
-let ExecutionOutput { stack, advice, .. } = Processor::new(&program)
-    .with_options(exec_options)
-    .with_stack_inputs(stack_inputs)
-    .with_advice(advice_inputs.clone())
+let program = Assembler::default()
+    .assemble_program("prg", "begin push.3 push.5 add swap drop end")
+    .unwrap()
+    .unwrap_program();
+let output = Processor::new(&program)
     .execute()
-    .run_sync(&mut host)
+    .run_sync(&mut DefaultHost::default())
     .unwrap();
 ```
 
 ### Proving program execution
 
-Select `.prove_complete(&prover)` to execute and prove all work, returning a
-`ProvingOutput<CompleteProof>`. Select `.prove_deferred(&prover)` to prove the VM while retaining
-any authenticated precompile work in a portable `ExecutionProof`. Both results include the execution claim and final
-advice. The complete wrapper can be borrowed with `.as_inner()` or consumed with `.into_inner()`
-when an API takes an `ExecutionProof`.
+Record a witness, then pass it to `Prover::prove_full` to obtain a `CompleteProof` locally. The
+recording also returns the public claim and final advice. To use a
+[proving service](../crates/prover-service/README.md), send the serialized witness and retain the
+claim and final advice locally. To require a completed proof from the service, decode its bytes
+as an `ExecutionProof` and check the precompile status with `CompleteProof::try_from(proof)`.
 
-For separate execution and proving, select `.record_witness()` and pass its `witness` field to
-`Prover::prove` or `Prover::prove_full`. The former proves the VM portion, returning an empty
-precompile status when no deferred work exists or a deferred status carrying one portable
-`PrecompileWitness`. The latter completes all proof work locally.
+```rust
+use miden_vm::{
+    Assembler, DefaultHost, Processor, Prover, Verifier, WitnessOutput, field::PrimeField64,
+};
 
-For delegated precompile proving, transport the proof with `ExecutionProof::to_bytes`, then decode
-it with `ExecutionProof::read_from_bytes`. Pass the carried witnesses to
-`Prover::prove_precompiles(Vec<PrecompileWitness>)`. One batch produces one proof, preserving input
-root order and repeated roots. After precompile proving, call `complete` and then `Verifier::verify`.
-Completion preserves the compatibility declaration.
+let program = Assembler::default()
+    .assemble_program("prg", "begin push.3 push.5 add swap drop end")
+    .unwrap()
+    .unwrap_program();
+let WitnessOutput { claim, witness, .. } = Processor::new(&program)
+    .record_witness()
+    .run_sync(&mut DefaultHost::default())
+    .unwrap();
+
+assert_eq!(8, claim.stack_outputs().first().unwrap().as_canonical_u64());
+let proof = Prover::new().prove_full(witness).unwrap();
+assert!(Verifier::new().verify(&claim, &proof).unwrap().is_complete());
+```
+
+Use `Prover::prove` to prove the VM portion. The resulting `ExecutionProof` carries a portable
+`PrecompileWitness` if any deferred work remains. For delegated precompile proving, transport the
+proof with `ExecutionProof::to_bytes` and decode it with `ExecutionProof::read_from_bytes`. Pass the
+carried witnesses to `Prover::prove_precompiles`. One batch proof preserves input root order and
+repeated roots. Attach it with `ExecutionProof::complete` and verify the completed proof.
 
 `ExecutionOptions::with_execution_precompile_limits` bounds guest-induced deferred work, while
 `ExecutionOptions::with_verification_precompile_limits` bounds the final root-reachable witness
 exported after execution. `Verifier::with_verification_precompile_limits` and
-`Prover::with_verification_precompile_limits` configure the same per-singleton verification policy
-for transported witnesses. Preparation applies verification limits before commitment hashing;
-native semantic evaluation and Session import do not reapply admission. These logical limits are
-distinct from the prover's batch-wide peak-memory budget.
+`Prover::with_verification_precompile_limits` configure the per-singleton policy for transported
+witnesses. These logical limits apply separately from the prover's batch-wide peak-memory budget.
 
-`ExecutionOptions` configure execution, while `Prover::with_hash_fn` selects the proof hash
-function. Select `.prove_complete(&prover).run_sync(&mut host)` to execute and fully prove in
-one synchronous call. The prover supplies the trace budget before execution starts. Async
-`.run(...).await` awaits host callbacks; local proof generation remains synchronous on the calling
-thread. To initialize the machine ahead of time, call `.prepare()` on the selected execution before
-running or starting it. Advanced APIs under `miden_vm::processor` include `ExecutionRequest` for
-execution without the proving facade, `ExecutionTask` for custom task selection, and `FastProcessor`
-for direct machine control.
+Both proving methods build the trace from the recorded witness under the prover's VM memory
+budget. For AIR diagnostics, split the witness with `into_parts()` and materialize the VM
+component with `vm_witness.build_trace(&budget)`.
 
-Synchronous trace building overlaps execution with hasher-chiplet trace construction when a Rayon
-worker is available. A caller with no separate Rayon worker uses compact buffered replay, including
-on targets such as `wasm32-unknown-unknown`.
+#### Stepping a recording
 
-#### Proof generation example
+Start a session to inspect the machine as it executes. The recorder stays with the session, so you
+can finish recording after stepping and pass that witness to the prover.
 
-Here is a simple example of executing a program which pushes two numbers onto the stack and computes their sum:
-
-```rust
-use miden_vm::{
-    advice::AdviceInputs,
-    field::PrimeField64,
-    Assembler, DefaultHost, Processor, Prover, ProvingOutput, StackInputs,
-};
-
-// instantiate the assembler
-let assembler = Assembler::default();
-
-// this is our program, we compile it from assembly code
-let program = assembler
-    .assemble_program("prg", "begin push.3 push.5 add swap drop end")
-    .unwrap()
-    .unwrap_program();
-
-// execute and prove the program using the prover's configured trace budget
-let mut host = DefaultHost::default();
-let prover = Prover::new();
-let ProvingOutput { claim, proof, advice } = Processor::new(&program)
-    .with_stack_inputs(StackInputs::default())
-    .with_advice(AdviceInputs::default())
-    .prove_complete(&prover)
-    .run_sync(&mut host)
-    .unwrap();
-let outputs = *claim.stack_outputs();
-let proof = proof.into_inner();
-
-// the output should be 8
-assert_eq!(8, outputs.first().unwrap().as_canonical_u64());
+```rust,ignore
+let mut session = Processor::new(&program).record_witness().start()?;
+session.step_sync(&mut host)?;
+let clock = session.state().clock();
+let finished = session.run_to_completion_sync(&mut host)?;
+let WitnessOutput { claim, witness, .. } = finished.finish()?;
+let proof = prover.prove_full(witness)?;
 ```
 
-#### Recording a witness for separate proving
-
-The facade returns named outputs with public fields. The witness and final advice can be moved
-independently; advice is retained locally rather than serialized into the proving witness.
-
-```rust
-use miden_vm::{Processor, Prover, WitnessOutput};
-# fn example(program: &miden_vm::Program, host: &mut impl miden_vm::SyncHost, prover: &Prover)
-#     -> Result<(), Box<dyn std::error::Error>> {
-let WitnessOutput { claim, witness, advice } = Processor::new(program)
-    .record_witness()
-    .run_sync(host)?;
-let proof = prover.prove(witness)?;
-miden_vm::Verifier::new().verify(&claim, &proof)?;
-# Ok(())
-# }
-```
-
-`Prover::prove` retains any outstanding precompile work in the proof. Use `Prover::prove_full` to
-complete that work locally instead.
-
-To materialize a recorded witness before proving, call `ExecutionWitness::build_trace` with the
-prover's trace budget. It returns an `ExecutionTrace` containing the VM trace and its matching optional
-precompile witness:
-
-```rust
-use miden_vm::{ExecutionWitness, Prover};
-# fn example(witness: ExecutionWitness, prover: &Prover) -> Result<(), Box<dyn std::error::Error>> {
-let trace = witness.build_trace(prover.trace_budget())?;
-let proof = prover.prove_full_trace(trace)?;
-# Ok(())
-# }
-```
-
-#### Running asynchronously
-
-All built-in tasks support `.run(...).await`. Async execution awaits host callbacks; local CPU
-proving still runs on the calling thread.
-
-```rust
-use miden_vm::{Processor, Prover, ProvingOutput};
-# async fn example(program: &miden_vm::Program, host: &mut impl miden_vm::Host, prover: &Prover)
-#     -> Result<(), Box<dyn std::error::Error>> {
-let ProvingOutput { claim, proof, advice } = Processor::new(program)
-    .prove_deferred(prover)
-    .run(host)
-    .await?;
-# Ok(())
-# }
-```
-
-#### Stepping before completing a proof
-
-A session retains its execution mode and recorded data across steps. Its `run_sync` and async
-`run` methods execute the remaining program and return the selected task's output, including
-trace construction or proving.
-
-```rust
-use miden_vm::{Processor, Prover, ProvingOutput};
-# fn example(program: &miden_vm::Program, host: &mut impl miden_vm::SyncHost, prover: &Prover)
-#     -> Result<(), Box<dyn std::error::Error>> {
-let mut session = Processor::new(program)
-    .prove_complete(prover)
-    .start()?;
-session.step_sync(host)?;
-let completed = session.run_to_completion_sync(host)?;
-println!("final precompile root: {:?}", completed.state().precompile_root());
-let ProvingOutput { claim, proof, advice } = completed.finish()?;
-miden_vm::Verifier::new().verify(&claim, proof.as_inner())?;
-# Ok(())
-# }
-```
-
-`run_to_completion_sync` and async `run_to_completion` separate VM completion from artifact
-preparation and proving. Inspect the final processor through `CompletedExecution::state()`, then
-call `finish()` to export any deferred precompile witness and finalize the task. `finish()` can
-report failures from export, artifact preparation, or proving.
-
-Use borrowed `run_until_halt_sync` or async `run_until_halt` to keep the session available for
-inspection on success or error. For individual steps, use `step_sync` or async `step`. A failed
-or cancelled session remains inspectable. `try_complete` returns
-`ControlFlow::Break(CompletedExecution)` after successful termination or
-`ControlFlow::Continue(session)` otherwise. Startup and VM driving return `ExecutionError`.
-Task finalization can return a task-specific error such as `ProvingRunError`.
-
-#### Inspecting an execution trace before proving
-
-`TraceOutput` carries an `ExecutionTrace` with the materialized VM trace and its matching optional
-precompile witness. Borrow those artifacts with `vm_trace()` and `precompile_witness()`, then pass the
-execution trace directly to the prover. `ExecutionTrace::try_new` checks the pairing when supplied
-with separate artifacts.
-
-```rust
-use miden_vm::{Processor, Prover, TraceOutput};
-# fn example(program: &miden_vm::Program, host: &mut impl miden_vm::SyncHost, prover: &Prover)
-#     -> Result<(), Box<dyn std::error::Error>> {
-let budget = prover.trace_budget();
-let TraceOutput { claim, trace, .. } = Processor::new(program)
-    .build_trace(budget)
-    .run_sync(host)?;
-println!("Core trace rows: {}", trace.vm_trace().trace_len_summary().core_rows());
-let proof = prover.prove_full_trace(trace)?;
-miden_vm::Verifier::new().verify(&claim, proof.as_inner())?;
-# Ok(())
-# }
-```
-
-Use `Prover::prove_trace` to leave precompile work deferred. Both trace-proving methods also check
-the trace against the selected prover's memory budget.
+Use the borrowed `run_until_halt_sync` or `run_until_halt` when you need to inspect the session
+after an execution error. A successful halt makes the final state available for inspection before
+`finish()` exports the selected output.
 
 ### Verifying program execution
 
@@ -334,37 +146,6 @@ directly into a shared Session. See the
 > If a program with the provided hash is executed against some secret inputs and the provided public inputs, it will produce the provided outputs.
 
 The verifier needs only the program hash. It does not need the program itself.
-
-#### Proof verification example
-
-This example proves a small program and verifies that it returns the expected output:
-
-```rust
-use miden_vm::{
-    Assembler, DefaultHost, ExecutionClaim, Processor, Prover, ProvingOutput, StackInputs,
-    StackOutputs, Verifier,
-};
-
-let program = Assembler::default()
-    .assemble_program("prg", "begin push.3 push.5 add swap drop end")
-    .unwrap()
-    .unwrap_program();
-let prover = Prover::new();
-let ProvingOutput { proof, .. } = Processor::new(&program)
-    .prove_complete(&prover)
-    .run_sync(&mut DefaultHost::default())
-    .unwrap();
-
-// Choose the expected claim independently of the prover's returned outputs.
-let expected_outputs = StackOutputs::new(&[8_u32.into()]).unwrap();
-let claim = ExecutionClaim::from_program_info(
-    program.to_info(),
-    StackInputs::default(),
-    expected_outputs,
-);
-let outcome = Verifier::new().verify(&claim, proof.as_inner()).unwrap();
-assert!(outcome.is_complete());
-```
 
 ## Fibonacci calculator
 
@@ -391,7 +172,7 @@ Notice that except for the first 2 operations which initialize the stack, the se
 ```rust
 use miden_vm::{
     field::PrimeField64,
-    Assembler, DefaultHost, Processor, Prover, ProvingOutput, StackInputs,
+    Assembler, DefaultHost, Processor, StackInputs,
 };
 
 // set the number of terms to compute
@@ -419,16 +200,13 @@ let mut host = DefaultHost::default();
 // initialize the stack with values 0 and 1
 let stack_inputs = StackInputs::new(&[1_u32.into(), 0_u32.into()]).unwrap();
 
-// execute the program and complete its proof
-let prover = Prover::new();
-let ProvingOutput { claim, .. } = Processor::new(&program)
+let output = Processor::new(&program)
     .with_stack_inputs(stack_inputs)
-    .prove_complete(&prover)
+    .execute()
     .run_sync(&mut host)
     .unwrap();
 
-// fetch the stack outputs, truncating to the first element
-let stack = claim.stack_outputs().get_num_elements(1);
+let stack = output.stack.get_num_elements(1);
 
 // the output should be the 50th Fibonacci number
 assert_eq!(12586269025, stack[0].as_canonical_u64());
@@ -487,6 +265,9 @@ make exec-avx2
 
 # build an executable for targets with SVE instructions (concurrent)
 make exec-sve
+
+# build an executable with log tree enabled
+make exec-info
 ```
 
 ### Running Miden VM

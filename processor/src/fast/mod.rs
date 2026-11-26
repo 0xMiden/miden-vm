@@ -337,11 +337,6 @@ impl FastProcessor {
         self.start_context(program, None)
     }
 
-    #[cfg(feature = "std")]
-    pub(crate) fn overlapped_trace_build(&self) -> bool {
-        self.options.overlapped_trace_build()
-    }
-
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
 

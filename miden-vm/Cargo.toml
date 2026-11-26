@@ -82,7 +82,6 @@ std = [
     "miden-verifier/std",
     "serde?/std",
     "serde_json?/std",
-    "thiserror/std",
 ]
 testing = ["arbitrary"]
 # For internal use, not meant to be used by users
@@ -108,7 +107,6 @@ same-file = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
-thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, optional = true, features = ["std", "env-filter"] }
 tracing-forest = { workspace = true, optional = true, features = ["ansi", "smallvec"] }
@@ -124,16 +122,9 @@ predicates = { version = "3.1" }
 rand = { workspace = true, features = ["std", "thread_rng"] }
 serde_json.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
-tracing = { workspace = true, features = ["std"] }
-tracing-subscriber.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 walkdir.workspace = true
 wat.workspace = true
-trybuild.workspace = true
-
-[package.metadata.cargo-shear]
-# Loaded by the typed facade's compile-fail harness.
-ignored-paths = ["tests/ui/**"]
 
 [lints]
 workspace = true

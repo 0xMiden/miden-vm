@@ -302,20 +302,6 @@ pub struct ExecutionTracer {
 }
 
 impl ExecutionTracer {
-    /// Creates a tracer whose hasher-chiplet requests stream to `hasher_sender` as they are
-    /// recorded, instead of buffering for post-execution replay. Everything else records as in
-    /// [`Self::new`].
-    #[cfg(feature = "std")]
-    pub(crate) fn new_with_streamed_hasher(
-        fragment_size: usize,
-        max_stack_depth: usize,
-        hasher_sender: std::sync::mpsc::Sender<crate::trace::ResolvedHasherOp<'static>>,
-    ) -> Self {
-        let mut tracer = Self::new(fragment_size, max_stack_depth);
-        tracer.hasher_for_chiplet = HasherRequestReplay::streamed(hasher_sender);
-        tracer
-    }
-
     /// Creates a new `ExecutionTracer` with the given fragment size.
     #[inline(always)]
     pub fn new(fragment_size: usize, max_stack_depth: usize) -> Self {
@@ -452,7 +438,7 @@ impl ExecutionTracer {
         // One compression per controller request, plus XOF requests which bypass the
         // controller. The Eidos AIR coalesces repeated requests when building the trace.
         let eidos_rows = (controller_rows / CONTROLLER_ROWS_PER_HASHER_OP)
-            .checked_add(self.hasher_for_chiplet.aead_xof_count()?)?
+            .checked_add(self.hasher_for_chiplet.aead_xof_count())?
             .checked_mul(EIDOS_COMPRESSION_CYCLE_LEN)?;
         let padded = |rows: usize| Some(rows.checked_next_power_of_two()?.max(MIN_TRACE_LEN));
         let heights = [
@@ -873,7 +859,7 @@ impl Tracer for ExecutionTracer {
                     self.hasher_for_chiplet.record_hash_basic_block(
                         forest_id,
                         mast_node_id,
-                        basic_block_node,
+                        basic_block_node.digest(),
                     );
                     let block_addr =
                         self.hasher_chiplet_shim.record_hash_basic_block(basic_block_node);
@@ -1496,7 +1482,7 @@ mod serialization_tests {
         context.hasher_for_chiplet.record_hash_basic_block(
             MastForestId::from(1u32),
             MastNodeId::from(0),
-            &basic_block,
+            basic_block.digest(),
         );
 
         assert_context_read_rejects_bad_forest_id(context, "hasher HashBasicBlock replay");

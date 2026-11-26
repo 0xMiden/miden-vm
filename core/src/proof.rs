@@ -525,16 +525,6 @@ impl CompleteProof {
         let status = precompile.map_or(PrecompileStatus::Empty, PrecompileStatus::Proven);
         Self(ExecutionProof::new(vm, status))
     }
-
-    /// Returns the underlying execution proof.
-    pub const fn as_inner(&self) -> &ExecutionProof {
-        &self.0
-    }
-
-    /// Consumes the wrapper and returns the underlying execution proof.
-    pub fn into_inner(self) -> ExecutionProof {
-        self.0
-    }
 }
 
 impl core::ops::Deref for CompleteProof {

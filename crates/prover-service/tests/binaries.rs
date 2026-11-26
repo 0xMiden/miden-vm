@@ -9,7 +9,7 @@ use miden_core::{
     proof::{ExecutionProof, PrecompileStatus},
     serde::Serializable,
 };
-use miden_processor::{DefaultHost, ExecutionRequest, ExecutionWitness};
+use miden_processor::{DefaultHost, ExecutionWitness, Processor};
 use miden_prover_service::{
     PROTOCOL_VERSION,
     protocol::{ErrorCode, ErrorDetail, ProveRequest, prover_service_client::ProverServiceClient},
@@ -185,7 +185,7 @@ fn execute(source: &str) -> ExecutionWitness {
     assembler.link_package(library.package(), Linkage::Dynamic).unwrap();
     let program = assembler.assemble_program("binary-test", source).unwrap().unwrap_program();
     let mut host = DefaultHost::default().with_library(&library).unwrap();
-    ExecutionRequest::new(&program)
+    Processor::new(&program)
         .record_witness()
         .run_sync(&mut host)
         .map(|recorded| recorded.witness)

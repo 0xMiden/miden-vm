@@ -3,10 +3,11 @@ use std::sync::Arc;
 use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
-    BaseHost, DefaultHost, ExecutionRequest, Felt, FutureMaybeSend, Host, LoadedMastForest,
-    MastForestLoadError, ProcessorState, StackInputs, Word,
-    advice::AdviceMutation,
+    BaseHost, DefaultHost, Felt, FutureMaybeSend, Host, LoadedMastForest, MastForestLoadError,
+    Processor, ProcessorState, StackInputs, Word,
+    advice::{AdviceInputs, AdviceMutation},
     event::{EventError, EventName, TraceError},
+    serde::Serializable,
 };
 
 struct YieldingAsyncHost {
@@ -88,7 +89,7 @@ fn emit_trace_program() -> miden_processor::Program {
 async fn execute_async_matches_execute() {
     let program = simple_program();
     let stack_inputs = StackInputs::new(&[Felt::new_unchecked(3)]).unwrap();
-    let execute = || ExecutionRequest::new(&program).with_stack_inputs(stack_inputs).execute();
+    let execute = || Processor::new(&program).with_stack_inputs(stack_inputs).execute();
     let sync_output = execute().run_sync(&mut DefaultHost::default()).unwrap();
     let async_output = execute().run(&mut DefaultHost::default()).await.unwrap();
 
@@ -101,7 +102,7 @@ async fn witness_recording_async_matches_sync() {
     let stack_inputs = StackInputs::new(&[Felt::new_unchecked(3)]).unwrap();
 
     let mut sync_host = DefaultHost::default();
-    let sync_witness = ExecutionRequest::new(&program)
+    let sync_witness = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .record_witness()
         .run_sync(&mut sync_host)
@@ -109,7 +110,7 @@ async fn witness_recording_async_matches_sync() {
         .unwrap();
 
     let mut async_host = DefaultHost::default();
-    let async_witness = ExecutionRequest::new(&program)
+    let async_witness = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .record_witness()
         .run(&mut async_host)
@@ -117,24 +118,40 @@ async fn witness_recording_async_matches_sync() {
         .map(|output| output.witness)
         .unwrap();
 
-    assert_eq!(sync_witness.claim().stack_outputs(), async_witness.claim().stack_outputs());
-    let (sync_trace, sync_precompile) = sync_witness
-        .build_trace(miden_vm_stark::memory::default_budget())
-        .unwrap()
-        .into_parts();
-    let (async_trace, async_precompile) = async_witness
-        .build_trace(miden_vm_stark::memory::default_budget())
-        .unwrap()
-        .into_parts();
-    assert!(sync_precompile.is_none());
-    assert!(async_precompile.is_none());
+    assert_eq!(sync_witness.to_bytes(), async_witness.to_bytes());
+}
 
-    assert_eq!(sync_trace.public_inputs(), async_trace.public_inputs());
-    assert_eq!(sync_trace.trace_len_summary(), async_trace.trace_len_summary());
-    for (sync_column, async_column) in
-        sync_trace.main_trace().columns().zip(async_trace.main_trace().columns())
-    {
-        assert_eq!(sync_column, async_column);
+#[tokio::test(flavor = "current_thread")]
+async fn witness_recording_with_async_only_host_matches_sync_direct_and_stepped() {
+    let program = emit_trace_program();
+    let record = || {
+        Processor::new(&program)
+            .with_advice(AdviceInputs::default().with_map([(Word::empty(), vec![Felt::ONE])]))
+            .record_witness()
+    };
+
+    let sync_output = record().run_sync(&mut DefaultHost::default()).unwrap();
+    for step_first in [false, true] {
+        let mut host = YieldingAsyncHost::new();
+        let async_output = if step_first {
+            let mut session = record().start().unwrap();
+            while host.trace_calls == 0 {
+                assert!(!session.step(&mut host).await.unwrap().is_finished());
+            }
+            let halted = session.run_to_completion(&mut host).await.unwrap();
+            halted.finish().unwrap()
+        } else {
+            record().run(&mut host).await.unwrap()
+        };
+
+        assert_eq!(host.trace_calls, 1);
+        assert_eq!(async_output.claim, sync_output.claim);
+        assert_eq!(async_output.advice, sync_output.advice);
+        assert_eq!(
+            async_output.advice.get_mapped_values(&Word::empty()),
+            Some([Felt::ONE].as_slice())
+        );
+        assert_eq!(async_output.witness.to_bytes(), sync_output.witness.to_bytes());
     }
 }
 
@@ -148,7 +165,7 @@ async fn execute_async_supports_async_only_host_events() {
         .unwrap_program();
 
     let mut host = YieldingAsyncHost::new();
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .execute()
         .run(&mut host)
         .await
@@ -163,7 +180,7 @@ async fn execute_async_supports_async_only_host_traces() {
     let program = emit_trace_program();
 
     let mut host = YieldingAsyncHost::new();
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .execute()
         .run(&mut host)
         .await

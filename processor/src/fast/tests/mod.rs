@@ -38,8 +38,8 @@ use rstest::rstest;
 
 use super::*;
 use crate::{
-    AdviceInputs, BaseHost, DefaultHost, Execute, Execution, ExecutionRequest, LoadedMastForest,
-    MastForestLoadError, ProcessorState, SyncHost,
+    AdviceInputs, BaseHost, DefaultHost, Execute, ExecutionPlan, LoadedMastForest,
+    MastForestLoadError, Processor, ProcessorState, SyncHost,
     advice::{AdviceMap, AdviceMutation},
     event::EventError,
     operation::OperationError,
@@ -56,7 +56,7 @@ mod proving;
 
 /// Exercises the single-cycle execution path through termination.
 fn execute_by_steps(
-    execution: Execution<'_, Execute>,
+    execution: ExecutionPlan<'_, Execute>,
     host: &mut impl SyncHost,
 ) -> Result<ExecutionOutput, ExecutionError> {
     let mut session = execution.start()?;
@@ -722,7 +722,7 @@ fn stack_get_word_out_of_bounds_read() {
     let mut host = DefaultHost::default();
 
     // Should not panic
-    ExecutionRequest::new(&program).execute().run_sync(&mut host).unwrap();
+    Processor::new(&program).execute().run_sync(&mut host).unwrap();
 }
 
 #[test]
@@ -733,7 +733,7 @@ fn execution_rejects_an_already_started_processor() {
     processor.step_sync(&mut DefaultHost::default(), context).unwrap();
 
     assert_matches!(
-        Execution::from_processor(processor, &program, crate::Witness).err(),
+        ExecutionPlan::from_processor(processor, &program, crate::RecordWitness).err(),
         Some(ExecutionError::Internal("an execution plan requires a fresh processor"))
     );
 }
@@ -865,7 +865,7 @@ fn test_syscall_fail() {
         Program::new(program.into(), root_id)
     };
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .execute()
         .run_sync(&mut host)
@@ -910,7 +910,7 @@ fn validated_debug_child_bearing_package_executes_with_debug_info() {
     assert!(package.debug_info().unwrap().is_some());
 
     let program = package.unwrap_program();
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .with_stack_inputs(StackInputs::new(&[Felt::new_unchecked(3)]).unwrap())
         .execute()
         .run_sync(&mut DefaultHost::default())
@@ -933,7 +933,7 @@ fn host_loaded_package_debug_info_reports_loaded_source_span() {
         .with_library(Arc::new(loaded_package))
         .expect("loaded package should register");
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &caller_debug_info,
             None,
@@ -968,7 +968,7 @@ fn host_loaded_package_debug_info_requires_source_aware_execution() {
         .with_library(Arc::new(loaded_package.clone()))
         .expect("loaded package should register");
 
-    let err = ExecutionRequest::new(&program).execute().run_sync(&mut plain_host).unwrap_err();
+    let err = Processor::new(&program).execute().run_sync(&mut plain_host).unwrap_err();
     assert_matches!(
         err,
         ExecutionError::OperationError {
@@ -983,7 +983,7 @@ fn host_loaded_package_debug_info_requires_source_aware_execution() {
         .with_source_manager(source_manager)
         .with_library(Arc::new(loaded_package))
         .expect("loaded package should register");
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &caller_debug_info,
             None,
@@ -1019,7 +1019,7 @@ fn host_loaded_package_debug_info_survives_missing_caller_entrypoint_root() {
         .with_library(Arc::new(loaded_package))
         .expect("loaded package should register");
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &caller_debug_info,
             None,
@@ -1054,7 +1054,7 @@ fn host_loaded_package_debug_info_survives_step_execution() {
         .with_library(Arc::new(loaded_package))
         .expect("loaded package should register");
 
-    let execution = ExecutionRequest::new(&program)
+    let execution = Processor::new(&program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &caller_debug_info,
             None,
@@ -1128,7 +1128,7 @@ fn host_loaded_stripped_package_executes_without_loaded_debug_info() {
         .with_library(Arc::new(stripped_package))
         .expect("stripped loaded package should register");
 
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .with_stack_inputs(StackInputs::new(&[Felt::from_u32(6), Felt::from_u32(7)]).unwrap())
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &caller_debug_info,
@@ -1158,7 +1158,7 @@ fn host_loaded_stripped_package_restores_caller_debug_info() {
         .with_library(Arc::new(stripped_package))
         .expect("stripped loaded package should register");
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &caller_debug_info,
             None,
@@ -1198,7 +1198,7 @@ fn host_loaded_debug_info_survives_stripped_intermediate_package() {
         .with_library(Arc::new(leaf_package))
         .expect("leaf package should register");
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &caller_debug_info,
             None,
@@ -1244,7 +1244,7 @@ fn host_loaded_ambiguous_debug_root_drops_precise_loaded_source_span() {
         .with_library(Arc::new(loaded_package))
         .expect("loaded package should register");
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &caller_debug_info,
             None,
@@ -1363,7 +1363,7 @@ fn package_source_debug_static_call_selects_identical_proc_from_called_file() {
     );
 
     let program = package.unwrap_program();
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .with_stack_inputs(StackInputs::new(&[Felt::new_unchecked(41)]).unwrap())
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &package_debug_info,
@@ -1423,7 +1423,7 @@ fn package_source_debug_execution_distinguishes_same_exec_node_split_children() 
     builder.add_root(source_root);
     let package_debug_info = *builder.build();
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &package_debug_info,
             None,
@@ -1457,7 +1457,7 @@ fn package_source_debug_execution_uses_manifest_entrypoint_source_node() {
     );
 
     let mut host = DefaultHost::default().with_source_manager(fixture.source_manager);
-    let err = ExecutionRequest::new(&fixture.program)
+    let err = Processor::new(&fixture.program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &fixture.debug_info,
             Some(fixture.entrypoint_source_node_id),
@@ -1493,7 +1493,7 @@ async fn package_source_debug_async_execution_uses_manifest_entrypoint_source_no
     );
 
     let mut host = DefaultHost::default().with_source_manager(fixture.source_manager);
-    let err = ExecutionRequest::new(&fixture.program)
+    let err = Processor::new(&fixture.program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new(
             &fixture.debug_info,
             fixture.entrypoint_source_node_id,
@@ -1528,7 +1528,7 @@ fn package_source_debug_trace_and_step_use_manifest_entrypoint_source_node() {
 
     let stack_inputs = StackInputs::new(&[Felt::from_u32(3), Felt::from_u32(4)]).unwrap();
     let request = || {
-        ExecutionRequest::new(&fixture.program)
+        Processor::new(&fixture.program)
             .with_stack_inputs(stack_inputs)
             .with_source_context(Some(crate::PackageSourceDebugContext::new(
                 &fixture.debug_info,
@@ -1597,7 +1597,7 @@ fn package_source_debug_execution_degrades_ambiguous_local_dyn_root() {
     builder.add_root(source_callee_b);
     let package_debug_info = *builder.build();
 
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &package_debug_info,
             None,
@@ -2279,7 +2279,7 @@ async fn package_source_debug_load_error_preserves_source_span(
     let mut host = FailingMastForestHost::new();
     host.source_manager = source_manager;
 
-    let request = ExecutionRequest::new(&program).with_source_context(Some(
+    let request = Processor::new(&program).with_source_context(Some(
         crate::PackageSourceDebugContext::new_optional(&package_debug_info, None),
     ));
     let err = if proving {
@@ -2331,7 +2331,7 @@ fn caches_all_procedures_and_advice_from_a_loaded_mast_forest() {
     let forest_commitment = mast_forest.commitment();
     let program = program_calling_external_procedures(procedure_digests);
     let mut host = CountingMastForestHost::new([mast_forest]);
-    let completed = ExecutionRequest::new(&program)
+    let completed = Processor::new(&program)
         .execute()
         .start()
         .unwrap()
@@ -2378,7 +2378,7 @@ async fn caches_advice_from_distinct_mast_forests() {
 
     let program = program_calling_external_procedures([first_digest, second_digest]);
     let mut host = CountingMastForestHost::new([first_forest, second_forest]);
-    let completed = ExecutionRequest::new(&program)
+    let completed = Processor::new(&program)
         .execute()
         .start()
         .unwrap()
@@ -2424,7 +2424,7 @@ fn preserves_first_cached_forest_for_a_shared_procedure() {
 
     let program = program_calling_external_procedures([first_unique_digest, second_unique_digest]);
     let mut host = CountingMastForestHost::new([first_forest, second_forest]);
-    let completed = ExecutionRequest::new(&program)
+    let completed = Processor::new(&program)
         .execute()
         .start()
         .unwrap()
@@ -2441,7 +2441,7 @@ fn package_source_debug_missing_external_preserves_external_source_span() {
     let (program, package_debug_info, mut host, _, expected_span, source_file) =
         missing_external_package_source_debug_fixture();
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &package_debug_info,
             None,
@@ -2476,7 +2476,7 @@ fn package_source_debug_malformed_external_preserves_external_source_span() {
         loaded_mast_forest: LoadedMastForest::new(Arc::new(wrong_forest)),
     };
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_stack_inputs(StackInputs::new(&[Felt::ONE, Felt::ONE]).unwrap())
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &package_debug_info,
@@ -2512,7 +2512,7 @@ async fn package_source_debug_malformed_external_preserves_external_source_span_
         loaded_mast_forest: LoadedMastForest::new(Arc::new(wrong_forest)),
     };
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_stack_inputs(StackInputs::new(&[Felt::ONE, Felt::ONE]).unwrap())
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &package_debug_info,
@@ -2564,7 +2564,7 @@ fn test_cycle_limit_exceeded() {
     // the total number of operations is certain to be greater than `MIN_TRACE_LEN`.
     let program = simple_program_with_ops(vec![Operation::Swap; MIN_TRACE_LEN]);
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_options(options)
         .execute()
         .run_sync(&mut host)
@@ -2597,75 +2597,13 @@ fn test_cycle_limit_exactly_max_cycles_succeeds() {
     )
     .unwrap();
 
-    let result = ExecutionRequest::new(&program)
-        .with_options(options)
-        .execute()
-        .run_sync(&mut host);
+    let result = Processor::new(&program).with_options(options).execute().run_sync(&mut host);
 
     // The program should succeed since it uses exactly max_cycles cycles.
     assert!(
         result.is_ok(),
         "Program using exactly max_cycles should succeed, but got: {result:?}"
     );
-}
-
-/// Tests that `ExecutionError::ProverMemoryExceeded` is correctly emitted when the modelled peak
-/// prover memory for a trace exceeds the configured budget.
-///
-/// Execution itself is unaffected by the budget (enforcement happens in `build_trace`), so this
-/// measures the exact modelled peak for the trace under a generous budget, then rebuilds with a
-/// budget one byte short of that peak.
-#[test]
-fn test_prover_memory_budget_exceeded() {
-    let program = simple_program_with_ops(vec![Operation::Swap; MIN_TRACE_LEN]);
-
-    let build_witness = || {
-        let mut host = DefaultHost::default();
-        // A fragment size close to the program's real row count keeps the tier-1 allocation
-        // precheck (based on `fragment_size`, not the actual padded height) from dominating the
-        // exact byte-budget boundary this test targets.
-        let options = ExecutionOptions::default()
-            .with_core_trace_fragment_size(MIN_TRACE_LEN)
-            .unwrap();
-        ExecutionRequest::new(&program)
-            .with_options(options)
-            .record_witness()
-            .run_sync(&mut host)
-            .expect("execution is unaffected by the prover memory budget")
-            .witness
-    };
-
-    let (measured, _) = build_witness()
-        .build_trace(miden_vm_stark::memory::default_budget())
-        .expect("default budget must succeed")
-        .into_parts();
-    let exact_peak = miden_vm_stark::memory::default_budget()
-        .prover_peak_bytes(measured.trace_len_summary().padded_heights())
-        .expect("modelled peak fits in u64");
-
-    let err = build_witness()
-        .build_trace(miden_vm_stark::memory::canonical_budget(exact_peak - 1))
-        .unwrap_err();
-
-    assert_matches!(
-        err,
-        ExecutionError::ProverMemoryExceeded { estimated_bytes, budget_bytes }
-            if estimated_bytes == exact_peak && budget_bytes == exact_peak - 1
-    );
-}
-
-/// Tests that the default prover memory budget does not reject a normal-sized trace.
-#[test]
-fn test_prover_memory_default_budget_accepts_normal_trace() {
-    let mut host = DefaultHost::default();
-
-    let program = simple_program_with_ops(vec![Operation::Swap; MIN_TRACE_LEN * 4]);
-
-    ExecutionRequest::new(&program)
-        .with_options(ExecutionOptions::default().with_overlapped_trace_build(false))
-        .build_trace(miden_vm_stark::memory::default_budget())
-        .run_sync(&mut host)
-        .expect("the default prover memory budget must accept a normal-sized trace");
 }
 
 #[test]
@@ -2677,7 +2615,7 @@ fn test_assert() {
         let stack_inputs = StackInputs::new(&[ONE]).unwrap();
         let program = simple_program_with_ops(vec![Operation::Assert(ZERO)]);
 
-        let result = ExecutionRequest::new(&program)
+        let result = Processor::new(&program)
             .with_stack_inputs(stack_inputs)
             .execute()
             .run_sync(&mut host);
@@ -2691,7 +2629,7 @@ fn test_assert() {
         let stack_inputs = StackInputs::new(&[ZERO]).unwrap();
         let program = simple_program_with_ops(vec![Operation::Assert(ZERO)]);
 
-        let err = ExecutionRequest::new(&program)
+        let err = Processor::new(&program)
             .with_stack_inputs(stack_inputs)
             .execute()
             .run_sync(&mut host)
@@ -2721,7 +2659,7 @@ fn test_valid_combinations_and(#[case] stack_inputs: Vec<Felt>, #[case] expected
     let program = simple_program_with_ops(vec![Operation::And]);
 
     let mut host = DefaultHost::default();
-    let stack_outputs = ExecutionRequest::new(&program)
+    let stack_outputs = Processor::new(&program)
         .with_stack_inputs(StackInputs::new(&stack_inputs).unwrap())
         .execute()
         .run_sync(&mut host)
@@ -2744,7 +2682,7 @@ fn test_valid_combinations_or(#[case] stack_inputs: Vec<Felt>, #[case] expected_
     let program = simple_program_with_ops(vec![Operation::Or]);
 
     let mut host = DefaultHost::default();
-    let stack_outputs = ExecutionRequest::new(&program)
+    let stack_outputs = Processor::new(&program)
         .with_stack_inputs(StackInputs::new(&stack_inputs).unwrap())
         .execute()
         .run_sync(&mut host)
@@ -2795,7 +2733,7 @@ fn test_frie2f4() {
     ]);
 
     // fast processor
-    let stack_outputs = ExecutionRequest::new(&program)
+    let stack_outputs = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .execute()
         .run_sync(&mut host)
@@ -2885,7 +2823,7 @@ fn test_call_node_preserves_stack_overflow_table() {
     .unwrap();
 
     // Execute the program
-    let result = ExecutionRequest::new(&program)
+    let result = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .execute()
         .run_sync(&mut host)
@@ -2926,7 +2864,7 @@ fn stack_depth_default_limit_exact_boundary_succeeds() {
     let pushes_to_default_limit = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH;
     let program = simple_program_with_ops(pad_then_drop_ops(pushes_to_default_limit));
 
-    ExecutionRequest::new(&program)
+    Processor::new(&program)
         .execute()
         .run_sync(&mut host)
         .expect("using the full default stack depth limit should succeed");
@@ -2939,7 +2877,7 @@ fn stack_depth_default_limit_exceeded_returns_typed_error() {
     let pushes_past_default_limit = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH + 1;
     let program = simple_program_with_ops(vec![Operation::Pad; pushes_past_default_limit]);
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .execute()
         .run_sync(&mut host)
         .expect_err("pushing past the default stack depth limit should fail");
@@ -2960,7 +2898,7 @@ fn stack_depth_small_custom_limit_fails_before_buffer_growth() {
     let program = simple_program_with_ops(vec![Operation::Pad; 2]);
     let options = ExecutionOptions::default().with_max_stack_depth(max_stack_depth).unwrap();
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_options(options)
         .execute()
         .run_sync(&mut host)
@@ -2987,7 +2925,7 @@ fn issue_2818_fast_processor_stack_grows_past_initial_buffer_by_multiple_element
         .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + GROWTH_MARGIN)
         .unwrap();
 
-    ExecutionRequest::new(&program)
+    Processor::new(&program)
         .with_options(options)
         .execute()
         .run_sync(&mut host)
@@ -3006,14 +2944,15 @@ fn issue_2818_traced_execution_stack_grows_past_initial_buffer() {
         .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + GROWTH_MARGIN)
         .unwrap();
 
-    let execution_witness = ExecutionRequest::new(&program)
+    let execution_witness = Processor::new(&program)
         .with_options(options)
         .record_witness()
         .run_sync(&mut host)
         .expect("traced execution should grow the stack buffer past the initial buffer")
         .witness;
-    execution_witness
-        .build_trace(miden_vm_stark::memory::default_budget())
+    let (vm_witness, _) = execution_witness.into_parts();
+    vm_witness
+        .build_trace(&miden_vm_stark::memory::default_budget())
         .expect("trace replay should accept the same operand stack depth limit");
 }
 
@@ -3029,7 +2968,7 @@ fn issue_2818_step_execution_stack_grows_past_initial_buffer() {
         .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + GROWTH_MARGIN)
         .unwrap();
 
-    let execution = ExecutionRequest::new(&program).with_options(options).execute();
+    let execution = Processor::new(&program).with_options(options).execute();
     execute_by_steps(execution, &mut host)
         .expect("step execution should grow the stack buffer past the initial buffer");
 }
@@ -3091,7 +3030,7 @@ fn stack_buffer_is_not_preallocated_to_operand_stack_depth_limit() {
 
     let mut host = DefaultHost::default();
     let program = simple_program_with_ops(vec![Operation::Pad, Operation::Drop]);
-    let completed = Execution::from_processor(processor, &program, Execute)
+    let completed = ExecutionPlan::from_processor(processor, &program, Execute)
         .unwrap()
         .start()
         .unwrap()
@@ -3107,7 +3046,7 @@ fn stack_buffer_is_not_preallocated_to_operand_stack_depth_limit() {
     let pushes_past_initial_buffer = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH + GROWTH_MARGIN;
     let program = simple_program_with_ops(pad_then_drop_ops(pushes_past_initial_buffer));
 
-    let completed = ExecutionRequest::new(&program)
+    let completed = Processor::new(&program)
         .with_options(options)
         .execute()
         .start()
@@ -3309,7 +3248,7 @@ fn stack_depth_limit_exceeded() {
     let program = simple_program_with_ops(vec![Operation::Pad]);
     let options = ExecutionOptions::default().with_max_stack_depth(MIN_STACK_DEPTH).unwrap();
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_options(options)
         .execute()
         .run_sync(&mut host)
@@ -3459,7 +3398,7 @@ fn nested_calls_within_aggregate_budget_succeed() {
     let options = ExecutionOptions::default().with_max_stack_depth(max_stack_depth).unwrap();
     let mut host = DefaultHost::default();
 
-    let completed = ExecutionRequest::new(&program)
+    let completed = Processor::new(&program)
         .with_options(options)
         .execute()
         .start()
@@ -3506,7 +3445,7 @@ fn test_continuation_stack_limit_exceeded() {
     // Set a very small continuation stack limit that will be exceeded by the nested joins.
     let options = ExecutionOptions::default().with_max_num_continuations(3);
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_options(options)
         .execute()
         .run_sync(&mut host)
@@ -3536,7 +3475,7 @@ fn test_continuation_stack_limit_exactly_max_continuations_succeeds() {
     // FinishJoin(root), StartNode(second), StartNode(first).
     let options = ExecutionOptions::default().with_max_num_continuations(3);
 
-    ExecutionRequest::new(&program)
+    Processor::new(&program)
         .with_options(options)
         .execute()
         .run_sync(&mut host)

@@ -199,13 +199,13 @@ fn run_warns_when_only_the_eidos_upper_bound_exceeds_the_budget() {
         .assemble_program("program", source)
         .unwrap()
         .unwrap_program();
-    let output = miden_processor::ExecutionRequest::new(&program)
+    let output = miden_processor::Processor::new(&program)
         .record_witness()
         .run_sync(&mut miden_processor::DefaultHost::default())
         .unwrap();
     let budget = miden_vm_stark::memory::default_budget();
     let (vm, _) = output.witness.into_parts();
-    let trace = miden_processor::trace::build_trace(vm, &budget).unwrap();
+    let trace = vm.build_trace(&budget).unwrap();
     let exact_peak = budget.prover_peak_bytes(trace.trace_len_summary().padded_heights()).unwrap();
 
     let dir = TempDir::new().unwrap();

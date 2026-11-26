@@ -12,14 +12,14 @@ fn test_memory_word_access_alignment() {
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
 
         // loadw at address 40 is allowed
-        ExecutionRequest::new(&program)
+        Processor::new(&program)
             .with_stack_inputs(StackInputs::new(&[Felt::from_u32(40)]).unwrap())
             .execute()
             .run_sync(&mut host)
             .unwrap();
 
         // but loadw at address 43 is not allowed
-        let err = ExecutionRequest::new(&program)
+        let err = Processor::new(&program)
             .with_stack_inputs(StackInputs::new(&[Felt::from_u32(43)]).unwrap())
             .execute()
             .run_sync(&mut host)
@@ -35,14 +35,14 @@ fn test_memory_word_access_alignment() {
         let program = simple_program_with_ops(vec![Operation::MStoreW]);
 
         // storew at address 40 is allowed
-        ExecutionRequest::new(&program)
+        Processor::new(&program)
             .with_stack_inputs(StackInputs::new(&[Felt::from_u32(40)]).unwrap())
             .execute()
             .run_sync(&mut host)
             .unwrap();
 
         // but storew at address 43 is not allowed
-        let err = ExecutionRequest::new(&program)
+        let err = Processor::new(&program)
             .with_stack_inputs(StackInputs::new(&[Felt::from_u32(43)]).unwrap())
             .execute()
             .run_sync(&mut host)
@@ -68,7 +68,7 @@ fn test_mloadw_success() {
         processor.memory.write_word(ctx, addr, dummy_clk, word_at_addr.into()).unwrap();
 
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
-        let stack_outputs = Execution::from_processor(processor, &program, Execute)
+        let stack_outputs = ExecutionPlan::from_processor(processor, &program, Execute)
             .unwrap()
             .run_sync(&mut host)
             .unwrap()
@@ -87,7 +87,7 @@ fn test_mloadw_success() {
         processor.memory.write_word(ctx, addr, dummy_clk, word_at_addr.into()).unwrap();
 
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
-        let stack_outputs = Execution::from_processor(processor, &program, Execute)
+        let stack_outputs = ExecutionPlan::from_processor(processor, &program, Execute)
             .unwrap()
             .run_sync(&mut host)
             .unwrap()
@@ -117,7 +117,7 @@ fn test_mstorew_success() {
     ])
     .unwrap();
     let program = simple_program_with_ops(vec![Operation::MStoreW]);
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .execute()
         .run_sync(&mut host)
@@ -141,7 +141,7 @@ fn test_mstore_success(#[case] addr: u32, #[case] value_to_store: u32) {
     // Store the value at address - addr at top, value at position 1
     let stack_inputs = StackInputs::new(&[Felt::from_u32(addr), value_to_store]).unwrap();
     let program = simple_program_with_ops(vec![Operation::MStore]);
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .execute()
         .run_sync(&mut host)
@@ -174,7 +174,7 @@ fn test_mload_success(#[case] addr_to_access: u32) {
         .unwrap();
 
     let program = simple_program_with_ops(vec![Operation::MLoad]);
-    let stack_outputs = Execution::from_processor(processor, &program, Execute)
+    let stack_outputs = ExecutionPlan::from_processor(processor, &program, Execute)
         .unwrap()
         .run_sync(&mut host)
         .unwrap()
@@ -214,7 +214,7 @@ fn test_mstream() {
         .unwrap();
 
     let program = simple_program_with_ops(vec![Operation::MStream]);
-    let stack_outputs = Execution::from_processor(processor, &program, Execute)
+    let stack_outputs = ExecutionPlan::from_processor(processor, &program, Execute)
         .unwrap()
         .run_sync(&mut host)
         .unwrap()
@@ -295,7 +295,7 @@ fn test_memory_element_limit_enforced_during_execution() {
 
     // A limit of 3 words' worth of elements is exceeded by the 4th distinct word write.
     let options = ExecutionOptions::default().with_max_memory_elements(3 * WORD_SIZE);
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_options(options)
         .execute()
         .run_sync(&mut host)
@@ -310,7 +310,7 @@ fn test_memory_element_limit_enforced_during_execution() {
 
     // A limit of 4 words' worth of elements accommodates every distinct word the program writes to.
     let options = ExecutionOptions::default().with_max_memory_elements(4 * WORD_SIZE);
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .with_options(options)
         .execute()
         .run_sync(&mut host)
@@ -341,7 +341,7 @@ fn test_memory_element_limit_enforced_via_with_options() {
     // The limit is configured through the `new(...).with_options(...)` builder chain.
     let options = ExecutionOptions::default().with_max_memory_elements(3 * WORD_SIZE);
     let processor = FastProcessor::new(StackInputs::default()).with_options(options).unwrap();
-    let err = Execution::from_processor(processor, &program, Execute)
+    let err = ExecutionPlan::from_processor(processor, &program, Execute)
         .unwrap()
         .run_sync(&mut host)
         .unwrap_err();

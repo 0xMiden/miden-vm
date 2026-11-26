@@ -18,8 +18,8 @@ use miden_precompiles_stark::recursive::{
     PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
 };
 use miden_processor::{
-    BaseHost, DefaultHost, ExecutionOutput, ExecutionRequest, FutureMaybeSend, Host,
-    LoadedMastForest, MastForestLoadError, ProcessorState, StackInputs, SyncHost, WitnessOutput,
+    BaseHost, DefaultHost, ExecutionOutput, FutureMaybeSend, Host, LoadedMastForest,
+    MastForestLoadError, Processor, ProcessorState, StackInputs, SyncHost, WitnessOutput,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
     event::EventError,
 };
@@ -75,15 +75,6 @@ async fn mixed_signatures_deferred_obligation_is_settled_end_to_end() {
     assert!(outcome.is_complete(), "the PVM proof must discharge the obligation");
 }
 
-/// Proves an ECDSA execution and returns its portable precompile witness for the PVM prover.
-fn prove_ecdsa_execution(
-    core_lib: &CoreLibrary,
-    fixture: EcdsaFixture,
-    stack_inputs: StackInputs,
-) -> (ExecutionProof, ExecutionClaim, PrecompileWitness) {
-    prove_signature_execution(core_lib, fixture, None, stack_inputs)
-}
-
 /// Proves an ECDSA execution, optionally followed by an Ed25519 verification of the same message,
 /// and returns its portable precompile witness for the PVM prover.
 fn prove_signature_execution(
@@ -96,7 +87,7 @@ fn prove_signature_execution(
     let mut host = DefaultHost::default()
         .with_library(core_lib)
         .expect("core library must load into the host");
-    let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+    let WitnessOutput { claim, witness, .. } = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
         .record_witness()
@@ -186,12 +177,10 @@ async fn run_settlement_in_masm(
     let mut host =
         PvmSettlementHost::new(core_lib, SettlementWitnesses::Supplied(vec![precompile_witness]));
 
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
         .execute()
-        .prepare()
-        .expect("processor construction")
         .run(&mut host)
         .await?;
     let precompile_proof = host

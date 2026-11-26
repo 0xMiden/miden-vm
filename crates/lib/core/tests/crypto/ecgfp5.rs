@@ -586,7 +586,7 @@ fn callable_from_a_kernel_procedure() {
     };
     use miden_core::program::{StackInputs, StackOutputs};
     use miden_core_lib::CoreLibrary;
-    use miden_processor::{DefaultHost, ExecutionRequest};
+    use miden_processor::{DefaultHost, Processor};
 
     let secret = sample();
     let public_key = recipient().public_key();
@@ -634,7 +634,7 @@ fn callable_from_a_kernel_procedure() {
         let inputs = StackInputs::new(commitment.as_elements()).unwrap();
         let mut host = DefaultHost::default().with_library(&core).unwrap();
         host.load_library(kernel.mast_forest()).unwrap();
-        let output = ExecutionRequest::new(&program)
+        let output = Processor::new(&program)
             .with_stack_inputs(inputs)
             .with_advice(advice)
             .execute()
@@ -1336,7 +1336,7 @@ fn prove_seal_and_commit_from_advice() {
     use miden_core::program::{ExecutionClaim, StackInputs, StackOutputs};
     use miden_core_lib::CoreLibrary;
     use miden_crypto::ies::ecgfp5_eidos::{self, Envelope};
-    use miden_processor::{DefaultHost, ExecutionRequest, WitnessOutput};
+    use miden_processor::{DefaultHost, Processor, WitnessOutput};
     use miden_prover::Prover;
     use miden_verifier::Verifier;
 
@@ -1380,7 +1380,7 @@ fn prove_seal_and_commit_from_advice() {
     };
 
     let key = recipient().public_key().to_commitment();
-    let WitnessOutput { witness, advice, .. } = ExecutionRequest::new(&program)
+    let WitnessOutput { witness, advice, .. } = Processor::new(&program)
         .with_stack_inputs(stack_inputs(key))
         .with_advice(AdviceInputs::default().with_stack(plaintext.to_vec().into()))
         .record_witness()

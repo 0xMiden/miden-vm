@@ -5,7 +5,7 @@ use http_body_util::{Full, StreamBody};
 use hyper::client::conn::http2::SendRequest;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use miden_core::proof::{ExecutionProof, PrecompileStatus};
-use miden_processor::{ExecutionRequest, WitnessOutput};
+use miden_processor::{Processor, WitnessOutput};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::mpsc,
@@ -239,7 +239,7 @@ async fn deferred_precompile_round_trip_retains_final_advice_for_both_policies()
         .unwrap_program();
     let mut host = DefaultHost::default().with_library(&library).unwrap();
     let WitnessOutput { claim, witness, advice: final_advice } =
-        ExecutionRequest::new(&program).record_witness().run_sync(&mut host).unwrap();
+        Processor::new(&program).record_witness().run_sync(&mut host).unwrap();
     let bytes = witness.to_bytes();
     let expected_precompile = witness.into_parts().1.unwrap();
     let deferred = config().with_proof_mode(ProofMode::Deferred);

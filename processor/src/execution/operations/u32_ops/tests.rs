@@ -13,7 +13,7 @@ use super::{
     op_u32sub, op_u32xor,
 };
 use crate::{
-    DefaultHost, ExecutionError, ExecutionRequest,
+    DefaultHost, ExecutionError, Processor,
     execution::operations::execute_op,
     fast::{FastProcessor, NoopTracer},
     operation::{Operation, OperationError},
@@ -212,7 +212,7 @@ fn test_op_u32assert2_assembled_err_msg_lookup() {
         .unwrap_program();
 
     let mut host = DefaultHost::default();
-    let exec_err = ExecutionRequest::new(&program)
+    let exec_err = Processor::new(&program)
         .execute()
         .run_sync(&mut host)
         .expect_err("expected u32 assertion failure");
@@ -249,7 +249,7 @@ fn test_u32assert_err_wrapper_assembled() {
         .unwrap_program();
 
     let mut host = DefaultHost::default();
-    let exec_err = ExecutionRequest::new(&program)
+    let exec_err = Processor::new(&program)
         .execute()
         .run_sync(&mut host)
         .expect_err("expected u32 assertion failure");
@@ -287,7 +287,7 @@ fn test_u32assertw_err_wrapper_assembled() {
         .unwrap_program();
 
     let mut host = DefaultHost::default();
-    let exec_err = ExecutionRequest::new(&program)
+    let exec_err = Processor::new(&program)
         .execute()
         .run_sync(&mut host)
         .expect_err("expected u32 assertion failure");

@@ -9,7 +9,7 @@ use miden_core::{
 };
 use miden_core_lib::{CoreLibrary, dsa::ecdsa_p256_sha256};
 use miden_crypto::hash::sha2::Sha256;
-use miden_processor::{DefaultHost, ExecutionRequest};
+use miden_processor::{DefaultHost, Processor};
 use p256::ecdsa::{Signature, VerifyingKey, signature::hazmat::PrehashVerifier};
 use wycheproof_ng_core::TestResult;
 
@@ -96,7 +96,7 @@ end
             advice.append_elements(be_to_le_limbs(&r));
             advice.append_elements(be_to_le_limbs(&s));
             let mut host = DefaultHost::default().with_library(&library).unwrap();
-            let result = ExecutionRequest::new(&program)
+            let result = Processor::new(&program)
                 .with_advice(AdviceInputs::default().with_stack(advice))
                 .execute()
                 .prepare()

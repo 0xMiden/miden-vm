@@ -1,7 +1,7 @@
 use alloc::string::ToString;
 
 use miden_assembly::{Assembler, DefaultSourceManager};
-use miden_processor::ExecutionRequest;
+use miden_processor::Processor;
 
 use super::*;
 use crate::exec::{DebuggerHost, poll_immediately};
@@ -26,10 +26,9 @@ fn trace_handler_errors_preserve_the_registered_name_through_diagnostics() {
     )
     .unwrap();
     let mut wrapper = DiagnosticHostWrapper::new(&mut host);
-    let error = poll_immediately(
-        ExecutionRequest::new(&package.unwrap_program()).execute().run(&mut wrapper),
-    )
-    .expect_err("the trace handler must reject execution");
+    let error =
+        poll_immediately(Processor::new(&package.unwrap_program()).execute().run(&mut wrapper))
+            .expect_err("the trace handler must reject execution");
     let ExecutionError::EventError { event_id, event_name, error, .. } = error else {
         panic!("unexpected execution error: {error:?}");
     };
@@ -69,10 +68,9 @@ fn diagnostics_delegate_events_capture_state_and_preserve_execution_results() {
             .is_some()
     );
     assert!(poll_immediately(wrapper.get_mast_forest(&Word::default())).unwrap().is_none());
-    let output = poll_immediately(
-        ExecutionRequest::new(&package.unwrap_program()).execute().run(&mut wrapper),
-    )
-    .unwrap();
+    let output =
+        poll_immediately(Processor::new(&package.unwrap_program()).execute().run(&mut wrapper))
+            .unwrap();
     assert_eq!(output.stack[0], Felt::from(7u32));
     assert_eq!(wrapper.call_depth, 0);
     assert!(wrapper.last_cycle > RowIndex::from(0u32));

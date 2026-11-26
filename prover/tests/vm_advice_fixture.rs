@@ -4,7 +4,8 @@ use miden_core::{
     program::{KernelDescriptor, StackInputs, StackOutputs},
     proof::HashFunction,
 };
-use miden_processor::{DefaultHost, ExecutionRequest, WitnessOutput};
+use miden_processor::{DefaultHost, Processor, WitnessOutput};
+use miden_prover::Prover;
 
 /// Explicit fixture maintenance; standard tests consume the checked-in proof instead.
 #[test]
@@ -22,19 +23,15 @@ fn regenerate_vm_advice_fixture() {
             .assemble_program("advice_fixture", "begin push.5 push.8 add drop end")
             .unwrap()
             .unwrap_program();
-        let WitnessOutput { claim, witness, .. } = ExecutionRequest::new(&program)
+        let WitnessOutput { claim, witness, .. } = Processor::new(&program)
             .record_witness()
             .run_sync(&mut DefaultHost::default())
             .unwrap();
         assert_eq!(*claim.kernel(), KernelDescriptor::default());
         assert_eq!(*claim.stack_inputs(), StackInputs::default());
         assert_eq!(*claim.stack_outputs(), StackOutputs::default());
-        let trace = witness
-            .build_trace(miden_vm_stark::memory::default_budget())
-            .unwrap()
-            .into_vm_trace();
-        let proof = miden_vm_stark::prover::prove(trace, HashFunction::Eidos, false).unwrap();
-        std::fs::write(directory.join("vm_eidos_v1_0.bin"), proof.to_bytes()).unwrap();
+        let proof = Prover::new().with_hash_fn(HashFunction::Eidos).prove(witness).unwrap();
+        std::fs::write(directory.join("vm_eidos_v1_0.bin"), proof.vm().to_bytes()).unwrap();
         std::fs::write(directory.join("vm_eidos_v1_0.program"), claim.program_root().to_bytes())
             .unwrap();
     });

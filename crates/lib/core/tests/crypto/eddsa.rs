@@ -26,7 +26,7 @@ use miden_crypto::{
 };
 use miden_precompiles::{Ed25519Base, UintSpec, ed25519_decompress_x};
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOutput, ExecutionRequest,
+    DefaultHost, ExecutionError, ExecutionOutput, Processor,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
     event::EventHandler,
     operation::OperationError,
@@ -400,7 +400,7 @@ fn run_program_with_handler(
     let mut advice = AdviceStack::new();
     advice.append_elements(bytes_to_packed_u32_elements(pk));
     advice.append_elements(bytes_to_packed_u32_elements(sig));
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .with_advice(AdviceInputs::default().with_stack(advice))
         .execute()
         .prepare()

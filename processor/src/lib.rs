@@ -37,7 +37,7 @@ use crate::{
     advice::{AdviceInputs, AdviceProvider},
     continuation_stack::ContinuationStack,
     errors::MapExecErr,
-    processor::{Processor, SystemInterface},
+    processor::{Processor as _, SystemInterface},
     trace::RowIndex,
 };
 
@@ -60,9 +60,8 @@ pub use errors::{
 };
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use execution_plan::{
-    CompletedExecution, Execute, Execution, ExecutionMode, ExecutionRequest, ExecutionSession,
-    ExecutionTask, ExecutionTrace, StepStatus, Trace, TraceOutput, VmTraceBudget, Witness,
-    WitnessOutput,
+    Execute, ExecutionPlan, ExecutionSession, HaltedExecution, Processor, RecordWitness,
+    StepStatus, WitnessOutput,
 };
 pub(crate) use fast::BreakReason;
 pub use fast::{

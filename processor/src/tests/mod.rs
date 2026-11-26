@@ -14,8 +14,8 @@ use miden_utils_testing::crypto::{init_merkle_leaves, init_merkle_store};
 
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
 use crate::{
-    BaseHost, DefaultHost, ExecutionRequest, KernelDescriptor, LoadedMastForest,
-    MastForestLoadError, ONE, ProcessorState, Program, SyncHost, Word, ZERO,
+    BaseHost, DefaultHost, KernelDescriptor, LoadedMastForest, MastForestLoadError, ONE, Processor,
+    ProcessorState, Program, SyncHost, Word, ZERO,
     advice::{AdviceInputs, AdviceMap, AdviceMutation},
     event::{EventError, EventHandler, EventName, TraceError, TraceHandler},
     operation::Operation,
@@ -190,7 +190,7 @@ fn test_diagnostic_advice_map_key_already_present() {
 
     let program = Program::new(mast_forest.into(), basic_block_id);
 
-    let err = ExecutionRequest::new(&program).execute().run_sync(&mut host).unwrap_err();
+    let err = Processor::new(&program).execute().run_sync(&mut host).unwrap_err();
 
     assert_diagnostic_lines!(
         err,
@@ -263,7 +263,7 @@ fn test_diagnostic_host_event_error_uses_emit_location() {
     let mut host = DefaultHost::default().with_source_manager(source_manager);
     host.register_handler(event.clone(), Arc::new(AlwaysFailEventHandler)).unwrap();
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &debug_info,
             None,
@@ -305,7 +305,7 @@ fn test_diagnostic_host_trace_error_uses_trace_location() {
     host.register_trace_handler(trace.clone(), Arc::new(AlwaysFailTraceHandler))
         .unwrap();
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &debug_info,
             None,
@@ -344,7 +344,7 @@ fn test_diagnostic_host_event_advice_error_uses_emit_location() {
     let mut host = DefaultHost::default().with_source_manager(source_manager);
     host.register_handler(event, Arc::new(DuplicateMapMutationHandler)).unwrap();
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_advice(AdviceInputs::default().with_map([(Word::default(), vec![ZERO])]))
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &debug_info,
@@ -981,7 +981,7 @@ fn test_diagnostic_procedure_not_found_call() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &debug_info,
             None,
@@ -1042,7 +1042,7 @@ fn test_diagnostic_procedure_not_found_join() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &debug_info,
             None,
@@ -1110,7 +1110,7 @@ fn test_diagnostic_procedure_not_found_loop() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &debug_info,
             None,
@@ -1178,7 +1178,7 @@ fn test_diagnostic_procedure_not_found_split() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &debug_info,
             None,
@@ -1228,7 +1228,7 @@ fn test_diagnostic_malformed_mast_forest_in_host() {
         mast_forest: malformed_forest.into(),
     };
 
-    let err = ExecutionRequest::new(&program)
+    let err = Processor::new(&program)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
             &debug_info,
             None,
@@ -1468,7 +1468,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let err = ExecutionRequest::new(&program.0)
+    let err = Processor::new(&program.0)
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(&program.1, None)))
         .execute()
         .run_sync(&mut host)

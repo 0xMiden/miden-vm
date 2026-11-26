@@ -43,9 +43,9 @@ same server.
                                          └───────────────────────┘
 ```
 
-When the client side asks for a DAP session, `miden-client` builds a
-`TransactionExecutor` configured with `DapExecutor` instead of the default
-`FastProcessor`. The executor binds a TCP listener on the address you
+When the client side asks for a DAP session, `miden-client` configures its
+`TransactionExecutor` with a `DapExecutor`, which drives a `FastProcessor`.
+The executor binds a TCP listener on the address you
 provide, waits for a DAP client to connect, and from then on every
 `continue`, `step`, `setBreakpoints`, and `evaluate` request flows over the
 DAP wire — execution only progresses when the client tells it to.

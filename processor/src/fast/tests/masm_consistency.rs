@@ -268,7 +268,7 @@ fn test_masm_consistency(
     }
 
     let stack_inputs = StackInputs::new(&stack_inputs).unwrap();
-    let execute = || ExecutionRequest::new(&program).with_stack_inputs(stack_inputs).execute();
+    let execute = || Processor::new(&program).with_stack_inputs(stack_inputs).execute();
     let fast_stack_outputs = execute().run_sync(&mut host).unwrap().stack;
     let stepped_stack_outputs = execute_by_steps(execute(), &mut host).unwrap().stack;
 
@@ -349,7 +349,7 @@ fn test_masm_errors_consistency(
     }
 
     let stack_inputs = StackInputs::new(&stack_inputs).unwrap();
-    let execute = || ExecutionRequest::new(&program).with_stack_inputs(stack_inputs).execute();
+    let execute = || Processor::new(&program).with_stack_inputs(stack_inputs).execute();
     let fast_err = execute().run_sync(&mut host).unwrap_err();
     let fast_stepped_err = execute_by_steps(execute(), &mut host).unwrap_err();
 
@@ -383,7 +383,7 @@ fn test_log_deferred_correctness() {
     };
 
     let mut host = DefaultHost::default();
-    let execution_output = ExecutionRequest::new(&program)
+    let execution_output = Processor::new(&program)
         .with_stack_inputs(StackInputs::new(&stack_inputs).unwrap())
         .execute()
         .run_sync(&mut host)
@@ -418,7 +418,7 @@ fn push_deferred_root_preserves_operands_and_existing_advice() {
         )
         .unwrap()
         .unwrap_program();
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .with_stack_inputs(StackInputs::new(&stack_inputs).unwrap())
         .with_advice(AdviceInputs::default().with_stack(AdviceStack::from(advice_stack.clone())))
         .execute()
@@ -454,9 +454,8 @@ fn push_deferred_root_reads_the_global_rolling_commitment() {
     let stack_inputs = [0, 0, 0, 0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map(Felt::from_u32);
     let advice_stack = vec![Felt::from_u32(17), Felt::from_u32(19)];
     let advice_inputs = AdviceInputs::default().with_stack(AdviceStack::from(advice_stack.clone()));
-    let request = || {
-        ExecutionRequest::new(&program).with_stack_inputs(StackInputs::new(&stack_inputs).unwrap())
-    };
+    let request =
+        || Processor::new(&program).with_stack_inputs(StackInputs::new(&stack_inputs).unwrap());
     let output = request()
         .with_advice(advice_inputs.clone())
         .execute()
@@ -527,7 +526,7 @@ fn export_deferred_witness_opens_an_unlogged_shared_graph() {
         )
         .unwrap()
         .unwrap_program();
-    let output = Execution::from_processor(processor, &program, Execute)
+    let output = ExecutionPlan::from_processor(processor, &program, Execute)
         .unwrap()
         .run_sync(&mut DefaultHost::default())
         .unwrap();
@@ -589,7 +588,7 @@ fn successive_log_deferred_calls_build_an_ordered_and_chain() {
         deferred_and_digest(deferred_and_digest(TRUE_DIGEST, second_statement), first_statement);
     assert_ne!(expected_root, reversed_root);
 
-    let execution_output = Execution::from_processor(processor, &program, Execute)
+    let execution_output = ExecutionPlan::from_processor(processor, &program, Execute)
         .unwrap()
         .run_sync(&mut DefaultHost::default())
         .unwrap();

@@ -4,7 +4,8 @@ use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, Execution, ExecutionClaim, ExecutionOptions, PackageSourceDebugContext, Witness,
+    DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionPlan, PackageSourceDebugContext,
+    RecordWitness,
     trace::{MIN_TRACE_LEN, TraceLenSummary},
 };
 use miden_vm::{Processor, internal::InputFile};
@@ -271,7 +272,7 @@ fn run_masm_program(
 }
 
 fn run_recording(
-    plan: Execution<'_, Witness>,
+    plan: ExecutionPlan<'_, RecordWitness>,
     host: &mut DefaultHost,
 ) -> Result<(ExecutionClaim, TraceLenSummary), Report> {
     let halted = plan

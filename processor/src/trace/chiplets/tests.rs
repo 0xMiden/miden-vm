@@ -25,7 +25,7 @@ use miden_core::{
 
 use super::{AEAD_STREAM_CYCLE_LEN, Chiplets};
 use crate::{
-    ContextId, DefaultHost, ExecutionOptions, ExecutionRequest, KernelDescriptor, RowIndex,
+    ContextId, DefaultHost, KernelDescriptor, Processor, RowIndex,
     operation::Operation,
     trace::{tests::build_trace_from_program_with_stack, trace_state::AeadStreamReplayEntry},
 };
@@ -250,11 +250,12 @@ fn regression_trace_build_does_not_panic_when_first_memory_access_clk_is_zero() 
         Program::with_kernel(forest.into(), entry, KernelDescriptor::default())
     };
 
-    ExecutionRequest::new(&program)
-        .with_options(ExecutionOptions::default().with_overlapped_trace_build(false))
-        .build_trace(miden_vm_stark::memory::default_budget())
+    let output = Processor::new(&program)
+        .record_witness()
         .run_sync(&mut DefaultHost::default())
         .unwrap();
+    let (vm, _) = output.witness.into_parts();
+    vm.build_trace(&miden_vm_stark::memory::default_budget()).unwrap();
 }
 
 // HELPER FUNCTIONS

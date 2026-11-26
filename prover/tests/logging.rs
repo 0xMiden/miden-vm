@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use miden_assembly::Assembler;
-use miden_processor::{DefaultHost, ExecutionOptions, ExecutionRequest, Program};
+use miden_processor::{DefaultHost, Processor, Program};
 use miden_prover::Prover;
 use tracing::{Event, Subscriber, span::Attributes};
 use tracing_subscriber::{
@@ -48,17 +48,16 @@ where
     }
 }
 
-fn capture_proving(program: &Program, overlapped: bool, filter: &str) -> Vec<Record> {
+fn capture_proving(program: &Program, filter: &str) -> Vec<Record> {
     let capture = Capture::default();
     let subscriber = Registry::default().with(EnvFilter::new(filter)).with(capture.clone());
     tracing::subscriber::with_default(subscriber, || {
         let prover = Prover::new();
-        let output = ExecutionRequest::new(program)
-            .with_options(ExecutionOptions::default().with_overlapped_trace_build(overlapped))
-            .build_trace(prover.trace_budget())
+        let output = Processor::new(program)
+            .record_witness()
             .run_sync(&mut DefaultHost::default())
             .unwrap();
-        prover.prove_full_trace(output.trace).unwrap();
+        prover.prove_full(output.witness).unwrap();
     });
     capture.0.lock().unwrap().clone()
 }
@@ -69,30 +68,15 @@ fn proving_is_quiet_at_info_and_separates_trace_building() {
         .assemble_program("logging", "begin push.1 drop end")
         .unwrap()
         .unwrap_program();
-    let pool = rayon::ThreadPoolBuilder::new().num_threads(2).build().unwrap();
+    let info = capture_proving(&program, "info");
+    assert!(info.is_empty(), "{info:?}");
 
-    for overlapped in [false, true] {
-        if overlapped && !cfg!(feature = "std") {
-            continue;
-        }
-        let info = pool.install(|| capture_proving(&program, overlapped, "info"));
-        assert!(info.is_empty(), "{info:?}");
+    let records = capture_proving(&program, "info,miden::vm=trace");
+    let execution = records.iter().find(|record| record.name == "execute_program").unwrap();
+    assert_eq!(execution.target, EXECUTE);
 
-        let records =
-            pool.install(|| capture_proving(&program, overlapped, "info,miden::vm=trace"));
-        let execution = records.iter().find(|record| record.name == "execute_program").unwrap();
-        assert_eq!(execution.target, EXECUTE);
-
-        let streamed_hasher = records.iter().find(|record| record.name == "build_streamed_hasher");
-        assert_eq!(streamed_hasher.is_some(), overlapped, "{records:?}");
-        if let Some(hasher) = streamed_hasher {
-            assert_eq!(hasher.target, TRACE);
-        }
-
-        let builds: Vec<_> =
-            records.iter().filter(|record| record.name == "build_vm_trace").collect();
-        assert_eq!(builds.len(), 1, "overlapped={overlapped}: {records:?}");
-        assert_eq!(builds[0].target, TRACE);
-        assert!(!builds[0].in_execution, "{records:?}");
-    }
+    let builds: Vec<_> = records.iter().filter(|record| record.name == "build_vm_trace").collect();
+    assert_eq!(builds.len(), 1, "{records:?}");
+    assert_eq!(builds[0].target, TRACE);
+    assert!(!builds[0].in_execution, "{records:?}");
 }

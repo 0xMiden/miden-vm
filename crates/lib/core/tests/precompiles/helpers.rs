@@ -2,7 +2,7 @@ use miden_assembly::{Assembler, Linkage};
 use miden_core::{Felt, deferred::TRUE_DIGEST, program::MIN_STACK_DEPTH};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    ContextId, DefaultHost, ExecutionError, ExecutionOutput, ExecutionRequest, StackInputs,
+    ContextId, DefaultHost, ExecutionError, ExecutionOutput, Processor, StackInputs,
 };
 
 pub use crate::helpers::assert_precompile_witness_round_trips;
@@ -45,7 +45,7 @@ pub fn run_precompile_program_with_stack(
         .with_library(&core_lib)
         .expect("failed to load CoreLibrary into the host");
 
-    let output = ExecutionRequest::new(&program)
+    let output = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .execute()
         .prepare()
@@ -107,10 +107,8 @@ pub fn expect_precompile_trap_with_stack(
     let mut host = DefaultHost::default()
         .with_library(&core_lib)
         .expect("failed to load CoreLibrary into the host");
-    let mut session = ExecutionRequest::new(&program)
-        .execute()
-        .start()
-        .expect("precompile session starts");
+    let mut session =
+        Processor::new(&program).execute().start().expect("precompile session starts");
     let error = session
         .run_until_halt_sync(&mut host)
         .expect_err("expected precompile program to trap");

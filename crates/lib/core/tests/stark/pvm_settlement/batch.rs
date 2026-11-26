@@ -16,13 +16,13 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, ExecutionRequest, Program, StackInputs, WitnessOutput, advice::AdviceInputs,
+    DefaultHost, Processor, Program, StackInputs, WitnessOutput, advice::AdviceInputs,
 };
 use miden_prover::Prover;
 use miden_verifier::Verifier;
 use miden_vm_stark::recursive::RecursiveVerifierInputs;
 
-use super::{prove_ecdsa_execution, pvm_proof_advice};
+use super::{prove_signature_execution, pvm_proof_advice};
 use crate::support::ecdsa::{generator_public_key_fixture, valid_fixture};
 
 mod checks;
@@ -34,9 +34,13 @@ fn batch_settles_deferred_obligations_with_one_pvm_proof() {
 
     // Each returned witness contains the precompile inputs needed by the PVM prover.
     let (first_proof, first_claim, first_witness) =
-        prove_ecdsa_execution(&core_lib, valid_fixture(), StackInputs::default());
-    let (second_proof, second_claim, second_witness) =
-        prove_ecdsa_execution(&core_lib, generator_public_key_fixture(), StackInputs::default());
+        prove_signature_execution(&core_lib, valid_fixture(), None, StackInputs::default());
+    let (second_proof, second_claim, second_witness) = prove_signature_execution(
+        &core_lib,
+        generator_public_key_fixture(),
+        None,
+        StackInputs::default(),
+    );
     let roots = [first_proof.vm().precompile_root, second_proof.vm().precompile_root];
     assert_ne!(roots[0], roots[1]);
 
@@ -58,7 +62,7 @@ fn batch_settles_deferred_obligations_with_one_pvm_proof() {
 
     // MASM derives the combined root from verified MVM proofs and checks the staged PVM proof.
     let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
-    let WitnessOutput { claim: batch_claim, witness, .. } = ExecutionRequest::new(&program)
+    let WitnessOutput { claim: batch_claim, witness, .. } = Processor::new(&program)
         .with_stack_inputs(stack_inputs)
         .with_advice(advice_inputs)
         .record_witness()

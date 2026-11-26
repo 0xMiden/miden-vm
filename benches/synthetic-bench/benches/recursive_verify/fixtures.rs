@@ -18,11 +18,10 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_precompiles_stark::recursive::PvmRecursiveVerifierInputs;
-use miden_processor::ExecutionRequest;
+use miden_processor::{Processor, WitnessOutput};
 use miden_verifier::Verifier;
 use miden_vm::{
-    Assembler, ExecutionProof, PrecompileWitness, Processor, ProgramInfo, Prover, ProvingOutput,
-    StackInputs, StackOutputs,
+    Assembler, ExecutionProof, PrecompileWitness, ProgramInfo, Prover, StackInputs, StackOutputs,
 };
 use miden_vm_precompiles_bench::{PrecompileFixture, PrecompileWorkload};
 use miden_vm_stark::recursive::RecursiveVerifierInputs;
@@ -296,16 +295,16 @@ fn hex_prefix(bytes: &[u8]) -> String {
 
 fn print_tx_fixture_shape(program: &miden_vm::Program, stack_inputs: StackInputs, scenario: &str) {
     let mut host = recursive_host();
-    let witness = ExecutionRequest::new(program)
+    let witness = Processor::new(program)
         .with_stack_inputs(stack_inputs)
         .record_witness()
         .run_sync(&mut host)
         .expect("execute transaction fixture")
         .witness;
-    let trace = witness
-        .build_trace(miden_vm_stark::memory::default_budget())
-        .expect("build transaction fixture trace")
-        .into_vm_trace();
+    let (vm_witness, _) = witness.into_parts();
+    let trace = vm_witness
+        .build_trace(&miden_vm_stark::memory::default_budget())
+        .expect("build transaction fixture trace");
     let summary = trace.trace_len_summary();
     let record = format!("BENCH_TX_SHAPE scenario={scenario}");
     let shape = trace_shape_summary_for(summary);
@@ -354,14 +353,17 @@ pub(super) fn load_tx_fixtures(
                 (stack_outputs, proof, "hit")
             } else {
                 let mut host = recursive_host();
-                let ProvingOutput { claim, proof, .. } = Processor::new(&program)
+                let WitnessOutput { claim, witness, .. } = Processor::new(&program)
                     .with_stack_inputs(stack_inputs)
                     .with_advice(advice_inputs)
-                    .prove_complete(&Prover::new().with_hash_fn(INNER_PROOF_HASH))
+                    .record_witness()
                     .run_sync(&mut host)
+                    .expect("record transaction fixture witness");
+                let proof = Prover::new()
+                    .with_hash_fn(INNER_PROOF_HASH)
+                    .prove_full(witness)
                     .expect("prove transaction fixture");
                 let stack_outputs = *claim.stack_outputs();
-                let proof = proof.into_inner();
                 assert!(
                     matches!(proof.precompile(), PrecompileStatus::Empty),
                     "recursive_verify fixture at proof index {proof_index} emits deferred proof data; \
@@ -380,7 +382,7 @@ pub(super) fn load_tx_fixtures(
                     &stack_outputs,
                     &proof,
                 );
-                (stack_outputs, proof, "miss")
+                (stack_outputs, proof.into(), "miss")
             };
             let proof_bytes = proof.to_bytes();
             let proof_bytes_len = proof_bytes.len();

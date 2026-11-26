@@ -17,7 +17,7 @@ use miden_assembly::{
 };
 use miden_mast_package::Package;
 use miden_processor::{
-    DefaultHost, ExecutionRequest,
+    DefaultHost, Processor,
     serde::{Deserializable, Serializable},
 };
 use miden_wasm_event_handlers::{WasmHandlerLimits, host_library_from_package};
@@ -71,7 +71,7 @@ fn a_project_build_ships_a_working_wasm_handler() {
     let mut host = DefaultHost::default();
     host.load_library(library).expect("the handlers register");
 
-    ExecutionRequest::new(&decoded.unwrap_program())
+    Processor::new(&decoded.unwrap_program())
         .execute()
         .run_sync(&mut host)
         .expect("the handler's advice satisfies the in-VM check");

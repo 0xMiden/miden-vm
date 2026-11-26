@@ -1,6 +1,6 @@
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{ExecutionRequest, advice::AdviceInputs};
+use miden_processor::{Processor, advice::AdviceInputs};
 use miden_vm::{Assembler, DefaultHost, StackInputs, internal::InputFile};
 use tokio::runtime::Runtime;
 use walkdir::WalkDir;
@@ -60,7 +60,7 @@ fn program_execution_fast(c: &mut Criterion) {
                                 .with_library(&CoreLibrary::default())
                                 .unwrap();
 
-                            let execution = ExecutionRequest::new(&program)
+                            let execution = Processor::new(&program)
                                 .with_stack_inputs(stack_inputs)
                                 .with_advice(advice_inputs.clone())
                                 .execute()

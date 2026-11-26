@@ -11,7 +11,7 @@ use miden_core::{
     program::{Program, StackOutputs},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_processor::{DefaultHost, ExecutionRequest, StackInputs, TraceOutput};
+use miden_processor::{DefaultHost, Processor, StackInputs, WitnessOutput};
 
 use crate::repro_harness::{ReproTrace, core_row_mut};
 
@@ -42,14 +42,12 @@ fn build_loop_program(body_ops: Vec<Operation>) -> Program {
 fn execute(program: &Program, stack: &[u64]) -> miden_processor::trace::VmTrace {
     let stack = stack.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
     let mut host = DefaultHost::default();
-    let TraceOutput { trace: execution_trace, .. } = ExecutionRequest::new(program)
+    let WitnessOutput { witness, .. } = Processor::new(program)
         .with_stack_inputs(StackInputs::new(&stack).unwrap())
-        .build_trace(miden_vm_stark::memory::default_budget())
+        .record_witness()
         .run_sync(&mut host)
         .unwrap();
-    let (trace, precompile_witness) = execution_trace.into_parts();
-    assert!(precompile_witness.is_none());
-    trace
+    crate::repro_harness::materialize_vm_trace(witness)
 }
 
 fn core_row(matrix: &RowMajorMatrix<Felt>, row: usize) -> &CoreCols<Felt> {

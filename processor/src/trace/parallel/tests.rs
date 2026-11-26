@@ -24,8 +24,7 @@ use rstest::{fixture, rstest};
 
 use super::*;
 use crate::{
-    DefaultHost, ExecutionOptions, ExecutionRequest, HostLibrary,
-    trace::trace_state::MemoryReadsReplay,
+    DefaultHost, ExecutionOptions, HostLibrary, Processor, trace::trace_state::MemoryReadsReplay,
 };
 
 const DEFAULT_STACK: &[Felt] =
@@ -332,7 +331,7 @@ fn test_trace_generation_at_fragment_boundaries(
         let vm_witness = record_vm_witness(&program, stack_inputs, MAX_FRAGMENT_SIZE, &mut host);
         assert!(vm_witness.trace_replay().core_trace_contexts.len() == 1);
 
-        build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap()
+        vm_witness.build_trace(&miden_vm_stark::memory::default_budget()).unwrap()
     };
 
     // Ensure that the trace generated from multiple fragments is identical to the one generated
@@ -509,8 +508,8 @@ fn test_nested_loop_end_flags_stable_across_fragmentation() {
 }
 
 #[test]
-fn test_partial_last_fragment_exists_for_h0_inversion_path() {
-    // Keep this > 1 and non-dividing for join_program() to guarantee a short final fragment.
+fn test_h0_inversion_with_partial_last_fragment() {
+    // A short final fragment exercises the uninitialized-tail regression under Miri.
     const FRAGMENT_SIZE: usize = 11;
 
     let program = join_program();
@@ -524,31 +523,14 @@ fn test_partial_last_fragment_exists_for_h0_inversion_path() {
         "repro precondition requires multiple fragments"
     );
 
-    let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget()).unwrap();
-    let total_rows_without_halt = trace.main_trace().core_height() - 1;
+    let trace = vm_witness.build_trace(&miden_vm_stark::memory::default_budget()).unwrap();
+    let total_rows_without_halt = trace.trace_len_summary().core_rows() - 1;
 
     assert_ne!(
         total_rows_without_halt % FRAGMENT_SIZE,
         0,
         "repro precondition requires a short final fragment"
     );
-}
-
-#[cfg(miri)]
-#[test]
-fn miri_repro_uninitialized_tail_read_during_h0_inversion() {
-    // This reproducer intentionally constructs a short final fragment. Before the fix in
-    // generate_core_trace_columns(), miri should flag an uninitialized read in the inversion pass.
-    const FRAGMENT_SIZE: usize = 11;
-
-    let program = join_program();
-    let mut host = DefaultHost::default();
-    host.load_library(create_simple_library()).unwrap();
-    let vm_witness = record_vm_witness(&program, DEFAULT_STACK, FRAGMENT_SIZE, &mut host);
-
-    assert!(vm_witness.trace_replay().core_trace_contexts.len() > 1);
-
-    let _ = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
 }
 
 /// Creates a library with a single procedure containing just a SWAP operation.
@@ -911,7 +893,7 @@ fn test_build_trace_returns_err_on_empty_memory_reads_replay() {
         ctx.replay.memory_reads = MemoryReadsReplay::default();
     }
 
-    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
+    let result = vm_witness.build_trace(&miden_vm_stark::memory::default_budget());
     assert!(
         result.is_err(),
         "build_trace should return Err when hasher replay has bad node ID"
@@ -935,15 +917,13 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
     // is well past any node actually in the sparse forest.
     let bogus_node_id = MastNodeId::new_unchecked(u32::MAX);
     let forest_id = MastForestId::from(0u32);
-    vm_witness.trace_replay_mut().hasher_for_chiplet.record_raw(
-        crate::trace::trace_state::HasherOp::HashBasicBlock((
-            forest_id,
-            bogus_node_id,
-            [ZERO; 4].into(),
-        )),
+    vm_witness.trace_replay_mut().hasher_for_chiplet.record_hash_basic_block(
+        forest_id,
+        bogus_node_id,
+        [ZERO; 4].into(),
     );
 
-    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
+    let result = vm_witness.build_trace(&miden_vm_stark::memory::default_budget());
     assert!(
         result.is_err(),
         "build_trace should return Err when hasher replay has bad node ID"
@@ -1023,7 +1003,7 @@ fn test_build_trace_returns_err_on_invalid_mast_forest_id(
         },
     }
 
-    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
+    let result = vm_witness.build_trace(&miden_vm_stark::memory::default_budget());
     assert!(
         result.is_err(),
         "build_trace should return Err when a fragment carries a MastForestId out of range of \
@@ -1098,7 +1078,8 @@ fn test_build_trace_corner_cases(
 
     // Measure the actual padded per-AIR heights under the default (generous) budget, then derive
     // the exact modelled peak for those heights.
-    let measured = build_trace(build_witness(), &miden_vm_stark::memory::default_budget())
+    let measured = build_witness()
+        .build_trace(&miden_vm_stark::memory::default_budget())
         .expect("default budget must succeed");
     let summary = measured.trace_len_summary();
     let exact_peak = miden_vm_stark::memory::default_budget()
@@ -1106,7 +1087,7 @@ fn test_build_trace_corner_cases(
         .expect("modelled peak fits in u64");
     let budget = exact_peak.checked_add_signed(budget_offset_from_exact_peak).unwrap();
 
-    let result = build_trace(build_witness(), &miden_vm_stark::memory::canonical_budget(budget));
+    let result = build_witness().build_trace(&miden_vm_stark::memory::canonical_budget(budget));
 
     assert_eq!(
         result.is_ok(),
@@ -1151,7 +1132,8 @@ fn test_build_trace_accepts_small_program_at_default_fragment_size() {
 
     // Measure the exact modelled peak for the program's real (small) padded heights under the
     // default (generous) budget.
-    let measured = build_trace(build_witness(), &miden_vm_stark::memory::default_budget())
+    let measured = build_witness()
+        .build_trace(&miden_vm_stark::memory::default_budget())
         .expect("default budget must succeed");
     let summary = measured.trace_len_summary();
     let exact_peak = miden_vm_stark::memory::default_budget()
@@ -1164,7 +1146,7 @@ fn test_build_trace_accepts_small_program_at_default_fragment_size() {
     // at its own (unblown-up) per-row cost instead.
     let budget = exact_peak * 3;
 
-    let result = build_trace(build_witness(), &miden_vm_stark::memory::canonical_budget(budget));
+    let result = build_witness().build_trace(&miden_vm_stark::memory::canonical_budget(budget));
     assert!(
         result.is_ok(),
         "expected build_trace to succeed at budget={budget} (exact peak={exact_peak}) \
@@ -1186,7 +1168,7 @@ fn test_build_trace_returns_err_on_fragment_size_overflow() {
     // Set fragment_size to usize::MAX so that `len() * fragment_size` overflows.
     vm_witness.trace_replay_mut().fragment_size = usize::MAX;
 
-    let result = build_trace(vm_witness, &miden_vm_stark::memory::canonical_budget(u64::MAX));
+    let result = vm_witness.build_trace(&miden_vm_stark::memory::canonical_budget(u64::MAX));
 
     assert!(
         matches!(result, Err(ExecutionError::TraceLenExceeded(_))),
@@ -1203,10 +1185,6 @@ fn test_build_trace_returns_err_when_eidos_compression_trace_exceeds_budget() {
     let program = dyn_program();
     let stack_inputs = dyn_target_proc_hash();
 
-    fn build_witness(program: &Program, stack_inputs: &[Felt]) -> VmWitness {
-        record_vm_witness(program, stack_inputs, MIN_TRACE_LEN, &mut DefaultHost::default())
-    }
-
     // Inject enough unique compression requests that the padded Eidos compression trace is strictly
     // taller than the fixed And8 table as well as the core and chiplets traces. Unique states
     // prevent replay deduplication from weakening the test.
@@ -1220,9 +1198,11 @@ fn test_build_trace_returns_err_when_eidos_compression_trace_exceeds_budget() {
     }
 
     // Measure the actual padded per-AIR heights under the default (generous) budget.
-    let mut measuring_witness = build_witness(&program, stack_inputs);
+    let mut measuring_witness =
+        record_vm_witness(&program, stack_inputs, MIN_TRACE_LEN, &mut DefaultHost::default());
     inject_extra_compressions(&mut measuring_witness);
-    let measured = build_trace(measuring_witness, &miden_vm_stark::memory::default_budget())
+    let measured = measuring_witness
+        .build_trace(&miden_vm_stark::memory::default_budget())
         .expect("default budget must succeed");
     let summary = measured.trace_len_summary();
     let heights = *summary.padded_heights();
@@ -1237,9 +1217,10 @@ fn test_build_trace_returns_err_when_eidos_compression_trace_exceeds_budget() {
         .prover_peak_bytes(summary.padded_heights())
         .expect("modelled peak fits in u64");
 
-    let mut vm_witness = build_witness(&program, stack_inputs);
+    let mut vm_witness =
+        record_vm_witness(&program, stack_inputs, MIN_TRACE_LEN, &mut DefaultHost::default());
     inject_extra_compressions(&mut vm_witness);
-    let result = build_trace(vm_witness, &miden_vm_stark::memory::canonical_budget(exact_peak - 1));
+    let result = vm_witness.build_trace(&miden_vm_stark::memory::canonical_budget(exact_peak - 1));
 
     assert!(
         matches!(result, Err(ExecutionError::ProverMemoryExceeded { .. })),
@@ -1276,20 +1257,20 @@ fn test_build_trace_returns_err_on_inconsistent_continuation(
     stack.push_continuation(continuation);
     ctx.continuation = stack;
 
-    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
+    let result = vm_witness.build_trace(&miden_vm_stark::memory::default_budget());
     assert!(
         matches!(result, Err(ExecutionError::Internal(_))),
         "expected ExecutionError::Internal, got: {result:?}"
     );
 }
 
-fn replayed_merkle_path_op(update: bool, depth: usize, index: u64) -> ResolvedHasherOp<'static> {
+fn replayed_merkle_path_op(update: bool, depth: usize, index: u64) -> HasherOp {
     let path = MerklePath::new(alloc::vec![Word::default(); depth]);
     let index = Felt::new_unchecked(index);
     if update {
-        ResolvedHasherOp::UpdateMerkleRoot((Word::default(), Word::default(), path, index))
+        HasherOp::UpdateMerkleRoot((Word::default(), Word::default(), path, index))
     } else {
-        ResolvedHasherOp::BuildMerkleRoot((Word::default(), path, index))
+        HasherOp::BuildMerkleRoot((Word::default(), path, index))
     }
 }
 
@@ -1307,7 +1288,7 @@ fn test_build_hasher_chiplet_rejects_invalid_replayed_merkle_path(
     #[case] index: u64,
 ) {
     let op = replayed_merkle_path_op(update, depth, index);
-    let err = build_hasher_chiplet([Ok(op)], usize::MAX, usize::MAX).err();
+    let err = build_hasher_chiplet([op], &[], usize::MAX, usize::MAX).err();
     assert!(
         matches!(err, Some(ExecutionError::Internal(_))),
         "expected ExecutionError::Internal, got: {err:?}"
@@ -1320,7 +1301,7 @@ fn test_build_hasher_chiplet_rejects_invalid_replayed_merkle_path(
 #[case::update_root(true)]
 fn test_build_hasher_chiplet_accepts_replayed_merkle_path_at_max_index(#[case] update: bool) {
     let op = replayed_merkle_path_op(update, 3, 7);
-    assert!(build_hasher_chiplet([Ok(op)], usize::MAX, usize::MAX).is_ok());
+    assert!(build_hasher_chiplet([op], &[], usize::MAX, usize::MAX).is_ok());
 }
 
 /// Verifies that `build_trace` returns `ExecutionError::Internal` when `core_trace_contexts` is
@@ -1337,7 +1318,7 @@ fn test_build_trace_returns_err_on_empty_core_trace_contexts() {
     // Clear core_trace_contexts to simulate an empty trace.
     vm_witness.trace_replay_mut().core_trace_contexts.clear();
 
-    let result = build_trace(vm_witness, &miden_vm_stark::memory::default_budget());
+    let result = vm_witness.build_trace(&miden_vm_stark::memory::default_budget());
 
     assert!(
         matches!(result, Err(ExecutionError::Internal(_))),
@@ -1359,20 +1340,11 @@ fn build_trace_for_program(
     stack_inputs: &[Felt],
     fragment_size: usize,
 ) -> VmTrace {
-    let options = ExecutionOptions::default()
-        .with_core_trace_fragment_size(fragment_size)
-        .unwrap()
-        .with_overlapped_trace_build(false);
     let mut host = DefaultHost::default();
     host.load_library(create_simple_library()).unwrap();
-    ExecutionRequest::new(program)
-        .with_stack_inputs(StackInputs::new(stack_inputs).unwrap())
-        .with_options(options)
-        .build_trace(miden_vm_stark::memory::default_budget())
-        .run_sync(&mut host)
+    record_vm_witness(program, stack_inputs, fragment_size, &mut host)
+        .build_trace(&miden_vm_stark::memory::default_budget())
         .unwrap()
-        .trace
-        .into_vm_trace()
 }
 
 fn record_vm_witness(
@@ -1384,7 +1356,7 @@ fn record_vm_witness(
     let options = ExecutionOptions::default()
         .with_core_trace_fragment_size(fragment_size)
         .unwrap();
-    let output = ExecutionRequest::new(program)
+    let output = Processor::new(program)
         .with_stack_inputs(StackInputs::new(stack_inputs).unwrap())
         .with_options(options)
         .record_witness()

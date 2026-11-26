@@ -115,7 +115,7 @@ impl<'a, P, H: BaseHost, S, T, F> ExecutionState<'a, P, H, S, T, F> {
 /// # Tracing
 ///
 /// Different processor implementations will need to record different pieces of information as the
-/// the program is executed. For example, the [`crate::ExecutionRequest::record_witness`]
+/// the program is executed. For example, the [`crate::Processor::record_witness`]
 /// execution mode needs to build a private trace replay which records information necessary to
 /// build the trace at each clock cycle, while the
 /// [`crate::parallel::core_trace_fragment::CoreTraceFragmentFiller`] needs to build the trace
