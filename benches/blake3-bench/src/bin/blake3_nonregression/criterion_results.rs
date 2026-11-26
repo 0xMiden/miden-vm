@@ -145,7 +145,8 @@ pub(crate) fn selected_criterion_axes(bench_axes: &str) -> Option<BTreeSet<Strin
 
 fn report_span_metric_name(name: &str) -> Option<String> {
     match name {
-        "execute_for_proving_with_package_debug_info_sync"
+        "record_witness_sync"
+        | "execute_for_proving_with_package_debug_info_sync"
         | "execute_for_proving_with_package_debug_info_at_source_node_sync" => {
             Some(EXECUTE_FOR_PROVING_METRIC.to_string())
         },

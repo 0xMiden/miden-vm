@@ -18,6 +18,12 @@ use miden_processor::trace::VmTrace;
 use miden_verifier::{VerificationError, VerificationOutcome, Verifier};
 use miden_vm_stark::prover::prove;
 
+pub(crate) fn materialize_vm_trace(witness: miden_processor::ExecutionWitness) -> VmTrace {
+    let (vm, precompile) = witness.into_parts();
+    assert!(precompile.is_none());
+    vm.build_trace(&miden_vm_stark::memory::default_budget()).unwrap()
+}
+
 /// Returns a mutable view of one core trace row.
 pub(crate) fn core_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut CoreCols<Felt> {
     let width = matrix.width();

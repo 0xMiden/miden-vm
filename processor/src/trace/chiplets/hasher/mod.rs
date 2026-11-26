@@ -76,14 +76,11 @@ fn key_to_state(key: &StateKey) -> HasherState {
 /// The controller records one row per compression request. Hash rows carry
 /// `block[8] || cv_in[4]` in the state columns and `cv_out[4]` in row data; Merkle rows carry
 /// `block[8] || cv_out[4]` plus their path-index data. The standalone Eidos compression
-/// AIR executes one block per unique input state, with multiplicity tracked by the
+/// AIR executes one block per distinct compression request, with multiplicity tracked by the
 /// compression-link bus.
 #[derive(Debug, Default)]
 pub(crate) struct Hasher {
     trace: HasherTrace,
-    // Both maps are keyed by program-chosen values under a fast, non-HashDoS-hardened
-    // hasher (foldhash); a crafted program can degrade lookups, but trace growth is
-    // bounded by `max_trace_len`, which caps the damage.
     /// Maps block digest -> (op_start, op_end) for memoized controller traces.
     memoized_trace_map: BTreeMap<DigestKey, (usize, usize)>,
     /// Maps (input state, output shape) -> multiplicity for compression deduplication.
@@ -91,25 +88,15 @@ pub(crate) struct Hasher {
     compression_request_map: BTreeMap<CompressionRequestKey, u64>,
     /// Monotonically increasing counter for MRUPDATE domain separation.
     mrupdate_id: Felt,
-    /// Whether the controller trace has been finalized.
-    finalized: bool,
 }
 
 impl Hasher {
     // STATE ACCESSORS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns the controller trace length.
-    ///
-    /// Before finalization, this returns an estimate based on the controller region length.
-    /// The estimate is verified against the actual length during `fill_trace()` via a
-    /// debug assertion.
+    /// Returns the controller row count including the alignment padding added by `fill_trace()`.
     pub(crate) fn trace_len(&self) -> usize {
-        if self.finalized {
-            self.trace.trace_len()
-        } else {
-            self.estimate_trace_len()
-        }
+        self.trace.trace_len().next_multiple_of(CONTROLLER_TRACE_ALIGNMENT)
     }
 
     /// Returns the unpadded Eidos compression AIR trace length.
@@ -117,11 +104,7 @@ impl Hasher {
     /// Wrapped lookup accumulation lets real compression blocks occupy the full logical trace.
     /// Power-of-two padding may still add zero-multiplicity dummy blocks later.
     pub(crate) fn eidos_compression_trace_len(&self) -> usize {
-        if self.finalized {
-            0
-        } else {
-            self.compression_request_map.len() * EIDOS_COMPRESSION_CYCLE_LEN
-        }
+        self.compression_request_map.len() * EIDOS_COMPRESSION_CYCLE_LEN
     }
 
     /// Adds range-check requests emitted by the standalone Eidos compression AIR.
@@ -131,7 +114,6 @@ impl Hasher {
         range: &mut RangeChecker,
     ) {
         debug_assert_eq!(eidos_compression_height % EIDOS_COMPRESSION_CYCLE_LEN, 0);
-        debug_assert!(!self.finalized, "range checks must be collected before finalization");
 
         let block_count = eidos_compression_height / EIDOS_COMPRESSION_CYCLE_LEN;
         debug_assert!(
@@ -147,14 +129,6 @@ impl Hasher {
             block_count - self.compression_request_map.len(),
             range,
         );
-    }
-
-    /// Estimates the controller trace length before finalization.
-    ///
-    /// This must match the actual length produced by `finalize_trace()`. The invariant is
-    /// verified by a debug assertion in `fill_trace()`.
-    fn estimate_trace_len(&self) -> usize {
-        self.trace.trace_len().next_multiple_of(CONTROLLER_TRACE_ALIGNMENT)
     }
 
     // HASHING METHODS
@@ -288,40 +262,19 @@ impl Hasher {
     // TRACE GENERATION
     // --------------------------------------------------------------------------------------------
 
-    /// Finalizes and fills the controller and Eidos compression traces.
+    /// Pads and fills the controller trace and writes one Eidos block per compression request key.
     ///
-    /// Finalization pads the controller region and materializes one Eidos compression block
-    /// per unique input state. Trace-height padding may append zero-multiplicity dummy blocks.
+    /// Eidos trace-height padding may append zero-multiplicity dummy blocks.
     pub(super) fn fill_trace(
         mut self,
         trace: &mut ChipletTraceFragment,
         eidos_compression_trace: &mut [Felt],
     ) -> Vec<u64> {
-        if !self.finalized {
-            let estimated_len = self.estimate_trace_len();
-            self.finalize_trace();
-            debug_assert_eq!(
-                estimated_len,
-                self.trace.trace_len(),
-                "hasher trace length estimate ({}) diverged from actual ({})",
-                estimated_len,
-                self.trace.trace_len(),
-            );
-        }
-        let compression_requests = core::mem::take(&mut self.compression_request_map);
-        self.trace.fill_trace(trace);
-        fill_eidos_compression_trace(compression_requests, eidos_compression_trace)
-    }
-
-    /// Finalizes the controller trace by padding it to the chiplet alignment boundary.
-    fn finalize_trace(&mut self) {
-        if self.finalized {
-            return;
-        }
-
+        let padded_len = self.trace_len();
         self.trace.pad_to_controller_boundary(self.mrupdate_id);
-
-        self.finalized = true;
+        debug_assert_eq!(self.trace.trace_len(), padded_len, "inconsistent controller padding");
+        self.trace.fill_trace(trace);
+        fill_eidos_compression_trace(self.compression_request_map, eidos_compression_trace)
     }
 
     // CORE HELPER: CONTROLLER COMPRESSION

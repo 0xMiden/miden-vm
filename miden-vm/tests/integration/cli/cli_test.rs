@@ -154,6 +154,81 @@ fn prove_rejects_missing_inferred_inputs_file() {
         .stderr(predicate::str::contains("No such file or directory"));
 }
 
+#[test]
+fn run_and_prove_report_execution_source_location() {
+    let working_dir = TempDir::new().unwrap();
+    let program_path = working_dir.path().join("failing-assertion.masm");
+    fs::write(&program_path, "begin\n    push.0\n    assert.err=\"diagnostic fixture\"\nend\n")
+        .unwrap();
+    fs::write(program_path.with_extension("inputs"), r#"{"operand_stack":[]}"#).unwrap();
+
+    for command in ["run", "prove"] {
+        let mut cmd = bin_under_test(working_dir.path());
+        cmd.arg(command).arg(&program_path);
+        cmd.assert()
+            .failure()
+            .stderr(predicate::str::contains("Failed to execute program"))
+            .stderr(predicate::str::contains(
+                "assertion failed with error message: diagnostic fixture",
+            ))
+            .stderr(predicate::str::contains("failing-assertion.masm"))
+            .stderr(predicate::str::contains("assert.err="));
+    }
+}
+
+#[test]
+fn run_rejects_definitely_insufficient_prover_memory() {
+    let working_dir = TempDir::new().unwrap();
+    let program_path = working_dir.path().join("program.masm");
+    fs::write(&program_path, "begin push.1 drop end").unwrap();
+    fs::write(program_path.with_extension("inputs"), r#"{"operand_stack":[]}"#).unwrap();
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("run").arg(&program_path).args(["--max-prover-memory", "0"]);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("more than the 0 byte prover memory limit"));
+}
+
+#[test]
+fn run_warns_when_only_the_eidos_upper_bound_exceeds_the_budget() {
+    // Every iteration hashes the same input. The materialized AIR fits exactly at this limit.
+    let source =
+        "begin repeat.16 padw padw padw compress dropw dropw dropw end push.7 swap drop end";
+    let program = Assembler::default()
+        .assemble_program("program", source)
+        .unwrap()
+        .unwrap_program();
+    let output = miden_processor::Processor::new(&program)
+        .record_witness()
+        .run_sync(&mut miden_processor::DefaultHost::default())
+        .unwrap();
+    let budget = miden_vm_stark::memory::default_budget();
+    let (vm, _) = output.witness.into_parts();
+    let trace = vm.build_trace(&budget).unwrap();
+    let exact_peak = budget.prover_peak_bytes(&trace.trace_len_summary().padded_heights()).unwrap();
+
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("program.masm"), source).unwrap();
+    fs::write(dir.path().join("program.inputs"), r#"{"operand_stack":[]}"#).unwrap();
+    let mut cmd = bin_under_test(dir.path());
+    cmd.args([
+        "run",
+        "program.masm",
+        "--max-prover-memory",
+        &exact_peak.to_string(),
+        "-o",
+        "result.json",
+    ]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Eidos compression rows: at most"))
+        .stderr(predicate::str::contains("VM prover memory upper bound exceeds"));
+    let result: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("result.json")).unwrap()).unwrap();
+    assert_eq!(result["stack"][0], "7");
+}
+
 /// Builds a working directory holding a program and its inputs, and a `prove` command that runs
 /// inside it against that program. Each test then adds only the paths it is about.
 fn prove_command() -> (TempDir, Command) {

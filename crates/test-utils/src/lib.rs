@@ -34,16 +34,12 @@ pub use miden_core::{
 };
 use miden_core::{chiplets::hasher::compress_state, events::EventName};
 use miden_mast_package::{Package, debug_info::PackageDebugInfo};
-#[cfg(not(target_family = "wasm"))]
-use miden_processor::trace::build_trace;
 pub use miden_processor::{
     ContextId, ExecutionError, ProcessorState,
     advice::{AdviceInputs, AdviceProvider, AdviceStack},
 };
 #[cfg(not(target_family = "wasm"))]
-use miden_processor::{
-    DefaultHost, ExecutionOptions, ExecutionOutput, ExecutionWitness, FastProcessor,
-};
+use miden_processor::{DefaultHost, ExecutionOptions, ExecutionOutput, Processor, WitnessOutput};
 use miden_processor::{
     Program,
     event::{EventHandler, TraceHandler},
@@ -87,17 +83,6 @@ pub(crate) fn module_source(path: impl AsRef<Path>, source: impl ToString) -> St
         let namespace = path.strip_prefix("::").unwrap_or(&path);
         format!("namespace {namespace}\n\n{source}")
     }
-}
-
-#[cfg(not(target_family = "wasm"))]
-/// Constructs a processor with the default VM environment.
-fn new_vm_default_processor(
-    stack_inputs: StackInputs,
-    advice_inputs: AdviceInputs,
-    options: ExecutionOptions,
-) -> Result<FastProcessor, ExecutionError> {
-    FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
-        .map_err(ExecutionError::advice_error_no_context)
 }
 
 // CONSTANTS
@@ -420,13 +405,12 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         // execute the test
-        let processor = new_vm_default_processor(
-            self.stack_inputs,
-            self.advice_inputs.clone(),
-            ExecutionOptions::default(),
-        )
-        .expect("test processor should initialize with default precompiles");
-        let execution_output = processor.execute_sync(&program, &mut host).unwrap();
+        let execution_output = Processor::new(&program)
+            .with_stack_inputs(self.stack_inputs)
+            .with_advice(self.advice_inputs.clone())
+            .execute()
+            .run_sync(&mut host)
+            .unwrap();
 
         // validate the memory state
         for (addr, mem_value) in ((mem_start_addr as usize)
@@ -469,20 +453,20 @@ impl Test {
 
     /// Executes the test with the provided stack inputs and asserts the final stack state.
     ///
-    /// This preserves the same execution coverage as [`expect_stack`](Self::expect_stack): traced
-    /// execution, step/resume execution comparison, and trace construction are all still run.
+    /// As in [`Self::expect_stack`], witness recording and step/resume execution must agree.
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
     pub fn expect_stack_with_inputs(&self, stack_inputs: &[u64], final_stack: &[u64]) {
-        let trace = self
-            .execute_with_stack_inputs(stack_inputs)
+        let inputs = stack_inputs_from_ints(stack_inputs.iter().copied());
+        let output = self
+            .record_with_stack_inputs(inputs)
             .inspect_err(|_err| {
                 #[cfg(feature = "std")]
                 std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
             })
             .expect("failed to execute");
 
-        let result = stack_outputs_as_int_vec(&trace.last_stack_state());
+        let result = stack_outputs_as_int_vec(output.claim.stack_outputs());
         let expected = resize_to_min_stack_depth(final_stack);
         assert_eq!(expected, result, "Expected stack to be {:?}, found {:?}", expected, result);
     }
@@ -563,37 +547,30 @@ impl Test {
         Ok(result)
     }
 
-    /// Compiles the test's source to a Program and executes it with the tests inputs. Returns a
-    /// resulting execution trace or error.
-    ///
-    /// Internally, this also checks that traced execution and step/resume execution agree on the
-    /// stack outputs.
+    /// Records the execution and compares its stack outputs with step/resume execution.
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
-    pub fn execute(&self) -> Result<VmTrace, ExecutionError> {
-        self.execute_with_stack_inputs_inner(self.stack_inputs)
+    pub fn execute(&self) -> Result<ExecutionClaim, ExecutionError> {
+        Ok(self.record_with_stack_inputs(self.stack_inputs)?.claim)
     }
 
-    /// Compiles the test's source and executes it with the provided stack inputs.
-    ///
-    /// This uses the same traced execution, step/resume comparison, and trace construction path as
-    /// [`execute`](Self::execute).
+    /// Builds a VM trace for AIR checks and assertions on trace rows.
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
-    pub(crate) fn execute_with_stack_inputs(
-        &self,
-        stack_inputs: &[u64],
-    ) -> Result<VmTrace, ExecutionError> {
-        let stack_inputs = stack_inputs_from_ints(stack_inputs.iter().copied());
-        self.execute_with_stack_inputs_inner(stack_inputs)
+    pub fn build_trace(&self) -> Result<VmTrace, ExecutionError> {
+        let output = self.record_with_stack_inputs(self.stack_inputs)?;
+        let (vm, _) = output.witness.into_parts();
+        let trace = vm.build_trace(&miden_vm_stark::memory::default_budget())?;
+        assert_eq!(output.claim.program_root(), *trace.program_hash(), "inconsistent program hash");
+        Ok(trace)
     }
 
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
-    fn execute_with_stack_inputs_inner(
+    fn record_with_stack_inputs(
         &self,
         stack_inputs: StackInputs,
-    ) -> Result<VmTrace, ExecutionError> {
+    ) -> Result<WitnessOutput, ExecutionError> {
         // Note: we fix a large fragment size here, as we're not testing the fragment boundaries
         // with these tests (which are tested separately), but rather only the per-fragment trace
         // generation logic - though not too big so as to over-allocate memory.
@@ -603,33 +580,25 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
 
-        let fast_stack_result = {
-            let fast_processor = new_vm_default_processor(
-                stack_inputs,
-                self.advice_inputs.clone(),
-                ExecutionOptions::default()
-                    .with_core_trace_fragment_size(FRAGMENT_SIZE)
-                    .unwrap(),
-            )?;
-            if let Some(debug_info) = debug_info.as_ref() {
-                fast_processor.execute_for_proving_with_package_debug_info_sync(
-                    &program, debug_info, &mut host,
-                )
-            } else {
-                fast_processor.execute_for_proving_sync(&program, &mut host)
-            }
-        };
-
-        // Compare traced full execution and step/resume execution stack outputs.
-        self.assert_result_with_step_execution(stack_inputs, &fast_stack_result);
-
-        fast_stack_result.and_then(|witness| {
-            let (vm_witness, _) = witness.into_parts();
-            let trace = build_trace(vm_witness, &miden_vm_stark::memory::default_budget())?;
-
-            assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
-            Ok(trace)
-        })
+        // Return advice initialization errors before replaying the program for comparison.
+        let options = ExecutionOptions::default()
+            .with_core_trace_fragment_size(FRAGMENT_SIZE)
+            .unwrap();
+        let execution = Processor::new(&program)
+            .with_stack_inputs(stack_inputs)
+            .with_advice(self.advice_inputs.clone())
+            .with_options(options)
+            .with_source_context(debug_info.as_ref().map(|debug_info| {
+                miden_processor::PackageSourceDebugContext::new_optional(debug_info, None)
+            }))
+            .record_witness()
+            .prepare()?;
+        let recorded = execution.run_sync(&mut host);
+        self.assert_result_with_step_execution(
+            stack_inputs,
+            recorded.as_ref().map(|output| *output.claim.stack_outputs()),
+        );
+        recorded
     }
 
     /// Compiles the test's source to a Program and executes it with the tests inputs.
@@ -641,19 +610,15 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
 
-        let processor = new_vm_default_processor(
-            self.stack_inputs,
-            self.advice_inputs.clone(),
-            ExecutionOptions::default(),
-        )?;
-
-        if let Some(debug_info) = debug_info.as_ref() {
-            processor
-                .execute_with_package_debug_info_sync(&program, debug_info, &mut host)
-                .map(|output| (output, host))
-        } else {
-            processor.execute_sync(&program, &mut host).map(|output| (output, host))
-        }
+        Processor::new(&program)
+            .with_stack_inputs(self.stack_inputs)
+            .with_advice(self.advice_inputs.clone())
+            .with_source_context(debug_info.as_ref().map(|debug_info| {
+                miden_processor::PackageSourceDebugContext::new_optional(debug_info, None)
+            }))
+            .execute()
+            .run_sync(&mut host)
+            .map(|output| (output, host))
     }
 
     /// Compiles the test's code into a program, then generates and verifies a STARK proof of
@@ -668,33 +633,23 @@ impl Test {
         let (program, mut host, debug_info) = self.get_program_and_host();
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
         let stack_inputs = stack_inputs_from_ints(pub_inputs);
-        let processor = new_vm_default_processor(
-            stack_inputs,
-            self.advice_inputs.clone(),
-            ExecutionOptions::default(),
-        )
-        .unwrap();
-        let witness = if let Some(debug_info) = debug_info.as_ref() {
-            processor
-                .execute_for_proving_with_package_debug_info_sync(&program, debug_info, &mut host)
-        } else {
-            processor.execute_for_proving_sync(&program, &mut host)
-        }
-        .unwrap();
-        let stack_outputs = *witness.claim().stack_outputs();
+        let WitnessOutput { claim, witness, .. } = Processor::new(&program)
+            .with_stack_inputs(stack_inputs)
+            .with_advice(self.advice_inputs.clone())
+            .with_source_context(debug_info.as_ref().map(|debug_info| {
+                miden_processor::PackageSourceDebugContext::new_optional(debug_info, None)
+            }))
+            .record_witness()
+            .run_sync(&mut host)
+            .unwrap();
         let proof = Prover::new().prove_full(witness).unwrap();
-        let claim =
-            ExecutionClaim::from_program_info(program.to_info(), stack_inputs, stack_outputs);
         if test_fail {
-            let mut elements = [ZERO; MIN_STACK_DEPTH];
-            elements.copy_from_slice(&*stack_outputs);
+            let mut elements = **claim.stack_outputs();
             elements[0] += ONE;
-            let stack_outputs =
-                StackOutputs::new(&elements).expect("stack outputs should fit the VM stack");
             let invalid_claim = ExecutionClaim::from_program_info(
                 claim.to_program_info(),
-                stack_inputs,
-                stack_outputs,
+                *claim.stack_inputs(),
+                StackOutputs::from(elements),
             );
             assert!(Verifier::new().verify(&invalid_claim, &proof).is_err());
         } else {
@@ -719,7 +674,7 @@ impl Test {
     #[track_caller]
     pub fn check_constraints(&self) {
         let trace = self
-            .execute()
+            .build_trace()
             .inspect_err(|_err| {
                 #[cfg(feature = "std")]
                 std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
@@ -732,7 +687,7 @@ impl Test {
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
     pub fn get_last_stack_state(&self) -> StackOutputs {
-        let trace = self
+        let claim = self
             .execute()
             .inspect_err(|_err| {
                 #[cfg(feature = "std")]
@@ -740,7 +695,7 @@ impl Test {
             })
             .expect("failed to execute");
 
-        trace.last_stack_state()
+        *claim.stack_outputs()
     }
 
     // HELPERS
@@ -779,7 +734,7 @@ impl Test {
     fn assert_result_with_step_execution(
         &self,
         stack_inputs: StackInputs,
-        fast_result: &Result<ExecutionWitness, ExecutionError>,
+        fast_result: Result<StackOutputs, &ExecutionError>,
     ) {
         fn compare_results(
             left_result: Result<StackOutputs, &ExecutionError>,
@@ -832,26 +787,24 @@ impl Test {
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
         let compare_error_diagnostics = debug_info.is_none();
 
-        let fast_result_by_step = {
-            let fast_process = new_vm_default_processor(
-                stack_inputs,
-                self.advice_inputs.clone(),
-                ExecutionOptions::default(),
-            )
-            .expect("test processor should initialize with default precompiles");
-            #[cfg(feature = "std")]
-            if let Some(debug_info) = debug_info.as_ref() {
-                fast_process
-                    .execute_by_step_with_package_debug_info_sync(&program, debug_info, &mut host)
-            } else {
-                fast_process.execute_by_step_sync(&program, &mut host)
-            }
-            #[cfg(not(feature = "std"))]
-            fast_process.execute_by_step_sync(&program, &mut host)
-        };
+        let fast_result_by_step: Result<StackOutputs, ExecutionError> = (|| {
+            let mut session = Processor::new(&program)
+                .with_stack_inputs(stack_inputs)
+                .with_advice(self.advice_inputs.clone())
+                .with_source_context(debug_info.as_ref().map(|debug_info| {
+                    miden_processor::PackageSourceDebugContext::new_optional(debug_info, None)
+                }))
+                .execute()
+                .prepare()
+                .expect("test processor should initialize with default precompiles")
+                .start()?;
+            while !session.step_sync(&mut host)?.is_finished() {}
+            let completed = session.try_complete().break_value().expect("the session halted");
+            Ok(completed.finish()?.stack)
+        })();
 
         compare_results(
-            fast_result.as_ref().map(|witness| *witness.claim().stack_outputs()),
+            fast_result,
             &fast_result_by_step,
             "traced execution",
             "step/resume execution",

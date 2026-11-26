@@ -3,12 +3,12 @@ use std::sync::Arc;
 use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
-    BaseHost, DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, Host,
-    LoadedMastForest, MastForestLoadError, ProcessorState, Word,
+    BaseHost, DefaultHost, Felt, FutureMaybeSend, Host, LoadedMastForest, MastForestLoadError,
+    Processor, ProcessorState, WitnessOutput, Word,
     advice::AdviceMutation,
     event::{EventError, EventName},
 };
-use miden_prover::{AdviceInputs, ExecutionClaim, ExecutionProof, Prover, StackInputs};
+use miden_prover::{ExecutionClaim, ExecutionProof, Prover, StackInputs};
 use miden_verifier::Verifier;
 
 struct YieldingAsyncHost {
@@ -77,34 +77,19 @@ fn simple_program() -> miden_processor::Program {
 async fn async_and_sync_execution_witnesses_prove_equivalently() {
     let program = simple_program();
     let stack_inputs = StackInputs::new(&[Felt::new_unchecked(0), Felt::new_unchecked(1)]).unwrap();
-    let advice_inputs = AdviceInputs::default();
-    let execution_options = ExecutionOptions::default();
+    let request = || Processor::new(&program).with_stack_inputs(stack_inputs);
 
     let mut sync_host = DefaultHost::default();
-    let sync_witness = FastProcessor::new_with_options(
-        stack_inputs,
-        advice_inputs.clone(),
-        execution_options.clone(),
-    )
-    .unwrap()
-    .execute_for_proving_sync(&program, &mut sync_host)
-    .unwrap();
-    let sync_claim = sync_witness.claim();
-    let sync_outputs = *sync_claim.stack_outputs();
-    let sync_proof = Prover::new().prove_full(sync_witness).unwrap();
+    let WitnessOutput { claim: sync_claim, witness, .. } =
+        request().record_witness().run_sync(&mut sync_host).unwrap();
+    let sync_proof = Prover::new().prove_full(witness).unwrap();
 
     let mut async_host = DefaultHost::default();
-    let async_witness =
-        FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
-            .unwrap()
-            .execute_for_proving(&program, &mut async_host)
-            .await
-            .unwrap();
-    let async_claim = async_witness.claim();
-    let async_outputs = *async_claim.stack_outputs();
-    let async_proof = Prover::new().prove_full(async_witness).unwrap();
+    let WitnessOutput { claim: async_claim, witness, .. } =
+        request().record_witness().run(&mut async_host).await.unwrap();
+    let async_proof = Prover::new().prove_full(witness).unwrap();
 
-    assert_eq!(sync_outputs, async_outputs);
+    assert_eq!(sync_claim.stack_outputs(), async_claim.stack_outputs());
     verify_generated_proof(&sync_claim, &sync_proof);
     verify_generated_proof(&async_claim, &async_proof);
 }
@@ -119,16 +104,11 @@ async fn proving_supports_witnesses_from_async_only_host_events() {
         .unwrap_program();
 
     let mut host = YieldingAsyncHost::new();
-    let witness = FastProcessor::new_with_options(
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    )
-    .unwrap()
-    .execute_for_proving(&program, &mut host)
-    .await
-    .expect("async execution should succeed");
-    let claim = witness.claim();
+    let WitnessOutput { claim, witness, .. } = Processor::new(&program)
+        .record_witness()
+        .run(&mut host)
+        .await
+        .expect("async execution should succeed");
     let proof = Prover::new().prove_full(witness).expect("proving should succeed");
 
     assert_eq!(host.event_calls, 1);

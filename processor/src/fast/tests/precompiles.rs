@@ -18,9 +18,9 @@ fn clear_deferred_in_kernel_preserves_stack() {
             dupw dupw adv_loadw assert_eqw
         end",
     );
-    let trace = test.execute().unwrap();
-    assert_eq!(trace.precompile_root(), TRUE_DIGEST);
-    assert_eq!(trace.stack_outputs().get_num_elements(16), &[ZERO; 16]);
+    let (output, _) = test.execute_for_output().unwrap();
+    assert_eq!(output.precompile_root(), TRUE_DIGEST);
+    assert_eq!(output.stack.get_num_elements(16), &[ZERO; 16]);
 }
 
 #[test]
@@ -33,8 +33,9 @@ fn clear_deferred_rejects_invalid_context_or_root() {
             .assemble_program("program", source)
             .unwrap()
             .unwrap_program();
-        let error = FastProcessor::new(StackInputs::default())
-            .execute_sync(&program, &mut DefaultHost::default())
+        let error = Processor::new(&program)
+            .execute()
+            .run_sync(&mut DefaultHost::default())
             .unwrap_err();
         assert_matches!(
             error,

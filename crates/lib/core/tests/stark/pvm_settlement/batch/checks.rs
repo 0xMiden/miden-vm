@@ -9,12 +9,12 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, Program, StackInputs,
+    DefaultHost, ExecutionError, Processor, Program, StackInputs, WitnessOutput,
     advice::AdviceInputs, operation::OperationError,
 };
 use miden_prover::Prover;
 
-use super::{assemble_batch, batch_inputs, prove_ecdsa_execution, pvm_proof_advice};
+use super::{assemble_batch, batch_inputs, prove_signature_execution, pvm_proof_advice};
 use crate::support::ecdsa::{generator_public_key_fixture, valid_fixture};
 
 #[test]
@@ -22,12 +22,20 @@ fn batch_root_and_response_checks() {
     let core_lib = CoreLibrary::default();
     let program = assemble_batch(&core_lib);
     let (first, first_claim, first_witness) =
-        prove_ecdsa_execution(&core_lib, valid_fixture(), StackInputs::default());
-    let (second, second_claim, second_witness) =
-        prove_ecdsa_execution(&core_lib, generator_public_key_fixture(), StackInputs::default());
+        prove_signature_execution(&core_lib, valid_fixture(), None, StackInputs::default());
+    let (second, second_claim, second_witness) = prove_signature_execution(
+        &core_lib,
+        generator_public_key_fixture(),
+        None,
+        StackInputs::default(),
+    );
     // A different public input gives a different claim with the same ECDSA work.
-    let (repeated, repeated_claim, repeated_witness) =
-        prove_ecdsa_execution(&core_lib, valid_fixture(), StackInputs::new(&[Felt::ONE]).unwrap());
+    let (repeated, repeated_claim, repeated_witness) = prove_signature_execution(
+        &core_lib,
+        valid_fixture(),
+        None,
+        StackInputs::new(&[Felt::ONE]).unwrap(),
+    );
     let (plain, plain_claim) = prove_without_precompiles();
     assert_ne!(first_claim.commitment(), repeated_claim.commitment());
     let first_root = first.vm().precompile_root;
@@ -60,12 +68,13 @@ fn batch_root_and_response_checks() {
     prepared_advice.extend(pvm_advice);
     let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
 
-    let witness =
-        FastProcessor::new_with_options(stack_inputs, prepared_advice, ExecutionOptions::default())
-            .unwrap()
-            .execute_for_proving_sync(&program, &mut host)
-            .expect("batch settlement failed");
-    assert!(!witness.has_precompiles());
+    let output = Processor::new(&program)
+        .with_stack_inputs(stack_inputs)
+        .with_advice(prepared_advice)
+        .execute()
+        .run_sync(&mut host)
+        .expect("batch settlement failed");
+    assert!(output.precompile_witness.is_none());
 
     // A valid PVM proof for [A, B, A] must fail for [B, A, A].
     let reordered = [
@@ -109,33 +118,33 @@ fn batch_root_and_response_checks() {
     let wrong_advice = advice_inputs
         .with_map([(wrong_commitment, Word::words_as_elements(&commitments).to_vec())]);
     let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
-    let error = FastProcessor::new_with_options(
-        wrong_batch_input,
-        wrong_advice,
-        ExecutionOptions::default(),
-    )
-    .unwrap()
-    .execute_sync(&program, &mut host)
-    .expect_err("accepted a claim list with the wrong public hash");
+    let error = Processor::new(&program)
+        .with_stack_inputs(wrong_batch_input)
+        .with_advice(wrong_advice)
+        .execute()
+        .run_sync(&mut host)
+        .expect_err("accepted a claim list with the wrong public hash");
     assert_failed_assertion(error);
 
     // Three valid claims must fail the even-count requirement.
     let (stack_inputs, advice_inputs) = batch_inputs(&core_lib, &[(&plain, &plain_claim); 3]);
-    let error =
-        FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
-            .unwrap()
-            .execute_sync(&program, &mut host)
-            .expect_err("accepted an odd number of claims");
+    let error = Processor::new(&program)
+        .with_stack_inputs(stack_inputs)
+        .with_advice(advice_inputs)
+        .execute()
+        .run_sync(&mut host)
+        .expect_err("accepted an odd number of claims");
     assert_failed_assertion(error);
 
     // With only TRUE roots, the batch needs no PVM proof package in advice.
     let (stack_inputs, advice_inputs) = batch_inputs(&core_lib, &[(&plain, &plain_claim); 2]);
-    let witness =
-        FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
-            .unwrap()
-            .execute_for_proving_sync(&program, &mut host)
-            .expect("a batch with no deferred work tried to fetch a PVM proof");
-    assert!(!witness.has_precompiles());
+    let output = Processor::new(&program)
+        .with_stack_inputs(stack_inputs)
+        .with_advice(advice_inputs)
+        .execute()
+        .run_sync(&mut host)
+        .expect("a batch with no deferred work tried to fetch a PVM proof");
+    assert!(output.precompile_witness.is_none());
 }
 
 fn prove_without_precompiles() -> (ExecutionProof, ExecutionClaim) {
@@ -143,15 +152,10 @@ fn prove_without_precompiles() -> (ExecutionProof, ExecutionClaim) {
         .assemble_program("no_precompiles", "begin push.7 drop end")
         .unwrap()
         .unwrap_program();
-    let witness = FastProcessor::new_with_options(
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    )
-    .unwrap()
-    .execute_for_proving_sync(&program, &mut DefaultHost::default())
-    .unwrap();
-    let claim = witness.claim();
+    let WitnessOutput { claim, witness, .. } = Processor::new(&program)
+        .record_witness()
+        .run_sync(&mut DefaultHost::default())
+        .unwrap();
     let proof = Prover::new().with_hash_fn(HashFunction::Eidos).prove(witness).unwrap();
     (proof, claim)
 }
@@ -175,11 +179,12 @@ fn assert_rejects_pvm_response(
     map.insert(proof_request_key(verifier_root, expected_root), stream);
     advice_inputs.extend(AdviceInputs::new(stack, map, store));
     let mut host = DefaultHost::default().with_library(core_lib).unwrap();
-    let error =
-        FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
-            .unwrap()
-            .execute_sync(program, &mut host)
-            .expect_err("accepted a PVM proof of different deferred work");
+    let error = Processor::new(program)
+        .with_stack_inputs(stack_inputs)
+        .with_advice(advice_inputs)
+        .execute()
+        .run_sync(&mut host)
+        .expect_err("accepted a PVM proof of different deferred work");
     assert_failed_assertion(error);
 }
 

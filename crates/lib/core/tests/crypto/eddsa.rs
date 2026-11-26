@@ -26,7 +26,7 @@ use miden_crypto::{
 };
 use miden_precompiles::{Ed25519Base, UintSpec, ed25519_decompress_x};
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, StackInputs,
+    DefaultHost, ExecutionError, ExecutionOutput, Processor,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
     event::EventHandler,
     operation::OperationError,
@@ -400,13 +400,12 @@ fn run_program_with_handler(
     let mut advice = AdviceStack::new();
     advice.append_elements(bytes_to_packed_u32_elements(pk));
     advice.append_elements(bytes_to_packed_u32_elements(sig));
-    let output = FastProcessor::new_with_options(
-        StackInputs::default(),
-        AdviceInputs::default().with_stack(advice),
-        ExecutionOptions::default(),
-    )
-    .unwrap()
-    .execute_sync(&program, &mut host);
+    let output = Processor::new(&program)
+        .with_advice(AdviceInputs::default().with_stack(advice))
+        .execute()
+        .prepare()
+        .unwrap()
+        .run_sync(&mut host);
     if let Ok(output) = &output {
         assert!(output.advice.stack().is_empty(), "signature witness must be consumed");
     }

@@ -32,9 +32,9 @@ use crate::{
 // REPLAY PROCESSOR
 // ================================================================================================
 
-/// A processor implementation used in conjunction with the [`CoreTraceGenerationTracer`] in
-/// [`super::build_trace`] to replay the execution of a fragment of execution for a predetermined
-/// number of clock cycles.
+/// A processor implementation used with [`CoreTraceGenerationTracer`] in
+/// [`VmWitness::build_trace`](crate::VmWitness::build_trace). It replays an execution fragment for
+/// a predetermined number of clock cycles.
 ///
 /// This processor uses various "replay" structures to provide the necessary state during execution,
 /// such as stack overflows, memory reads, advice provider values, hasher responses, execution
@@ -43,7 +43,7 @@ use crate::{
 ///
 /// The replay structures and initial system and stack state are built by the
 /// [`crate::trace::execution_tracer::ExecutionTracer`] in conjunction with
-/// [`crate::FastProcessor::execute_for_proving`].
+/// [`crate::Processor::record_witness`].
 #[derive(Debug)]
 pub(crate) struct ReplayProcessor {
     pub system: SystemState,
@@ -73,7 +73,7 @@ impl ReplayProcessor {
     ///
     /// The parameters are expected to be built by the
     /// [`crate::trace::execution_tracer::ExecutionTracer`] when used in conjunction with
-    /// [`crate::FastProcessor::execute_for_proving`].
+    /// [`crate::Processor::record_witness`].
     pub fn new(
         initial_system: SystemState,
         initial_stack: StackState,

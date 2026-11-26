@@ -5,10 +5,13 @@ use std::{
 };
 
 use clap::Parser;
-use miden_assembly::diagnostics::{Report, WrapErr};
+use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor};
-use miden_vm::{HashFunction, PrecompileLimits, PrecompileStatus, Prover, internal::InputFile};
+use miden_processor::{DefaultHost, ExecutionOptions, PackageSourceDebugContext};
+use miden_vm::{
+    HashFunction, PrecompileLimits, PrecompileStatus, Processor, Prover, WitnessOutput,
+    internal::InputFile,
+};
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},
@@ -220,34 +223,26 @@ impl ProveCmd {
 
         let hash_fn = self.get_hash_fn()?;
 
-        // execute program and generate proof
-        let processor =
-            FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
-                .map_err(|err| Report::msg(format!("{err}")))?;
-        let witness = match (package_debug_info.as_ref(), entrypoint_source_node) {
-            (Some(debug_info), Some(entrypoint_source_node_id)) => processor
-                .execute_for_proving_with_package_debug_info_at_source_node_sync(
-                    &program,
-                    debug_info,
-                    entrypoint_source_node_id,
-                    &mut host,
-                )
-                .wrap_err("Failed to execute program")?,
-            (Some(debug_info), None) => processor
-                .execute_for_proving_with_package_debug_info_sync(&program, debug_info, &mut host)
-                .wrap_err("Failed to execute program")?,
-            (None, _) => processor
-                .execute_for_proving_sync(&program, &mut host)
-                .wrap_err("Failed to execute program")?,
-        };
-        let stack_outputs = *witness.claim().stack_outputs();
+        let source = package_debug_info
+            .as_ref()
+            .map(|info| PackageSourceDebugContext::new_optional(info, entrypoint_source_node));
+        let WitnessOutput { claim, witness, .. } = Processor::new(&program)
+            .with_options(execution_options)
+            .with_stack_inputs(stack_inputs)
+            .with_advice(advice_inputs)
+            .with_source_context(source)
+            .record_witness()
+            .run_sync(&mut host)
+            .wrap_err("Failed to execute program")?;
+        let stack_outputs = *claim.stack_outputs();
         let prover = self.prover(hash_fn, verification_limits);
         let proof = if self.complete || !self.deferred {
-            prover.prove_full(witness)
+            prover.prove_full(witness).map(Into::into)
         } else {
             prover.prove(witness)
         }
-        .map_err(|err| Report::msg(format!("Failed to prove program: {err}")))?;
+        .into_diagnostic()
+        .wrap_err("Failed to prove program")?;
 
         println!("Program proved in {} ms", now.elapsed().as_millis());
         if matches!(proof.precompile(), PrecompileStatus::Deferred(_)) {
