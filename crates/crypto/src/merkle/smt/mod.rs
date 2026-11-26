@@ -463,7 +463,7 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
             }
         }
 
-        for (key, value) in new_pairs {
+        for (key, value) in removals_first(new_pairs, &Self::EMPTY_VALUE) {
             self.insert_value(key, value)?;
         }
 
@@ -524,7 +524,7 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
         }
 
         let mut reverse_pairs = Map::new();
-        for (key, value) in new_pairs {
+        for (key, value) in removals_first(new_pairs, &Self::EMPTY_VALUE) {
             match self.insert_value(key.clone(), value)? {
                 Some(old_value) => {
                     reverse_pairs.insert(key, old_value);
@@ -763,6 +763,21 @@ impl<const DEPTH: u8, K: Eq + Hash, V> MutationSet<DEPTH, K, V> {
             new_root,
         }
     }
+}
+
+/// Yields removals before insertions so a leaf has room for replacement entries.
+fn removals_first<K: Ord + Hash, V: PartialEq>(
+    mut pairs: Map<K, V>,
+    empty: &V,
+) -> impl Iterator<Item = (K, V)> {
+    let is_removal = |_: &K, value: &mut V| *value == *empty;
+    #[cfg(feature = "std")]
+    let removals = pairs.extract_if(is_removal);
+    #[cfg(not(feature = "std"))]
+    let removals = pairs.extract_if(.., is_removal);
+
+    let removals: Vec<_> = removals.collect();
+    removals.into_iter().chain(pairs)
 }
 
 // SERIALIZATION

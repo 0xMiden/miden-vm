@@ -597,6 +597,41 @@ fn test_mutations_revert() {
 }
 
 #[test]
+fn test_apply_mutations_replaces_entry_in_full_leaf() {
+    // Keys with the same last element share a leaf.
+    let key = |i: usize| Word::new([ONE, ONE, Felt::new_unchecked(i as u64), ONE]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
+
+    // Assign edit roles so plain map iteration encounters the insertion first.
+    let mut pairs = Map::from([(key(0), EMPTY_WORD), (key(1), EMPTY_WORD)]);
+    let mut keys = pairs.keys().copied();
+    let inserted = keys.next().unwrap();
+    let removed = keys.next().unwrap();
+    *pairs.get_mut(&inserted).unwrap() = value;
+    assert_eq!(pairs.iter().next(), Some((&inserted, &value)));
+
+    let entries = (2..=MAX_LEAF_ENTRIES).map(|i| (key(i), value)).chain([(removed, value)]);
+    let original = Smt::with_entries(entries).unwrap();
+    let mut expected = original.clone();
+    expected.insert(removed, EMPTY_WORD).unwrap();
+    expected.insert(inserted, value).unwrap();
+
+    // Compute the node changes in removal-first order, then install the insertion-first map.
+    let mut mutations = original
+        .compute_mutations_sequential([(removed, EMPTY_WORD), (inserted, value)])
+        .unwrap();
+    assert_eq!(mutations.new_pairs(), &pairs);
+    mutations.new_pairs = pairs;
+
+    let mut smt = original.clone();
+    let reverse = apply_mutations(&mut smt, mutations);
+    assert_eq!(smt, expected);
+
+    apply_mutations(&mut smt, reverse);
+    assert_eq!(smt, original);
+}
+
+#[test]
 fn test_mutation_set_serialization() {
     let mut smt = Smt::default();
 
