@@ -79,6 +79,9 @@ Startup and VM driving return `ExecutionError`. `run`, `run_sync`, and `finish` 
 error type because they also finalize the selected task. Failed or cancelled sessions cannot
 resume or complete.
 
+On a halted witness recording, `trace_len_upper_bound()` reports the core and chiplet sizes from
+the live recorder. The Eidos compression count bounds the distinct requests that replay will keep.
+
 With the `std` feature, a synchronous `build_trace` task can overlap execution with hasher
 trace construction when enabled in `ExecutionOptions`. Execution stays on the calling thread while
 Rayon may run the hasher builder on a worker. A caller with no separate Rayon worker uses compact

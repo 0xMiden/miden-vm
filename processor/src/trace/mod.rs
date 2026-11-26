@@ -34,7 +34,8 @@ mod tests;
 
 pub(crate) use execution_tracer::TraceReplay;
 pub use miden_air_definitions::vm::{
-    ChipletsLengths, TraceLenSummary, TraceLenSummaryError, VmTrace, trace::RowIndex,
+    ChipletsLengths, TraceLenSummary, TraceLenSummaryError, VmTrace,
+    trace::{MIN_TRACE_LEN, RowIndex},
 };
 pub use miden_core::deferred::PrecompileWitness;
 pub use parallel::{CORE_TRACE_WIDTH, build_trace};

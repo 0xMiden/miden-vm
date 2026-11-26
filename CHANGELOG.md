@@ -13,6 +13,7 @@
 - [BREAKING] Replaced Miette with local diagnostic types in `miden-utils-diagnostics`. Use the existing Miden `Report` re-export, implement `Diagnostic` for custom error metadata, and use `diagnostic!` for messages with labels. The renderer emits plain text ([#4246](https://github.com/0xMiden/miden-vm/pull/4246)).
 - Consolidated Word conversion, Word ordering and String/Arc serialization tests using Proptest ([#4252](https://github.com/0xMiden/miden-vm/pull/4252)).
 
+- `run` reports core and chiplet sizes from the recording and an upper bound for Eidos compression rows. It warns when only the upper bound exceeds `--max-prover-memory` ([#4232](https://github.com/0xMiden/miden-vm/pull/4232)).
 - Applied the routine-logging changes from [#4238](https://github.com/0xMiden/miden-vm/pull/4238) to the current VM and STARK crates. Successful proving is silent at `INFO`; profiling remains available at `TRACE`.
 
 - [BREAKING] Changed `Host::get_mast_forest` and `SyncHost::get_mast_forest` to return `Result<Option<LoadedMastForest>, MastForestLoadError>`. Retrieval failures preserve their source in `ExecutionError::MastForestError`, while `Ok(None)` still reports a missing procedure ([#4237](https://github.com/0xMiden/miden-vm/pull/4237)).

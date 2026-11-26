@@ -603,6 +603,19 @@ impl<T: ExecutionTask> CompletedExecution<T> {
     }
 }
 
+impl CompletedExecution<Witness> {
+    /// Reports trace rows and padded heights from live recording metadata.
+    ///
+    /// Core rows include HALT. Chiplet counts include controller alignment, AEAD expansion
+    /// and the mandatory padding row. Only the Eidos compression rows and their padded height
+    /// are upper bounds, since trace construction deduplicates compression requests.
+    /// Returns `None` if a row count or padded height exceeds `usize`.
+    pub fn trace_len_upper_bound(&self) -> Option<crate::trace::TraceLenSummary> {
+        self.recorder
+            .trace_len_upper_bound(self.state().clock(), self.program_info.kernel())
+    }
+}
+
 mod private {
     use super::*;
 

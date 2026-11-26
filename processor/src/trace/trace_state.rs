@@ -1457,6 +1457,11 @@ impl HasherRequestReplay {
             })
     }
 
+    pub(super) fn aead_xof_count(&self) -> Option<usize> {
+        let ops = self.buffered_ops()?;
+        Some(ops.iter().filter(|op| matches!(op, HasherOp::AeadXof(..))).count())
+    }
+
     fn buffered_ops(&self) -> Option<&VecDeque<HasherOp>> {
         match &self.sink {
             HasherOpSink::Buffered(ops) => Some(ops),

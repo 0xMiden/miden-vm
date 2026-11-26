@@ -719,22 +719,37 @@ fn non_hasher_trace_len(
     ace: &AceReplay,
     max_trace_len: usize,
 ) -> Result<usize, ExecutionError> {
-    let overflow = || ExecutionError::TraceLenExceeded(max_trace_len);
-    let bitwise_len = bitwise.trace_len().ok_or_else(overflow)?;
-    let memory_reads_len = core_trace_contexts.iter().try_fold(0usize, |len, context| {
-        len.checked_add(context.replay.memory_reads.num_accesses()?)
-    });
-    let memory_len = memory_writes
-        .num_accesses()
-        .and_then(|writes| memory_reads_len.and_then(|reads| writes.checked_add(reads)))
-        .ok_or_else(overflow)?;
-    let ace_len = ace.trace_len().ok_or_else(overflow)?;
+    recorded_chiplet_lengths(
+        0,
+        kernel,
+        core_trace_contexts.iter().map(|ctx| &ctx.replay.memory_reads),
+        memory_writes,
+        bitwise,
+        ace,
+    )
+    .and_then(|lengths| lengths.checked_trace_len())
+    .filter(|&total| total <= max_trace_len)
+    .ok_or(ExecutionError::TraceLenExceeded(max_trace_len))
+}
 
-    [1, kernel.proc_hashes().len(), bitwise_len, memory_len, ace_len]
-        .into_iter()
-        .try_fold(0usize, usize::checked_add)
-        .filter(|&total| total <= max_trace_len)
-        .ok_or_else(overflow)
+pub(super) fn recorded_chiplet_lengths<'a>(
+    hasher_rows: usize,
+    kernel: &KernelDescriptor,
+    mut reads: impl Iterator<Item = &'a super::trace_state::MemoryReadsReplay>,
+    writes: &MemoryWritesReplay,
+    bitwise: &BitwiseReplay,
+    ace: &AceReplay,
+) -> Option<ChipletsLengths> {
+    let memory_rows = reads.try_fold(writes.num_accesses()?, |total, replay| {
+        total.checked_add(replay.num_accesses()?)
+    })?;
+    Some(ChipletsLengths::from_parts(
+        hasher_rows,
+        bitwise.trace_len()?,
+        memory_rows,
+        ace.trace_len()?,
+        kernel.proc_hashes().len(),
+    ))
 }
 
 /// Checks a Merkle path request from the hasher replay before the hasher chiplet records it.
