@@ -359,19 +359,30 @@ impl fmt::Debug for SourceContent {
     }
 }
 
+impl SourceContent {
+    /// Shared key for equality, ordering, and hashing.
+    ///
+    /// Line starts are derived from the text. Sources with the same URI, text, and language compare
+    /// equal across document versions.
+    #[inline]
+    fn key(&self) -> (&Uri, &str, &str) {
+        (&self.uri, &self.content, &self.language)
+    }
+}
+
 impl Eq for SourceContent {}
 
 impl PartialEq for SourceContent {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        self.language == other.language && self.uri == other.uri && self.content == other.content
+        self.key() == other.key()
     }
 }
 
 impl Ord for SourceContent {
     #[inline]
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.uri.cmp(&other.uri).then_with(|| self.content.cmp(&other.content))
+        self.key().cmp(&other.key())
     }
 }
 
@@ -384,9 +395,7 @@ impl PartialOrd for SourceContent {
 
 impl core::hash::Hash for SourceContent {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.language.hash(state);
-        self.uri.hash(state);
-        self.content.hash(state);
+        self.key().hash(state);
     }
 }
 
@@ -1536,5 +1545,14 @@ end
              {result:?}"
         );
         assert_eq!(content.line_count(), 2);
+    }
+
+    #[test]
+    fn source_content_ordering_distinguishes_languages() {
+        let masm = SourceContent::new("masm", "foo.masm", "begin end");
+        let text = SourceContent::new("text", "foo.masm", "begin end");
+
+        assert_ne!(masm, text);
+        assert_ne!(masm.cmp(&text), core::cmp::Ordering::Equal);
     }
 }
