@@ -74,9 +74,15 @@ impl Envelope {
         elements
     }
 
-    /// Hashes the envelope encoding from [`Self::to_elements`] under `ECGFP5_ENVELOPE`.
+    /// Returns the Eidos commitment to the Felt encoding from [`Self::to_elements`] under the
+    /// `ECGFP5_ENVELOPE` domain. This matches the commitment returned by `seal_and_commit`.
     ///
-    /// This matches the commitment returned by the VM's `seal_and_commit` procedure.
+    /// For a wire message, follow the decoding instructions on [`super::SealedMessage`] and
+    /// convert the decoded message with `Envelope::try_from`. Use its commitment as the
+    /// expected envelope commitment in the execution claim's public stack outputs.
+    ///
+    /// To verify an expected recipient or context, the program must separately bind the
+    /// recipient-key commitment or context used for sealing to the expected value.
     pub fn to_commitment(&self) -> Word {
         let header = self.encode_header();
         let len = header.len() + self.ciphertext.len();

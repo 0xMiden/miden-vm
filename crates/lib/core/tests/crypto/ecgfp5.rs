@@ -298,16 +298,16 @@ fn agreement_and_sealing_reject_a_different_recipient() {
     let secret = sample();
     let other_key = secret.public_key();
     let other_prepared = PreparedPublicKey::new(other_key);
-    for (mode, source, commitment, advice, message) in [
+    for (modes, source, commitment, advice, message) in [
         (
-            SealMode::Direct,
+            &[SealMode::Direct, SealMode::DirectWithCommitment][..],
             DIRECT_SOURCE,
             recipient().public_key().to_commitment(),
             direct_advice_inputs(&other_key, &secret),
             "public key commitment",
         ),
         (
-            SealMode::Preprocessed,
+            &[SealMode::Preprocessed][..],
             SOURCE,
             prepared().to_commitment(),
             advice_inputs(&other_prepared, &secret),
@@ -316,9 +316,11 @@ fn agreement_and_sealing_reject_a_different_recipient() {
     ] {
         // The advice is internally consistent, but belongs to another valid recipient key.
         assert_failure(&agreement(source, commitment, advice.clone()), message);
-        let program = seal_program(&[], &[], mode);
-        let test = sealing_with_advice(&program, advice);
-        assert_failure(&test, message);
+        for &mode in modes {
+            let program = seal_program(&[], &[], mode);
+            let test = sealing_with_advice(&program, advice.clone());
+            assert_failure(&test, message);
+        }
     }
 }
 
@@ -834,16 +836,33 @@ enum SealMode {
 }
 
 impl SealMode {
+    const ALL: [Self; 3] = [Self::Direct, Self::DirectWithCommitment, Self::Preprocessed];
+
     fn call(self) -> String {
-        let (key, procedure) = match self {
-            Self::Direct => (recipient().public_key().to_commitment(), "seal"),
-            Self::DirectWithCommitment => {
-                (recipient().public_key().to_commitment(), "seal_and_commit")
-            },
-            Self::Preprocessed => (prepared().to_commitment(), "seal_preprocessed"),
+        let commitment = match self {
+            Self::Direct | Self::DirectWithCommitment => recipient().public_key().to_commitment(),
+            Self::Preprocessed => prepared().to_commitment(),
         };
-        let key = key.into_elements();
+        self.call_with_commitment(commitment)
+    }
+
+    fn call_with_commitment(self, commitment: Word) -> String {
+        let procedure = match self {
+            Self::Direct => "seal",
+            Self::DirectWithCommitment => "seal_and_commit",
+            Self::Preprocessed => "seal_preprocessed",
+        };
+        let key = commitment.into_elements();
         format!("push.{key:?} exec.ecgfp5_eidos::{procedure}")
+    }
+
+    // Drops the commitment returned by `seal_and_commit`, so that one program can exercise every
+    // mode with the stack effect of `seal`. Tests that check the commitment use `call`.
+    fn call_dropping_commitment(self) -> String {
+        match self {
+            Self::Direct | Self::Preprocessed => self.call(),
+            Self::DirectWithCommitment => format!("{} dropw", self.call()),
+        }
     }
 
     fn advice(self, secret: &SecretKey) -> AdviceInputs {
@@ -876,7 +895,7 @@ fn seal_program(plaintext: &[Felt], context: &[Felt], mode: SealMode) -> String 
     for address in [1000 + plaintext.len(), 2000 + context.len(), 3008 + 2 * plaintext.len()] {
         body.push_str(&format!("push.999 mem_store.{address}\n"));
     }
-    let seal = mode.call();
+    let seal = mode.call_dropping_commitment();
     format!(
         "use miden::core::crypto::ies::ecgfp5_eidos
         use miden::core::crypto::hashes::eidos
@@ -919,7 +938,7 @@ fn sealing_matches_rust_with_general_associated_data() {
         .unwrap();
         let expected_elements = expected.to_elements();
         let digest = Eidos::hash_elements(&expected_elements);
-        for mode in [SealMode::Direct, SealMode::Preprocessed] {
+        for mode in SealMode::ALL {
             let source = seal_program(&plaintext, &context, mode);
             let test = sealing_with_advice(&source, mode.advice(&ephemeral));
             let (output, _) = test.execute_for_output().unwrap();
@@ -962,8 +981,8 @@ fn sealing_reexecutes_with_recorded_advice() {
     let plaintext = [Felt::from_u32(42)];
     let context = [Felt::from_u32(17)];
     let envelope_len = 8 + 2 * plaintext.len() as u32;
-    for mode in [SealMode::Direct, SealMode::Preprocessed] {
-        let seal = mode.call();
+    for mode in SealMode::ALL {
+        let seal = mode.call_dropping_commitment();
         let source = format!(
             "use miden::core::crypto::ies::ecgfp5_eidos
              begin
@@ -1051,42 +1070,43 @@ fn sealing_reexecutes_with_recorded_advice() {
 
 #[test]
 fn sealing_rejects_unregistered_keys_and_wrong_modes() {
-    for (commitment, seal, expected_error) in [
-        (Word::default(), "seal", "no EcGFp5 public key registered"),
-        (
-            Word::default(),
-            "seal_preprocessed",
-            "no preprocessed EcGFp5 public key registered",
-        ),
-        (prepared().to_commitment(), "seal", "no EcGFp5 public key registered"),
-        (
-            recipient().public_key().to_commitment(),
-            "seal_preprocessed",
-            "no preprocessed EcGFp5 public key registered",
-        ),
-    ] {
-        let source = format!(
-            "use miden::core::crypto::ies::ecgfp5_eidos
-             begin push.3000.0.2000.0.1000 push.{:?} exec.ecgfp5_eidos::{seal} end",
-            commitment.into_elements(),
-        );
-        let handlers = Ecgfp5SealHandler::new(ChaCha20Rng::from_seed([92; 32]))
-            .with_public_key(recipient().public_key())
-            .with_preprocessed_public_key(Arc::clone(prepared()))
-            .handlers();
-        let test = build_test!(&source, &[]).with_event_handlers(handlers);
-        let error = test.execute_for_output().unwrap_err();
-        assert!(matches!(
-            error,
-            ExecutionError::EventError { error, .. }
-                if error.to_string().contains(expected_error)
-        ));
+    for mode in SealMode::ALL {
+        let (wrong_mode_commitment, expected_error) = match mode {
+            SealMode::Direct | SealMode::DirectWithCommitment => {
+                (prepared().to_commitment(), "no EcGFp5 public key registered")
+            },
+            SealMode::Preprocessed => (
+                recipient().public_key().to_commitment(),
+                "no preprocessed EcGFp5 public key registered",
+            ),
+        };
+        for commitment in [Word::default(), wrong_mode_commitment] {
+            let seal = mode.call_with_commitment(commitment);
+            let source = format!(
+                "use miden::core::crypto::ies::ecgfp5_eidos
+                 begin push.3000.0.2000.0.1000 {seal} end"
+            );
+            let handlers = Ecgfp5SealHandler::new(ChaCha20Rng::from_seed([92; 32]))
+                .with_public_key(recipient().public_key())
+                .with_preprocessed_public_key(Arc::clone(prepared()))
+                .handlers();
+            let test = build_test!(&source, &[]).with_event_handlers(handlers);
+            let error = test.execute_for_output().unwrap_err();
+            assert!(
+                matches!(
+                    &error,
+                    ExecutionError::EventError { error, .. }
+                        if error.to_string().contains(expected_error)
+                ),
+                "{seal} should report {expected_error}, got {error}"
+            );
+        }
     }
 }
 
 #[test]
 fn sealing_requires_a_host_handler_even_with_preloaded_advice() {
-    for mode in [SealMode::Direct, SealMode::Preprocessed] {
+    for mode in SealMode::ALL {
         let source = seal_program(&[], &[], mode);
         let mut test = build_test!(&source, &[]);
         test.advice_inputs = mode.advice(&sample());
@@ -1141,8 +1161,8 @@ fn sealing_rejects_bad_memory_before_requesting_advice() {
         (1000, 4, 2000, 1, 2000, "destination overlaps an input"),
         (1000, 4, 2000, 1, 1996, "destination overlaps an input"),
     ] {
-        for mode in [SealMode::Direct, SealMode::Preprocessed] {
-            let seal = mode.call();
+        for mode in SealMode::ALL {
+            let seal = mode.call_dropping_commitment();
             let source = format!(
                 "use miden::core::crypto::ies::ecgfp5_eidos
                 begin push.{dst}.{context_len}.{context}.{len}.{src} {seal} end"
@@ -1173,8 +1193,8 @@ fn sealing_empty_ranges_does_not_read_their_addresses() {
     let unread = u32::MAX - 3;
     let dst = miden_core::FMP_INIT_VALUE.as_canonical_u64() as u32 - 8;
     let expected: Vec<_> = sealed.to_elements().iter().map(Felt::as_canonical_u64).collect();
-    for mode in [SealMode::Direct, SealMode::Preprocessed] {
-        let seal = mode.call();
+    for mode in SealMode::ALL {
+        let seal = mode.call_dropping_commitment();
         let source = format!(
             "use miden::core::crypto::ies::ecgfp5_eidos
             begin push.{dst}.0.{unread}.0.{unread} {seal} end"
