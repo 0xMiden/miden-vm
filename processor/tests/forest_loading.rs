@@ -6,8 +6,8 @@ use std::sync::{
 use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
-    BaseHost, ExecutionError, FastProcessor, FutureMaybeSend, Host, LoadedMastForest,
-    MastForestLoadError, Processor, ProcessorState, Program, StackInputs, Word,
+    BaseHost, FastProcessor, FutureMaybeSend, Host, LoadedMastForest, MastForestLoadError,
+    Processor, ProcessorError, ProcessorState, Program, StackInputs, Word,
     advice::AdviceMutation,
     event::EventError,
     mast::{DenseMastForestBuilder, ExternalNodeBuilder, JoinNodeBuilder},
@@ -84,11 +84,11 @@ async fn async_lookup_preserves_storage_errors() {
     let (program, mut host) = fixture();
     host.result = Err(std::io::ErrorKind::PermissionDenied);
     let error = Processor::new(&program).record_witness().run(&mut host).await.unwrap_err();
-    let ExecutionError::MastForestError { error, .. } = error else {
+    let ProcessorError::MastForestLoad { source, .. } = error.kind() else {
         panic!("expected a storage error");
     };
     assert_eq!(
-        error.downcast_ref::<std::io::Error>().unwrap().kind(),
+        source.downcast_ref::<std::io::Error>().unwrap().kind(),
         std::io::ErrorKind::PermissionDenied
     );
 }
@@ -98,7 +98,7 @@ async fn absent_forest_reports_procedure_not_found() {
     let (program, mut host) = fixture();
     host.result = Ok(None);
     let error = Processor::new(&program).execute().run(&mut host).await.unwrap_err();
-    assert!(matches!(error, ExecutionError::ProcedureNotFound { .. }));
+    assert!(matches!(error.kind(), ProcessorError::ProcedureNotFound { .. }));
     assert_eq!(host.calls.load(Ordering::SeqCst), 1);
 }
 

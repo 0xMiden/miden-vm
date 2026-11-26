@@ -18,7 +18,7 @@
 - [BREAKING] `TraceLenSummary::new` requires power-of-two padded heights. `padded_heights()` returns the array by value ([#4254](https://github.com/0xMiden/miden-vm/pull/4254)).
 - Applied the routine-logging changes from [#4238](https://github.com/0xMiden/miden-vm/pull/4238) to the current VM and STARK crates. Successful proving is silent at `INFO`; profiling remains available at `TRACE`.
 
-- [BREAKING] Changed `Host::get_mast_forest` and `SyncHost::get_mast_forest` to return `Result<Option<LoadedMastForest>, MastForestLoadError>`. Retrieval failures preserve their source in `ExecutionError::MastForestError`, while `Ok(None)` still reports a missing procedure ([#4237](https://github.com/0xMiden/miden-vm/pull/4237)).
+- [BREAKING] Changed `Host::get_mast_forest` and `SyncHost::get_mast_forest` to return `Result<Option<LoadedMastForest>, MastForestLoadError>`. Retrieval failures preserve their source in `ProcessorError::MastForestLoad`, while `Ok(None)` still reports a missing procedure ([#4237](https://github.com/0xMiden/miden-vm/pull/4237)).
 
 - Updated development and coverage to Rust 1.100 with Cargo dependency checks enforced in CI. Reduced dependencies in builds with fewer features while keeping MSRV at 1.96.1 ([#4234](https://github.com/0xMiden/miden-vm/pull/4234)).
 - [BREAKING] Restricted the visibility of public items that no workspace consumer or upstream user needs. Items used only within their defining crate are now `pub(crate)` or private, unused public re-exports were narrowed, and public helpers that only forwarded to another public entry point were removed. `DebugVarTracker` no longer replays recorded event maps: it tracks debug variables through the observed invocation only. The external API surface is smaller; downstream users must rely on the remaining public items.
@@ -27,6 +27,9 @@
 - [BREAKING] Replaced `FastProcessor::execute_by_step*` and `execute_mut*` with owned execution sessions. Sessions can step one cycle at a time or run to halt by mutable borrow. They retain inspectable state after halt, failure, or cancellation, and completed sessions expose their state until `finish()` exports outputs and the deferred precompile witness ([#4232](https://github.com/0xMiden/miden-vm/pull/4232)).
 - Increased in-memory SMT insert benchmark batches to 4,096 and 16,384 entries and fixed the SMT CodSpeed job at eight Rayon threads ([#4220](https://github.com/0xMiden/miden-vm/pull/4220)).
 - Added workspace test coverage collection with `make coverage` and CI reports on `next`/`main` pushes and manual runs ([#4218](https://github.com/0xMiden/miden-vm/pull/4218)).
+- [BREAKING] Inspect execution failures with `ExecutionError::kind()` or `into_kind()` to obtain the underlying `ProcessorError`. Invalid source occurrences return `ProcessorError::SourceContext`, retaining the debug graph lookup error or the mismatched entrypoint IDs. Host registration and library loading return `HostError` ([#4223](https://github.com/0xMiden/miden-vm/pull/4223)).
+- Driving a failed or interrupted session again returns `ProcessorError::SessionUnavailable` through `ExecutionError`, with a reason distinguishing the two cases ([#4223](https://github.com/0xMiden/miden-vm/pull/4223)).
+- [BREAKING] `VmWitness::build_trace` returns `TraceGenerationError`. `ProverError` preserves the underlying trace, VM proof, or precompile proof error. Replay stops at the first failing clock hook in a fragment ([#4223](https://github.com/0xMiden/miden-vm/pull/4223)).
 
 #### Fixes
 

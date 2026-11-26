@@ -4,7 +4,7 @@ use miden_core::{
     mast::{BasicBlockNodeBuilder, MastForest},
 };
 use miden_processor::{
-    AceError, DefaultHost, ExecutionError, Felt, Processor, Program, StackInputs,
+    AceError, DefaultHost, Felt, Processor, ProcessorError, Program, StackInputs,
     operation::Operation,
     trace::chiplets::{MAX_EVAL_CIRCUIT_INVOCATIONS, MAX_EVAL_CIRCUIT_WIRES},
 };
@@ -24,12 +24,8 @@ fn eval_circuit_overflow_panic_check() {
 
     // Namely, this checks that execution doesn't panic due to an overflow.
     assert!(matches!(
-        execution.run_sync(&mut host),
-        Err(ExecutionError::AceChipError {
-            label: _,
-            source_file: _,
-            error: AceError(_),
-        })
+        execution.run_sync(&mut host).unwrap_err().kind(),
+        ProcessorError::Ace(AceError(_))
     ));
 }
 
@@ -48,10 +44,10 @@ fn eval_circuit_rejects_excessive_wires_before_memory_access() {
             .execute()
             .run_sync(&mut DefaultHost::default())
             .unwrap_err();
-        let ExecutionError::AceChipError { error: AceError(message), .. } = error else {
+        let ProcessorError::Ace(AceError(message)) = error.kind() else {
             panic!("expected an ACE resource-limit error, got {error}");
         };
-        assert_eq!(message, format!("num of wires cannot exceed {limit} but was {}", limit + 2));
+        assert_eq!(*message, format!("num of wires cannot exceed {limit} but was {}", limit + 2));
     }
 }
 
@@ -84,8 +80,7 @@ fn eval_circuit_witness_invocation_limit_across_calls() {
         if invocations == limit {
             result.unwrap();
         } else {
-            let ExecutionError::AceChipError { error: AceError(message), .. } = result.unwrap_err()
-            else {
+            let ProcessorError::Ace(AceError(message)) = result.unwrap_err().into_kind() else {
                 panic!("expected an ACE invocation-limit error");
             };
             assert_eq!(

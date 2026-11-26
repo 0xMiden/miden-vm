@@ -1,5 +1,7 @@
 use alloc::string::ToString;
 
+use miden_processor::ProcessorError;
+
 use super::*;
 
 /// One entry per `on_event` invocation, in execution order, and the recorded log replays to
@@ -43,12 +45,10 @@ fn records_event_mutations_and_replays_them() {
         .expect("failed to assemble test program");
 
     let mut executor = Executor::new(Vec::new());
-    executor
-        .register_event_handler(
-            EventName::from_string(event_name.to_string()),
-            Arc::new(CountingHandler { calls: AtomicU64::new(0) }),
-        )
-        .expect("failed to register event handler");
+    executor.register_event_handler(
+        EventName::from_string(event_name.to_string()),
+        Arc::new(CountingHandler { calls: AtomicU64::new(0) }),
+    );
     executor.with_event_advice_mutations_recording();
 
     // Run to completion through the debug executor: recording is an internal detail of its
@@ -181,12 +181,10 @@ fn replays_from_a_serialized_snapshot() {
         advice_inputs: advice_inputs.clone(),
         options: options.clone(),
     });
-    executor
-        .register_event_handler(
-            EventName::from_string(event_name.to_string()),
-            Arc::new(CountingHandler { calls: AtomicU64::new(0) }),
-        )
-        .expect("failed to register event handler");
+    executor.register_event_handler(
+        EventName::from_string(event_name.to_string()),
+        Arc::new(CountingHandler { calls: AtomicU64::new(0) }),
+    );
     executor.with_event_advice_mutations_recording();
     let mut debug_executor = executor.into_debug(program.clone(), source_manager.clone());
     while !debug_executor.stopped {
@@ -265,8 +263,7 @@ fn into_stepper_keeps_the_event_handlers() {
     };
     let mut executor = Executor::new(Vec::new());
     executor
-        .register_event_handler(EventName::from_string(event_name.to_string()), Arc::new(handler))
-        .expect("failed to register event handler");
+        .register_event_handler(EventName::from_string(event_name.to_string()), Arc::new(handler));
 
     let (mut stepper, mut host) = executor.into_stepper(program, source_manager).unwrap();
     let mut cycles = 0;
@@ -295,8 +292,8 @@ fn into_stepper_returns_the_initial_context_error() {
         Executor::from_config(config).into_stepper(program.clone(), source_manager.clone())
     };
     // The advice error that refuses the stepper.
-    let refusal = |config| match into_stepper(config) {
-        Err(ExecutionError::AdviceError { err, .. }) => err,
+    let refusal = |config| match into_stepper(config).map_err(ExecutionError::into_kind) {
+        Err(ProcessorError::Advice(err)) => err,
         Err(other) => panic!("expected an advice error: {other:?}"),
         Ok(_) => panic!("the program's advice map must not give a stepper"),
     };

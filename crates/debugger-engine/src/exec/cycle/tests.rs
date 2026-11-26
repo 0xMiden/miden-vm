@@ -18,8 +18,8 @@ use miden_debug_types::SourceManager;
 use miden_mast_package::Package;
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionError, FastProcessor, FutureMaybeSend, Host, LoadedMastForest,
-    MastForestLoadError, Processor, ProcessorState, StackInputs, advice::AdviceMutation,
-    event::EventError,
+    MastForestLoadError, Processor, ProcessorError, ProcessorState, SessionUnavailableReason,
+    StackInputs, advice::AdviceMutation, event::EventError,
 };
 
 use super::*;
@@ -643,27 +643,20 @@ fn a_dropped_step_is_not_a_finished_program() {
     assert!(stepper.resume_ctx().is_none(), "the dropped step took the context");
     assert!(!stepper.stopped());
     assert!(!stepper.failed());
-    match stepper.step_sync(&mut host.inner, |_| {}) {
-        Err(ExecutionError::Internal(message)) => {
-            assert!(message.contains("did not complete"), "{message}")
-        },
-        other => panic!("expected the lost execution to be reported: {other:?}"),
-    }
+    assert!(matches!(
+        stepper.step_sync(&mut host.inner, |_| {}).map_err(ExecutionError::into_kind),
+        Err(ProcessorError::SessionUnavailable(SessionUnavailableReason::Interrupted))
+    ));
     // A stepper left stepping would keep a caller looping on `stopped` forever.
     assert!(stepper.stopped() && stepper.failed());
-    match stepper.step_sync(&mut host.inner, |_| {}) {
-        Err(ExecutionError::Internal(message)) => {
-            assert!(message.contains("cannot be stepped"), "{message}")
-        },
-        other => panic!("expected a failed program to be refused: {other:?}"),
-    }
-    match stepper.into_output() {
-        Err(ExecutionError::Internal(message)) => {
-            assert_eq!(message, "the program failed and has no output")
-        },
-        Err(other) => panic!("expected the failed program to be refused: {other:?}"),
-        Ok(_) => panic!("a failed program has no output"),
-    }
+    assert!(matches!(
+        stepper.step_sync(&mut host.inner, |_| {}).map_err(ExecutionError::into_kind),
+        Err(ProcessorError::SessionUnavailable(SessionUnavailableReason::Interrupted))
+    ));
+    assert!(matches!(
+        stepper.into_output().map_err(ExecutionError::into_kind),
+        Err(ProcessorError::SessionUnavailable(SessionUnavailableReason::Interrupted))
+    ));
 }
 
 /// An instrument that keeps the operation of every record it receives and notes its turn.
@@ -815,7 +808,7 @@ fn debug_executor_stops_on_a_failing_step() {
         }
         assert!(!exec.stopped, "the program fails on `assert` before it ends");
     };
-    assert!(!matches!(error, ExecutionError::Internal(_)), "{error:?}");
+    assert!(!matches!(error.kind(), ProcessorError::Internal(_)), "{error:?}");
     assert!(exec.stopped);
     assert_eq!(exec.cycle, clock(exec.processor()));
     let described = records.borrow().len();
@@ -844,13 +837,10 @@ fn a_step_after_a_panic_in_the_callback_reports_the_lost_execution_once() {
     let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| exec.step()));
     assert!(unwound.is_err());
     assert!(!exec.stopped);
-    match exec.step() {
-        Err(ExecutionError::Internal(message)) => {
-            assert!(message.contains("did not complete"), "{message}")
-        },
-        Err(other) => panic!("expected the lost execution to be reported: {other:?}"),
-        Ok(_) => panic!("a step after a lost execution must fail"),
-    }
+    assert!(matches!(
+        exec.step().map_err(ExecutionError::into_kind),
+        Err(ProcessorError::SessionUnavailable(SessionUnavailableReason::Interrupted))
+    ));
     assert!(exec.stopped);
     assert!(exec.step().unwrap().is_none());
     assert!(exec.stopped);
@@ -1286,7 +1276,10 @@ fn into_output_is_refused_after_a_failure() {
     assert!(stepper.failed() && stepper.stopped());
     assert_eq!(stepper.cycle(), clock, "the refused step leaves the clock alone");
     assert!(stepper.run_sync(&mut DefaultHost::default(), |_| {}).is_err());
-    assert!(stepper.into_output().is_err());
+    assert!(matches!(
+        stepper.into_output().map_err(ExecutionError::into_kind),
+        Err(ProcessorError::SessionUnavailable(SessionUnavailableReason::PreviouslyFailed))
+    ));
 }
 
 /// `exec` of a MASM procedure is recorded as an inline call: the frames name the procedure
@@ -1423,11 +1416,10 @@ fn stepper_output_preserves_deferred_work_and_verification_limits() {
     let mut stepper = Stepper::new(processor, ctx);
     stepper.run_sync(&mut DefaultHost::default(), |_| {}).unwrap();
     assert!(matches!(
-        stepper.into_output(),
-        Err(ExecutionError::DeferredError {
-            err: PrecompileError::Limit(PrecompileLimitError::Elements { max: 0, .. }),
-            ..
-        })
+        stepper.into_output().map_err(ExecutionError::into_kind),
+        Err(ProcessorError::Deferred(PrecompileError::Limit(
+            PrecompileLimitError::Elements { max: 0, .. }
+        )))
     ));
 }
 
@@ -1625,7 +1617,7 @@ fn a_cycle_that_trips_the_limit_is_counted() {
     let mut stepper = Stepper::for_package(processor, package).unwrap();
     let mut records = 0;
     let error = stepper.run_sync(&mut DefaultHost::default(), |_| records += 1).unwrap_err();
-    assert!(matches!(error, ExecutionError::CycleLimitExceeded(64)), "{error:?}");
+    assert!(matches!(error.kind(), ProcessorError::CycleLimitExceeded(64)), "{error:?}");
     assert_eq!(records, stepper.cycle());
     assert!(stepper.failed());
 }
@@ -1652,7 +1644,7 @@ fn debug_executor_mirrors_the_clock_on_a_cycle_limit() {
         }
         assert!(!exec.stopped, "the fixture runs longer than the limit");
     };
-    assert!(matches!(error, ExecutionError::CycleLimitExceeded(64)), "{error:?}");
+    assert!(matches!(error.kind(), ProcessorError::CycleLimitExceeded(64)), "{error:?}");
     assert_eq!(exec.cycle, clock(exec.processor()));
     // The 65th cycle completed before it tripped the limit of 64.
     assert_eq!(exec.cycle, 65);

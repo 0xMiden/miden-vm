@@ -14,8 +14,7 @@ use miden_mast_package::{
     debug_info::{DebugSourceNodeId, PackageDebugInfo},
 };
 use miden_processor::{
-    DefaultHost, PackageSourceDebugContext,
-    operation::OperationError,
+    DefaultHost, PackageSourceDebugContext, ProcessorError, operation::OperationError,
 };
 
 fuzz_target!(|data: &[u8]| {
@@ -112,7 +111,9 @@ fn exercise_embedded_kernel(package: &Package) {
     let round_tripped = Package::read_from_bytes(&encoded)
         .expect("an admitted embedded kernel should survive serialization and re-admission");
     assert_eq!(
-        round_tripped.debug_info().expect("round-tripped kernel debug info should remain valid"),
+        round_tripped
+            .debug_info()
+            .expect("round-tripped kernel debug info should remain valid"),
         actual_debug_info
     );
 }
@@ -133,15 +134,13 @@ fn exercise_execution_diagnostics(debug_info: &PackageDebugInfo) {
         let Ok(source_node_idx) = u32::try_from(source_node_idx) else {
             break;
         };
-        let context = PackageSourceDebugContext::new(
-            debug_info,
-            DebugSourceNodeId::from(source_node_idx),
-        );
+        let context =
+            PackageSourceDebugContext::new(debug_info, DebugSourceNodeId::from(source_node_idx));
 
         let _ = context.assembly_location(None);
         for asm_op in &source_node.asm_ops {
-            let _ = OperationError::DivideByZero.with_package_source_context(
-                context,
+            let _ = ProcessorError::Operation(OperationError::DivideByZero).with_context(
+                Some(context),
                 &host,
                 Some(asm_op.op_idx as usize),
             );

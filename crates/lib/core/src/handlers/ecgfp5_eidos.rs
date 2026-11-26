@@ -46,10 +46,10 @@ pub const ECGFP5_EIDOS_SEAL_PREPROCESSED_EVENT_NAME: EventName =
 /// ```
 /// # use miden_core_lib::{CoreLibrary, handlers::ecgfp5_eidos::Ecgfp5SealHandler};
 /// # use miden_crypto::ecdh::ecgfp5::PublicKey;
-/// # use miden_processor::{DefaultHost, ExecutionError};
+/// # use miden_processor::{DefaultHost, HostError};
 /// # fn configure<R: rand::CryptoRng + Send + Sync + 'static>(
 /// #     rng: R, recipient: PublicKey,
-/// # ) -> Result<DefaultHost, ExecutionError> {
+/// # ) -> Result<DefaultHost, HostError> {
 /// let mut host = DefaultHost::default().with_library(&CoreLibrary::default())?;
 /// let sealing = Ecgfp5SealHandler::new(rng).with_public_key(recipient);
 /// for (event, handler) in sealing.handlers() {

@@ -4,7 +4,7 @@ use miden_core::{
     proof::{MAX_STARK_PROOF_BYTES, PrecompileProof},
 };
 use miden_crypto::hash::eidos::BLOCK_LEN as EIDOS_RATE;
-use miden_processor::{ExecutionError, operation::OperationError};
+use miden_processor::{ProcessorError, operation::OperationError};
 use miden_serde_utils::deserialize_schema_exact;
 use miden_stark::{
     StarkConfig, VerifierInstance,
@@ -315,8 +315,5 @@ fn deep_query_rejects_zero_denominators_with_zero_numerators(
     let error = build_test!(&source, &[])
         .execute()
         .expect_err("zero denominator must be rejected");
-    assert!(matches!(
-        error,
-        ExecutionError::OperationError { err: OperationError::DivideByZero, .. }
-    ));
+    assert!(matches!(error.kind(), ProcessorError::Operation(OperationError::DivideByZero)));
 }

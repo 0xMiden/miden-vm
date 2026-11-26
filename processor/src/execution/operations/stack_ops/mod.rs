@@ -1,5 +1,5 @@
 use crate::{
-    ExecutionError, Felt, ZERO,
+    Felt, ProcessorError, ZERO,
     operation::{BinaryValueErrorContext, OperationError},
     processor::{Processor, StackInterface},
     tracer::OperationHelperRegisters,
@@ -16,7 +16,7 @@ mod tests;
 pub(super) fn op_push<P>(
     processor: &mut P,
     element: Felt,
-) -> Result<OperationHelperRegisters, ExecutionError>
+) -> Result<OperationHelperRegisters, ProcessorError>
 where
     P: Processor,
 {
@@ -27,7 +27,7 @@ where
 
 /// Pushes a `ZERO` on top of the stack.
 #[inline(always)]
-pub(super) fn op_pad<P>(processor: &mut P) -> Result<OperationHelperRegisters, ExecutionError>
+pub(super) fn op_pad<P>(processor: &mut P) -> Result<OperationHelperRegisters, ProcessorError>
 where
     P: Processor,
 {
@@ -64,7 +64,7 @@ pub(super) fn op_swap_double_word<P: Processor>(processor: &mut P) -> OperationH
 pub(super) fn dup_nth<P>(
     processor: &mut P,
     n: usize,
-) -> Result<OperationHelperRegisters, ExecutionError>
+) -> Result<OperationHelperRegisters, ProcessorError>
 where
     P: Processor,
 {

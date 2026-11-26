@@ -1,5 +1,5 @@
 use miden_processor::{
-    ExecutionError, ProcessorState, ZERO,
+    ProcessorError, ProcessorState, ZERO,
     event::{EventName, NoopEventHandler},
     mast,
     operation::OperationError,
@@ -31,7 +31,7 @@ fn assert_with_code() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, err_msg }, .. }
+        ProcessorError::Operation(OperationError::FailedAssertion{ err_code, err_msg })
         if err_code == code && err_msg.is_none()
     );
 }
@@ -44,7 +44,7 @@ fn assert_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, .. }, .. }
+        ProcessorError::Operation(OperationError::FailedAssertion{ err_code, .. })
         if err_code == ZERO
     );
 }
@@ -68,7 +68,7 @@ fn assert_eq_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, err_msg }, .. }
+        ProcessorError::Operation(OperationError::FailedAssertion{ err_code, err_msg })
         if err_code == ZERO && err_msg.is_none()
     );
 
@@ -76,7 +76,7 @@ fn assert_eq_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, err_msg }, .. }
+        ProcessorError::Operation(OperationError::FailedAssertion{ err_code, err_msg })
         if err_code == ZERO && err_msg.is_none()
     );
 }

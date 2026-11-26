@@ -39,7 +39,7 @@ use rstest::rstest;
 use super::*;
 use crate::{
     AdviceInputs, BaseHost, DefaultHost, Execute, ExecutionPlan, LoadedMastForest,
-    MastForestLoadError, Processor, ProcessorState, SyncHost,
+    MastForestLoadError, Processor, ProcessorError, ProcessorState, SyncHost,
     advice::{AdviceMap, AdviceMutation},
     event::EventError,
     operation::OperationError,
@@ -53,6 +53,7 @@ mod masm_consistency;
 mod memory;
 mod precompiles;
 mod proving;
+mod tracer;
 
 /// Exercises the single-cycle execution path through termination.
 fn execute_by_steps(
@@ -733,8 +734,10 @@ fn execution_rejects_an_already_started_processor() {
     processor.step_sync(&mut DefaultHost::default(), context).unwrap();
 
     assert_matches!(
-        ExecutionPlan::from_processor(processor, &program, crate::RecordWitness).err(),
-        Some(ExecutionError::Internal("an execution plan requires a fresh processor"))
+        ExecutionPlan::from_processor(processor, &program, crate::RecordWitness)
+            .err()
+            .map(ExecutionError::into_kind),
+        Some(ProcessorError::Internal("an execution plan requires a fresh processor"))
     );
 }
 
@@ -873,11 +876,8 @@ fn test_syscall_fail() {
 
     // Check that the error is due to the syscall target not being in the kernel
     assert_matches!(
-        err,
-        ExecutionError::OperationError {
-            err: OperationError::SyscallTargetNotInKernel { .. },
-            ..
-        }
+        err.into_kind(),
+        ProcessorError::Operation(OperationError::SyscallTargetNotInKernel { .. })
     );
 }
 
@@ -942,15 +942,11 @@ fn host_loaded_package_debug_info_reports_loaded_source_span() {
         .run_sync(&mut host)
         .unwrap_err();
 
+    assert_eq!(err.source_span(), Some(SourceSpan::new(loaded_source_file.id(), 0u32..11)));
+    assert_eq!(err.source_file().map(|file| file.id()), Some(loaded_source_file.id()));
     assert_matches!(
-        err,
-        ExecutionError::OperationError {
-            label,
-            source_file: Some(actual_source_file),
-            err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(loaded_source_file.id(), 0u32..11)
-            && actual_source_file.id() == loaded_source_file.id()
-            && err_code == Felt::from_u32(9)
+        err.into_kind(),
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if err_code == Felt::from_u32(9)
     );
 }
 
@@ -969,14 +965,8 @@ fn host_loaded_package_debug_info_requires_source_aware_execution() {
         .expect("loaded package should register");
 
     let err = Processor::new(&program).execute().run_sync(&mut plain_host).unwrap_err();
-    assert_matches!(
-        err,
-        ExecutionError::OperationError {
-            source_file: None,
-            err: OperationError::FailedAssertion { err_code, .. },
-            ..
-        } if err_code == Felt::from_u32(9)
-    );
+    assert!(err.source_file().is_none());
+    assert_matches!(err.into_kind(), ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if err_code == Felt::from_u32(9));
 
     let caller_debug_info = PackageDebugInfo::default();
     let mut source_aware_host = DefaultHost::default()
@@ -992,15 +982,11 @@ fn host_loaded_package_debug_info_requires_source_aware_execution() {
         .run_sync(&mut source_aware_host)
         .unwrap_err();
 
+    assert_eq!(err.source_span(), Some(SourceSpan::new(loaded_source_file.id(), 0u32..11)));
+    assert_eq!(err.source_file().map(|file| file.id()), Some(loaded_source_file.id()));
     assert_matches!(
-        err,
-        ExecutionError::OperationError {
-            label,
-            source_file: Some(actual_source_file),
-            err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(loaded_source_file.id(), 0u32..11)
-            && actual_source_file.id() == loaded_source_file.id()
-            && err_code == Felt::from_u32(9)
+        err.into_kind(),
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if err_code == Felt::from_u32(9)
     );
 }
 
@@ -1028,15 +1014,11 @@ fn host_loaded_package_debug_info_survives_missing_caller_entrypoint_root() {
         .run_sync(&mut host)
         .unwrap_err();
 
+    assert_eq!(err.source_span(), Some(SourceSpan::new(loaded_source_file.id(), 0u32..11)));
+    assert_eq!(err.source_file().map(|file| file.id()), Some(loaded_source_file.id()));
     assert_matches!(
-        err,
-        ExecutionError::OperationError {
-            label,
-            source_file: Some(actual_source_file),
-            err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(loaded_source_file.id(), 0u32..11)
-            && actual_source_file.id() == loaded_source_file.id()
-            && err_code == Felt::from_u32(9)
+        err.into_kind(),
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if err_code == Felt::from_u32(9)
     );
 }
 
@@ -1062,15 +1044,11 @@ fn host_loaded_package_debug_info_survives_step_execution() {
         .execute();
     let err = execute_by_steps(execution, &mut host).unwrap_err();
 
+    assert_eq!(err.source_span(), Some(SourceSpan::new(loaded_source_file.id(), 0u32..11)));
+    assert_eq!(err.source_file().map(|file| file.id()), Some(loaded_source_file.id()));
     assert_matches!(
-        err,
-        ExecutionError::OperationError {
-            label,
-            source_file: Some(actual_source_file),
-            err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(loaded_source_file.id(), 0u32..11)
-            && actual_source_file.id() == loaded_source_file.id()
-            && err_code == Felt::from_u32(9)
+        err.into_kind(),
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if err_code == Felt::from_u32(9)
     );
 }
 
@@ -1101,15 +1079,11 @@ fn direct_step_with_package_debug_info_seeds_initial_resume_context() {
         }
     };
 
+    assert_eq!(err.source_span(), Some(SourceSpan::new(loaded_source_file.id(), 0u32..11)));
+    assert_eq!(err.source_file().map(|file| file.id()), Some(loaded_source_file.id()));
     assert_matches!(
-        err,
-        ExecutionError::OperationError {
-            label,
-            source_file: Some(actual_source_file),
-            err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(loaded_source_file.id(), 0u32..11)
-            && actual_source_file.id() == loaded_source_file.id()
-            && err_code == Felt::from_u32(9)
+        err.into_kind(),
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if err_code == Felt::from_u32(9)
     );
 }
 
@@ -1167,15 +1141,11 @@ fn host_loaded_stripped_package_restores_caller_debug_info() {
         .run_sync(&mut host)
         .unwrap_err();
 
+    assert_eq!(err.source_span(), Some(SourceSpan::new(caller_source_file.id(), 12u32..23)));
+    assert_eq!(err.source_file().map(|file| file.id()), Some(caller_source_file.id()));
     assert_matches!(
-        err,
-        ExecutionError::OperationError {
-            label,
-            source_file: Some(actual_source_file),
-            err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(caller_source_file.id(), 12u32..23)
-            && actual_source_file.id() == caller_source_file.id()
-            && err_code == Felt::from_u32(11)
+        err.into_kind(),
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if err_code == Felt::from_u32(11)
     );
 }
 
@@ -1207,15 +1177,11 @@ fn host_loaded_debug_info_survives_stripped_intermediate_package() {
         .run_sync(&mut host)
         .unwrap_err();
 
+    assert_eq!(err.source_span(), Some(SourceSpan::new(leaf_source_file.id(), 0u32..11)));
+    assert_eq!(err.source_file().map(|file| file.id()), Some(leaf_source_file.id()));
     assert_matches!(
-        err,
-        ExecutionError::OperationError {
-            label,
-            source_file: Some(actual_source_file),
-            err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(leaf_source_file.id(), 0u32..11)
-            && actual_source_file.id() == leaf_source_file.id()
-            && err_code == Felt::from_u32(9)
+        err.into_kind(),
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if err_code == Felt::from_u32(9)
     );
 }
 
@@ -1253,14 +1219,8 @@ fn host_loaded_ambiguous_debug_root_drops_precise_loaded_source_span() {
         .run_sync(&mut host)
         .unwrap_err();
 
-    assert_matches!(
-        err,
-        ExecutionError::OperationError {
-            source_file: None,
-            err: OperationError::FailedAssertion { err_code, .. },
-            ..
-        } if err_code == Felt::from_u32(9)
-    );
+    assert!(err.source_file().is_none());
+    assert_matches!(err.into_kind(), ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if err_code == Felt::from_u32(9));
 }
 
 #[test]
@@ -1432,15 +1392,11 @@ fn package_source_debug_execution_distinguishes_same_exec_node_split_children() 
         .run_sync(&mut host)
         .unwrap_err();
 
+    assert_eq!(err.source_span(), Some(SourceSpan::new(source_file.id(), 6u32..12)));
+    assert_eq!(err.source_file().map(|file| file.id()), Some(source_file.id()));
     assert_matches!(
-        err,
-        ExecutionError::OperationError {
-            label,
-            source_file: Some(actual_source_file),
-            err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(source_file.id(), 6u32..12)
-            && actual_source_file.id() == source_file.id()
-            && err_code == Felt::from_u32(7)
+        err.into_kind(),
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if err_code == Felt::from_u32(7)
     );
 }
 
@@ -1448,12 +1404,18 @@ fn package_source_debug_execution_distinguishes_same_exec_node_split_children() 
 fn package_source_debug_execution_uses_manifest_entrypoint_source_node() {
     let fixture =
         same_digest_entrypoint_fixture(vec![Operation::Assert(Felt::from_u32(9))], "assert");
-    assert!(
-        fixture
-            .debug_info
-            .unique_source_root_for_exec_node(fixture.program.entrypoint())
-            .is_err(),
-        "debug info alone cannot pick the manifest-selected same-digest entrypoint"
+    let inferred = Processor::new(&fixture.program)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
+            &fixture.debug_info,
+            None,
+        )))
+        .execute()
+        .start();
+    assert_matches!(
+        inferred.err().map(ExecutionError::into_kind),
+        Some(ProcessorError::SourceContext(crate::SourceContextError::Lookup(
+            miden_mast_package::debug_info::DebugSourceGraphLookupError::AmbiguousRoot { exec_node }
+        ))) if exec_node == fixture.program.entrypoint()
     );
 
     let mut host = DefaultHost::default().with_source_manager(fixture.source_manager);
@@ -1466,15 +1428,11 @@ fn package_source_debug_execution_uses_manifest_entrypoint_source_node() {
         .run_sync(&mut host)
         .unwrap_err();
 
+    assert_eq!(err.source_span(), Some(SourceSpan::new(fixture.source_file.id(), 9u32..17)));
+    assert_eq!(err.source_file().map(|file| file.id()), Some(fixture.source_file.id()));
     assert_matches!(
-        err,
-        ExecutionError::OperationError {
-            label,
-            source_file: Some(actual_source_file),
-            err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(fixture.source_file.id(), 9u32..17)
-            && actual_source_file.id() == fixture.source_file.id()
-            && err_code == Felt::from_u32(9)
+        err.into_kind(),
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if err_code == Felt::from_u32(9)
     );
 }
 
@@ -1503,15 +1461,11 @@ async fn package_source_debug_async_execution_uses_manifest_entrypoint_source_no
         .await
         .unwrap_err();
 
+    assert_eq!(err.source_span(), Some(SourceSpan::new(fixture.source_file.id(), 9u32..17)));
+    assert_eq!(err.source_file().map(|file| file.id()), Some(fixture.source_file.id()));
     assert_matches!(
-        err,
-        ExecutionError::OperationError {
-            label,
-            source_file: Some(actual_source_file),
-            err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::new(fixture.source_file.id(), 9u32..17)
-            && actual_source_file.id() == fixture.source_file.id()
-            && err_code == Felt::from_u32(9)
+        err.into_kind(),
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if err_code == Felt::from_u32(9)
     );
 }
 
@@ -2062,14 +2016,11 @@ fn same_digest_entrypoint_fixture(
     }
 }
 
-fn missing_external_package_source_debug_fixture() -> (
-    Program,
-    PackageDebugInfo,
-    DefaultHost,
-    Arc<DefaultSourceManager>,
-    SourceSpan,
-    Arc<SourceFile>,
-) {
+fn missing_external_package_source_debug_fixture(
+    external_has_location: bool,
+    external_file_available: bool,
+    caller_file_available: bool,
+) -> (Program, PackageDebugInfo, Arc<DefaultSourceManager>) {
     let mut forest = MastForest::new();
     let missing_digest = Word::from([ONE, ONE, ONE, ONE]);
     let external_id = ExternalNodeBuilder::new(missing_digest).add_to_forest(&mut forest).unwrap();
@@ -2078,19 +2029,24 @@ fn missing_external_package_source_debug_fixture() -> (
     let program = Program::new(forest.into(), root_id);
 
     let source_manager = Arc::new(DefaultSourceManager::default());
-    let uri = Uri::new("file://pkg/missing-external.masm");
-    let source_file = source_manager.load_from_raw_parts(
-        uri.clone(),
-        SourceContent::new("masm", uri.clone(), "begin\n    call.missing::proc\nend\n"),
-    );
-    let host = DefaultHost::default().with_source_manager(source_manager.clone());
+    let external_uri = Uri::new("file://pkg/external.masm");
+    let caller_uri = Uri::new("file://pkg/caller.masm");
+    for (uri, available, source) in [
+        (&external_uri, external_file_available, "exec"),
+        (&caller_uri, caller_file_available, "begin\n    call.missing::proc\nend\n"),
+    ] {
+        if available {
+            source_manager
+                .load_from_raw_parts(uri.clone(), SourceContent::new("masm", uri.clone(), source));
+        }
+    }
 
-    let expected_span = SourceSpan::new(source_file.id(), 10u32..28);
     let mut builder = PackageDebugInfoBuilder::default();
     let external_asm_op = debug_asm_op(
         &mut builder,
         0,
-        Some(Location::new(uri, ByteIndex::new(10), ByteIndex::new(28))),
+        external_has_location
+            .then(|| Location::new(external_uri, ByteIndex::new(0), ByteIndex::new(4))),
         "external_call",
         "call.missing::proc",
         2,
@@ -2098,18 +2054,19 @@ fn missing_external_package_source_debug_fixture() -> (
     let source_external = builder
         .add_node(debug_source_node(external_id, Vec::new(), 1, vec![external_asm_op]))
         .unwrap();
+    let caller_asm_op = debug_asm_op(
+        &mut builder,
+        0,
+        Some(Location::new(caller_uri, ByteIndex::new(10), ByteIndex::new(28))),
+        "caller",
+        "call.missing::proc",
+        2,
+    );
     let source_root = builder
-        .add_node(debug_source_node(root_id, vec![source_external], 1, Vec::new()))
+        .add_node(debug_source_node(root_id, vec![source_external], 1, vec![caller_asm_op]))
         .unwrap();
     builder.add_root(source_root);
-    let package_debug_info = *builder.build();
-
-    (program, package_debug_info, host, source_manager, expected_span, source_file)
-}
-
-struct MalformedExternalHost {
-    source_manager: Arc<DefaultSourceManager>,
-    loaded_mast_forest: LoadedMastForest,
+    (program, *builder.build(), source_manager)
 }
 
 struct CountingMastForestHost {
@@ -2170,44 +2127,24 @@ fn program_calling_external_procedures(procedure_digests: [Word; 2]) -> Program 
     Program::new(forest.into(), root)
 }
 
-impl BaseHost for MalformedExternalHost {
-    fn get_label_and_source_file(
-        &self,
-        location: &Location,
-    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        let source_file = self.source_manager.get_by_uri(location.uri());
-        let label = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
-        (label, source_file)
-    }
-}
-
-impl SyncHost for MalformedExternalHost {
-    fn get_mast_forest(
-        &self,
-        _node_digest: &Word,
-    ) -> Result<Option<LoadedMastForest>, MastForestLoadError> {
-        Ok(Some(self.loaded_mast_forest.clone()))
-    }
-
-    fn on_event(&mut self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        Ok(Vec::new())
-    }
-}
-
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("test MAST forest load failure")]
 struct TestMastForestLoadError;
 
 struct FailingMastForestHost {
     result: Result<Option<LoadedMastForest>, TestMastForestLoadError>,
+    lookup_count: Cell<usize>,
     source_manager: Arc<DefaultSourceManager>,
+    provide_source_files: bool,
 }
 
 impl FailingMastForestHost {
     fn new() -> Self {
         Self {
             result: Err(TestMastForestLoadError),
+            lookup_count: Cell::new(0),
             source_manager: Arc::default(),
+            provide_source_files: true,
         }
     }
 }
@@ -2217,20 +2154,79 @@ impl BaseHost for FailingMastForestHost {
         &self,
         location: &Location,
     ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        let maybe_file = self.source_manager.get_by_uri(location.uri());
+        let maybe_file = if self.provide_source_files {
+            self.source_manager.get_by_uri(location.uri())
+        } else {
+            None
+        };
         let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
         (span, maybe_file)
     }
 }
 
 impl SyncHost for FailingMastForestHost {
-    fn get_mast_forest(&self, _: &Word) -> Result<Option<LoadedMastForest>, MastForestLoadError> {
+    fn get_mast_forest(
+        &self,
+        _node_digest: &Word,
+    ) -> Result<Option<LoadedMastForest>, MastForestLoadError> {
+        self.lookup_count.set(self.lookup_count.get() + 1);
         self.result.clone().map_err(Into::into)
     }
 
     fn on_event(&mut self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         Ok(Vec::new())
     }
+}
+
+#[test]
+fn external_mast_forest_load_error_is_propagated_sync() {
+    let missing_digest = Word::from([ONE, ONE, ONE, ONE]);
+    let program = program_calling_external_procedures([missing_digest, Word::default()]);
+    let mut host = FailingMastForestHost::new();
+
+    let err = Processor::new(&program).execute().run_sync(&mut host).unwrap_err();
+
+    let ProcessorError::MastForestLoad { root_digest, source } = err.kind() else {
+        panic!("expected a MAST forest load error, got {err:?}");
+    };
+    assert_eq!(*root_digest, missing_digest);
+    assert!(source.downcast_ref::<TestMastForestLoadError>().is_some());
+    assert!(
+        err.source()
+            .and_then(|source| source.downcast_ref::<TestMastForestLoadError>())
+            .is_some(),
+        "the original host error must remain the source"
+    );
+}
+
+#[rstest]
+#[tokio::test(flavor = "current_thread")]
+async fn external_mast_forest_absence_reports_procedure_not_found(
+    #[values(false, true)] run_async: bool,
+    #[values(false, true)] proving: bool,
+) {
+    let missing_digest = Word::from([ONE, ONE, ONE, ONE]);
+    let program = program_calling_external_procedures([missing_digest, Word::default()]);
+    let mut host = FailingMastForestHost::new();
+    host.result = Ok(None);
+
+    let processor = Processor::new(&program);
+    let err = if proving {
+        if run_async {
+            processor.record_witness().run(&mut host).await.unwrap_err()
+        } else {
+            processor.record_witness().run_sync(&mut host).unwrap_err()
+        }
+    } else if run_async {
+        processor.execute().run(&mut host).await.unwrap_err()
+    } else {
+        processor.execute().run_sync(&mut host).unwrap_err()
+    };
+
+    assert_matches!(
+        err.kind(),
+        ProcessorError::ProcedureNotFound { root_digest } if *root_digest == missing_digest
+    );
 }
 
 fn dynamic_forest_call(
@@ -2262,6 +2258,38 @@ fn dynamic_forest_call(
 
 #[rstest]
 #[tokio::test(flavor = "current_thread")]
+async fn host_can_supply_a_forest(
+    #[values(false, true)] run_async: bool,
+    #[values(false, true)] proving: bool,
+) {
+    let mut forest = MastForest::new();
+    let root = BasicBlockNodeBuilder::new(vec![Operation::Incr])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(root);
+    let digest = forest[root].digest();
+    let program = program_calling_external_procedures([digest; 2]);
+    let mut host = FailingMastForestHost::new();
+    host.result = Ok(Some(LoadedMastForest::new(Arc::new(forest))));
+    let processor = Processor::new(&program);
+    let stack = if proving {
+        let witness = if run_async {
+            processor.record_witness().run(&mut host).await.unwrap()
+        } else {
+            processor.record_witness().run_sync(&mut host).unwrap()
+        };
+        *witness.claim.stack_outputs()
+    } else if run_async {
+        processor.execute().run(&mut host).await.unwrap().stack
+    } else {
+        processor.execute().run_sync(&mut host).unwrap().stack
+    };
+    assert_eq!(stack.get_element(0), Some(Felt::from_u32(2)));
+    assert_eq!(host.lookup_count.get(), 1, "the repeated procedure must use the cached forest");
+}
+
+#[rstest]
+#[tokio::test(flavor = "current_thread")]
 async fn package_source_debug_load_error_preserves_source_span(
     #[values("external", "dynexec", "dyncall")] invocation: &str,
     #[values(false, true)] run_async: bool,
@@ -2270,8 +2298,10 @@ async fn package_source_debug_load_error_preserves_source_span(
     let missing_digest = Word::from([ONE, ONE, ONE, ONE]);
     let (program, package_debug_info, source_manager, expected_span, source_file) =
         if invocation == "external" {
-            let (program, debug_info, _, manager, span, file) =
-                missing_external_package_source_debug_fixture();
+            let (program, debug_info, manager) =
+                missing_external_package_source_debug_fixture(true, true, true);
+            let file = manager.get_by_uri(&Uri::new("file://pkg/external.masm")).unwrap();
+            let span = SourceSpan::new(file.id(), 0..4);
             (program, debug_info, manager, span, file)
         } else {
             dynamic_forest_call(missing_digest, invocation)
@@ -2300,16 +2330,11 @@ async fn package_source_debug_load_error_preserves_source_span(
 
     assert!(err.source().unwrap().downcast_ref::<TestMastForestLoadError>().is_some());
 
+    assert_eq!(err.source_span(), Some(expected_span));
+    assert_eq!(err.source_file().map(|file| file.id()), Some(source_file.id()));
     assert_matches!(
-        err,
-        ExecutionError::MastForestError {
-            label,
-            source_file: Some(actual_source_file),
-            root_digest,
-            ..
-        } if label == expected_span
-            && actual_source_file.id() == source_file.id()
-            && root_digest == missing_digest
+        err.kind(),
+        ProcessorError::MastForestLoad { root_digest, .. } if *root_digest == missing_digest
     );
 }
 
@@ -2436,101 +2461,110 @@ fn preserves_first_cached_forest_for_a_shared_procedure() {
     assert_eq!(cached_shared_forest.mast_forest().commitment(), first_commitment);
 }
 
-#[test]
-fn package_source_debug_missing_external_preserves_external_source_span() {
-    let (program, package_debug_info, mut host, _, expected_span, source_file) =
-        missing_external_package_source_debug_fixture();
-
-    let err = Processor::new(&program)
-        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
-            &package_debug_info,
-            None,
-        )))
-        .execute()
-        .run_sync(&mut host)
-        .unwrap_err();
-
-    assert_matches!(
-        err,
-        ExecutionError::ProcedureNotFound {
-            label,
-            source_file: Some(actual_source_file),
-            ..
-        } if label == expected_span && actual_source_file.id() == source_file.id()
-    );
-}
-
-#[test]
-fn package_source_debug_malformed_external_preserves_external_source_span() {
-    let (program, package_debug_info, _, source_manager, expected_span, source_file) =
-        missing_external_package_source_debug_fixture();
-
-    let mut wrong_forest = MastForest::new();
-    let wrong_root = BasicBlockNodeBuilder::new(vec![Operation::Add])
-        .add_to_forest(&mut wrong_forest)
-        .unwrap();
-    wrong_forest.make_root(wrong_root);
-
-    let mut host = MalformedExternalHost {
-        source_manager,
-        loaded_mast_forest: LoadedMastForest::new(Arc::new(wrong_forest)),
-    };
-
-    let err = Processor::new(&program)
-        .with_stack_inputs(StackInputs::new(&[Felt::ONE, Felt::ONE]).unwrap())
-        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
-            &package_debug_info,
-            None,
-        )))
-        .execute()
-        .run_sync(&mut host)
-        .unwrap_err();
-
-    assert_matches!(
-        err,
-        ExecutionError::OperationError {
-            label,
-            source_file: Some(actual_source_file),
-            err: OperationError::MalformedMastForestInHost { .. },
-        } if label == expected_span && actual_source_file.id() == source_file.id()
-    );
-}
-
+#[rstest]
+#[case::unavailable_external_file(true, false, true, Some(("file://pkg/caller.masm", 10..28)))]
+#[case::missing_external_location(false, false, true, Some(("file://pkg/caller.masm", 10..28)))]
+#[case::available_external_source(true, true, true, Some(("file://pkg/external.masm", 0..4)))]
+#[case::neither_file_available(true, false, false, None)]
 #[tokio::test(flavor = "current_thread")]
-async fn package_source_debug_malformed_external_preserves_external_source_span_async() {
-    let (program, package_debug_info, _, source_manager, expected_span, source_file) =
-        missing_external_package_source_debug_fixture();
-
+async fn external_resolution_errors_use_available_source_context(
+    #[case] external_has_location: bool,
+    #[case] external_file_available: bool,
+    #[case] caller_file_available: bool,
+    #[case] expected_source: Option<(&str, core::ops::Range<u32>)>,
+) {
+    let (program, debug_info, source_manager) = missing_external_package_source_debug_fixture(
+        external_has_location,
+        external_file_available,
+        caller_file_available,
+    );
+    let expected = expected_source.map(|(uri, range)| {
+        let file = source_manager.get_by_uri(&Uri::new(uri)).unwrap();
+        (SourceSpan::new(file.id(), range), file.id())
+    });
     let mut wrong_forest = MastForest::new();
     let wrong_root = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut wrong_forest)
         .unwrap();
     wrong_forest.make_root(wrong_root);
+    let wrong_forest = LoadedMastForest::new(Arc::new(wrong_forest));
 
-    let mut host = MalformedExternalHost {
-        source_manager,
-        loaded_mast_forest: LoadedMastForest::new(Arc::new(wrong_forest)),
-    };
+    for (outcome, result) in [
+        ("missing", Ok(None)),
+        ("malformed", Ok(Some(wrong_forest))),
+        ("failed", Err(TestMastForestLoadError)),
+    ] {
+        for asynchronous in [false, true] {
+            let mut host = FailingMastForestHost::new();
+            host.source_manager = source_manager.clone();
+            host.result = result.clone();
+            let execution = Processor::new(&program)
+                .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
+                    &debug_info,
+                    None,
+                )))
+                .execute();
+            let err = if asynchronous {
+                execution.run(&mut host).await
+            } else {
+                execution.run_sync(&mut host)
+            }
+            .unwrap_err();
+
+            assert_eq!(
+                err.source_span(),
+                expected.map(|(span, _)| span),
+                "outcome={outcome}, asynchronous={asynchronous}"
+            );
+            assert_eq!(
+                err.source_file().map(|file| file.id()),
+                expected.map(|(_, id)| id),
+                "outcome={outcome}, asynchronous={asynchronous}"
+            );
+            match &result {
+                Ok(Some(_)) => assert_matches!(
+                    err.kind(),
+                    ProcessorError::Operation(OperationError::MalformedMastForestInHost { .. })
+                ),
+                Ok(None) => assert_matches!(err.kind(), ProcessorError::ProcedureNotFound { .. }),
+                Err(_) => {
+                    assert_matches!(err.kind(), ProcessorError::MastForestLoad { .. });
+                    assert!(
+                        err.source().unwrap().downcast_ref::<TestMastForestLoadError>().is_some()
+                    );
+                },
+            }
+        }
+    }
+}
+
+#[rstest]
+#[case::caller_span_only(false, "file://pkg/caller.masm", 10..28)]
+#[case::external_span_preferred(true, "file://pkg/external.masm", 0..4)]
+fn external_resolution_error_preserves_span_without_source_file(
+    #[case] external_has_span: bool,
+    #[case] expected_uri: &str,
+    #[case] expected_range: core::ops::Range<u32>,
+) {
+    let (program, debug_info, source_manager) =
+        missing_external_package_source_debug_fixture(true, external_has_span, true);
+    let file = source_manager.get_by_uri(&Uri::new(expected_uri)).unwrap();
+    let expected_span = SourceSpan::new(file.id(), expected_range);
+    let mut host = FailingMastForestHost::new();
+    host.source_manager = source_manager;
+    host.provide_source_files = false;
 
     let err = Processor::new(&program)
-        .with_stack_inputs(StackInputs::new(&[Felt::ONE, Felt::ONE]).unwrap())
         .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
-            &package_debug_info,
+            &debug_info,
             None,
         )))
         .execute()
-        .run(&mut host)
-        .await
+        .run_sync(&mut host)
         .unwrap_err();
 
-    assert_matches!(
-        err,
-        ExecutionError::OperationError {
-            label,
-            source_file: Some(actual_source_file),
-            err: OperationError::MalformedMastForestInHost { .. },
-        } if label == expected_span && actual_source_file.id() == source_file.id()
-    );
+    assert_eq!(err.source_span(), Some(expected_span));
+    assert!(err.source_file().is_none());
 }
 
 #[test]
@@ -2547,8 +2581,8 @@ fn test_stack_write_word_max_start_idx() {
     assert_eq!(processor.stack_get_word(start_idx), word);
 }
 
-/// Tests that `ExecutionError::CycleLimitExceeded` is correctly emitted when a program exceeds the
-/// number of allowed cycles.
+/// Tests that `ProcessorError::CycleLimitExceeded` is correctly emitted when a program exceeds
+/// the number of allowed cycles.
 #[test]
 fn test_cycle_limit_exceeded() {
     let mut host = DefaultHost::default();
@@ -2570,7 +2604,7 @@ fn test_cycle_limit_exceeded() {
         .run_sync(&mut host)
         .unwrap_err();
 
-    assert_matches!(err, ExecutionError::CycleLimitExceeded(max_cycles) if max_cycles == MIN_TRACE_LEN as u32);
+    assert_matches!(err.into_kind(), ProcessorError::CycleLimitExceeded(max_cycles) if max_cycles == MIN_TRACE_LEN as u32);
 }
 
 /// Tests that a program using exactly `max_cycles` cycles succeeds.
@@ -2637,11 +2671,8 @@ fn test_assert() {
 
         // Check that the error is due to a failed assertion
         assert_matches!(
-            err,
-            ExecutionError::OperationError {
-                err: OperationError::FailedAssertion { .. },
-                ..
-            }
+            err.into_kind(),
+            ProcessorError::Operation(OperationError::FailedAssertion { .. })
         );
     }
 }
@@ -2883,8 +2914,8 @@ fn stack_depth_default_limit_exceeded_returns_typed_error() {
         .expect_err("pushing past the default stack depth limit should fail");
 
     assert_matches!(
-        err,
-        ExecutionError::StackDepthLimitExceeded {
+        err.into_kind(),
+        ProcessorError::StackDepthLimitExceeded {
             depth,
             max: DEFAULT_MAX_STACK_DEPTH,
         } if depth == DEFAULT_MAX_STACK_DEPTH + 1
@@ -2905,8 +2936,8 @@ fn stack_depth_small_custom_limit_fails_before_buffer_growth() {
         .expect_err("small configured stack depth limit should fail before buffer growth");
 
     assert_matches!(
-        err,
-        ExecutionError::StackDepthLimitExceeded {
+        err.into_kind(),
+        ProcessorError::StackDepthLimitExceeded {
             depth,
             max,
         } if depth == max_stack_depth + 1 && max == max_stack_depth
@@ -3255,8 +3286,8 @@ fn stack_depth_limit_exceeded() {
         .expect_err("pushing past the configured stack depth should fail");
 
     assert_matches!(
-        err,
-        ExecutionError::StackDepthLimitExceeded {
+        err.into_kind(),
+        ProcessorError::StackDepthLimitExceeded {
             depth,
             max: MIN_STACK_DEPTH,
         } if depth == MIN_STACK_DEPTH + 1
@@ -3342,8 +3373,8 @@ fn nested_calls_enforce_aggregate_stack_depth_limit() {
     };
 
     assert_matches!(
-        err,
-        ExecutionError::StackDepthLimitExceeded { depth, max }
+        err.into_kind(),
+        ProcessorError::StackDepthLimitExceeded { depth, max }
             if depth == max_stack_depth + 1 && max == max_stack_depth
     );
 }
@@ -3412,7 +3443,7 @@ fn nested_calls_within_aggregate_budget_succeed() {
     assert_eq!(processor.saved_overflow_len, 0);
 }
 
-/// Tests that `ExecutionError::Internal` is correctly emitted when the continuation stack grows
+/// Tests that `ProcessorError::Internal` is correctly emitted when the continuation stack grows
 /// past the maximum allowed size.
 #[test]
 fn test_continuation_stack_limit_exceeded() {
@@ -3451,7 +3482,7 @@ fn test_continuation_stack_limit_exceeded() {
         .run_sync(&mut host)
         .unwrap_err();
 
-    assert_matches!(err, ExecutionError::Internal(msg) if msg.contains("continuation stack"));
+    assert_matches!(err.into_kind(), ProcessorError::Internal(msg) if msg.contains("continuation stack"));
 }
 
 /// Tests that a continuation stack size exactly equal to `max_num_continuations` succeeds.

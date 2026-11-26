@@ -30,24 +30,26 @@ Pass the program as `&Program`, its public inputs as `StackInputs`, and its priv
 
 ### Execution and sessions
 
-Use `ExecutionPlan::prepare()` to initialize the machine before a run or session. Benchmarks can use it
-to initialize the machine outside the measured section.
+Use `ExecutionPlan::prepare()` to initialize the machine before a run or session. If initial
+advice exceeds the configured limits, `ExecutionError::kind()` returns `ProcessorError::Advice`.
 
 Use `.with_source_context(Some(PackageSourceDebugContext::new(&debug_info, source_node)))` on the
-request to identify the source occurrence for diagnostics. Source resolution and recorder setup
-happen at run or start. Every mode supports `.start()`, which returns an `ExecutionSession`
-that owns the machine, continuation, and recorder.
+request to identify the source occurrence for diagnostics. Both run and start validate the source
+context before calling the host. Invalid occurrences surface as `ProcessorError::SourceContext`
+through `ExecutionError::kind()`. Every mode supports `.start()`, which returns an
+`ExecutionSession` that owns the machine, continuation, and recorder.
 
 `state()` remains available after halt, failure, or cancellation. Use borrowed `step_sync` and
 `step` for individual steps, or `run_until_halt_sync` and `run_until_halt` to drive the remaining
-execution and keep the session.
+execution and keep the session. The failing step or drive returns its original `ExecutionError`.
+Another attempt returns `ProcessorError::SessionUnavailable` through `kind()`, with the reason
+`PreviouslyFailed` after a failure or `Interrupted` after an interrupted step or drive.
 
 `.run_to_completion_sync(&mut host)` and `.run_to_completion(&mut host).await` return
 `HaltedExecution` after successful termination. Its `state()` exposes the halted machine until
 `finish()` consumes it and exports the execution output and any recorded artifact. Deferred
-precompile witness export happens during `finish()`, so export failures occur after VM completion.
-Each stage returns `ExecutionError` on failure. Failed or cancelled sessions cannot resume or
-complete.
+precompile witness export happens during `finish()`. Both `finish()` and the combined `run_sync`
+and `run` methods report export failures as `ProcessorError::Deferred` through `ExecutionError::kind()`.
 
 On a halted witness recording, `trace_len_upper_bound()` reports the core and chiplet sizes from
 the live recorder. The Eidos compression count bounds the distinct requests that replay will keep.
@@ -62,7 +64,8 @@ it directly for raw stepping and machine inspection. Ordinary execution uses the
 ### Trace generation with `build_trace()`
 The prover consumes the recorded witness and builds the trace after execution. For row-level
 inspection or AIR diagnostics, call `witness.into_parts()` to obtain the VM witness and the
-optional precompile witness. Then call `vm_witness.build_trace(&budget)`.
+optional precompile witness. Then call `vm_witness.build_trace(&budget)`. This method returns
+`TraceGenerationError` if replay fails or the trace exceeds its limits.
 
 Use `miden_vm_stark::memory::default_budget()` or `canonical_budget(limit_bytes)` for the
 canonical VM proof configuration. The processor checks the model against the padded heights

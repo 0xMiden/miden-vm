@@ -1,5 +1,5 @@
 use crate::{
-    ExecutionError, Felt, ONE,
+    Felt, ONE, ProcessorError,
     errors::OperationError,
     processor::{Processor, StackInterface, SystemInterface},
     tracer::OperationHelperRegisters,
@@ -32,7 +32,7 @@ where
 
 /// Writes the current stack depth to the top of the stack.
 #[inline(always)]
-pub(super) fn op_sdepth<P>(processor: &mut P) -> Result<OperationHelperRegisters, ExecutionError>
+pub(super) fn op_sdepth<P>(processor: &mut P) -> Result<OperationHelperRegisters, ProcessorError>
 where
     P: Processor,
 {
@@ -46,23 +46,17 @@ where
 /// Overwrites the top four stack items with the value of the CALLER_HASH register, which is the
 /// hash of the procedure that initiated the most recent SYSCALL, or ZERO if not in a syscall
 /// context.
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "uniform return type with sibling op_* handlers dispatched in execute_op"
-)]
 #[inline(always)]
-pub(super) fn op_caller<P: Processor>(
-    processor: &mut P,
-) -> Result<OperationHelperRegisters, ExecutionError> {
+pub(super) fn op_caller<P: Processor>(processor: &mut P) -> OperationHelperRegisters {
     let caller_hash = processor.system().caller_hash();
     processor.stack_mut().set_word(0, &caller_hash);
 
-    Ok(OperationHelperRegisters::Empty)
+    OperationHelperRegisters::Empty
 }
 
 /// Writes the current clock value to the top of the stack.
 #[inline(always)]
-pub(super) fn op_clk<P>(processor: &mut P) -> Result<OperationHelperRegisters, ExecutionError>
+pub(super) fn op_clk<P>(processor: &mut P) -> Result<OperationHelperRegisters, ProcessorError>
 where
     P: Processor,
 {

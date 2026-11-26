@@ -1,11 +1,10 @@
 use alloc::vec::Vec;
 
 use miden_core::deferred::PrecompileError;
-use miden_utils_diagnostics::Diagnostic;
 
 use crate::{Felt, Word, crypto::merkle::MerkleError};
 
-#[derive(Debug, thiserror::Error, Diagnostic)]
+#[derive(Debug, thiserror::Error)]
 pub enum AdviceError {
     #[error(
         "value for key {} already present in the advice map: previous values were '{prev_values:?}', attempted replacement values were '{new_values:?}'",

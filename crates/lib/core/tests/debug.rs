@@ -21,6 +21,7 @@ use miden_core_lib::{
 };
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOutput, HostLibrary, MemoryError, Processor,
+    ProcessorError,
     advice::{AdviceInputs, AdviceStack},
     event::{EventHandler, EventName},
 };
@@ -297,8 +298,12 @@ fn print_mem_rejects_out_of_bounds_range_end() {
     };
     let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
 
-    match Processor::new(&program).execute().run_sync(&mut host) {
-        Err(ExecutionError::EventError { error, .. }) => {
+    match Processor::new(&program)
+        .execute()
+        .run_sync(&mut host)
+        .map_err(ExecutionError::into_kind)
+    {
+        Err(ProcessorError::Event { source: error, .. }) => {
             let err = error.downcast_ref::<MemoryError>().expect("expected a MemoryError");
             assert!(matches!(err, MemoryError::AddressOutOfBounds { .. }));
         },
@@ -334,8 +339,12 @@ fn print_mem_rejects_oversized_range() {
     };
     let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
 
-    match Processor::new(&program).execute().run_sync(&mut host) {
-        Err(ExecutionError::EventError { error, .. }) => {
+    match Processor::new(&program)
+        .execute()
+        .run_sync(&mut host)
+        .map_err(ExecutionError::into_kind)
+    {
+        Err(ProcessorError::Event { source: error, .. }) => {
             assert_eq!(error.to_string(), "print_mem range length 1025 exceeds maximum of 1024");
         },
         Err(err) => panic!("unexpected error type: {err:?}"),
@@ -371,8 +380,12 @@ fn print_mem_rejects_full_range() {
     };
     let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
 
-    match Processor::new(&program).execute().run_sync(&mut host) {
-        Err(ExecutionError::EventError { error, .. }) => {
+    match Processor::new(&program)
+        .execute()
+        .run_sync(&mut host)
+        .map_err(ExecutionError::into_kind)
+    {
+        Err(ProcessorError::Event { source: error, .. }) => {
             assert_eq!(
                 error.to_string(),
                 "print_mem range length 4294967296 exceeds maximum of 1024"

@@ -76,7 +76,7 @@ impl StandaloneDapHost {
     fn load_library(
         &mut self,
         lib: impl Into<HostLibrary>,
-    ) -> Result<(), miden_processor::ExecutionError> {
+    ) -> Result<(), miden_processor::HostError> {
         self.inner.load_library(lib)
     }
 

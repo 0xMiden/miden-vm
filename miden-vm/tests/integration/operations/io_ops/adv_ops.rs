@@ -1,6 +1,6 @@
 use miden_core::{Felt, advice::AdviceStack, chiplets::hasher::compress_state, utils::ToElements};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{ExecutionError, advice::AdviceError};
+use miden_processor::{ProcessorError, advice::AdviceError};
 use miden_utils_testing::{build_expected_hash, expect_exec_error_matches};
 
 use super::{TRUNCATE_STACK_PROC, build_op_test, build_test};
@@ -32,10 +32,7 @@ fn adv_push_repeat() {
 fn adv_push_invalid() {
     // attempting to read from empty advice stack should throw an error
     let test = build_op_test!("adv_push");
-    expect_exec_error_matches!(
-        test,
-        ExecutionError::AdviceError { err: AdviceError::StackReadFailed, .. }
-    )
+    expect_exec_error_matches!(test, ProcessorError::Advice(AdviceError::StackReadFailed))
 }
 
 // PUSHING WORDS ONTO THE STACK (PUSHW)
@@ -65,19 +62,13 @@ fn adv_loadw() {
 fn adv_loadw_invalid() {
     // attempting to read from empty advice stack should throw an error
     let test = build_op_test!("adv_loadw", &[0, 0, 0, 0]);
-    expect_exec_error_matches!(
-        test,
-        ExecutionError::AdviceError { err: AdviceError::StackReadFailed, .. }
-    );
+    expect_exec_error_matches!(test, ProcessorError::Advice(AdviceError::StackReadFailed));
 }
 
 #[test]
 fn adv_pushw_invalid() {
     let test = build_op_test!("adv_pushw", &[], &[1, 2, 3]);
-    expect_exec_error_matches!(
-        test,
-        ExecutionError::AdviceError { err: AdviceError::StackReadFailed, .. }
-    );
+    expect_exec_error_matches!(test, ProcessorError::Advice(AdviceError::StackReadFailed));
 }
 
 // MOVING ELEMENTS TO MEMORY VIA THE STACK (PIPE)

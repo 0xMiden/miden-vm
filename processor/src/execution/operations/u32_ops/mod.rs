@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use paste::paste;
 
 use crate::{
-    ExecutionError, Felt, ZERO,
+    Felt, ProcessorError, ZERO,
     operation::OperationError,
     processor::{Processor, StackInterface},
     tracer::{OperationHelperRegisters, Tracer},
@@ -53,7 +53,7 @@ macro_rules! require_u32_operands {
 pub(super) fn op_u32split<P, T>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, ExecutionError>
+) -> Result<OperationHelperRegisters, ProcessorError>
 where
     P: Processor,
     T: Tracer<Processor = P>,

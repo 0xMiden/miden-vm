@@ -41,10 +41,11 @@ pub use miden_processor as processor;
 pub use miden_processor::{
     BaseHost, DefaultHost, Execute, ExecutionError, ExecutionOptions, ExecutionOutput,
     ExecutionPlan, ExecutionSession, ExecutionWitness, FutureMaybeSend, HaltedExecution, Host,
-    Memory, PackageSourceDebugContext, Processor, RecordWitness, StepStatus, SyncHost,
-    WitnessOutput, advice, crypto, field, serde, trace, utils,
+    HostError, Memory, PackageSourceDebugContext, Processor, ProcessorError, RecordWitness,
+    StepStatus, SyncHost, TraceGenerationError, WitnessOutput, advice, crypto, field, serde, trace,
+    utils,
 };
-pub use miden_prover::{PrecompileProvingError, Prover, ProverError};
+pub use miden_prover::{PrecompileProvingError, Prover, ProverError, VmProvingError};
 pub use miden_verifier::{
     PrecompileVerificationError, ProofSecurityParameters, ProvenSecurityReport, SecurityReport,
     StarkVerificationError, VerificationError, VerificationOutcome, Verifier,

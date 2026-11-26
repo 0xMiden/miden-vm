@@ -32,11 +32,10 @@ use super::{
     },
 };
 use crate::{
-    ContextId, ExecutionError,
+    ContextId,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::MapExecErrNoCtx,
     trace::{
-        ChipletsLengths, TraceLenSummary, VmTrace, VmTraceBudget, VmWitness,
+        ChipletsLengths, TraceGenerationError, TraceLenSummary, VmTrace, VmTraceBudget, VmWitness,
         chiplets::{Ace, AeadStream, Bitwise, Hasher, KernelRom, Memory},
         parallel::{processor::ReplayProcessor, tracer::CoreTraceGenerationTracer},
         range::RangeChecker,
@@ -102,7 +101,7 @@ impl VmWitness {
     /// assert_eq!(*trace.program_hash(), program.hash());
     /// ```
     #[instrument(target = "miden::vm::trace", name = "build_vm_trace", level = "trace", skip_all)]
-    pub fn build_trace(self, budget: &VmTraceBudget) -> Result<VmTrace, ExecutionError> {
+    pub fn build_trace(self, budget: &VmTraceBudget) -> Result<VmTrace, TraceGenerationError> {
         let VmWitness {
             program_info,
             stack_inputs,
@@ -140,13 +139,13 @@ impl VmWitness {
             .len()
             .checked_mul(fragment_size)
             .and_then(|n| n.checked_add(1))
-            .ok_or(ExecutionError::TraceLenExceeded(max_core_alloc_len))?;
+            .ok_or(TraceGenerationError::TraceLenExceeded(max_core_alloc_len))?;
         if total_core_trace_rows > max_core_alloc_len {
-            return Err(ExecutionError::TraceLenExceeded(max_core_alloc_len));
+            return Err(TraceGenerationError::TraceLenExceeded(max_core_alloc_len));
         }
 
         if core_trace_contexts.is_empty() {
-            return Err(ExecutionError::Internal(
+            return Err(TraceGenerationError::InvalidReplay(
                 "no trace fragments provided in the trace witness",
             ));
         }
@@ -197,13 +196,14 @@ impl VmWitness {
         let heights: [usize; MIDEN_AIR_COUNT] =
             [core_height, chiplets_height, eidos_compression_height, byte_pair_lookup_rows];
         validate_heights_within_max_trace_len(&heights)?;
-        let estimated_bytes =
-            budget.prover_peak_bytes(&heights).ok_or(ExecutionError::ProverMemoryExceeded {
+        let estimated_bytes = budget.prover_peak_bytes(&heights).ok_or(
+            TraceGenerationError::ProverMemoryExceeded {
                 estimated_bytes: u64::MAX,
                 budget_bytes: max_prover_memory_bytes,
-            })?;
+            },
+        )?;
         if estimated_bytes > max_prover_memory_bytes {
-            return Err(ExecutionError::ProverMemoryExceeded {
+            return Err(TraceGenerationError::ProverMemoryExceeded {
                 estimated_bytes,
                 budget_bytes: max_prover_memory_bytes,
             });
@@ -290,9 +290,9 @@ fn max_core_alloc_rows(max_prover_memory_bytes: u64) -> usize {
 /// of how permissive the budget is.
 fn validate_heights_within_max_trace_len(
     heights: &[usize; MIDEN_AIR_COUNT],
-) -> Result<(), ExecutionError> {
+) -> Result<(), TraceGenerationError> {
     if heights.iter().any(|&height| height > MAX_TRACE_LEN) {
-        return Err(ExecutionError::TraceLenExceeded(MAX_TRACE_LEN));
+        return Err(TraceGenerationError::TraceLenExceeded(MAX_TRACE_LEN));
     }
     Ok(())
 }
@@ -304,7 +304,7 @@ fn generate_core_trace_row_major(
     fragment_size: usize,
     mast_forest_store: &[Arc<SparseMastForest>],
     max_stack_depth: usize,
-) -> Result<Vec<Felt>, ExecutionError> {
+) -> Result<Vec<Felt>, TraceGenerationError> {
     let num_fragments = core_trace_contexts.len();
     let total_allocated_rows = num_fragments * fragment_size;
 
@@ -325,7 +325,7 @@ fn generate_core_trace_row_major(
         .collect();
 
     // Build the core trace fragments in parallel
-    let fragment_results: Result<Vec<_>, ExecutionError> = core_trace_contexts
+    let fragment_results: Result<Vec<_>, TraceGenerationError> = core_trace_contexts
         .into_par_iter()
         .zip(writers.into_par_iter())
         .map(|(trace_state, writer)| {
@@ -345,7 +345,7 @@ fn generate_core_trace_row_major(
                 &mut tracer,
             )?;
 
-            tracer.into_final_state()
+            Ok(tracer.into_final_state())
         })
         .collect();
     let fragment_results = fragment_results?;
@@ -399,12 +399,12 @@ fn generate_core_trace_row_major(
     push_halt_opcode_row(
         &mut core_trace_data,
         total_core_trace_rows,
-        system_rows
-            .last()
-            .ok_or(ExecutionError::Internal("no trace fragments provided in the trace witness"))?,
-        stack_rows
-            .last()
-            .ok_or(ExecutionError::Internal("no trace fragments provided in the trace witness"))?,
+        system_rows.last().ok_or(TraceGenerationError::InvalidReplay(
+            "no trace fragments provided in the trace witness",
+        ))?,
+        stack_rows.last().ok_or(TraceGenerationError::InvalidReplay(
+            "no trace fragments provided in the trace witness",
+        ))?,
     );
 
     Ok(core_trace_data)
@@ -421,7 +421,7 @@ fn generate_core_trace_row_major(
 fn set_loop_body_multiplicities(
     core_trace_data: &mut [Felt],
     num_rows: usize,
-) -> Result<(), ExecutionError> {
+) -> Result<(), TraceGenerationError> {
     if num_rows < 2 {
         return Ok(());
     }
@@ -462,7 +462,7 @@ fn set_loop_body_multiplicities(
         let body_count = loop_body_counts
             .get(&loop_addr)
             .copied()
-            .ok_or(ExecutionError::Internal("dynamic LOOP has no matching body END"))?;
+            .ok_or(TraceGenerationError::InvalidReplay("dynamic LOOP has no matching body END"))?;
 
         let row: &mut CoreCols<Felt> =
             core_trace_data[row_idx * width..(row_idx + 1) * width].borrow_mut();
@@ -604,7 +604,7 @@ fn initialize_chiplets(
     ace_replay: AceReplay,
     mast_forest_store: &[Arc<SparseMastForest>],
     max_trace_len: usize,
-) -> Result<Chiplets, ExecutionError> {
+) -> Result<Chiplets, TraceGenerationError> {
     let non_hasher_trace_len = non_hasher_trace_len(
         &kernel,
         core_trace_contexts,
@@ -660,7 +660,7 @@ fn initialize_chiplets(
     if chiplets.trace_len() > max_trace_len
         || chiplets.eidos_compression_trace_len() > max_trace_len
     {
-        return Err(ExecutionError::TraceLenExceeded(max_trace_len));
+        return Err(TraceGenerationError::TraceLenExceeded(max_trace_len));
     }
     Ok(chiplets)
 }
@@ -672,7 +672,7 @@ fn non_hasher_trace_len(
     bitwise: &BitwiseReplay,
     ace: &AceReplay,
     max_trace_len: usize,
-) -> Result<usize, ExecutionError> {
+) -> Result<usize, TraceGenerationError> {
     recorded_chiplet_lengths(
         0,
         kernel,
@@ -683,7 +683,7 @@ fn non_hasher_trace_len(
     )
     .and_then(|lengths| lengths.checked_trace_len())
     .filter(|&total| total <= max_trace_len)
-    .ok_or(ExecutionError::TraceLenExceeded(max_trace_len))
+    .ok_or(TraceGenerationError::TraceLenExceeded(max_trace_len))
 }
 
 pub(super) fn recorded_chiplet_lengths<'a>(
@@ -711,12 +711,14 @@ pub(super) fn recorded_chiplet_lengths<'a>(
 /// The replay can come from a deserialized execution witness, so this returns an error for the
 /// inputs that `Hasher::build_merkle_root` and `Hasher::update_merkle_root` assert against: an
 /// empty path, or an index that does not fit in the path's depth.
-fn check_replayed_merkle_path(path: &[Word], index: Felt) -> Result<(), ExecutionError> {
+fn check_replayed_merkle_path(path: &[Word], index: Felt) -> Result<(), TraceGenerationError> {
     if path.is_empty() {
-        return Err(ExecutionError::Internal("replayed Merkle path is empty"));
+        return Err(TraceGenerationError::InvalidReplay("replayed Merkle path is empty"));
     }
     if index.as_canonical_u64().checked_shr(path.len() as u32).unwrap_or(0) != 0 {
-        return Err(ExecutionError::Internal("replayed Merkle path index exceeds the path depth"));
+        return Err(TraceGenerationError::InvalidReplay(
+            "replayed Merkle path index exceeds the path depth",
+        ));
     }
     Ok(())
 }
@@ -727,7 +729,7 @@ fn build_hasher_chiplet(
     mast_forest_store: &[Arc<SparseMastForest>],
     max_controller_trace_len: usize,
     max_eidos_compression_trace_len: usize,
-) -> Result<Hasher, ExecutionError> {
+) -> Result<Hasher, TraceGenerationError> {
     let mut hasher = Hasher::default();
     for hasher_op in ops {
         match hasher_op {
@@ -742,11 +744,11 @@ fn build_hasher_chiplet(
             },
             HasherOp::HashBasicBlock((forest_id, node_id, expected_hash)) => {
                 let forest = lookup_mast_forest(mast_forest_store, forest_id)?;
-                let node = forest
-                    .get_node_by_id(node_id)
-                    .ok_or(ExecutionError::Internal("invalid node ID in hasher replay"))?;
+                let node = forest.get_node_by_id(node_id).ok_or(
+                    TraceGenerationError::InvalidReplay("invalid node ID in hasher replay"),
+                )?;
                 let MastNode::Block(block) = node else {
-                    return Err(ExecutionError::Internal(
+                    return Err(TraceGenerationError::InvalidReplay(
                         "expected basic block node in hasher replay",
                     ));
                 };
@@ -764,7 +766,7 @@ fn build_hasher_chiplet(
         if hasher.trace_len() > max_controller_trace_len
             || hasher.eidos_compression_trace_len() > max_eidos_compression_trace_len
         {
-            return Err(ExecutionError::TraceLenExceeded(max_eidos_compression_trace_len));
+            return Err(TraceGenerationError::TraceLenExceeded(max_eidos_compression_trace_len));
         }
     }
     Ok(hasher)
@@ -773,23 +775,23 @@ fn build_hasher_chiplet(
 fn build_bitwise_chiplets(
     bitwise_replay: BitwiseReplay,
     max_trace_len: usize,
-) -> Result<(Bitwise, AeadStream), ExecutionError> {
+) -> Result<(Bitwise, AeadStream), TraceGenerationError> {
     let mut bitwise = Bitwise::default();
     let mut aead_stream = AeadStream::default();
     for entry in bitwise_replay {
         match entry {
             BitwiseReplayEntry::U32(BitwiseOp::U32And, a, b) => {
-                bitwise.u32and(a, b).map_exec_err_no_ctx()?;
+                bitwise.u32and(a, b)?;
             },
             BitwiseReplayEntry::U32(BitwiseOp::U32Xor, a, b) => {
-                bitwise.u32xor(a, b).map_exec_err_no_ctx()?;
+                bitwise.u32xor(a, b)?;
             },
             BitwiseReplayEntry::AeadStream(entry) => {
-                aead_stream.record(*entry).map_exec_err_no_ctx()?;
+                aead_stream.record(*entry)?;
             },
         }
         if bitwise.trace_len() + aead_stream.trace_len() > max_trace_len {
-            return Err(ExecutionError::TraceLenExceeded(max_trace_len));
+            return Err(TraceGenerationError::TraceLenExceeded(max_trace_len));
         }
     }
     Ok((bitwise, aead_stream))
@@ -799,7 +801,7 @@ fn build_memory_chiplet(
     memory_writes: MemoryWritesReplay,
     core_trace_contexts: &[CoreTraceFragmentContext],
     max_trace_len: usize,
-) -> Result<Memory, ExecutionError> {
+) -> Result<Memory, TraceGenerationError> {
     enum MemoryAccess {
         ReadElement(Felt, ContextId, RowIndex),
         WriteElement(Felt, Felt, ContextId, RowIndex),
@@ -848,23 +850,21 @@ fn build_memory_chiplet(
         .kmerge_by(|a, b| a.clk() < b.clk())
         .try_for_each(|mem_access| {
             match mem_access {
-                MemoryAccess::ReadElement(addr, ctx, clk) => memory
-                    .read(ctx, addr, clk)
-                    .map(|_| ())
-                    .map_err(ExecutionError::MemoryErrorNoCtx)?,
-                MemoryAccess::WriteElement(addr, element, ctx, clk) => memory
-                    .write(ctx, addr, clk, element)
-                    .map_err(ExecutionError::MemoryErrorNoCtx)?,
-                MemoryAccess::ReadWord(addr, ctx, clk) => memory
-                    .read_word(ctx, addr, clk)
-                    .map(|_| ())
-                    .map_err(ExecutionError::MemoryErrorNoCtx)?,
-                MemoryAccess::WriteWord(addr, word, ctx, clk) => memory
-                    .write_word(ctx, addr, clk, word)
-                    .map_err(ExecutionError::MemoryErrorNoCtx)?,
+                MemoryAccess::ReadElement(addr, ctx, clk) => {
+                    memory.read(ctx, addr, clk).map(|_| ())?
+                },
+                MemoryAccess::WriteElement(addr, element, ctx, clk) => {
+                    memory.write(ctx, addr, clk, element)?
+                },
+                MemoryAccess::ReadWord(addr, ctx, clk) => {
+                    memory.read_word(ctx, addr, clk).map(|_| ())?
+                },
+                MemoryAccess::WriteWord(addr, word, ctx, clk) => {
+                    memory.write_word(ctx, addr, clk, word)?
+                },
             }
             if memory.trace_len() > max_trace_len {
-                return Err(ExecutionError::TraceLenExceeded(max_trace_len));
+                return Err(TraceGenerationError::TraceLenExceeded(max_trace_len));
             }
             Ok(())
         })?;
@@ -872,12 +872,15 @@ fn build_memory_chiplet(
     Ok(memory)
 }
 
-fn build_ace_chiplet(ace_replay: AceReplay, max_trace_len: usize) -> Result<Ace, ExecutionError> {
+fn build_ace_chiplet(
+    ace_replay: AceReplay,
+    max_trace_len: usize,
+) -> Result<Ace, TraceGenerationError> {
     let mut ace = Ace::default();
     for (clk, circuit_eval) in ace_replay {
         ace.add_circuit_evaluation(clk, circuit_eval);
         if ace.trace_len() > max_trace_len {
-            return Err(ExecutionError::TraceLenExceeded(max_trace_len));
+            return Err(TraceGenerationError::TraceLenExceeded(max_trace_len));
         }
     }
     Ok(ace)
@@ -887,12 +890,12 @@ fn build_kernel_rom_chiplet(
     kernel: KernelDescriptor,
     kernel_replay: KernelReplay,
     max_trace_len: usize,
-) -> Result<KernelRom, ExecutionError> {
+) -> Result<KernelRom, TraceGenerationError> {
     let mut kernel_rom = KernelRom::new(kernel);
     for proc_hash in kernel_replay {
-        kernel_rom.access_proc(proc_hash).map_exec_err_no_ctx()?;
+        kernel_rom.access_proc(proc_hash)?;
         if kernel_rom.trace_len() > max_trace_len {
-            return Err(ExecutionError::TraceLenExceeded(max_trace_len));
+            return Err(TraceGenerationError::TraceLenExceeded(max_trace_len));
         }
     }
     Ok(kernel_rom)
@@ -981,8 +984,8 @@ type SplitFragmentContext<'a> = (
 ///
 /// # Errors
 ///
-/// Returns [`ExecutionError::Internal`] if any [`MastForestId`] referenced by the fragment
-/// (either `initial_mast_forest_id` or an `EnterForest` continuation) is out of range of
+/// Returns [`TraceGenerationError::InvalidReplay`] if any [`MastForestId`] referenced by the
+/// fragment (either `initial_mast_forest_id` or an `EnterForest` continuation) is out of range of
 /// `mast_forest_store`. Because [`CoreTraceFragmentContext`] is attacker-controllable when fed in
 /// from outside, we validate these indices rather than indexing-and-panicking.
 fn split_trace_fragment_context<'a>(
@@ -991,7 +994,7 @@ fn split_trace_fragment_context<'a>(
     fragment_size: usize,
     mast_forest_store: &[Arc<SparseMastForest>],
     max_stack_depth: usize,
-) -> Result<SplitFragmentContext<'a>, ExecutionError> {
+) -> Result<SplitFragmentContext<'a>, TraceGenerationError> {
     let CoreTraceFragmentContext {
         state: CoreTraceState { system, decoder, stack },
         replay:
@@ -1037,12 +1040,12 @@ fn split_trace_fragment_context<'a>(
 /// Translates a snapshotted `ContinuationStack<MastForestId>` into one carrying actual
 /// [`Arc<SparseMastForest>`] handles, ready to drive `execute_impl`.
 ///
-/// Returns [`ExecutionError::Internal`] if any `EnterForest` continuation carries a
+/// Returns [`TraceGenerationError::InvalidReplay`] if any `EnterForest` continuation carries a
 /// [`MastForestId`] that is out of range of `mast_forest_store`.
 fn translate_snapshot_continuation_stack(
     snapshot: ContinuationStack<MastForestId>,
     mast_forest_store: &[Arc<SparseMastForest>],
-) -> Result<ContinuationStack<Arc<SparseMastForest>>, ExecutionError> {
+) -> Result<ContinuationStack<Arc<SparseMastForest>>, TraceGenerationError> {
     let mut out: ContinuationStack<Arc<SparseMastForest>> = ContinuationStack::default();
     for cont in snapshot.into_inner() {
         let translated = match cont {
@@ -1074,13 +1077,13 @@ fn translate_snapshot_continuation_stack(
     Ok(out)
 }
 
-/// Looks up `id` in `mast_forest_store`, returning [`ExecutionError::Internal`] if it is out of
-/// range.
+/// Looks up `id` in `mast_forest_store`, returning [`TraceGenerationError::InvalidReplay`] if it is
+/// out of range.
 fn lookup_mast_forest(
     mast_forest_store: &[Arc<SparseMastForest>],
     id: MastForestId,
-) -> Result<&Arc<SparseMastForest>, ExecutionError> {
-    mast_forest_store
-        .get(id.to_usize())
-        .ok_or(ExecutionError::Internal("MastForestId out of range of mast_forest_store"))
+) -> Result<&Arc<SparseMastForest>, TraceGenerationError> {
+    mast_forest_store.get(id.to_usize()).ok_or(TraceGenerationError::InvalidReplay(
+        "MastForestId out of range of mast_forest_store",
+    ))
 }

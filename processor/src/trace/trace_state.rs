@@ -8,8 +8,9 @@ use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, read_bounded_len,
 };
 
+use super::TraceGenerationError;
 use crate::{
-    AceError, ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, Word, ZERO,
+    AceError, ContextId, Felt, MIN_STACK_DEPTH, MemoryError, ONE, ProcessorError, Word, ZERO,
     advice::AdviceError,
     continuation_stack::ContinuationStack,
     crypto::merkle::MerklePath,
@@ -153,7 +154,7 @@ impl DecoderState {
         &mut self,
         block_address_replay: &mut BlockAddressReplay,
         block_stack_replay: &mut BlockStackReplay,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), ProcessorError> {
         self.current_addr = block_address_replay.replay_block_address()?;
         self.parent_addr = block_stack_replay.replay_node_start_parent_addr()?;
         Ok(())
@@ -165,7 +166,7 @@ impl DecoderState {
     pub fn replay_node_end(
         &mut self,
         block_stack_replay: &mut BlockStackReplay,
-    ) -> Result<Felt, ExecutionError> {
+    ) -> Result<Felt, ProcessorError> {
         let node_end_data = block_stack_replay.replay_node_end()?;
 
         self.current_addr = node_end_data.prev_addr;
@@ -399,17 +400,17 @@ impl BlockStackReplay {
     }
 
     /// Replays the node's parent address
-    pub fn replay_node_start_parent_addr(&mut self) -> Result<Felt, ExecutionError> {
+    pub fn replay_node_start_parent_addr(&mut self) -> Result<Felt, ProcessorError> {
         self.node_start_parent_addr
             .pop_front()
-            .ok_or(ExecutionError::Internal("no node start parent address recorded"))
+            .ok_or(ProcessorError::Internal("no node start parent address recorded"))
     }
 
     /// Replays the data needed to recover the state on an END operation.
-    pub fn replay_node_end(&mut self) -> Result<NodeEndData, ExecutionError> {
+    pub fn replay_node_end(&mut self) -> Result<NodeEndData, ProcessorError> {
         self.node_end
             .pop_front()
-            .ok_or(ExecutionError::Internal("no node address and flags recorded"))
+            .ok_or(ProcessorError::Internal("no node address and flags recorded"))
     }
 }
 
@@ -517,10 +518,12 @@ impl MastForestResolutionReplay {
 
     /// Replays the next recorded MastForest resolution, returning both the node ID and the forest
     /// id.
-    pub fn replay_resolution(&mut self) -> Result<(MastNodeId, MastForestId), ExecutionError> {
+    pub fn replay_resolution(
+        &mut self,
+    ) -> Result<(MastNodeId, MastForestId), TraceGenerationError> {
         self.mast_forest_resolutions
             .pop_front()
-            .ok_or(ExecutionError::Internal("no MastForest resolutions recorded"))
+            .ok_or(TraceGenerationError::InvalidReplay("no MastForest resolutions recorded"))
     }
 
     pub(crate) fn iter_forest_ids(&self) -> impl Iterator<Item = MastForestId> + '_ {
@@ -747,24 +750,24 @@ impl AdviceReplay {
     // --------------------------------------------------------------------------------
 
     /// Replays a pop_stack operation, returning the previously recorded value
-    pub fn replay_pop_stack(&mut self) -> Result<Felt, ExecutionError> {
+    pub fn replay_pop_stack(&mut self) -> Result<Felt, TraceGenerationError> {
         self.stack_pops
             .pop_front()
-            .ok_or(ExecutionError::Internal("no stack pop operations recorded"))
+            .ok_or(TraceGenerationError::InvalidReplay("no stack pop operations recorded"))
     }
 
     /// Replays a pop_stack_word operation, returning the previously recorded word
-    pub fn replay_pop_stack_word(&mut self) -> Result<Word, ExecutionError> {
+    pub fn replay_pop_stack_word(&mut self) -> Result<Word, TraceGenerationError> {
         self.stack_word_pops
             .pop_front()
-            .ok_or(ExecutionError::Internal("no stack word pop operations recorded"))
+            .ok_or(TraceGenerationError::InvalidReplay("no stack word pop operations recorded"))
     }
 
     /// Replays a pop_stack_dword operation, returning the previously recorded double word
-    pub fn replay_pop_stack_dword(&mut self) -> Result<[Word; 2], ExecutionError> {
+    pub fn replay_pop_stack_dword(&mut self) -> Result<[Word; 2], TraceGenerationError> {
         self.stack_dword_pops
             .pop_front()
-            .ok_or(ExecutionError::Internal("no stack dword pop operations recorded"))
+            .ok_or(TraceGenerationError::InvalidReplay("no stack dword pop operations recorded"))
     }
 }
 
@@ -1084,10 +1087,10 @@ impl BlockAddressReplay {
 
     /// Replays a `Hasher::hash_control_block` or `Hasher::hash_basic_block` operation, returning
     /// the pre-recorded address
-    pub fn replay_block_address(&mut self) -> Result<Felt, ExecutionError> {
+    pub fn replay_block_address(&mut self) -> Result<Felt, ProcessorError> {
         self.block_addresses
             .pop_front()
-            .ok_or(ExecutionError::Internal("no block address operations recorded"))
+            .ok_or(ProcessorError::Internal("no block address operations recorded"))
     }
 }
 

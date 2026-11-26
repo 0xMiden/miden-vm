@@ -1,8 +1,8 @@
 use miden_air_definitions::vm::trace::{RowIndex, chiplets::hasher::HasherState};
-use miden_core::deferred::Digest;
+use miden_core::deferred::{Digest, PrecompileError};
 
 use crate::{
-    ContextId, ExecutionError, Felt, MemoryError, Word, advice::AdviceError,
+    ContextId, Felt, MemoryError, ProcessorError, Word, advice::AdviceError,
     crypto::merkle::MerklePath, errors::OperationError,
 };
 
@@ -81,13 +81,13 @@ pub(crate) trait SystemInterface {
         &mut self,
         statement_digest: Digest,
         expected_new_root: Word,
-    ) -> Result<(), OperationError>;
+    ) -> Result<(), PrecompileError>;
 
     /// Clears the deferred root only if it matches `expected_previous_root`.
     ///
     /// The operation must check the root context before calling this method. A mismatch leaves
     /// the deferred state unchanged.
-    fn clear_deferred(&mut self, expected_previous_root: Word) -> Result<(), OperationError>;
+    fn clear_deferred(&mut self, expected_previous_root: Word) -> Result<(), PrecompileError>;
 
     // CALL STATE
     // --------------------------------------------------------------------------------------------
@@ -219,7 +219,7 @@ pub(crate) trait StackInterface {
     /// It is guaranteed that any operation that calls `increment_size()` will subsequently
     /// call `write(0)` or `write_word(0)` to write an element to that position on the
     /// stack.
-    fn increment_size(&mut self) -> Result<(), ExecutionError>;
+    fn increment_size(&mut self) -> Result<(), ProcessorError>;
 
     /// Decrements the stack size by one, removing the top element from the stack.
     ///

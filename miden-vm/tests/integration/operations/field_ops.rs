@@ -1,7 +1,7 @@
 #[cfg(feature = "testing")]
 use miden_assembly::testing::regex;
 use miden_core::field::Field;
-use miden_processor::{ExecutionError, operation::OperationError};
+use miden_processor::{ProcessorError, operation::OperationError};
 use miden_utils_testing::{
     Felt, ONE, PrimeField64, ZERO, build_op_test, build_test, expect_exec_error_matches,
 };
@@ -229,10 +229,7 @@ fn div_fail() {
 
     // --- test divide by zero --------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[0, 1]);
-    expect_exec_error_matches!(
-        test,
-        ExecutionError::OperationError { err: OperationError::DivideByZero, .. }
-    );
+    expect_exec_error_matches!(test, ProcessorError::Operation(OperationError::DivideByZero));
 }
 
 #[test]
@@ -337,7 +334,7 @@ fn pow2_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::FailedAssertion{err_code, err_msg}, .. }
+        ProcessorError::Operation(OperationError::FailedAssertion{err_code, err_msg})
         if err_code == ZERO && err_msg.is_none()
     );
 }
@@ -369,7 +366,7 @@ fn exp_bits_length_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::FailedAssertion{err_code, err_msg}, .. }
+        ProcessorError::Operation(OperationError::FailedAssertion{err_code, err_msg})
         if err_code == ZERO && err_msg.is_none()
     );
 
@@ -475,7 +472,7 @@ fn bare_exp_rejects_64_bit_exponents() {
         let test = build_op_test!(asm_op, &[pow, base]);
         expect_exec_error_matches!(
             test,
-            ExecutionError::OperationError{ err: OperationError::FailedAssertion{err_code, err_msg}, .. }
+            ProcessorError::Operation(OperationError::FailedAssertion{err_code, err_msg})
             if err_code == ZERO && err_msg.is_none()
         );
     }
@@ -506,10 +503,7 @@ fn ilog2_fail() {
     let asm_op = "ilog2";
 
     let test = build_op_test!(asm_op, &[0]);
-    expect_exec_error_matches!(
-        test,
-        ExecutionError::OperationError { err: OperationError::LogArgumentZero, .. }
-    );
+    expect_exec_error_matches!(test, ProcessorError::Operation(OperationError::LogArgumentZero));
 }
 
 #[test]
@@ -559,7 +553,7 @@ fn ilog2_rejects_forged_advice_too_high_claim() {
     let test = build_test!(source, &[n], &[forged_ilog2]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, err_msg }, .. }
+        ProcessorError::Operation(OperationError::FailedAssertion{ err_code, err_msg })
         if err_code == ZERO && err_msg.is_none()
     );
 }
@@ -573,7 +567,7 @@ fn ilog2_rejects_forged_advice_too_low_claim() {
     let test = build_test!(source, &[n], &[forged_ilog2]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, err_msg }, .. }
+        ProcessorError::Operation(OperationError::FailedAssertion{ err_code, err_msg })
         if err_code == ZERO && err_msg.is_none()
     );
 }
@@ -599,7 +593,7 @@ fn ilog2_rejects_forged_boundary_claims_with_advice() {
     let test = build_test!(source, &[(1u64 << 63) - 1], &[63]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, err_msg }, .. }
+        ProcessorError::Operation(OperationError::FailedAssertion{ err_code, err_msg })
         if err_code == ZERO && err_msg.is_none()
     );
 
@@ -607,7 +601,7 @@ fn ilog2_rejects_forged_boundary_claims_with_advice() {
     let test = build_test!(source, &[1u64 << 63], &[62]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, err_msg }, .. }
+        ProcessorError::Operation(OperationError::FailedAssertion{ err_code, err_msg })
         if err_code == ZERO && err_msg.is_none()
     );
 }
@@ -635,7 +629,7 @@ fn not_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == Felt::new_unchecked(2_u64)
+        ProcessorError::Operation(OperationError::NotBinaryValue { value, .. }) if value == Felt::new_unchecked(2_u64)
     );
 }
 
@@ -663,19 +657,19 @@ fn and_fail() {
     let test = build_op_test!(asm_op, &[2, 3]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == Felt::new_unchecked(2_u64)
+        ProcessorError::Operation(OperationError::NotBinaryValue { value, .. }) if value == Felt::new_unchecked(2_u64)
     );
 
     let test = build_op_test!(asm_op, &[0, 2]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == Felt::new_unchecked(2_u64)
+        ProcessorError::Operation(OperationError::NotBinaryValue { value, .. }) if value == Felt::new_unchecked(2_u64)
     );
 
     let test = build_op_test!(asm_op, &[2, 0]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == Felt::new_unchecked(2_u64)
+        ProcessorError::Operation(OperationError::NotBinaryValue { value, .. }) if value == Felt::new_unchecked(2_u64)
     );
 }
 
@@ -704,19 +698,19 @@ fn or_fail() {
     let test = build_op_test!(asm_op, &[2, 3]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == expected_value
+        ProcessorError::Operation(OperationError::NotBinaryValue { value, .. }) if value == expected_value
     );
 
     let test = build_op_test!(asm_op, &[0, 2]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == expected_value
+        ProcessorError::Operation(OperationError::NotBinaryValue { value, .. }) if value == expected_value
     );
 
     let test = build_op_test!(asm_op, &[2, 0]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == expected_value
+        ProcessorError::Operation(OperationError::NotBinaryValue { value, .. }) if value == expected_value
     );
 }
 
@@ -747,21 +741,21 @@ fn xor_fail() {
     let test = build_op_test!(asm_op, &[3, 2]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == expected_value
+        ProcessorError::Operation(OperationError::NotBinaryValue { value, .. }) if value == expected_value
     );
 
     // Stack [0, 2] - position 1 is 2, error for value 2
     let test = build_op_test!(asm_op, &[0, 2]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == expected_value
+        ProcessorError::Operation(OperationError::NotBinaryValue { value, .. }) if value == expected_value
     );
 
     // Stack [2, 0] - position 1 is 0 (valid), position 0 is 2, error for value 2
     let test = build_op_test!(asm_op, &[2, 0]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == expected_value
+        ProcessorError::Operation(OperationError::NotBinaryValue { value, .. }) if value == expected_value
     );
 }
 

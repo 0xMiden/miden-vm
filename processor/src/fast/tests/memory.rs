@@ -1,7 +1,9 @@
 use core::assert_matches;
 
+use miden_utils_diagnostics::Diagnostic;
+
 use super::*;
-use crate::{ExecutionError, MemoryError, fast::Memory};
+use crate::{MemoryError, ProcessorError, fast::Memory};
 
 #[test]
 fn test_memory_word_access_alignment() {
@@ -300,12 +302,15 @@ fn test_memory_element_limit_enforced_during_execution() {
         .execute()
         .run_sync(&mut host)
         .unwrap_err();
+    assert!(
+        err.details()
+            .help
+            .unwrap()
+            .contains("ExecutionOptions::with_max_memory_elements")
+    );
     assert_matches!(
-        err,
-        ExecutionError::MemoryError {
-            err: MemoryError::MemoryElementLimitExceeded { .. },
-            ..
-        }
+        err.into_kind(),
+        ProcessorError::Memory(MemoryError::MemoryElementLimitExceeded { .. })
     );
 
     // A limit of 4 words' worth of elements accommodates every distinct word the program writes to.
@@ -346,10 +351,7 @@ fn test_memory_element_limit_enforced_via_with_options() {
         .run_sync(&mut host)
         .unwrap_err();
     assert_matches!(
-        err,
-        ExecutionError::MemoryError {
-            err: MemoryError::MemoryElementLimitExceeded { .. },
-            ..
-        }
+        err.into_kind(),
+        ProcessorError::Memory(MemoryError::MemoryElementLimitExceeded { .. })
     );
 }

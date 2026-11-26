@@ -1,4 +1,4 @@
-use miden_processor::{ExecutionError, operation::OperationError};
+use miden_processor::{ProcessorError, operation::OperationError};
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::prop_randw;
 use miden_utils_testing::{Felt, U32_BOUND, build_op_test, expect_exec_error_matches};
@@ -18,7 +18,7 @@ pub fn test_input_out_of_bounds(asm_op: &str) {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
+        ProcessorError::Operation(OperationError::NotU32Values{ values }) if
             values.len() == 1 &&
             values[0] == Felt::new_unchecked(U32_BOUND)
     );
@@ -38,7 +38,7 @@ pub fn test_inputs_out_of_bounds(asm_op: &str, input_count: usize) {
 
         expect_exec_error_matches!(
             test,
-            ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
+            ProcessorError::Operation(OperationError::NotU32Values{ values }) if
                 values.len() == 1 &&
                 values[0] == Felt::new_unchecked(U32_BOUND)
         );

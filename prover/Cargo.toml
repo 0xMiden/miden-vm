@@ -26,6 +26,7 @@ std = [
     "miden-precompiles-stark/std",
     "miden-vm-stark/std",
     "miden-processor/std",
+    "miden-utils-diagnostics/std",
     "thiserror/std",
 ]
 
@@ -36,6 +37,7 @@ miden-precompiles.workspace = true
 miden-precompiles-stark = { workspace = true, features = ["prover"] }
 miden-vm-stark = { workspace = true, features = ["prover"] }
 miden-processor.workspace = true
+miden-utils-diagnostics.workspace = true
 
 # External dependencies
 thiserror.workspace = true

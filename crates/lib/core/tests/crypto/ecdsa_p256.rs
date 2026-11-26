@@ -26,7 +26,8 @@ use miden_precompiles_stark::{
     verifier::verify_deferred,
 };
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOutput, MemoryError, Processor, ProcessorState,
+    DefaultHost, ExecutionError, ExecutionOutput, MemoryError, Processor, ProcessorError,
+    ProcessorState,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
     event::{EventError, EventHandler},
     operation::OperationError,
@@ -489,11 +490,10 @@ fn p256_recover_traps_on_malformed_signature_memory() {
         Some(recovery_public_key_handler(signer)),
     )
     .expect_err("the MASM scalar loader must reject an unaligned signature pointer");
-    match error {
-        ExecutionError::MemoryError {
-            err: MemoryError::UnalignedWordAccess { addr, .. },
-            ..
-        } => assert_eq!(addr, SIGNATURE_PTR + 1),
+    match error.into_kind() {
+        ProcessorError::Memory(MemoryError::UnalignedWordAccess { addr, .. }) => {
+            assert_eq!(addr, SIGNATURE_PTR + 1)
+        },
         other => panic!("expected an unaligned word access, got {other:?}"),
     }
 }
@@ -907,22 +907,16 @@ fn stack_elements<const N: usize>(output: &ExecutionOutput) -> [Felt; N] {
 
 fn is_failed_assertion(err: &ExecutionError, message: &str) -> bool {
     matches!(
-        err,
-        ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_code, .. },
-            ..
-        } if *err_code == error_code_from_msg(message)
+        err.kind(),
+        ProcessorError::Operation(OperationError::FailedAssertion { err_code, .. }) if *err_code == error_code_from_msg(message)
     )
 }
 
 /// Whether `err` is the uint precompile rejecting a noncanonical VALUE encoding.
 fn is_invalid_uint_value(err: &ExecutionError) -> bool {
     matches!(
-        err,
-        ExecutionError::DeferredError {
-            err: PrecompileError::Precompile { name, source },
-            ..
-        } if *name == UintPrecompile::NAME
+        err.kind(),
+        ProcessorError::Deferred(PrecompileError::Precompile { name, source }) if *name == UintPrecompile::NAME
             && matches!(**source, PrecompileError::Other(DeferredError::InvalidPayload))
     )
 }

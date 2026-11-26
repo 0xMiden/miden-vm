@@ -54,11 +54,10 @@ fn msm_mem_runtime_frames_match_pair_counts() {
             let (error, stack) = expect_precompile_trap_with_stack(&source);
             assert!(
                 matches!(
-                    error,
-                    miden_processor::ExecutionError::MemoryError {
-                        err: miden_processor::MemoryError::UnalignedWordAccess { addr: 1, .. },
-                        ..
-                    }
+                    error.kind(),
+                    miden_processor::ProcessorError::Memory(
+                        miden_processor::MemoryError::UnalignedWordAccess { addr: 1, .. }
+                    )
                 ),
                 "{} {n_pairs}-pair msm_mem returned the wrong error: {error:?}",
                 curve.module,
@@ -79,7 +78,7 @@ fn msm_mem_runtime_frames_match_pair_counts() {
 fn msm_mem_rejects_zero_pairs() {
     for curve in supported_curves() {
         let error = expect_curve_msm_mem_trap(curve, 0);
-        let miden_processor::ExecutionError::DeferredError { err, .. } = error else {
+        let miden_processor::ProcessorError::Deferred(err) = error.kind() else {
             panic!("{} zero-pair msm_mem returned the wrong error: {error:?}", curve.module);
         };
         assert!(
@@ -103,7 +102,7 @@ fn msm_mem_max_count_reaches_state_size_check() {
             "{} msm_mem injected u32::MAX into the wrong CV lane",
             curve.module,
         );
-        let miden_processor::ExecutionError::DeferredError { err, .. } = error else {
+        let miden_processor::ProcessorError::Deferred(err) = error.kind() else {
             panic!("{} maximum-count msm_mem returned the wrong error: {error:?}", curve.module);
         };
         let PrecompileError::Other(DeferredError::DeferredStateTooLarge { num_elements, max }) =

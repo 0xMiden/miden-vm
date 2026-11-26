@@ -122,13 +122,14 @@ fn test_basic_block(
         .with_stack_inputs(StackInputs::new(&stack_inputs).unwrap())
         .execute()
         .run_sync(&mut host)
-        .map(|output| output.stack);
+        .map(|output| output.stack)
+        .map_err(ExecutionError::into_kind);
 
     // Make sure that we're not getting an output stack overflow error, as it indicates that
     // the sequence of operations makes the stack end with a non-16 depth, and doesn't tell
     // us if the stack outputs are actually the same.
     if let Some(err) = fast_stack_outputs.as_ref().err()
-        && matches!(err, ExecutionError::OutputStackOverflow(_))
+        && matches!(err, ProcessorError::OutputStackOverflow(_))
     {
         panic!("we don't want to be testing this output stack overflow error");
     }

@@ -5,7 +5,7 @@ use std::{
 };
 
 use clap::Parser;
-use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
+use miden_assembly::diagnostics::{Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, PackageSourceDebugContext};
 use miden_vm::{
@@ -241,7 +241,6 @@ impl ProveCmd {
         } else {
             prover.prove(witness)
         }
-        .into_diagnostic()
         .wrap_err("Failed to prove program")?;
 
         println!("Program proved in {} ms", now.elapsed().as_millis());

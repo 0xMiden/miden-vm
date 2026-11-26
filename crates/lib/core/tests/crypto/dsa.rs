@@ -18,7 +18,8 @@ use miden_precompiles_stark::{
     verifier::verify_deferred,
 };
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOutput, MemoryError, Processor, ProcessorState,
+    DefaultHost, ExecutionError, ExecutionOutput, MemoryError, Processor, ProcessorError,
+    ProcessorState,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
     event::{EventError, EventHandler},
 };
@@ -189,11 +190,10 @@ fn core_ecdsa_k256_keccak_recover_traps_on_malformed_signature_memory() {
         Some(recovery_public_key_handler(&fixture.public_key)),
     )
     .expect_err("the MASM scalar loader must reject an unaligned signature pointer");
-    match error {
-        ExecutionError::MemoryError {
-            err: MemoryError::UnalignedWordAccess { addr, .. },
-            ..
-        } => assert_eq!(addr, SIGNATURE_PTR + 1),
+    match error.into_kind() {
+        ProcessorError::Memory(MemoryError::UnalignedWordAccess { addr, .. }) => {
+            assert_eq!(addr, SIGNATURE_PTR + 1)
+        },
         other => panic!("expected an unaligned word access, got {other:?}"),
     }
 }

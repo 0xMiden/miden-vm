@@ -2,7 +2,7 @@ use miden_assembly::Assembler;
 use miden_core::{Felt, Word};
 use miden_processor::{TestHost, advice::AdviceError};
 use miden_utils_testing::{build_test, crypto::MerkleStore};
-use miden_vm::{ExecutionError, ExecutionOptions, Processor};
+use miden_vm::{ExecutionError, ExecutionOptions, Processor, ProcessorError};
 
 // ADVICE INJECTION
 // ================================================================================================
@@ -447,11 +447,8 @@ fn test_adv_insert_mem_existing_key_respects_advice_size_budget() {
 
     let err = run_insert_mem_after_empty_insertion(RANGE_LEN).unwrap_err();
     assert!(matches!(
-        err,
-        ExecutionError::AdviceError {
-            err: AdviceError::SizeBudgetExceeded { .. },
-            ..
-        }
+        err.into_kind(),
+        ProcessorError::Advice(AdviceError::SizeBudgetExceeded { .. })
     ));
 }
 
@@ -467,15 +464,12 @@ fn test_adv_insert_mem_conflict_at_budget_is_rejected_before_allocation() {
 
     let err = run_conflicting_insert(max).unwrap_err();
     assert!(matches!(
-        err,
-        ExecutionError::AdviceError {
-            err: AdviceError::SizeBudgetExceeded {
+        err.into_kind(),
+        ProcessorError::Advice(AdviceError::SizeBudgetExceeded {
                 current,
                 added,
                 max: actual_max,
-            },
-            ..
-        } if current == max && added == entry_bytes && actual_max == max
+            }) if current == max && added == entry_bytes && actual_max == max
     ));
 }
 
@@ -490,15 +484,14 @@ fn test_adv_insert_mem_conflict_with_spare_budget_reports_values() {
     let max = base_store_bytes + 2 * entry_bytes;
 
     let err = run_conflicting_insert(max).unwrap_err();
-    let ExecutionError::AdviceError {
-        err: AdviceError::MapKeyAlreadyPresent { prev_values, new_values, .. },
-        ..
-    } = err
+    let ProcessorError::Advice(AdviceError::MapKeyAlreadyPresent {
+        prev_values, new_values, ..
+    }) = err.kind()
     else {
         panic!("expected conflicting advice map value, got: {err:?}");
     };
-    assert_eq!(prev_values, vec![Felt::new_unchecked(1); RANGE_LEN]);
-    assert_eq!(new_values, vec![Felt::new_unchecked(1), Felt::new_unchecked(2)]);
+    assert_eq!(prev_values, &vec![Felt::new_unchecked(1); RANGE_LEN]);
+    assert_eq!(new_values, &vec![Felt::new_unchecked(1), Felt::new_unchecked(2)]);
 }
 
 // HELPERS

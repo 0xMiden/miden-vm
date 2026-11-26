@@ -4,7 +4,7 @@ use miden_assembly::Assembler;
 use miden_debug_engine::exec::{DiagnosticExecutor, MastForestRecorder, RecordingHost};
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
-    BaseHost, ExecutionError, ExecutionOptions, LoadedMastForest, MastForestLoadError,
+    BaseHost, ExecutionOptions, LoadedMastForest, MastForestLoadError, ProcessorError,
     ProcessorState, StackInputs, SyncHost, Word,
     advice::{AdviceInputs, AdviceMutation},
     event::EventError,
@@ -82,9 +82,12 @@ fn diagnostic_recording_preserves_lookup_results() {
         ExecutionOptions::default(),
     );
     let error = ready(executor.execute_async(&program, &mut recording)).unwrap_err();
-    let ExecutionError::MastForestError { error, .. } = error else {
+    let ProcessorError::MastForestLoad { source, .. } = error.kind() else {
         panic!("expected the store error");
     };
-    assert_eq!(error.downcast_ref::<std::io::Error>().unwrap().to_string(), "store unavailable");
+    assert_eq!(
+        source.downcast_ref::<std::io::Error>().unwrap().to_string(),
+        "store unavailable"
+    );
     assert!(failed_forests.snapshot().is_empty());
 }

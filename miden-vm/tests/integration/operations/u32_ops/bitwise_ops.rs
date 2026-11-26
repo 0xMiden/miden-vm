@@ -1,4 +1,4 @@
-use miden_processor::{ExecutionError, Felt, operation::OperationError};
+use miden_processor::{Felt, ProcessorError, operation::OperationError};
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::PrimeField64;
 #[cfg(feature = "arbitrary")]
@@ -67,14 +67,14 @@ fn u32and_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if values == vec![Felt::new_unchecked(U32_BOUND)]
+        ProcessorError::Operation(OperationError::NotU32Values{ values }) if values == vec![Felt::new_unchecked(U32_BOUND)]
     );
 
     let test = build_op_test!(asm_op, &[0, U32_BOUND]);
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if values == vec![Felt::new_unchecked(U32_BOUND)]
+        ProcessorError::Operation(OperationError::NotU32Values{ values }) if values == vec![Felt::new_unchecked(U32_BOUND)]
     );
 }
 
@@ -135,14 +135,14 @@ fn u32or_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if values == vec![Felt::new_unchecked(U32_BOUND)]
+        ProcessorError::Operation(OperationError::NotU32Values{ values }) if values == vec![Felt::new_unchecked(U32_BOUND)]
     );
 
     let test = build_op_test!(asm_op, &[0, U32_BOUND]);
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if values == vec![Felt::new_unchecked(U32_BOUND)]
+        ProcessorError::Operation(OperationError::NotU32Values{ values }) if values == vec![Felt::new_unchecked(U32_BOUND)]
     );
 }
 
@@ -204,14 +204,14 @@ fn u32xor_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if values == vec![Felt::new_unchecked(U32_BOUND)]
+        ProcessorError::Operation(OperationError::NotU32Values{ values }) if values == vec![Felt::new_unchecked(U32_BOUND)]
     );
 
     let test = build_op_test!(asm_op, &[0, U32_BOUND]);
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if values == vec![Felt::new_unchecked(U32_BOUND)]
+        ProcessorError::Operation(OperationError::NotU32Values{ values }) if values == vec![Felt::new_unchecked(U32_BOUND)]
     );
 }
 

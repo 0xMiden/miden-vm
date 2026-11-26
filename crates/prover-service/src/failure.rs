@@ -1,6 +1,6 @@
 use miden_core::deferred::{IntegrityError, PrecompileError, PreparationError};
 use miden_precompiles_stark::prover::{PrecompileProvingError, SessionInputError};
-use miden_processor::ExecutionError;
+use miden_processor::TraceGenerationError;
 use miden_prover::ProverError;
 use prost::Message;
 use tonic::{Code, Status};
@@ -33,10 +33,8 @@ pub(crate) fn status(error: ErrorCode) -> Status {
 pub(crate) fn prover_error(error: ProverError) -> Status {
     let code = match error {
         ProverError::TraceGeneration(
-            ExecutionError::ProverMemoryExceeded { .. } | ExecutionError::TraceLenExceeded(_),
-        )
-        | ProverError::VmProofGeneration(
-            ExecutionError::ProverMemoryExceeded { .. } | ExecutionError::TraceLenExceeded(_),
+            TraceGenerationError::ProverMemoryExceeded { .. }
+            | TraceGenerationError::TraceLenExceeded(_),
         ) => ErrorCode::ProverLimitExceeded,
         ProverError::TraceGeneration(_) => ErrorCode::InvalidWitness,
         ProverError::VmProofGeneration(_) => ErrorCode::ProvingFailed,
@@ -63,4 +61,52 @@ pub(crate) fn prover_error(error: ProverError) -> Status {
         _ => ErrorCode::Internal,
     };
     status(code)
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_precompiles_stark::prover::ProveError;
+    use miden_processor::ProcessorError;
+
+    use super::*;
+
+    #[test]
+    fn proving_phases_preserve_service_failure_classification() {
+        for (error, expected, grpc) in [
+            (
+                ProverError::TraceGeneration(TraceGenerationError::TraceLenExceeded(1024)),
+                ErrorCode::ProverLimitExceeded,
+                Code::ResourceExhausted,
+            ),
+            (
+                ProverError::TraceGeneration(TraceGenerationError::ProverMemoryExceeded {
+                    estimated_bytes: 2,
+                    budget_bytes: 1,
+                }),
+                ErrorCode::ProverLimitExceeded,
+                Code::ResourceExhausted,
+            ),
+            (
+                ProverError::TraceGeneration(TraceGenerationError::InvalidReplay("missing row")),
+                ErrorCode::InvalidWitness,
+                Code::InvalidArgument,
+            ),
+            (
+                ProverError::TraceGeneration(TraceGenerationError::Replay(
+                    ProcessorError::CycleLimitExceeded(64),
+                )),
+                ErrorCode::InvalidWitness,
+                Code::InvalidArgument,
+            ),
+            (
+                ProverError::PrecompileProofGeneration(ProveError::MissingPreprocessed.into()),
+                ErrorCode::ProvingFailed,
+                Code::Internal,
+            ),
+        ] {
+            let status = prover_error(error);
+            assert_eq!(status.code(), grpc);
+            assert_eq!(ErrorDetail::decode(status.details()).unwrap().code(), expected);
+        }
+    }
 }
