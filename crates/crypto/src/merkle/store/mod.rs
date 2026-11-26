@@ -141,9 +141,8 @@ impl MerkleStore {
     ///
     /// # Errors
     /// This method can return the following errors:
-    /// - `RootNotInStore` if the `root` is not present in the store.
-    /// - `NodeNotInStore` if a node needed to traverse from `root` to `index` is not present in the
-    ///   store.
+    /// - [`MerkleError::RootNotInStore`] if `root` is absent from the store.
+    /// - [`MerkleError::NodeIndexNotFoundInStore`] if a node needed to reach `index` is absent.
     pub fn get_node(&self, root: Word, index: NodeIndex) -> Result<Word, MerkleError> {
         let mut hash = root;
 
@@ -169,9 +168,8 @@ impl MerkleStore {
     ///
     /// # Errors
     /// This method can return the following errors:
-    /// - `RootNotInStore` if the `root` is not present in the store.
-    /// - `NodeNotInStore` if a node needed to traverse from `root` to `index` is not present in the
-    ///   store.
+    /// - [`MerkleError::RootNotInStore`] if `root` is absent from the store.
+    /// - [`MerkleError::NodeIndexNotFoundInStore`] if a node needed to reach `index` is absent.
     pub fn get_path(&self, root: Word, index: NodeIndex) -> Result<MerkleProof, MerkleError> {
         let mut hash = root;
         let mut path = Vec::with_capacity(index.depth().into());
@@ -429,18 +427,20 @@ impl MerkleStore {
     // STATE MUTATORS
     // --------------------------------------------------------------------------------------------
 
-    /// Adds all the nodes of a Merkle path represented by `path`, opening to `node`. Returns the
-    /// new root.
+    /// Returns the root of the opening for `node` at `index` and inserts an entry for each parent
+    /// on the path. Each entry maps the parent digest to its two child digests.
     ///
-    /// This will compute the sibling elements determined by the Merkle `path` and `node`, and
-    /// include all the nodes into the store.
+    /// An empty path returns `node` and leaves the store unchanged.
+    ///
+    /// # Errors
+    /// Returns an error if the path depth or index is invalid.
     pub fn add_merkle_path(
         &mut self,
         index: u64,
         node: Word,
         path: MerklePath,
     ) -> Result<Word, MerkleError> {
-        let root = path.authenticated_nodes(index, node)?.fold(Word::default(), |_, node| {
+        let root = path.authenticated_nodes(index, node)?.fold(node, |_, node| {
             let value: Word = node.value;
             let left: Word = node.left;
             let right: Word = node.right;
@@ -469,13 +469,15 @@ impl MerkleStore {
         Ok(())
     }
 
-    /// Sets a node to `value`.
+    /// Replaces the node at `index` with `value` and returns the new root and the opening path.
+    ///
+    /// At the root index, this returns `value` and an empty path. The store is unchanged, so
+    /// lookups from the new root require an existing entry for `value`.
     ///
     /// # Errors
     /// This method can return the following errors:
-    /// - `RootNotInStore` if the `root` is not present in the store.
-    /// - `NodeNotInStore` if a node needed to traverse from `root` to `index` is not present in the
-    ///   store.
+    /// - [`MerkleError::RootNotInStore`] if `root` is absent from the store.
+    /// - [`MerkleError::NodeIndexNotFoundInStore`] if a node needed to reach `index` is absent.
     pub fn set_node(
         &mut self,
         mut root: Word,
