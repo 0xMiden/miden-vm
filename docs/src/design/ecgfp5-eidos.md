@@ -101,8 +101,10 @@ tag before returning plaintext. Decrypted limb pairs must encode canonical Felts
 
 ### Envelope commitment
 
-`seal_and_commit` writes the envelope as `seal` does and returns its commitment.
-Rust's `Envelope::to_commitment()` computes the same commitment from the envelope.
+`commit_envelope` takes the address of a complete envelope in memory and reads its plaintext
+length from the header. It returns the same commitment as Rust's `Envelope::to_commitment()`.
+Both `seal_and_commit` and `seal_preprocessed_and_commit` return this commitment after writing
+the envelope.
 
 ```text
 e = H_envelope(R(5) || tag(2) || plaintext_len || ciphertext(2 * plaintext_len))
@@ -131,16 +133,19 @@ For an explicit ephemeral scalar, use `miden_crypto::ies::ecgfp5_eidos::seal_wit
 In the VM, call `crypto::ies::ecgfp5_eidos::seal` with the recipient's key commitment,
 plaintext, context, and destination. It requests private agreement advice from the host
 and writes the envelope. `seal_and_commit` takes the same arguments and also returns the
-[envelope commitment](#envelope-commitment).
+[envelope commitment](#envelope-commitment). With a preprocessed key, use
+`seal_preprocessed_and_commit`. To commit to an envelope already in memory, call
+`commit_envelope` with its address.
 
 | Procedure | Public-key input | Host key for advice generation |
 | --- | --- | --- |
 | `seal` | Commitment to `Q` (four Felts) | `PublicKey` |
 | `seal_preprocessed` | Commitment `I` (four Felts) | `PreparedPublicKey` |
 | `seal_and_commit` | Commitment to `Q` (four Felts) | `PublicKey` |
+| `seal_preprocessed_and_commit` | Commitment `I` (four Felts) | `PreparedPublicKey` |
 
-All three procedures produce the same envelope for the same recipient, scalar, plaintext, and
-context. The recipient does not need the preprocessed tables to decrypt it.
+All four sealing procedures produce the same envelope for the same recipient, scalar, plaintext,
+and context. The recipient does not need the preprocessed tables to decrypt it.
 
 Decode a MASM envelope with `miden_crypto::ies::ecgfp5_eidos::Envelope::from_elements`, then call
 `ecgfp5_eidos::open` with the recipient's secret key and original context. `Envelope` also converts

@@ -32,7 +32,8 @@ use rand::CryptoRng;
 pub const ECGFP5_EIDOS_SEAL_EVENT_NAME: EventName =
     EventName::new("miden::core::crypto::ies::ecgfp5_eidos::seal");
 
-/// Requests private key-agreement inputs for `crypto::ies::ecgfp5_eidos::seal_preprocessed`.
+/// Requests private key-agreement inputs for `crypto::ies::ecgfp5_eidos::seal_preprocessed` and
+/// `seal_preprocessed_and_commit`.
 pub const ECGFP5_EIDOS_SEAL_PREPROCESSED_EVENT_NAME: EventName =
     EventName::new("miden::core::crypto::ies::ecgfp5_eidos::seal_preprocessed");
 

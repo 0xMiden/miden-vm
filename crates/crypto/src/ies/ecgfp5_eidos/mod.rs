@@ -75,7 +75,8 @@ impl Envelope {
     }
 
     /// Returns the Eidos commitment to the Felt encoding from [`Self::to_elements`] under the
-    /// `ECGFP5_ENVELOPE` domain. This matches the commitment returned by `seal_and_commit`.
+    /// `ECGFP5_ENVELOPE` domain. The VM procedures `commit_envelope`, `seal_and_commit`, and
+    /// `seal_preprocessed_and_commit` return the same commitment.
     ///
     /// For a wire message, follow the decoding instructions on [`super::SealedMessage`] and
     /// convert the decoded message with `Envelope::try_from`. Use its commitment as the

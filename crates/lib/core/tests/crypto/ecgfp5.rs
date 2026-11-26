@@ -307,7 +307,7 @@ fn agreement_and_sealing_reject_a_different_recipient() {
             "public key commitment",
         ),
         (
-            &[SealMode::Preprocessed][..],
+            &[SealMode::Preprocessed, SealMode::PreprocessedWithCommitment][..],
             SOURCE,
             prepared().to_commitment(),
             advice_inputs(&other_prepared, &secret),
@@ -833,15 +833,21 @@ enum SealMode {
     Direct,
     DirectWithCommitment,
     Preprocessed,
+    PreprocessedWithCommitment,
 }
 
 impl SealMode {
-    const ALL: [Self; 3] = [Self::Direct, Self::DirectWithCommitment, Self::Preprocessed];
+    const ALL: [Self; 4] = [
+        Self::Direct,
+        Self::DirectWithCommitment,
+        Self::Preprocessed,
+        Self::PreprocessedWithCommitment,
+    ];
 
     fn call(self) -> String {
         let commitment = match self {
             Self::Direct | Self::DirectWithCommitment => recipient().public_key().to_commitment(),
-            Self::Preprocessed => prepared().to_commitment(),
+            Self::Preprocessed | Self::PreprocessedWithCommitment => prepared().to_commitment(),
         };
         self.call_with_commitment(commitment)
     }
@@ -851,17 +857,19 @@ impl SealMode {
             Self::Direct => "seal",
             Self::DirectWithCommitment => "seal_and_commit",
             Self::Preprocessed => "seal_preprocessed",
+            Self::PreprocessedWithCommitment => "seal_preprocessed_and_commit",
         };
         let key = commitment.into_elements();
         format!("push.{key:?} exec.ecgfp5_eidos::{procedure}")
     }
 
-    // Drops the commitment returned by `seal_and_commit`, so that one program can exercise every
-    // mode with the stack effect of `seal`. Tests that check the commitment use `call`.
+    // Drops each wrapper's commitment so shared tests can use the stack effect of `seal`.
     fn call_dropping_commitment(self) -> String {
         match self {
             Self::Direct | Self::Preprocessed => self.call(),
-            Self::DirectWithCommitment => format!("{} dropw", self.call()),
+            Self::DirectWithCommitment | Self::PreprocessedWithCommitment => {
+                format!("{} dropw", self.call())
+            },
         }
     }
 
@@ -870,7 +878,9 @@ impl SealMode {
             Self::Direct | Self::DirectWithCommitment => {
                 direct_advice_inputs(&recipient().public_key(), secret)
             },
-            Self::Preprocessed => advice_inputs(prepared(), secret),
+            Self::Preprocessed | Self::PreprocessedWithCommitment => {
+                advice_inputs(prepared(), secret)
+            },
         }
     }
 }
@@ -898,27 +908,24 @@ fn seal_program(plaintext: &[Felt], context: &[Felt], mode: SealMode) -> String 
     let seal = mode.call_dropping_commitment();
     format!(
         "use miden::core::crypto::ies::ecgfp5_eidos
-        use miden::core::crypto::hashes::eidos
         begin
             {body}
             push.123.456
             push.3000.{}.2000.{}.1000 {seal}
             push.456 assert_eq push.123 assert_eq
             mem_load.{} eq.999 assert
-            push.{}.3000 exec.eidos::hash_elements
+            push.3000 exec.ecgfp5_eidos::commit_envelope
             swapw dropw
         end",
         context.len(),
         plaintext.len(),
         3008 + 2 * plaintext.len(),
-        8 + 2 * plaintext.len(),
     )
 }
 
 #[test]
 fn sealing_matches_rust_with_general_associated_data() {
     use miden_crypto::{
-        hash::eidos::Eidos,
         ies::{SealedMessage, UnsealingKey, ecgfp5_eidos},
         utils::Deserializable,
     };
@@ -937,7 +944,7 @@ fn sealing_matches_rust_with_general_associated_data() {
         )
         .unwrap();
         let expected_elements = expected.to_elements();
-        let digest = Eidos::hash_elements(&expected_elements);
+        let digest = expected.to_commitment();
         for mode in SealMode::ALL {
             let source = seal_program(&plaintext, &context, mode);
             let test = sealing_with_advice(&source, mode.advice(&ephemeral));
@@ -995,7 +1002,9 @@ fn sealing_reexecutes_with_recorded_advice() {
         );
         let event = match mode {
             SealMode::Direct | SealMode::DirectWithCommitment => ECGFP5_EIDOS_SEAL_EVENT_NAME,
-            SealMode::Preprocessed => ECGFP5_EIDOS_SEAL_PREPROCESSED_EVENT_NAME,
+            SealMode::Preprocessed | SealMode::PreprocessedWithCommitment => {
+                ECGFP5_EIDOS_SEAL_PREPROCESSED_EVENT_NAME
+            },
         };
         let handler = Ecgfp5SealHandler::new(ChaCha20Rng::from_seed([91; 32]))
             .with_public_key(recipient().public_key())
@@ -1075,7 +1084,7 @@ fn sealing_rejects_unregistered_keys_and_wrong_modes() {
             SealMode::Direct | SealMode::DirectWithCommitment => {
                 (prepared().to_commitment(), "no EcGFp5 public key registered")
             },
-            SealMode::Preprocessed => (
+            SealMode::Preprocessed | SealMode::PreprocessedWithCommitment => (
                 recipient().public_key().to_commitment(),
                 "no preprocessed EcGFp5 public key registered",
             ),
@@ -1219,6 +1228,7 @@ fn repeated_sealing_preserves_caller_state_and_allows_overlapping_read_inputs() 
         (SealMode::Direct, sample()),
         (SealMode::Preprocessed, scalar([65537, 0, 0, 0, 0, 0, 0, 0, 0, 0])),
         (SealMode::DirectWithCommitment, scalar([65539, 0, 0, 0, 0, 0, 0, 0, 0, 0])),
+        (SealMode::PreprocessedWithCommitment, scalar([65543, 0, 0, 0, 0, 0, 0, 0, 0, 0])),
     ] {
         for value in 1..=32 {
             body.push_str(&format!("push.{value}\n"));
@@ -1234,7 +1244,7 @@ fn repeated_sealing_preserves_caller_state_and_allows_overlapping_read_inputs() 
             &ephemeral,
         )
         .unwrap();
-        if matches!(mode, SealMode::DirectWithCommitment) {
+        if matches!(mode, SealMode::DirectWithCommitment | SealMode::PreprocessedWithCommitment) {
             for value in sealed.to_commitment().iter() {
                 body.push_str(&format!("push.{value} assert_eq\n"));
             }
@@ -1264,58 +1274,59 @@ fn repeated_sealing_preserves_caller_state_and_allows_overlapping_read_inputs() 
 }
 
 #[test]
-fn seal_and_commit_respects_envelope_boundary() {
+fn sealing_with_commitment_respects_envelope_boundary() {
     use miden_crypto::ies::ecgfp5_eidos;
 
-    let mode = SealMode::DirectWithCommitment;
-    let call = mode.call();
-    let ephemeral = sample();
-    let frame = miden_core::FMP_INIT_VALUE.as_canonical_u64() as u32;
+    for mode in [SealMode::DirectWithCommitment, SealMode::PreprocessedWithCommitment] {
+        let call = mode.call();
+        let ephemeral = sample();
+        let frame = miden_core::FMP_INIT_VALUE.as_canonical_u64() as u32;
 
-    // These lengths exercise all four possible envelope remainders modulo the hash block size.
-    // Odd lengths leave two sentinel elements between the envelope and the frame.
-    let last_word = frame - 4;
-    for len in 0..4u32 {
-        let sealed = ecgfp5_eidos::seal_with_scalar(
-            &recipient().public_key(),
-            &[Felt::ONE; 4][..len as usize],
-            &[],
-            &ephemeral,
-        )
-        .unwrap();
-        let envelope_len = 8 + 2 * len;
-        let dst = frame - envelope_len.next_multiple_of(4);
-        let end = dst + envelope_len;
+        // These lengths exercise all four possible envelope remainders modulo the hash block size.
+        // Odd lengths leave two sentinel elements between the envelope and the frame.
+        let last_word = frame - 4;
+        for len in 0..4u32 {
+            let sealed = ecgfp5_eidos::seal_with_scalar(
+                &recipient().public_key(),
+                &[Felt::ONE; 4][..len as usize],
+                &[],
+                &ephemeral,
+            )
+            .unwrap();
+            let envelope_len = 8 + 2 * len;
+            let dst = frame - envelope_len.next_multiple_of(4);
+            let end = dst + envelope_len;
+            let source = format!(
+                "use miden::core::crypto::ies::ecgfp5_eidos
+                begin
+                    push.1.1.1.1 mem_storew_le.1000 dropw
+                    push.999.999.999.999 mem_storew_le.{last_word} dropw
+                    push.{dst}.0.2000.{len}.1000 {call}
+                    swapw dropw
+                end"
+            );
+            let test = sealing_with_advice(&source, mode.advice(&ephemeral));
+            let commitment: Vec<_> =
+                sealed.to_commitment().iter().map(Felt::as_canonical_u64).collect();
+            let memory: Vec<_> = sealed
+                .to_elements()
+                .iter()
+                .map(Felt::as_canonical_u64)
+                .chain((end..frame).map(|_| 999))
+                .collect();
+            test.expect_stack_and_memory(&commitment, dst, &memory);
+        }
+
         let source = format!(
             "use miden::core::crypto::ies::ecgfp5_eidos
-            begin
-                push.1.1.1.1 mem_storew_le.1000 dropw
-                push.999.999.999.999 mem_storew_le.{last_word} dropw
-                push.{dst}.0.2000.{len}.1000 {call}
-                swapw dropw
-            end"
+            begin push.{}.0.2000.1.1000 {call} end",
+            frame - 8,
         );
-        let test = sealing_with_advice(&source, mode.advice(&ephemeral));
-        let commitment: Vec<_> =
-            sealed.to_commitment().iter().map(Felt::as_canonical_u64).collect();
-        let memory: Vec<_> = sealed
-            .to_elements()
-            .iter()
-            .map(Felt::as_canonical_u64)
-            .chain((end..frame).map(|_| 999))
-            .collect();
-        test.expect_stack_and_memory(&commitment, dst, &memory);
+        assert_failure(
+            &build_test!(&source, &[]),
+            "EcGFp5-Eidos memory ranges must stay below the local frame",
+        );
     }
-
-    let source = format!(
-        "use miden::core::crypto::ies::ecgfp5_eidos
-        begin push.{}.0.2000.1.1000 {call} end",
-        frame - 8,
-    );
-    assert_failure(
-        &build_test!(&source, &[]),
-        "EcGFp5-Eidos memory ranges must stay below the local frame",
-    );
 }
 
 #[test]
