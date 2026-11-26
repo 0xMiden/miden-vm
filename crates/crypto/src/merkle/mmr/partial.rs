@@ -493,8 +493,17 @@ impl PartialMmr {
         // Remove from tracked leaves set
         self.tracked_leaves.remove(&leaf_pos);
 
-        let mut idx = InOrderIndex::from_leaf_pos(leaf_pos);
         let mut removed = Vec::new();
+
+        // Validate the position against the forest first: from_leaf_pos panics on
+        // positions no forest can hold, while the docs promise an empty vec here.
+        let Some(rel_pos) = self.forest.leaf_relative_position(leaf_pos) else {
+            // Invalid MMR leaf position - treat as a no-op.
+            return removed;
+        };
+        let tree_start = leaf_pos - rel_pos;
+
+        let mut idx = InOrderIndex::from_leaf_pos(leaf_pos);
 
         // Check if the sibling leaf is still tracked. If so, we need to keep our leaf value
         // as an auth node for the sibling, and keep all auth nodes above.
@@ -505,12 +514,6 @@ impl PartialMmr {
             // nodes above are still needed for the sibling's proof.
             return removed;
         }
-
-        let Some(rel_pos) = self.forest.leaf_relative_position(leaf_pos) else {
-            // Invalid MMR leaf position - treat as a no-op.
-            return removed;
-        };
-        let tree_start = leaf_pos - rel_pos;
 
         // Remove the leaf value itself
         if let Some(word) = self.nodes.remove(&idx) {
@@ -1760,5 +1763,15 @@ mod tests {
         invalid_tracked.insert(999);
         let partial = PartialMmr::from_parts_unchecked(peaks, BTreeMap::new(), invalid_tracked);
         assert!(partial.tracked_leaves.contains(&999));
+    }
+
+    #[test]
+    fn untrack_invalid_position_returns_empty_vec() {
+        // The docs promise an empty vec for a position invalid for the forest;
+        // from_leaf_pos must not panic first.
+        let mut partial = PartialMmr::default();
+        assert!(partial.untrack(usize::MAX).is_empty());
+        assert!(partial.untrack(usize::MAX / 2).is_empty());
+        assert!(partial.untrack(7).is_empty());
     }
 }
