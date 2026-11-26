@@ -392,6 +392,28 @@ fn test_sparse_merkle_tree() {
 }
 
 #[test]
+fn test_add_merkle_path_empty_path_root_is_leaf() -> Result<(), MerkleError> {
+    // A depth-0 path has no siblings: the leaf itself is the root, matching
+    // `MerklePath::compute_root`. Previously the fold over zero nodes returned
+    // the `Word::default()` seed instead.
+    let mut store = MerkleStore::new();
+    let root = store.add_merkle_path(0, VALUES4[0], MerklePath::default())?;
+    assert_eq!(root, VALUES4[0], "depth-0 root must be the leaf itself");
+    assert_eq!(
+        root,
+        MerklePath::default().compute_root(0, VALUES4[0])?,
+        "add_merkle_path and compute_root must agree on depth 0"
+    );
+
+    // A non-zero index does not fit a depth-0 path.
+    assert_matches!(
+        store.add_merkle_path(1, VALUES4[0], MerklePath::default()),
+        Err(MerkleError::InvalidNodeIndex { depth: 0, position: 1 })
+    );
+    Ok(())
+}
+
+#[test]
 fn test_add_merkle_paths() -> Result<(), MerkleError> {
     let mtree = MerkleTree::new(VALUES4)?;
 

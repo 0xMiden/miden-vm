@@ -434,12 +434,22 @@ impl MerkleStore {
     ///
     /// This will compute the sibling elements determined by the Merkle `path` and `node`, and
     /// include all the nodes into the store.
+    ///
+    /// For a depth-0 (empty) path the leaf itself is the root, matching
+    /// [`MerklePath::compute_root`]; there are no siblings to fold, so the fold's
+    /// `Word::default()` seed must not leak out as the root.
     pub fn add_merkle_path(
         &mut self,
         index: u64,
         node: Word,
         path: MerklePath,
     ) -> Result<Word, MerkleError> {
+        if path.depth() == 0 {
+            // Validates the index fits a depth-0 path (only index 0 does), the same
+            // check `authenticated_nodes` performs for non-empty paths.
+            NodeIndex::new(path.depth(), index)?;
+            return Ok(node);
+        }
         let root = path.authenticated_nodes(index, node)?.fold(Word::default(), |_, node| {
             let value: Word = node.value;
             let left: Word = node.left;
