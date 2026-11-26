@@ -4,6 +4,8 @@
 
 #### Features
 
+- Added `seal_and_commit` and `seal_preprocessed_and_commit` to encrypt with EcGFp5/Eidos and return the envelope commitment. Added `commit_envelope` to compute the same commitment from an envelope in memory. Rust callers use `Envelope::to_commitment` ([#4245](https://github.com/0xMiden/miden-vm/pull/4245)).
+
 #### Changes
 
 - [BREAKING] Replaced Miette with local diagnostic types in `miden-utils-diagnostics`. Use the existing Miden `Report` re-export, implement `Diagnostic` for custom error metadata, and use `diagnostic!` for messages with labels. The renderer emits plain text ([#4246](https://github.com/0xMiden/miden-vm/pull/4246)).
