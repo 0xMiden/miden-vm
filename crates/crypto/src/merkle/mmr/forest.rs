@@ -78,9 +78,14 @@ impl Forest {
     ///
     /// # Panics
     ///
-    /// This will panic if `height` is greater than `usize::BITS - 1`.
+    /// This will panic if `1 << height` exceeds [`Forest::MAX_LEAVES`], i.e. if `height`
+    /// is greater than 31 on 64-bit targets (30 on 32-bit targets).
     pub fn with_height(height: usize) -> Self {
-        assert!(height < usize::BITS as usize);
+        assert!(
+            height <= Self::MAX_LEAVES.ilog2() as usize,
+            "forest height {height} exceeds maximum {}",
+            Self::MAX_LEAVES.ilog2()
+        );
         Self::new(1 << height).expect("forest height exceeds maximum")
     }
 
@@ -686,5 +691,18 @@ mod tests {
         // No tree has an index larger than u32::MAX, so nothing survives the filter.
         assert_eq!(Forest::new(5).unwrap().trees_larger_than(u32::MAX), Forest::new(0).unwrap());
         assert_eq!(Forest::new(5).unwrap().trees_larger_than(1), Forest::new(0b100).unwrap());
+    }
+
+    #[test]
+    fn with_height_accepts_the_largest_valid_height() {
+        let max_height = Forest::MAX_LEAVES.ilog2() as usize;
+        let forest = Forest::with_height(max_height);
+        assert_eq!(forest.num_leaves(), 1usize << max_height);
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds maximum")]
+    fn with_height_panics_above_the_largest_valid_height() {
+        let _ = Forest::with_height(Forest::MAX_LEAVES.ilog2() as usize + 1);
     }
 }
