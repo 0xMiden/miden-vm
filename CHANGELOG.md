@@ -26,12 +26,12 @@
 - Fixed `miden-format` leaving struct and enum bodies over the line limit when they contained comments or line breaks, or nested struct field types. Each field now gets its own line and long fields wrap, keeping comments and blank lines. Type items no longer get a space before `;` or `:` when wrapped ([#4064](https://github.com/0xMiden/miden-vm/issues/4064)).
 - [BREAKING] Rejected struct and enum types larger than `u32::MAX` bytes with an error instead of panicking (debug builds) or computing a wrapped size (release builds). Standalone arrays larger than `u32::MAX` bytes are now rejected too. This affects the assembler, the recursive type builder, and `Type` deserialization; the new fallible `StructType::try_from_parts` reports the error as `InvalidStructTypeError::SizeOverflow`, and `EnumType::new` as `InvalidEnumTypeError::SizeOverflow`. Valid enum layouts can grow to fit every variant and satisfy alignment requirements. For example, a `u32`-tagged enum with `[u8; 5]` and `u32` payload variants grows from 8 to 12 bytes ([#3983](https://github.com/0xMiden/miden-vm/pull/3983)).
 - [BREAKING] Fixed `mul.0` and `exp.0` leaving an extra element on the operand stack when executed at the minimum stack depth. MAST roots of procedures that use `mul.0` or `exp.0` change ([#4256](https://github.com/0xMiden/miden-vm/pull/4256)).
-- Fixed `SourceContent` ordering to distinguish entries with the same URI and text in different languages.
+- Fixed `SourceContent` ordering to distinguish entries with the same URI and text in different languages ([#4265](https://github.com/0xMiden/miden-vm/pull/4265)).
 - Fixed `MerkleStore::add_merkle_path` to return the opening node as the root of an empty path. Updating at the root index with `MerkleStore::set_node` returns the replacement value as the new root ([#4144](https://github.com/0xMiden/miden-vm/issues/4144)).
 - Fixed `ExecutionOptions::new` to return `ExpectedCyclesTooBig` when rounding `expected_cycles` up to a power of two overflows ([#4151](https://github.com/0xMiden/miden-vm/issues/4151)).
 - Fixed `PartialMerkleTree::update_leaf` to leave an empty tree unchanged when the update fails ([#4221](https://github.com/0xMiden/miden-vm/issues/4221)).
-- Fixed `Alignable::prev_power_of_two` to round down inputs above the largest representable power of two.
-- Fixed `Smt::apply_mutations` and `Smt::apply_mutations_with_reversion` to handle a mutation set that replaces one key with another in a full leaf.
+- Fixed `Alignable::prev_power_of_two` to round down inputs above the largest representable power of two ([#4265](https://github.com/0xMiden/miden-vm/pull/4265)).
+- Fixed `Smt::apply_mutations` and `Smt::apply_mutations_with_reversion` to handle a mutation set that replaces one key with another in a full leaf ([#4265](https://github.com/0xMiden/miden-vm/pull/4265)).
 
 ## v1.0.0-rc.1 (2026-11-14)
 
