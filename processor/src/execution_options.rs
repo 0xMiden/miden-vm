@@ -148,7 +148,18 @@ impl ExecutionOptions {
         };
         // Round up the expected number of cycles to the next power of two. If it is smaller than
         // MIN_TRACE_LEN -- pad expected number to it.
-        let expected_cycles = expected_cycles.next_power_of_two().max(MIN_TRACE_LEN as u32);
+        //
+        // `checked_next_power_of_two` is used because `next_power_of_two` overflows (debug:
+        // panics, release: wraps) for inputs above 2^31. Such an input rounds up past any
+        // valid `max_cycles` (<= 2^29), so it is rejected with the same error as any other
+        // expected_cycles that exceeds max_cycles after rounding.
+        let Some(expected_cycles) = expected_cycles.checked_next_power_of_two() else {
+            return Err(ExecutionOptionsError::ExpectedCyclesTooBig {
+                max_cycles,
+                expected_cycles,
+            });
+        };
+        let expected_cycles = expected_cycles.max(MIN_TRACE_LEN as u32);
         // Validate expected cycles (after rounding) against max_cycles.
         if max_cycles < expected_cycles {
             return Err(ExecutionOptionsError::ExpectedCyclesTooBig {
@@ -595,6 +606,27 @@ mod tests {
         let opts = ExecutionOptions::new(Some(100), 64, 1024);
         assert!(opts.is_ok());
         assert_eq!(opts.unwrap().expected_cycles(), 64);
+    }
+
+    #[test]
+    fn expected_cycles_above_2_pow_31_is_rejected_not_overflow() {
+        // `u32::next_power_of_two` overflows above 2^31: it panics in debug builds and wraps
+        // in release builds. These inputs must be rejected with `ExpectedCyclesTooBig`, the
+        // same error as any other expected_cycles exceeding max_cycles after rounding.
+        // 2^31 itself rounds to 2^31, which exceeds the default max_cycles (2^29).
+        for expected_cycles in [u32::MAX, 2_147_483_649, 1 << 31] {
+            let opts = ExecutionOptions::new(None, expected_cycles, 1024);
+            assert!(
+                matches!(opts, Err(ExecutionOptionsError::ExpectedCyclesTooBig { .. })),
+                "expected_cycles={expected_cycles} should be rejected, got {opts:?}"
+            );
+        }
+
+        // Boundary cases that must keep working: 65 rounds up to 128, 0 pads to MIN_TRACE_LEN.
+        let opts = ExecutionOptions::new(None, 65, 1024).unwrap();
+        assert_eq!(opts.expected_cycles(), 128);
+        let opts = ExecutionOptions::new(None, 0, 1024).unwrap();
+        assert_eq!(opts.expected_cycles(), MIN_TRACE_LEN as u32);
     }
 
     #[test]

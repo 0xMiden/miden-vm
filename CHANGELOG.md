@@ -20,6 +20,7 @@
 
 #### Fixes
 
+- Fixed `ExecutionOptions::new` panicking in debug builds and silently wrapping in release builds for `expected_cycles` above 2^31. The rounding now uses `checked_next_power_of_two`, so those inputs return `ExpectedCyclesTooBig` instead ([#4151](https://github.com/0xMiden/miden-vm/issues/4151)).
 - [BREAKING] Rejected unused opcode 47, required zero padding in LOOP, CALL and SYSCALL hash inputs, and required short operation batches to be final in the VM decoder AIR. The VM proof relation and recursive VM verifier root change ([#4239](https://github.com/0xMiden/miden-vm/pull/4239)).
 - Restored `no_std` builds for VM libraries by using `alloc` in the constraint compiler, building processor traces serially without `std`, and gating diagnostic rendering behind `std` ([#3934](https://github.com/0xMiden/miden-vm/pull/3934)).
 - Enabled `miden-test-utils` builds without `std` by keeping logging and test-only dependencies behind its `std` feature ([#3934](https://github.com/0xMiden/miden-vm/pull/3934)).
