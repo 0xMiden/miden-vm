@@ -116,13 +116,17 @@ impl ExecutionOptions {
 
     /// Creates a new instance of [ExecutionOptions] from the specified parameters.
     ///
-    /// If the `max_cycles` is `None` the maximum number of cycles will be set to 2^29.
+    /// If `max_cycles` is `None`, the limit is [`Self::MAX_CYCLES`]. The expected cycle count is
+    /// rounded up to a power of two and raised to [`MIN_TRACE_LEN`] if needed.
     ///
     /// # Errors
     /// Returns an error if:
-    /// - `max_cycles` is outside the valid range
-    /// - after rounding up to the next power of two, `expected_cycles` exceeds `max_cycles`
+    /// - the limit is outside the range from [`MIN_TRACE_LEN`] through [`Self::MAX_CYCLES`]
+    /// - rounding `expected_cycles` overflows or the adjusted count exceeds the cycle limit
     /// - `core_trace_fragment_size` is zero
+    ///
+    /// [`ExecutionOptionsError::ExpectedCyclesTooBig`] reports the adjusted cycle count when it
+    /// fits in `u32` and the original input when rounding overflows.
     pub fn new(
         max_cycles: Option<u32>,
         expected_cycles: u32,
@@ -146,10 +150,14 @@ impl ExecutionOptions {
         } else {
             Self::MAX_CYCLES
         };
-        // Round up the expected number of cycles to the next power of two. If it is smaller than
-        // MIN_TRACE_LEN -- pad expected number to it.
-        let expected_cycles = expected_cycles.next_power_of_two().max(MIN_TRACE_LEN as u32);
-        // Validate expected cycles (after rounding) against max_cycles.
+        // If rounding overflows, the input already exceeds every valid cycle limit.
+        let Some(rounded_cycles) = expected_cycles.checked_next_power_of_two() else {
+            return Err(ExecutionOptionsError::ExpectedCyclesTooBig {
+                max_cycles,
+                expected_cycles,
+            });
+        };
+        let expected_cycles = rounded_cycles.max(MIN_TRACE_LEN as u32);
         if max_cycles < expected_cycles {
             return Err(ExecutionOptionsError::ExpectedCyclesTooBig {
                 max_cycles,
@@ -476,9 +484,7 @@ impl Deserializable for ExecutionOptions {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExecutionOptionsError {
-    #[error(
-        "expected number of cycles {expected_cycles} must be smaller than the maximum number of cycles {max_cycles}"
-    )]
+    #[error("expected number of cycles {expected_cycles} exceeds the maximum of {max_cycles}")]
     ExpectedCyclesTooBig { max_cycles: u32, expected_cycles: u32 },
     #[error("maximum number of cycles {max_cycles} must be greater than {min_cycles_limit}")]
     MaxCycleNumTooSmall { max_cycles: u32, min_cycles_limit: usize },
@@ -577,6 +583,20 @@ mod tests {
         // Zero should fail
         let result = ExecutionOptions::default().with_core_trace_fragment_size(0);
         assert!(matches!(result, Err(ExecutionOptionsError::CoreTraceFragmentSizeTooSmall)));
+    }
+
+    #[test]
+    fn expected_cycles_that_overflow_rounding_are_rejected() {
+        for expected_cycles in [(1 << 31) + 1, u32::MAX] {
+            let opts = ExecutionOptions::new(None, expected_cycles, 1024);
+            assert!(matches!(
+                opts,
+                Err(ExecutionOptionsError::ExpectedCyclesTooBig {
+                    max_cycles: ExecutionOptions::MAX_CYCLES,
+                    expected_cycles: reported,
+                }) if reported == expected_cycles
+            ));
+        }
     }
 
     #[test]
