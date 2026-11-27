@@ -8,7 +8,7 @@ use super::{
     EmptySubtreeRoots, InnerNode, InnerNodes, Leaves, MerkleError, MutationSet, NodeIndex,
     SMT_DEPTH, Smt, SmtLeaf, SparseMerkleTreeReader, Word,
 };
-use crate::merkle::smt::{Map, NodeMutation, NodeMutations, SmtLeafError};
+use crate::merkle::smt::{Map, NodeMutation, NodeMutations, SmtLeafError, sort_removals_first};
 
 #[cfg(test)]
 mod tests;
@@ -94,8 +94,8 @@ impl Smt {
     ///    8 levels up. This continues until reaching the tree's root at depth 0.
     ///
     /// # Errors
-    /// Returns an error if mutations would exceed [`crate::merkle::smt::MAX_LEAF_ENTRIES`]
-    /// (1024 entries) in a leaf.
+    /// Returns an error for duplicate keys or if the final contents of a leaf would exceed
+    /// [`crate::merkle::smt::MAX_LEAF_ENTRIES`].
     pub(crate) fn compute_mutations_concurrent(
         &self,
         kv_pairs: impl IntoIterator<Item = (Word, Word)>,
@@ -311,19 +311,13 @@ impl Smt {
         // Map to track new key-value pairs for mutated leaves
         let mut new_pairs = Map::new();
 
-        let accumulator = process_sorted_pairs_to_leaves(pairs, |leaf_pairs| {
+        let accumulator = process_sorted_pairs_to_leaves(pairs, |mut leaf_pairs| {
             let mut leaf = self.get_leaf(&leaf_pairs[0].0);
+            sort_removals_first(&mut leaf_pairs, &Self::EMPTY_VALUE);
 
             let mut leaf_changed = false;
             for (key, value) in leaf_pairs {
-                // Check if the value has changed
-                let old_value = new_pairs.get(&key).cloned().unwrap_or_else(|| {
-                    // Safe to unwrap: `leaf_pairs` contains keys all belonging to this leaf.
-                    // `SmtLeaf::get_value()` only returns `None` if the key does not belong to the
-                    // leaf, which cannot happen due to the sorting/grouping
-                    // logic in `process_sorted_pairs_to_leaves()`.
-                    leaf.get_value(&key).unwrap()
-                });
+                let old_value = leaf.get_value(&key).expect("key belongs to the leaf");
 
                 if value != old_value {
                     // Update the leaf and track the new key-value pair
@@ -340,17 +334,8 @@ impl Smt {
                 }
             }
 
-            if leaf_changed {
-                // Only return the leaf if it actually changed
-                Ok(Some(leaf))
-            } else {
-                // Return None if leaf hasn't changed
-                Ok(None)
-            }
+            Ok(leaf_changed.then_some(leaf))
         });
-        // The closure is the only possible source of errors.
-        // Since it never returns an error - only `Ok(Some(_))` or `Ok(None)` - we can safely assume
-        // `accumulator` is always `Ok(_)`.
         Ok((accumulator?.leaves, new_pairs))
     }
 }

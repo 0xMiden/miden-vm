@@ -7,7 +7,7 @@ use crate::{
     Felt, ONE, Word,
     hash::eidos::{Eidos, domains::SMT_BUCKET_LEAF},
     merkle::{
-        EmptySubtreeRoots,
+        EmptySubtreeRoots, MerkleError,
         smt::{
             Map, MutationSet, NodeMutation, SmtLeafError, SmtProofError, SparseMerkleTree,
             SparseMerkleTreeReader, full::MAX_LEAF_ENTRIES,
@@ -596,21 +596,25 @@ fn test_mutations_revert() {
     assert_eq!(smt, original, "SMT with applied revert mutations did not match original SMT");
 }
 
+fn shared_leaf_key(i: usize) -> Word {
+    Word::new([ONE, ONE, Felt::new_unchecked(i as u64), ONE])
+}
+
 #[test]
 fn test_apply_mutations_replaces_entry_in_full_leaf() {
-    // Keys with the same last element share a leaf.
-    let key = |i: usize| Word::new([ONE, ONE, Felt::new_unchecked(i as u64), ONE]);
     let value = Word::new([ONE; Word::NUM_ELEMENTS]);
 
     // Assign edit roles so plain map iteration encounters the insertion first.
-    let mut pairs = Map::from([(key(0), EMPTY_WORD), (key(1), EMPTY_WORD)]);
+    let mut pairs = Map::from([(shared_leaf_key(0), EMPTY_WORD), (shared_leaf_key(1), EMPTY_WORD)]);
     let mut keys = pairs.keys().copied();
     let inserted = keys.next().unwrap();
     let removed = keys.next().unwrap();
     *pairs.get_mut(&inserted).unwrap() = value;
     assert_eq!(pairs.iter().next(), Some((&inserted, &value)));
 
-    let entries = (2..=MAX_LEAF_ENTRIES).map(|i| (key(i), value)).chain([(removed, value)]);
+    let entries = (2..=MAX_LEAF_ENTRIES)
+        .map(|i| (shared_leaf_key(i), value))
+        .chain([(removed, value)]);
     let original = Smt::with_entries(entries).unwrap();
     let mut expected = original.clone();
     expected.insert(removed, EMPTY_WORD).unwrap();
@@ -628,6 +632,85 @@ fn test_apply_mutations_replaces_entry_in_full_leaf() {
     assert_eq!(smt, expected);
 
     apply_mutations(&mut smt, reverse);
+    assert_eq!(smt, original);
+}
+
+#[test]
+fn test_compute_mutations_replaces_entry_in_full_leaf_in_any_order() {
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
+    // The leaf holds the keys 1 to `MAX_LEAF_ENTRIES`, so the inserted key 0 sorts before the
+    // removed key.
+    let entries = (1..=MAX_LEAF_ENTRIES).map(|i| (shared_leaf_key(i), value));
+    let original = Smt::with_entries(entries).unwrap();
+    let insertion = (shared_leaf_key(0), value);
+    let removal = (shared_leaf_key(5), EMPTY_WORD);
+
+    let mut expected = original.clone();
+    expected.insert(removal.0, removal.1).unwrap();
+    expected.insert(insertion.0, insertion.1).unwrap();
+
+    for batch in [[insertion, removal], [removal, insertion]] {
+        let mutations = original.compute_mutations(batch).unwrap();
+        assert_eq!(mutations, original.compute_mutations_sequential(batch).unwrap());
+
+        let mut smt = original.clone();
+        let reverse = apply_mutations(&mut smt, mutations);
+        assert_eq!(smt, expected);
+
+        apply_mutations(&mut smt, reverse);
+        assert_eq!(smt, original);
+    }
+}
+
+#[test]
+fn test_compute_mutations_sequential_replaces_many_entries_in_full_leaf() {
+    const REPLACED: usize = 32;
+
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let entries = (REPLACED..REPLACED + MAX_LEAF_ENTRIES).map(|i| (shared_leaf_key(i), value));
+    let original = Smt::with_entries(entries).unwrap();
+
+    // The inserted keys sort before the removed keys in a BTreeMap. Several batches exercise
+    // different HashMap iteration orders.
+    for start in (REPLACED..=4 * REPLACED).step_by(REPLACED) {
+        let removals = (start..start + REPLACED).map(|i| (shared_leaf_key(i), EMPTY_WORD));
+        let insertions = (0..REPLACED).map(|i| (shared_leaf_key(i), value));
+        let batch = removals.chain(insertions);
+
+        let mut expected = original.clone();
+        for (key, value) in batch.clone() {
+            expected.insert(key, value).unwrap();
+        }
+
+        let mutations = original.compute_mutations_sequential(batch).unwrap();
+        let mut smt = original.clone();
+        smt.apply_mutations(mutations).unwrap();
+        assert_eq!(smt, expected);
+    }
+}
+
+#[test]
+fn test_apply_mutations_leaves_tree_unchanged_on_error() {
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let entries = (1..=MAX_LEAF_ENTRIES).map(|i| (shared_leaf_key(i), value));
+    let original = Smt::with_entries(entries).unwrap();
+
+    // Rollback must undo the successful insertion before it can restore the removed entry.
+    let replacement = [(shared_leaf_key(1), EMPTY_WORD), (shared_leaf_key(0), value)];
+    let mut overflowing = original.compute_mutations(replacement).unwrap();
+    overflowing.new_pairs.insert(shared_leaf_key(MAX_LEAF_ENTRIES + 1), value);
+
+    let mut smt = original.clone();
+    assert_matches!(
+        smt.apply_mutations(overflowing.clone()),
+        Err(MerkleError::TooManyLeafEntries { actual }) if actual == MAX_LEAF_ENTRIES + 1
+    );
+    assert_eq!(smt, original);
+
+    assert_matches!(
+        smt.apply_mutations_with_reversion(overflowing),
+        Err(MerkleError::TooManyLeafEntries { actual }) if actual == MAX_LEAF_ENTRIES + 1
+    );
     assert_eq!(smt, original);
 }
 
