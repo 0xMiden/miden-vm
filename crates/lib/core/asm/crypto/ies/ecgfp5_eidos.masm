@@ -31,6 +31,10 @@ const NONCE_INIT_CV = [
     13503953893947608321, 11912009168875159560, 11170449401267093504, 6620516959492505600
 ]
 const ECGFP5_SEAL_CONTEXT = 0x00000e01
+const ECGFP5_ENVELOPE = 0x00001301
+# Envelope header: [R(5), tag(2), plaintext_len].
+const ENVELOPE_HEADER_LEN = 8
+const ENVELOPE_PLAINTEXT_LEN_OFFSET = ENVELOPE_HEADER_LEN - 1
 const MAX_AUTHENTICATED_INPUT_FELTS = 268435456
 
 # seal locals; offsets 0..24 hold the extraction input:
@@ -116,8 +120,74 @@ pub proc seal_preprocessed(
     push.1 exec.seal_inner
 end
 
-# The public entry points differ only in the DH strategy. Both fill the three point blocks
-# before the common key derivation and AEAD operations.
+#! Returns the commitment to the envelope at `envelope_ptr`.
+#!
+#! Input:  [envelope_ptr, ...]
+#! Output: [envelope_commitment(4), ...]
+#!
+#! Reads `plaintext_len` from the envelope header and hashes
+#! `[R(5), tag(2), plaintext_len, ciphertext(2 * plaintext_len)]` under `ECGFP5_ENVELOPE`,
+#! matching Rust's `Envelope::to_commitment`.
+#!
+#! The caller must supply a complete, valid envelope at a word-aligned u32 address.
+#!
+#! Invocation: exec
+pub proc commit_envelope(envelope_ptr: ptr<felt>) -> eidos::Digest
+    dup add.ENVELOPE_PLAINTEXT_LEN_OFFSET mem_load
+    mul.2 add.ENVELOPE_HEADER_LEN swap
+    # => [envelope_ptr, envelope_len, ...]
+    push.ECGFP5_ENVELOPE exec.eidos::hash_elements_in_domain
+end
+
+#! Seals a message to the recipient's public key and returns the commitment to the
+#! envelope written at `dst_ptr`.
+#!
+#! Input:  [public_key(4), src_ptr, plaintext_len, context_ptr, context_len, dst_ptr, ...]
+#! Output: [envelope_commitment(4), ...]
+#!
+#! Equivalent to `seal` followed by `commit_envelope` on `dst_ptr`. The key, advice, and memory
+#! requirements are those of `seal`.
+#!
+#! Invocation: exec
+pub proc seal_and_commit(
+    public_key: eidos::Digest,
+    source: ptr<felt>,
+    plaintext_len: u32,
+    context: ptr<felt>,
+    context_len: u32,
+    destination: ptr<felt>,
+) -> eidos::Digest
+    # `seal` consumes its arguments, so keep a copy of dst_ptr for the commitment.
+    dup.8 movdn.9
+    # => [public_key(4), src_ptr, plaintext_len, context_ptr, context_len, dst_ptr, dst_ptr, ...]
+    exec.seal
+    exec.commit_envelope
+end
+
+#! Encrypts with a preprocessed public-key commitment and returns the envelope commitment.
+#!
+#! Input:  [public_key(4), src_ptr, plaintext_len, context_ptr, context_len, dst_ptr, ...]
+#! Output: [envelope_commitment(4), ...]
+#!
+#! Equivalent to `seal_preprocessed` followed by `commit_envelope` on `dst_ptr`. The key,
+#! advice, and memory requirements are those of `seal_preprocessed`.
+#!
+#! Invocation: exec
+pub proc seal_preprocessed_and_commit(
+    public_key: eidos::Digest,
+    source: ptr<felt>,
+    plaintext_len: u32,
+    context: ptr<felt>,
+    context_len: u32,
+    destination: ptr<felt>,
+) -> eidos::Digest
+    dup.8 movdn.9
+    # => [public_key(4), src_ptr, plaintext_len, context_ptr, context_len, dst_ptr, dst_ptr, ...]
+    exec.seal_preprocessed
+    exec.commit_envelope
+end
+
+# Direct and preprocessed agreement both supply R, S, and Q to the same key derivation.
 # Input:  [preprocessed, public_key(4), src_ptr, plaintext_len, context_ptr, context_len, dst_ptr, ...]
 # Output: [...]
 @locals(36)
@@ -139,9 +209,9 @@ proc seal_inner(
 
     locaddr.0 dup.6 dup.6 exec.assert_range
     locaddr.0 dup.8 dup.8 exec.assert_range
-    locaddr.0 dup.6 mul.2 add.8 dup.10 exec.assert_range
-    dup.5 mul.2 add.8 dup.9 dup.7 dup.7 exec.assert_disjoint
-    dup.5 mul.2 add.8 dup.9 dup.9 dup.9 exec.assert_disjoint
+    locaddr.0 dup.6 mul.2 add.ENVELOPE_HEADER_LEN dup.10 exec.assert_range
+    dup.5 mul.2 add.ENVELOPE_HEADER_LEN dup.9 dup.7 dup.7 exec.assert_disjoint
+    dup.5 mul.2 add.ENVELOPE_HEADER_LEN dup.9 dup.9 dup.9 exec.assert_disjoint
 
     # Q's slot holds the commitment until agreement returns the authenticated point.
     padw loc_storew_le.RECIPIENT_POINT_TAIL_LOC dropw
@@ -174,7 +244,7 @@ proc seal_inner(
     padw loc_loadw_le.CONTEXT_DIGEST_LOC
     locaddr.SHARED_POINT_LOC exec.derive_key_nonce
     # => [key(4), nonce(4), ...]
-    loc_load.DESTINATION_PTR_LOC add.8 movdn.8
+    loc_load.DESTINATION_PTR_LOC add.ENVELOPE_HEADER_LEN movdn.8
     padw loc_loadw_le.SOURCE_PTR_LOC movdnw.2
     # => [key(4), nonce(4), src_ptr, plaintext_len, context_ptr, context_len, ct_ptr, ...]
     exec.aead_eidos::encrypt_with_ad

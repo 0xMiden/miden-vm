@@ -11,8 +11,8 @@ use miden_core::{
 };
 use miden_core_lib::{CoreLibrary, PVM_PROOF_REQUEST_EVENT_NAME};
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, ProcessorState, StackInputs,
-    advice::AdviceMutation, operation::OperationError,
+    DefaultHost, ExecutionError, Processor, ProcessorState, WitnessOutput, advice::AdviceMutation,
+    operation::OperationError,
 };
 use miden_prover::Prover;
 use miden_verifier::Verifier;
@@ -33,15 +33,12 @@ async fn live_accumulator_is_proved_before_clearing() {
         None,
         &clearing_epilogue(MIN_SECURITY_BITS),
     );
-    let witness = FastProcessor::new_with_options(
-        StackInputs::default(),
-        advice,
-        ExecutionOptions::default(),
-    )
-    .unwrap()
-    .execute_for_proving(&program, &mut host)
-    .await
-    .expect("recursive verification and clearing must succeed");
+    let WitnessOutput { claim, witness, .. } = Processor::new(&program)
+        .with_advice(advice)
+        .record_witness()
+        .run(&mut host)
+        .await
+        .expect("recursive verification and clearing must succeed");
     let root = host.requested_root.expect("settlement must request the live root");
     assert_ne!(root, TRUE_DIGEST);
     let pvm_proof = host
@@ -52,7 +49,6 @@ async fn live_accumulator_is_proved_before_clearing() {
     assert!(!witness.has_precompiles(), "clearing must remove the settled obligation");
 
     // Prove the execution containing both the original workload and recursive settlement.
-    let claim = witness.claim();
     let proof = Prover::new().with_hash_fn(HashFunction::Eidos).prove(witness).unwrap();
     assert!(matches!(proof.precompile(), PrecompileStatus::Empty));
     assert_eq!(proof.vm().precompile_root, TRUE_DIGEST);
@@ -76,19 +72,14 @@ async fn live_accumulator_is_proved_before_clearing() {
         let (program, advice) =
             signature_execution_inputs(&core_lib, fixture, None, &clearing_epilogue(minimum));
         let (mut host, requested_root) = rejection_host(&core_lib, &pvm_proof);
-        let mut processor = FastProcessor::new_with_options(
-            StackInputs::default(),
-            advice,
-            ExecutionOptions::default(),
-        )
-        .unwrap();
-        let error = processor
-            .execute_mut_sync(&program, &mut host)
+        let mut session = Processor::new(&program).with_advice(advice).execute().start().unwrap();
+        let error = session
+            .run_until_halt_sync(&mut host)
             .expect_err("an invalid settlement must fail before clearing");
         let requested_root = *requested_root.get().expect("the verifier must receive a proof");
         assert_ne!(requested_root, TRUE_DIGEST);
         assert_eq!(
-            processor.deferred_state().root(),
+            session.state().precompile_root(),
             requested_root,
             "failed settlement must retain the live obligation",
         );

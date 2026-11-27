@@ -18,8 +18,9 @@ pub use miden_core::{
     deferred::{DeferredRoot, PrecompileError, PrecompileLimits, PreparationError},
     program::{ExecutionClaim, KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
     proof::{
-        ExecutionProof, ExecutionProofCompatibility, ExecutionProofCompatibilityError,
-        HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof,
+        CompleteProof, ExecutionProof, ExecutionProofCompatibility,
+        ExecutionProofCompatibilityError, HashFunction, PrecompileProof, PrecompileStatus,
+        StarkProof, VmProof,
     },
 };
 use miden_core::{

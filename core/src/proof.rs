@@ -512,6 +512,47 @@ impl ExecutionProof {
     }
 }
 
+/// An execution proof whose precompile status is empty or proven.
+///
+/// Use [`CompleteProof::try_from`] to check this status on an imported [`ExecutionProof`].
+/// The verifier checks the STARK proofs and their roots against the execution claim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompleteProof(ExecutionProof);
+
+impl CompleteProof {
+    /// Packages a VM proof and its optional precompile proof with the current compatibility.
+    pub fn new(vm: VmProof, precompile: Option<PrecompileProof>) -> Self {
+        let status = precompile.map_or(PrecompileStatus::Empty, PrecompileStatus::Proven);
+        Self(ExecutionProof::new(vm, status))
+    }
+}
+
+impl core::ops::Deref for CompleteProof {
+    type Target = ExecutionProof;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl TryFrom<ExecutionProof> for CompleteProof {
+    /// The original execution proof, including its outstanding precompile witness.
+    type Error = ExecutionProof;
+
+    fn try_from(proof: ExecutionProof) -> Result<Self, Self::Error> {
+        match proof.precompile() {
+            PrecompileStatus::Empty | PrecompileStatus::Proven(_) => Ok(Self(proof)),
+            PrecompileStatus::Deferred(_) => Err(proof),
+        }
+    }
+}
+
+impl From<CompleteProof> for ExecutionProof {
+    fn from(proof: CompleteProof) -> Self {
+        proof.0
+    }
+}
+
 /// Lifecycle errors returned while transitioning an execution proof.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ExecutionProofError {
@@ -703,6 +744,25 @@ mod tests {
         let complete_with_precompile =
             versioned(vm_proof(root(1)), PrecompileStatus::Proven(precompile_proof(&[root(1)])));
         assert!(complete_with_precompile.has_precompiles());
+    }
+
+    #[test]
+    fn complete_proof_conversions_preserve_imported_artifacts_and_reject_deferred_work() {
+        for proof in [
+            versioned(vm_proof(TRUE_DIGEST), PrecompileStatus::Empty),
+            versioned(vm_proof(root(1)), PrecompileStatus::Proven(precompile_proof(&[root(1)]))),
+        ] {
+            let bytes = proof.to_bytes();
+            let imported = ExecutionProof::read_from_bytes(&bytes).unwrap();
+            let complete = CompleteProof::try_from(imported).unwrap();
+            assert_eq!(complete.to_bytes(), bytes);
+            assert_eq!(ExecutionProof::from(complete), proof);
+        }
+
+        let (witness, root) = wire();
+        let deferred = versioned(vm_proof(root), PrecompileStatus::Deferred(witness));
+        let imported = ExecutionProof::read_from_bytes(&deferred.to_bytes()).unwrap();
+        assert_eq!(CompleteProof::try_from(imported).unwrap_err(), deferred);
     }
 
     #[test]

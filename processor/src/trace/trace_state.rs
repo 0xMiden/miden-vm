@@ -1,15 +1,11 @@
-use alloc::{boxed::Box, collections::VecDeque, string::ToString, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::VecDeque, string::ToString, vec::Vec};
 
 use miden_air_definitions::vm::trace::{
     RowIndex,
     chiplets::hasher::{HasherState, MERKLE_DEPTH_RANGE_SCALE, STATE_WIDTH},
 };
-use miden_core::{
-    mast::{BasicBlockNode, ExecutableMastForest, MastNode, MastNodeExt, OpBatch},
-    serde::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        read_bounded_len,
-    },
+use miden_core::serde::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, read_bounded_len,
 };
 
 use crate::{
@@ -18,13 +14,12 @@ use crate::{
     continuation_stack::ContinuationStack,
     crypto::merkle::MerklePath,
     errors::OperationError,
-    mast::{MastForestId, MastNodeId, SparseMastForest},
+    mast::{MastForestId, MastNodeId},
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, SystemInterface,
     },
     trace::chiplets::{AEAD_STREAM_CYCLE_LEN, CircuitEvaluation, MAX_EVAL_CIRCUIT_INVOCATIONS},
     tracer::merkle_index_helper_values,
-    utils::Idx,
 };
 
 mod serde;
@@ -1240,147 +1235,29 @@ pub enum HasherOp {
     UpdateMerkleRoot((Word, Word, MerklePath, Felt)),
 }
 
-impl HasherOp {
-    /// Resolves the five forest-free variants; `None` for [`HasherOp::HashBasicBlock`], which
-    /// needs forest access.
-    fn resolve_forest_free<'a>(self) -> Option<ResolvedHasherOp<'a>> {
-        match self {
-            HasherOp::Compress(s) => Some(ResolvedHasherOp::Compress(s)),
-            HasherOp::AeadXof(ctx, clk, s) => Some(ResolvedHasherOp::AeadXof(ctx, clk, s)),
-            HasherOp::HashControlBlock(x) => Some(ResolvedHasherOp::HashControlBlock(x)),
-            HasherOp::HashBasicBlock(_) => None,
-            HasherOp::BuildMerkleRoot(x) => Some(ResolvedHasherOp::BuildMerkleRoot(x)),
-            HasherOp::UpdateMerkleRoot(x) => Some(ResolvedHasherOp::UpdateMerkleRoot(x)),
-        }
-    }
-}
-
-/// Basic-block data resolved for replay by the hasher-chiplet builder.
-#[derive(Debug)]
-pub enum ResolvedBasicBlockGroups<'a> {
-    /// Buffered replay borrows batches from the finalized MAST forest.
-    Borrowed(&'a [OpBatch]),
-    /// Streamed replay owns the group hashes because it crosses a thread boundary.
-    Owned(Vec<OpBatch>),
-}
-
-/// A hasher-chiplet request with all operands resolved, so it can be replayed without further
-/// MAST forest lookups.
-///
-/// This is what the hasher-chiplet builder consumes: the buffered replay resolves its recorded
-/// [`HasherOp`]s at drain time and borrows basic-block batches from the finalized forest, while the
-/// streaming path resolves at record time and forwards owned data to the concurrent builder.
-#[derive(Debug)]
-pub enum ResolvedHasherOp<'a> {
-    Compress([Felt; STATE_WIDTH]),
-    AeadXof(ContextId, RowIndex, [Felt; STATE_WIDTH]),
-    HashControlBlock((Word, Word, Felt, Word)),
-    HashBasicBlock((ResolvedBasicBlockGroups<'a>, Word)),
-    BuildMerkleRoot((Word, MerklePath, Felt)),
-    UpdateMerkleRoot((Word, Word, MerklePath, Felt)),
-}
-
 /// Records and replays all the requests made to the hasher chiplet during the execution of a
 /// program, for the purposes of generating the hasher chiplet's trace.
-///
-/// In buffered mode (the default) requests are recorded during fast-processor execution and
-/// replayed during hasher chiplet trace generation. In streamed mode
-/// ([`HasherRequestReplay::streamed`]) each request is resolved at record time and forwarded to
-/// a hasher-chiplet builder running concurrently with execution; see
-/// `FastProcessor::execute_and_build_trace_sync`.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 #[cfg_attr(
     all(feature = "arbitrary", test),
     miden_test_serialization_macros::serialization_test
 )]
 pub struct HasherRequestReplay {
-    sink: HasherOpSink,
-}
-
-#[derive(Debug)]
-enum HasherOpSink {
-    Buffered(VecDeque<HasherOp>),
-    #[cfg(feature = "std")]
-    Streamed(std::sync::mpsc::Sender<ResolvedHasherOp<'static>>),
-}
-
-impl PartialEq for HasherRequestReplay {
-    fn eq(&self, other: &Self) -> bool {
-        match (&self.sink, &other.sink) {
-            (HasherOpSink::Buffered(lhs), HasherOpSink::Buffered(rhs)) => lhs == rhs,
-            #[cfg(feature = "std")]
-            (HasherOpSink::Streamed(_), HasherOpSink::Streamed(_)) => true,
-            #[cfg(feature = "std")]
-            _ => false,
-        }
-    }
-}
-
-impl Eq for HasherRequestReplay {}
-
-impl Default for HasherOpSink {
-    fn default() -> Self {
-        Self::Buffered(VecDeque::new())
-    }
+    ops: Vec<HasherOp>,
 }
 
 impl HasherRequestReplay {
-    /// Creates a replay that forwards each request, resolved, to the receiving end as it is
-    /// recorded.
-    ///
-    /// Send failures are ignored: they mean the consumer stopped early, and its error surfaces
-    /// when the caller joins it.
-    #[cfg(feature = "std")]
-    pub(crate) fn streamed(sender: std::sync::mpsc::Sender<ResolvedHasherOp<'static>>) -> Self {
-        Self { sink: HasherOpSink::Streamed(sender) }
+    pub(super) fn aead_xof_count(&self) -> usize {
+        self.ops.iter().filter(|op| matches!(op, HasherOp::AeadXof(..))).count()
     }
 
-    // `resolved` is consumed only by the std-only streamed arm; without std the buffered arm
-    // stores the raw op and resolves later at drain.
-    #[cfg_attr(not(feature = "std"), allow(unused_variables))]
-    fn record_resolved(
-        &mut self,
-        op: HasherOp,
-        resolved: impl FnOnce() -> ResolvedHasherOp<'static>,
-    ) {
-        match &mut self.sink {
-            HasherOpSink::Buffered(ops) => ops.push_back(op),
-            #[cfg(feature = "std")]
-            HasherOpSink::Streamed(sender) => {
-                let _ = sender.send(resolved());
-            },
-        }
-    }
-
-    /// Records a forest-free op: buffered sinks store it as is, streamed sinks resolve and
-    /// forward it. [`HasherOp::HashBasicBlock`] must go through
-    /// [`Self::record_hash_basic_block`] instead.
-    fn record(&mut self, op: HasherOp) {
-        match &mut self.sink {
-            HasherOpSink::Buffered(ops) => ops.push_back(op),
-            #[cfg(feature = "std")]
-            HasherOpSink::Streamed(sender) => {
-                let resolved =
-                    op.resolve_forest_free().expect("`record` is only called with forest-free ops");
-                let _ = sender.send(resolved);
-            },
-        }
-    }
-
-    /// Records a raw, unresolved op — test-only escape hatch for injecting
-    /// malformed ids to exercise the drain-time resolution error paths.
-    #[cfg(test)]
-    pub(crate) fn record_raw(&mut self, op: HasherOp) {
-        match &mut self.sink {
-            HasherOpSink::Buffered(ops) => ops.push_back(op),
-            #[cfg(feature = "std")]
-            HasherOpSink::Streamed(_) => panic!("record_raw is for buffered replays"),
-        }
+    pub(super) fn into_ops(self) -> Vec<HasherOp> {
+        self.ops
     }
 
     /// Records a `Hasher::compress()` request.
     pub fn record_compress_input(&mut self, state: [Felt; STATE_WIDTH]) {
-        self.record(HasherOp::Compress(state));
+        self.ops.push(HasherOp::Compress(state));
     }
 
     /// Records an AEAD-XOF compression request.
@@ -1390,7 +1267,7 @@ impl HasherRequestReplay {
         clk: RowIndex,
         state: [Felt; STATE_WIDTH],
     ) {
-        self.record(HasherOp::AeadXof(ctx, clk, state));
+        self.ops.push(HasherOp::AeadXof(ctx, clk, state));
     }
 
     /// Records a `Hasher::hash_control_block()` request.
@@ -1401,32 +1278,22 @@ impl HasherRequestReplay {
         domain: Felt,
         expected_hash: Word,
     ) {
-        self.record(HasherOp::HashControlBlock((h1, h2, domain, expected_hash)));
+        self.ops.push(HasherOp::HashControlBlock((h1, h2, domain, expected_hash)));
     }
 
     /// Records a `Hasher::hash_basic_block()` request.
-    ///
-    /// `basic_block_node` must be the node identified by `(forest_id, node_id)`; streamed
-    /// replays copy its per-batch group hashes so the concurrent builder needs no forest
-    /// access.
     pub fn record_hash_basic_block(
         &mut self,
         forest_id: MastForestId,
         node_id: MastNodeId,
-        basic_block_node: &BasicBlockNode,
+        expected_hash: Word,
     ) {
-        let expected_hash = basic_block_node.digest();
-        self.record_resolved(HasherOp::HashBasicBlock((forest_id, node_id, expected_hash)), || {
-            ResolvedHasherOp::HashBasicBlock((
-                ResolvedBasicBlockGroups::Owned(basic_block_node.op_batches().to_vec()),
-                expected_hash,
-            ))
-        });
+        self.ops.push(HasherOp::HashBasicBlock((forest_id, node_id, expected_hash)));
     }
 
     /// Records a `Hasher::build_merkle_root()` request.
     pub fn record_build_merkle_root(&mut self, leaf: Word, path: MerklePath, index: Felt) {
-        self.record(HasherOp::BuildMerkleRoot((leaf, path, index)));
+        self.ops.push(HasherOp::BuildMerkleRoot((leaf, path, index)));
     }
 
     /// Records a `Hasher::update_merkle_root()` request.
@@ -1437,76 +1304,17 @@ impl HasherRequestReplay {
         path: MerklePath,
         index: Felt,
     ) {
-        self.record(HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)));
+        self.ops.push(HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)));
     }
 
-    /// Returns the forest IDs referenced by buffered basic-block hash requests.
-    ///
-    /// Trace replay deserialization uses these IDs to validate that every request points into the
-    /// replay's finalized MAST forest store. Streamed requests have already been delivered to the
-    /// concurrent trace builder, so they yield no IDs here.
+    /// Forests referenced by basic-block requests must exist in the finalized forest store.
     pub(crate) fn iter_hash_basic_block_forest_ids(
         &self,
     ) -> impl Iterator<Item = MastForestId> + '_ {
-        self.buffered_ops()
-            .into_iter()
-            .flat_map(|ops| ops.iter())
-            .filter_map(|op| match op {
-                HasherOp::HashBasicBlock((forest_id, _node_id, _expected_hash)) => Some(*forest_id),
-                _ => None,
-            })
-    }
-
-    fn buffered_ops(&self) -> Option<&VecDeque<HasherOp>> {
-        match &self.sink {
-            HasherOpSink::Buffered(ops) => Some(ops),
-            #[cfg(feature = "std")]
-            HasherOpSink::Streamed(_) => None,
-        }
-    }
-
-    /// Drains the buffered requests as resolved ops, looking basic blocks up in the finalized
-    /// forest store.
-    ///
-    /// A streamed replay must not reach this path — its ops were already delivered to the
-    /// concurrent builder (and the overlap path swaps in an empty buffered replay via
-    /// `take_hasher_replay`) — so it yields an error rather than silently producing an empty
-    /// hasher chiplet.
-    pub fn into_resolved_ops<'a>(
-        self,
-        mast_forest_store: &'a [Arc<SparseMastForest>],
-    ) -> impl Iterator<Item = Result<ResolvedHasherOp<'a>, ExecutionError>> + 'a {
-        let (streamed_err, ops) = match self.sink {
-            HasherOpSink::Buffered(ops) => (None, ops),
-            #[cfg(feature = "std")]
-            HasherOpSink::Streamed(_) => (
-                Some(ExecutionError::Internal(
-                    "streamed hasher replay reached the buffered trace-build path",
-                )),
-                VecDeque::new(),
-            ),
-        };
-        streamed_err.into_iter().map(Err).chain(ops.into_iter().map(move |op| match op {
-            HasherOp::HashBasicBlock((forest_id, node_id, expected_hash)) => {
-                let forest =
-                    mast_forest_store.get(forest_id.to_usize()).ok_or(ExecutionError::Internal(
-                        "MAST forest id in hasher replay out of range of mast_forest_store",
-                    ))?;
-                let node = forest
-                    .get_node_by_id(node_id)
-                    .ok_or(ExecutionError::Internal("invalid node ID in hasher replay"))?;
-                let MastNode::Block(basic_block_node) = node else {
-                    return Err(ExecutionError::Internal(
-                        "expected basic block node in hasher replay",
-                    ));
-                };
-                Ok(ResolvedHasherOp::HashBasicBlock((
-                    ResolvedBasicBlockGroups::Borrowed(basic_block_node.op_batches()),
-                    expected_hash,
-                )))
-            },
-            op => Ok(op.resolve_forest_free().expect("all other variants are forest-free")),
-        }))
+        self.ops.iter().filter_map(|op| match op {
+            HasherOp::HashBasicBlock((id, ..)) => Some(*id),
+            _ => None,
+        })
     }
 }
 
@@ -1666,17 +1474,6 @@ mod tests {
             size_of::<BitwiseReplayEntry>() < size_of::<AeadStreamReplayEntry>(),
             "ordinary replay entries must not pay for the inline AEAD stream payload",
         );
-    }
-
-    /// A streamed replay reaching the buffered trace-build path is a logic error
-    /// and must surface immediately, not as a silently empty hasher chiplet.
-    #[test]
-    fn streamed_replay_in_buffered_path_errors() {
-        let (sender, _receiver) = std::sync::mpsc::channel();
-        let replay = HasherRequestReplay::streamed(sender);
-        let mut ops = replay.into_resolved_ops(&[]);
-        assert!(matches!(ops.next(), Some(Err(ExecutionError::Internal(_)))));
-        assert!(ops.next().is_none());
     }
 }
 
@@ -2124,16 +1921,8 @@ mod arbitrary_replays {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            // Buffered-only: the write side panics on Streamed and the reader always yields
-            // Buffered, so Default (Buffered) + record is the exact-roundtrip regime.
             proptest::collection::vec(any::<HasherOp>(), 0..=4)
-                .prop_map(|ops| {
-                    let mut replay = Self::default();
-                    for op in ops {
-                        replay.record(op);
-                    }
-                    replay
-                })
+                .prop_map(|ops| Self { ops })
                 .boxed()
         }
     }

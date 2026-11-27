@@ -1,8 +1,7 @@
 //! Benchmark sparse extraction against replay-builder finalization and dense rebuilding.
 //!
-//! Criterion reports elapsed time. Before timing each case, the benchmark also prints allocation
-//! calls and requested bytes for one operation. Fixture construction and reachability discovery
-//! happen before either measurement.
+//! Criterion reports elapsed time. Comparisons with replay and dense rebuilding also report
+//! allocation calls and requested bytes per operation. All timings exclude fixture construction.
 
 use std::{
     alloc::{GlobalAlloc, Layout, System},
@@ -322,6 +321,70 @@ fn bench_large_payloads(c: &mut Criterion) {
     group.finish();
 }
 
+/// Times single-leaf extraction as the source root count grows. For procedures with equal
+/// digests, it measures the cost of adding dense conversion when bodies are copied or pruned.
+fn bench_procedure_boundaries(c: &mut Criterion) {
+    let mut group = c.benchmark_group("mast_forest_extraction/procedure_boundaries");
+    for count in [16, 1_024, 16_384] {
+        let mut builder = DenseMastForestBuilder::new();
+        for i in 0..count {
+            let root = builder
+                .push_node(BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::from_u32(i))]))
+                .unwrap();
+            builder.mark_root(root);
+        }
+        let source = builder.build().unwrap();
+        let roots = source.procedure_roots();
+        for (case, root) in [("first_leaf", roots[0]), ("last_leaf", roots[roots.len() - 1])] {
+            group.bench_function(BenchmarkId::new(case, count), |b| {
+                b.iter(|| {
+                    SparseMastForest::from_procedure_roots_with_externals(&source, &[root], |_| {
+                        false
+                    })
+                    .unwrap()
+                });
+            });
+        }
+    }
+
+    // These procedures differ in their assertion codes but have the same digest. Sparse
+    // extraction retains the source IDs, while dense conversion selects one body.
+    let mut builder = DenseMastForestBuilder::new();
+    let mut level = Vec::new();
+    for code in 0..64 {
+        let mut id = builder
+            .push_node(BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::from_u32(code))]))
+            .unwrap();
+        for _ in 1..32 {
+            id = builder.push_node(CallNodeBuilder::new(id)).unwrap();
+        }
+        builder.mark_root(id);
+        level.push(id);
+    }
+    while level.len() > 1 {
+        let (pairs, _) = level.as_chunks::<2>();
+        level = pairs
+            .iter()
+            .map(|&pair| builder.push_node(JoinNodeBuilder::new(pair)).unwrap())
+            .collect();
+    }
+    let root = level[0];
+    builder.mark_root(root);
+    let (source, ids) = builder.build_with_id_map().unwrap();
+    let roots = [ids.get(root).unwrap()];
+    for (case, known) in [("known", true), ("unknown", false)] {
+        let extract = || {
+            SparseMastForest::from_procedure_roots_with_externals(&source, &roots, |_| known)
+                .unwrap()
+        };
+        group.bench_function(BenchmarkId::new("aliases_sparse", case), |b| b.iter(extract));
+        group.bench_function(BenchmarkId::new("aliases_sparse_then_dense", case), |b| {
+            b.iter(|| extract().to_mast_forest_with_externals().unwrap());
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_source_size,
@@ -329,5 +392,6 @@ criterion_group!(
     bench_selected_roots,
     bench_shared_descendants,
     bench_large_payloads,
+    bench_procedure_boundaries,
 );
 criterion_main!(benches);

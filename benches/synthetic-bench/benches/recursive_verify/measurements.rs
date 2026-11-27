@@ -3,11 +3,12 @@
 use std::{hint::black_box, time::Instant};
 
 use miden_core::program::ExecutionClaim;
-use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor, trace::TraceLenSummary};
-use miden_vm::{
-    ExecutionProof, ExecutionWitness, Prover, StackInputs, StackOutputs, Verifier, VmTrace,
-    prove_sync, trace::build_trace,
+use miden_processor::{
+    DefaultHost, Processor, Program,
+    advice::AdviceInputs,
+    trace::{TraceLenSummary, VmTrace},
 };
+use miden_vm::{ExecutionProof, ExecutionWitness, Prover, Verifier};
 
 use super::{RecursionCase, config::ProofComposition, recursive_host};
 
@@ -71,67 +72,42 @@ pub(super) fn trace_shape_summary_for(summary: &TraceLenSummary) -> TraceShape {
 }
 
 pub(super) fn execute_trace_inputs(case: RecursionCase, mut host: DefaultHost) -> ExecutionWitness {
-    let processor = FastProcessor::new_with_options(
-        StackInputs::default(),
-        case.advice_inputs,
-        ExecutionOptions::default(),
-    )
-    .expect("recursive verifier advice should fit provider limits");
-    processor
-        .execute_for_proving_sync(&case.program, &mut host)
+    Processor::new(&case.program)
+        .with_advice(case.advice_inputs)
+        .record_witness()
+        .run_sync(&mut host)
         .expect("execute recursive verifier")
-}
-
-pub(super) fn execute_recursive_case(
-    (case, host): (RecursionCase, DefaultHost),
-) -> ExecutionWitness {
-    execute_trace_inputs(case, host)
+        .witness
 }
 
 pub(super) fn build_trace_case(witness: ExecutionWitness) -> VmTrace {
     let (vm_witness, _) = witness.into_parts();
-    build_trace(vm_witness, &miden_vm_stark::memory::default_budget())
+    vm_witness
+        .build_trace(&miden_vm_stark::memory::default_budget())
         .expect("build recursive verifier trace")
 }
 
-pub(super) fn execute_and_build_case((case, host): (RecursionCase, DefaultHost)) -> VmTrace {
-    build_trace_case(execute_trace_inputs(case, host))
-}
-
-pub(super) fn prove_recursive_case(
+pub(super) fn prove_recursive_trace(
     prover: &Prover,
-    (case, mut host): (RecursionCase, DefaultHost),
-) -> (StackOutputs, ExecutionProof) {
-    prove_sync(
-        prover,
-        &case.program,
-        StackInputs::default(),
-        case.advice_inputs,
-        &mut host,
-        ExecutionOptions::default(),
-    )
-    .expect("prove recursive verifier")
+    program: &Program,
+    advice_inputs: AdviceInputs,
+    host: &mut DefaultHost,
+) -> (ExecutionClaim, ExecutionProof) {
+    let output = Processor::new(program)
+        .with_advice(advice_inputs)
+        .record_witness()
+        .run_sync(host)
+        .expect("execute recursive verifier and record witness");
+    let proof = prover.prove_full(output.witness).expect("prove recursive verifier");
+    (output.claim, proof.into())
 }
 
 fn prove_recursive_once(prover: &Prover, case: &RecursionCase) -> (f64, usize) {
     let advice_inputs = case.advice_inputs.clone();
     let mut host = recursive_host();
     let start = Instant::now();
-    let (stack_outputs, proof) = prove_sync(
-        prover,
-        &case.program,
-        StackInputs::default(),
-        advice_inputs,
-        &mut host,
-        ExecutionOptions::default(),
-    )
-    .expect("prove recursive verifier");
+    let (claim, proof) = prove_recursive_trace(prover, &case.program, advice_inputs, &mut host);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1_000.0;
-    let claim = ExecutionClaim::from_program_info(
-        case.program.to_info(),
-        StackInputs::default(),
-        stack_outputs,
-    );
     assert!(
         Verifier::new()
             .verify(&claim, &proof)

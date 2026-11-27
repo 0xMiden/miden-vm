@@ -26,8 +26,7 @@ use miden_precompiles_stark::{
     verifier::verify_deferred,
 };
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, MemoryError,
-    ProcessorState, StackInputs,
+    DefaultHost, ExecutionError, ExecutionOutput, MemoryError, Processor, ProcessorState,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
     event::{EventError, EventHandler},
     operation::OperationError,
@@ -84,7 +83,8 @@ fn p256_verify_bytes_accepts_lengths_0_1_55_56_64_200() {
         let message: Vec<u8> =
             (0..len).map(|i| (i as u8).wrapping_mul(29).wrapping_add(3)).collect();
 
-        let output = run_verify_bytes(&message)
+        let memory = bytes_to_packed_u32_elements(&message);
+        let output = run_verify_bytes_with_memory(&message, &memory, None)
             .unwrap_or_else(|err| panic!("{len}-byte message must verify: {err}"));
         assert_precompile_witness_round_trips(&output);
     }
@@ -346,7 +346,9 @@ fn p256_recover_bytes_respects_partial_final_word() {
     let prehash: [u8; 32] = Sha256::hash(&message).into();
     let (signature, recovery_id) = signing_key.sign_prehash_recoverable(&prehash);
 
-    let output = run_recover_bytes(&message, &native_recovery_signature(&signature, recovery_id))
+    let memory = bytes_to_packed_u32_elements(&message);
+    let signature = native_recovery_signature(&signature, recovery_id);
+    let output = run_recover_bytes_with_memory(&message, &memory, &signature, None)
         .expect("message byte length must exclude zero padding in the final memory word");
 
     assert_eq!(stack_elements::<16>(&output), public_key_elements(signing_key.verifying_key()));
@@ -737,10 +739,6 @@ fn run_verify_with(
     run_core_program(&source, advice, None)
 }
 
-fn run_verify_bytes(message: &[u8]) -> Result<ExecutionOutput, ExecutionError> {
-    run_verify_bytes_with_memory(message, &bytes_to_packed_u32_elements(message), None)
-}
-
 /// Signs `message` and verifies it with `memory` stored at the message pointer.
 fn run_verify_bytes_with_memory(
     message: &[u8],
@@ -809,13 +807,6 @@ fn run_recover_with_native_signature(
     run_core_program(&source, &[], handler)
 }
 
-fn run_recover_bytes(
-    message: &[u8],
-    signature: &[Felt; 17],
-) -> Result<ExecutionOutput, ExecutionError> {
-    run_recover_bytes_with_memory(message, &bytes_to_packed_u32_elements(message), signature, None)
-}
-
 /// Recovers from `signature` over `message` with `memory` stored at the message pointer.
 fn run_recover_bytes_with_memory(
     message: &[u8],
@@ -869,14 +860,12 @@ fn run_core_program(
 
     let mut advice_stack = AdviceStack::new();
     advice_stack.append_elements(advice.iter().copied());
-    let processor = FastProcessor::new_with_options(
-        StackInputs::default(),
-        AdviceInputs::default().with_stack(advice_stack),
-        ExecutionOptions::default(),
-    )
-    .expect("processor construction");
-
-    let output = processor.execute_sync(&program, &mut host);
+    let output = Processor::new(&program)
+        .with_advice(AdviceInputs::default().with_stack(advice_stack))
+        .execute()
+        .prepare()
+        .expect("processor construction")
+        .run_sync(&mut host);
     if let Ok(output) = &output {
         assert!(output.advice.stack().is_empty(), "core ECDSA wrapper must consume advice");
     }

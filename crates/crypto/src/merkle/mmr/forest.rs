@@ -232,7 +232,7 @@ impl Forest {
     /// assert_eq!(range.trees_larger_than(1), Forest::new(0b0101_0100).unwrap());
     /// ```
     pub fn trees_larger_than(self, tree_idx: u32) -> Self {
-        let mask = high_bitmask(tree_idx + 1);
+        let mask = high_bitmask(tree_idx.saturating_add(1));
         Self::new(self.0 & mask).expect("forest size exceeds maximum")
     }
 
@@ -679,5 +679,12 @@ mod tests {
     #[should_panic(expected = "no rightmost in-order index")]
     fn rightmost_in_order_index_unchecked_panics_on_the_empty_forest() {
         let _ = Forest::empty().rightmost_in_order_index_unchecked();
+    }
+
+    #[test]
+    fn trees_larger_than_max_returns_the_empty_forest() {
+        // No tree has an index larger than u32::MAX, so nothing survives the filter.
+        assert_eq!(Forest::new(5).unwrap().trees_larger_than(u32::MAX), Forest::new(0).unwrap());
+        assert_eq!(Forest::new(5).unwrap().trees_larger_than(1), Forest::new(0b100).unwrap());
     }
 }

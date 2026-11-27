@@ -47,8 +47,8 @@ use fixtures::{
     RecursiveProofAdvice, TxProofFixture, load_pvm_advice, load_tx_fixtures, recursive_proof_advice,
 };
 use measurements::{
-    build_trace_case, execute_and_build_case, execute_recursive_case, execute_trace_inputs,
-    print_case_shape, print_trace_shape_summary, profile_prove_round_robin, prove_recursive_case,
+    build_trace_case, execute_trace_inputs, print_case_shape, print_trace_shape_summary,
+    profile_prove_round_robin, prove_recursive_trace,
 };
 
 #[derive(Clone)]
@@ -261,7 +261,7 @@ fn bench_recursive_verify(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new(format!("execute/{label}"), &case.scenario), |b| {
             b.iter_batched(
                 || (case.clone(), recursive_host()),
-                execute_recursive_case,
+                |(case, host)| execute_trace_inputs(case, host),
                 BatchSize::PerIteration,
             );
         });
@@ -280,7 +280,7 @@ fn bench_recursive_verify(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new(format!("total/{label}"), &case.scenario), |b| {
             b.iter_batched(
                 || (case.clone(), recursive_host()),
-                execute_and_build_case,
+                |(case, host)| build_trace_case(execute_trace_inputs(case, host)),
                 BatchSize::PerIteration,
             );
         });
@@ -288,7 +288,15 @@ fn bench_recursive_verify(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new(format!("prove/{label}"), &case.scenario), |b| {
             b.iter_batched(
                 || (case.clone(), recursive_host()),
-                |input| prove_recursive_case(&prover, input),
+                |(case, mut host)| {
+                    let (claim, proof) = prove_recursive_trace(
+                        &prover,
+                        &case.program,
+                        case.advice_inputs,
+                        &mut host,
+                    );
+                    (*claim.stack_outputs(), proof)
+                },
                 BatchSize::PerIteration,
             );
         });

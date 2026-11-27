@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_processor::{
-    DefaultHost, ExecutionError, FastProcessor, ProcessorState, StackInputs,
+    DefaultHost, ExecutionError, Processor, ProcessorState,
     event::{EventName, TraceError},
 };
 
@@ -25,11 +25,9 @@ fn trace_handler_errors_preserve_the_registered_name() {
     )
     .unwrap();
     let mut recording = RecordingHost::new(&mut host, None, None);
-    let error = poll_immediately(
-        FastProcessor::new(StackInputs::default())
-            .execute(&package.unwrap_program(), &mut recording),
-    )
-    .expect_err("the trace handler must reject execution");
+    let error =
+        poll_immediately(Processor::new(&package.unwrap_program()).execute().run(&mut recording))
+            .expect_err("the trace handler must reject execution");
     let ExecutionError::EventError { event_id, event_name, error, .. } = error else {
         panic!("unexpected execution error: {error:?}");
     };
@@ -65,11 +63,8 @@ fn trace_callbacks_do_not_add_advice_events() {
     .unwrap();
     let events = EventMutationRecorder::new();
     let mut recording = RecordingHost::new(&mut host, Some(events.clone()), None);
-    poll_immediately(
-        FastProcessor::new(StackInputs::default())
-            .execute(&package.unwrap_program(), &mut recording),
-    )
-    .unwrap();
+    poll_immediately(Processor::new(&package.unwrap_program()).execute().run(&mut recording))
+        .unwrap();
     assert_eq!(calls.load(Ordering::Relaxed), 1);
     let log = events.snapshot();
     assert_eq!(log.len(), 1, "only the regular event belongs in the advice replay log");
