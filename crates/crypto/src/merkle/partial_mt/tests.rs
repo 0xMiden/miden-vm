@@ -266,6 +266,19 @@ fn update_leaf() {
     assert_eq!(expected_root, actual_root);
 }
 
+#[test]
+fn update_leaf_on_an_empty_tree_leaves_it_unchanged() {
+    let mut pmt = PartialMerkleTree::new();
+    let before = pmt.clone();
+
+    let result = pmt.update_leaf(0, int_to_node(7));
+    assert!(matches!(
+        result,
+        Err(MerkleError::NodeIndexNotFoundInTree(index)) if index == NodeIndex::root()
+    ));
+    assert_eq!(pmt, before);
+}
+
 /// Checks that paths of the PMT returned by `paths()` function are equal to the expected ones.
 #[test]
 fn get_paths() {
