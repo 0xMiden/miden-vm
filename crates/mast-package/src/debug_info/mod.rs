@@ -11,7 +11,7 @@ mod builder;
 mod serialization;
 mod types;
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{collections::BTreeSet, sync::Arc, vec::Vec};
 
 pub use builder::*;
 use miden_core::mast::{MastForestRootMap, MastNodeId};
@@ -23,6 +23,60 @@ pub use types::*;
 
 type FxHashMap<K, V> = hashbrown::HashMap<K, V, rustc_hash::FxBuildHasher>;
 type FxHashSet<K> = hashbrown::HashSet<K, rustc_hash::FxBuildHasher>;
+
+enum DebugStringIndices {
+    One(DebugStringIdx),
+    Many(BTreeSet<DebugStringIdx>),
+}
+
+impl DebugStringIndices {
+    fn insert(&mut self, index: DebugStringIdx) {
+        match self {
+            Self::One(existing) if *existing == index => {},
+            Self::One(existing) => {
+                let mut indices = BTreeSet::new();
+                indices.insert(*existing);
+                indices.insert(index);
+                *self = Self::Many(indices);
+            },
+            Self::Many(indices) => {
+                indices.insert(index);
+            },
+        }
+    }
+
+    fn contains(&self, index: DebugStringIdx) -> bool {
+        match self {
+            Self::One(existing) => *existing == index,
+            Self::Many(indices) => indices.contains(&index),
+        }
+    }
+
+    /// Removes `index` and returns whether the collection is now empty.
+    fn remove(&mut self, index: DebugStringIdx) -> bool {
+        match self {
+            Self::One(existing) => {
+                debug_assert_eq!(*existing, index);
+                true
+            },
+            Self::Many(indices) => {
+                let removed = indices.remove(&index);
+                debug_assert!(removed);
+                if indices.len() == 1 {
+                    *self = Self::One(*indices.first().expect("one string index should remain"));
+                }
+                false
+            },
+        }
+    }
+
+    fn first(&self) -> DebugStringIdx {
+        match self {
+            Self::One(index) => *index,
+            Self::Many(indices) => *indices.first().expect("one string index should remain"),
+        }
+    }
+}
 
 pub const DEBUG_INFO_VERSION: u8 = 4;
 
@@ -325,48 +379,230 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
 
     /// Apply `trimmer` to every distinct file path referenced by the file table.
     ///
-    /// If `trimmer` returns `None`, the file path is left unmodified. Otherwise, the returned path
-    /// is interned and the corresponding file records are retargeted to it. Other debug records
-    /// which reference the original string are left unchanged.
+    /// If `trimmer` returns `None`, the file path is left unmodified. Otherwise, file-only strings
+    /// are replaced in place. Strings shared with unrelated debug records are preserved, and the
+    /// file records are retargeted to an interned copy of the trimmed path. All other debug
+    /// records, including assembly operation metadata, retain their original values. This
+    /// method does not compact orphaned strings produced by older implementations. Distinct
+    /// file-only indices normally remain distinct when they trim to the same text because
+    /// deduplicating them would also require table compaction. A retained remap target cannot be
+    /// replaced in place, so a later file may reuse another matching index.
     pub fn trim_file_paths(&mut self, mut trimmer: impl FnMut(&str) -> Option<Arc<str>>) {
-        use hashbrown::hash_map::Entry;
+        // Destructure every table so adding one requires classifying its string ownership here.
+        let DebugInfo {
+            version: _,
+            strings,
+            files,
+            locations: _,
+            types,
+            functions,
+            nodes,
+            roots: _,
+            error_messages,
+        } = self;
 
-        let mut string_indices = FxHashMap::<Arc<str>, DebugStringIdx>::default();
-        for (index, string) in self.strings.iter().enumerate() {
+        let mut unrelated_strings = FxHashSet::<DebugStringIdx>::default();
+        for ty in types.iter() {
+            match ty {
+                DebugTypeInfo::Struct { name_idx, size: _, fields } => {
+                    unrelated_strings.insert(*name_idx);
+                    for DebugFieldInfo { name_idx, type_idx: _, offset: _ } in fields {
+                        unrelated_strings.insert(*name_idx);
+                    }
+                },
+                DebugTypeInfo::Enum {
+                    name_idx,
+                    size: _,
+                    discriminant_type_idx: _,
+                    variants,
+                } => {
+                    unrelated_strings.insert(*name_idx);
+                    for DebugVariantInfo {
+                        name_idx,
+                        type_idx: _,
+                        payload_offset: _,
+                        discriminant: _,
+                    } in variants
+                    {
+                        unrelated_strings.insert(*name_idx);
+                    }
+                },
+                DebugTypeInfo::Primitive(_)
+                | DebugTypeInfo::Pointer { pointee_type_idx: _ }
+                | DebugTypeInfo::Array { element_type_idx: _, count: _ }
+                | DebugTypeInfo::Function {
+                    return_type_idx: _,
+                    param_type_indices: _,
+                }
+                | DebugTypeInfo::Variadic
+                | DebugTypeInfo::Unknown => {},
+            }
+        }
+        for function in functions.iter() {
+            let FunctionInfo {
+                mast_root: _,
+                source_node: _,
+                type_idx: _,
+                linkage_name_idx,
+                name_idx,
+                file_idx: _,
+                line: _,
+                column: _,
+            } = function;
+            unrelated_strings.insert(*name_idx);
+            if let Some(linkage_name_idx) = (*linkage_name_idx)
+                .try_into_option()
+                .expect("invalid debug function linkage name index")
+            {
+                unrelated_strings.insert(linkage_name_idx);
+            }
+        }
+        for node in nodes.iter() {
+            let SourceNode {
+                exec_node: _,
+                children: _,
+                op_start: _,
+                op_end: _,
+                asm_ops,
+                debug_vars,
+                inline_calls: _,
+            } = node;
+            for asm_op in asm_ops {
+                let DebugSourceAsmOp {
+                    op_idx: _,
+                    location_idx: _,
+                    context_name_idx,
+                    op_name_idx,
+                    num_cycles: _,
+                    _padding: _,
+                } = asm_op;
+                unrelated_strings.insert(*op_name_idx);
+                unrelated_strings.insert(*context_name_idx);
+            }
+            for debug_var in debug_vars {
+                let DebugSourceVar {
+                    op_idx: _,
+                    name_idx,
+                    type_id: _,
+                    arg_idx: _,
+                    location_idx: _,
+                    value_location: _,
+                } = debug_var;
+                unrelated_strings.insert(*name_idx);
+            }
+        }
+        for error in error_messages.iter() {
+            let DebugErrorMessage { err_code: _, message, _padding: _ } = error;
+            unrelated_strings.insert(*message);
+        }
+
+        let mut trimmed_paths = FxHashMap::<Arc<str>, Option<Arc<str>>>::default();
+        for file in files.iter() {
+            let path_idx = file.path_idx;
+            let path = strings.get(path_idx).unwrap_or_else(|| {
+                panic!(
+                    "debug file path index {path_idx:?} exceeds string table length {}",
+                    strings.len()
+                )
+            });
+            if !trimmed_paths.contains_key(path.as_ref()) {
+                trimmed_paths.insert(path.clone(), trimmer(path.as_ref()));
+            }
+        }
+        let replacement_paths = trimmed_paths
+            .iter()
+            .filter_map(|(path, replacement)| {
+                replacement
+                    .as_ref()
+                    .filter(|replacement| replacement.as_ref() != path.as_ref())
+                    .cloned()
+            })
+            .collect::<FxHashSet<_>>();
+
+        let mut string_indices = FxHashMap::<Arc<str>, DebugStringIndices>::default();
+        for (index, string) in strings.iter().enumerate() {
+            let index = DebugStringIdx::from(index as u32);
+            if unrelated_strings.contains(&index) && !replacement_paths.contains(string.as_ref()) {
+                continue;
+            }
             string_indices
                 .entry(string.clone())
-                .or_insert_with(|| DebugStringIdx::from(index as u32));
+                .and_modify(|indices| indices.insert(index))
+                .or_insert(DebugStringIndices::One(index));
         }
 
         // Multiple file rows may share a path string (for example, when they have different
         // checksums). Apply the trimmer once per path and retarget each file row to the result.
-        // Appending/reusing a string rather than mutating the original preserves unrelated records
-        // which happen to reference the same globally-interned string.
+        // File-only strings can be replaced in place so the original path is not serialized.
+        // Shared strings must be preserved for unrelated records that reference them.
         let mut remapped_paths = FxHashMap::<DebugStringIdx, DebugStringIdx>::default();
-        for file in self.files.iter_mut() {
-            let old_path_idx = file.path_idx;
+        let mut retained_path_indices = FxHashSet::<DebugStringIdx>::default();
+        for file in files.iter_mut() {
+            let DebugFileInfo { path_idx, checksum: _ } = file;
+            let old_path_idx = *path_idx;
             let new_path_idx = if let Some(new_path_idx) = remapped_paths.get(&old_path_idx) {
                 *new_path_idx
             } else {
-                let Some(path) = self.strings.get(old_path_idx).cloned() else {
-                    continue;
-                };
-                let new_path_idx = match trimmer(path.as_ref()) {
+                let path = strings.get(old_path_idx).unwrap_or_else(|| {
+                    panic!(
+                        "debug file path index {old_path_idx:?} exceeds string table length {}",
+                        strings.len()
+                    )
+                });
+                let path = path.clone();
+                let trimmed_path = trimmed_paths
+                    .get(path.as_ref())
+                    .expect("debug path was not passed to the trimmer")
+                    .clone();
+                let new_path_idx = match trimmed_path {
                     None => old_path_idx,
-                    Some(new_path) => match string_indices.entry(new_path.clone()) {
-                        Entry::Occupied(entry) => *entry.get(),
-                        Entry::Vacant(entry) => {
-                            let index =
-                                self.strings.push(new_path).expect("too many debug info strings");
-                            entry.insert(index);
+                    Some(new_path) if new_path == path => old_path_idx,
+                    Some(new_path)
+                        if !unrelated_strings.contains(&old_path_idx)
+                            && !retained_path_indices.contains(&old_path_idx) =>
+                    {
+                        let indices = string_indices
+                            .get_mut(path.as_ref())
+                            .expect("debug string reverse index is missing a path");
+                        assert!(
+                            indices.contains(old_path_idx),
+                            "debug string reverse index is missing {old_path_idx:?} for {path:?}"
+                        );
+                        let remove_path = indices.remove(old_path_idx);
+                        if remove_path {
+                            string_indices.remove(path.as_ref());
+                        }
+                        strings[old_path_idx] = new_path.clone();
+                        string_indices
+                            .entry(new_path)
+                            .and_modify(|indices| indices.insert(old_path_idx))
+                            .or_insert(DebugStringIndices::One(old_path_idx));
+                        old_path_idx
+                    },
+                    Some(new_path) => {
+                        if let Some(index) =
+                            string_indices.get(new_path.as_ref()).map(DebugStringIndices::first)
+                        {
                             index
-                        },
+                        } else {
+                            let index = strings
+                                .push(new_path.clone())
+                                .expect("too many debug info strings");
+                            string_indices
+                                .entry(new_path)
+                                .and_modify(|indices| indices.insert(index))
+                                .or_insert(DebugStringIndices::One(index));
+                            index
+                        }
                     },
                 };
+                if new_path_idx != old_path_idx {
+                    retained_path_indices.insert(new_path_idx);
+                }
                 remapped_paths.insert(old_path_idx, new_path_idx);
                 new_path_idx
             };
-            file.path_idx = new_path_idx;
+            *path_idx = new_path_idx;
         }
     }
 

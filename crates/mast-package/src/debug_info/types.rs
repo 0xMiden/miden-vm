@@ -503,7 +503,7 @@ pub struct DebugSourceAsmOp {
     pub op_name_idx: DebugStringIdx,
     /// Number of VM cycles taken by the operation.
     pub num_cycles: u8,
-    _padding: [u8; 3],
+    pub(super) _padding: [u8; 3],
 }
 
 impl DebugSourceAsmOp {
@@ -608,7 +608,7 @@ pub struct DebugErrorMessage {
     /// String table index of the error message content
     pub message: DebugStringIdx,
     /// Pads out this struct to a multiple of its alignment
-    _padding: [u8; 4],
+    pub(super) _padding: [u8; 4],
 }
 
 impl DebugErrorMessage {
@@ -2321,6 +2321,457 @@ mod tests {
         assert_eq!(debug_info[file_b].path_idx, trimmed_path_idx);
         assert_eq!(debug_info.error_message(7).as_deref(), Some(absolute_path.as_ref()));
         assert_eq!(debug_info.strings().len(), 2, "the existing trimmed string should be reused");
+    }
+
+    #[test]
+    fn trimming_file_paths_identity_is_a_noop_for_shared_paths() {
+        let absolute_path: Arc<str> = Arc::from("/workspace/src/main.masm");
+        let mut builder = PackageDebugInfoBuilder::default();
+        builder.add_file(Uri::from(absolute_path.clone()), None);
+        assert!(builder.add_error_message(7, absolute_path));
+        let mut debug_info = *builder.build();
+        let original = debug_info.clone();
+
+        debug_info.trim_file_paths(|path| Some(Arc::from(path)));
+
+        assert_eq!(debug_info, original);
+    }
+
+    #[test]
+    fn trimming_file_paths_preserves_each_non_file_string_user() {
+        use miden_assembly_syntax::ast::DebugVarLocation;
+
+        fn assert_preserved<Handle>(
+            kind: &str,
+            configure: impl FnOnce(&mut PackageDebugInfoBuilder, DebugFileIdx, DebugStringIdx) -> Handle,
+            resolve: impl Fn(&PackageDebugInfo, &Handle) -> DebugStringIdx,
+        ) {
+            let absolute_path: Arc<str> = Arc::from("/workspace/src/main.masm");
+            let trimmed_path: Arc<str> = Arc::from("src/main.masm");
+            let mut builder = PackageDebugInfoBuilder::default();
+            let file_idx = builder.add_file(Uri::from(absolute_path.clone()), None);
+            let shared_idx = builder.add_string(absolute_path.clone());
+            let handle = configure(&mut builder, file_idx, shared_idx);
+            let mut debug_info = *builder.build();
+            assert_eq!(resolve(&debug_info, &handle), shared_idx, "{kind} before trimming");
+
+            debug_info.trim_file_paths(|_| Some(trimmed_path.clone()));
+
+            assert_ne!(debug_info[file_idx].path_idx, shared_idx, "{kind}");
+            assert_eq!(
+                debug_info.get_string(debug_info[file_idx].path_idx).as_deref(),
+                Some(trimmed_path.as_ref()),
+                "{kind}"
+            );
+            let resolved_idx = resolve(&debug_info, &handle);
+            assert_eq!(resolved_idx, shared_idx, "{kind} after trimming");
+            assert_eq!(
+                debug_info.get_string(resolved_idx).as_deref(),
+                Some(absolute_path.as_ref()),
+                "{kind}"
+            );
+        }
+
+        assert_preserved(
+            "struct name",
+            |builder, _, shared_idx| {
+                builder.add_type(DebugTypeInfo::Struct {
+                    name_idx: shared_idx,
+                    size: 0,
+                    fields: Vec::new(),
+                })
+            },
+            |debug_info, type_idx| match debug_info.get_type(*type_idx).unwrap() {
+                DebugTypeInfo::Struct { name_idx, .. } => *name_idx,
+                _ => unreachable!(),
+            },
+        );
+        assert_preserved(
+            "field name",
+            |builder, _, shared_idx| {
+                let name_idx = builder.add_string("struct");
+                let type_idx = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U8));
+                builder.add_type(DebugTypeInfo::Struct {
+                    name_idx,
+                    size: 1,
+                    fields: vec![DebugFieldInfo {
+                        name_idx: shared_idx,
+                        type_idx,
+                        offset: 0,
+                    }],
+                })
+            },
+            |debug_info, type_idx| match debug_info.get_type(*type_idx).unwrap() {
+                DebugTypeInfo::Struct { fields, .. } => fields[0].name_idx,
+                _ => unreachable!(),
+            },
+        );
+        assert_preserved(
+            "enum name",
+            |builder, _, shared_idx| {
+                let discriminant_type_idx =
+                    builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U8));
+                builder.add_type(DebugTypeInfo::Enum {
+                    name_idx: shared_idx,
+                    size: 1,
+                    discriminant_type_idx,
+                    variants: Vec::new(),
+                })
+            },
+            |debug_info, type_idx| match debug_info.get_type(*type_idx).unwrap() {
+                DebugTypeInfo::Enum { name_idx, .. } => *name_idx,
+                _ => unreachable!(),
+            },
+        );
+        assert_preserved(
+            "variant name",
+            |builder, _, shared_idx| {
+                let name_idx = builder.add_string("enum");
+                let discriminant_type_idx =
+                    builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U8));
+                builder.add_type(DebugTypeInfo::Enum {
+                    name_idx,
+                    size: 1,
+                    discriminant_type_idx,
+                    variants: vec![DebugVariantInfo {
+                        name_idx: shared_idx,
+                        type_idx: None,
+                        payload_offset: None,
+                        discriminant: 0,
+                    }],
+                })
+            },
+            |debug_info, type_idx| match debug_info.get_type(*type_idx).unwrap() {
+                DebugTypeInfo::Enum { variants, .. } => variants[0].name_idx,
+                _ => unreachable!(),
+            },
+        );
+        assert_preserved(
+            "function name",
+            |builder, file_idx, shared_idx| {
+                builder.add_function(DebugFunctionInfo::new(
+                    None,
+                    shared_idx,
+                    file_idx,
+                    LineNumber::new(1).unwrap(),
+                    ColumnNumber::new(1).unwrap(),
+                    Word::default(),
+                ))
+            },
+            |debug_info, function_idx| debug_info.get_function(*function_idx).unwrap().name_idx,
+        );
+        assert_preserved(
+            "function linkage name",
+            |builder, file_idx, shared_idx| {
+                let name_idx = builder.add_string("function");
+                builder.add_function(
+                    DebugFunctionInfo::new(
+                        None,
+                        name_idx,
+                        file_idx,
+                        LineNumber::new(1).unwrap(),
+                        ColumnNumber::new(1).unwrap(),
+                        Word::default(),
+                    )
+                    .with_linkage_name(shared_idx),
+                )
+            },
+            |debug_info, function_idx| {
+                debug_info
+                    .get_function(*function_idx)
+                    .unwrap()
+                    .linkage_name_idx
+                    .into_option()
+                    .unwrap()
+            },
+        );
+        assert_preserved(
+            "operation name",
+            |builder, _, shared_idx| {
+                let context_name_idx = builder.add_string("context");
+                let mut node = source_node(MastNodeId::new_unchecked(0), Vec::new(), 0, 1);
+                node.asm_ops
+                    .push(DebugSourceAsmOp::new(0, None, context_name_idx, shared_idx, 1));
+                builder.add_node(node).unwrap()
+            },
+            |debug_info, source_idx| debug_info[*source_idx].asm_ops[0].op_name_idx,
+        );
+        assert_preserved(
+            "debug variable name",
+            |builder, _, shared_idx| {
+                let mut node = source_node(MastNodeId::new_unchecked(0), Vec::new(), 0, 1);
+                node.debug_vars.push(DebugSourceVar {
+                    op_idx: 0,
+                    name_idx: shared_idx,
+                    type_id: None,
+                    arg_idx: None,
+                    location_idx: None,
+                    value_location: DebugVarLocation::Stack(0),
+                });
+                builder.add_node(node).unwrap()
+            },
+            |debug_info, source_idx| debug_info[*source_idx].debug_vars[0].name_idx,
+        );
+    }
+
+    #[test]
+    fn trimming_file_paths_replaces_file_only_strings_in_place() {
+        let absolute_path: Arc<str> = Arc::from("/workspace/src/main.masm");
+        let trimmed_path: Arc<str> = Arc::from("src/main.masm");
+        let mut builder = PackageDebugInfoBuilder::default();
+        let file_idx = builder.add_file(Uri::from(absolute_path.clone()), None);
+        builder.add_string(trimmed_path.clone());
+        let mut debug_info = *builder.build();
+        let path_idx = debug_info[file_idx].path_idx;
+
+        debug_info.trim_file_paths(|path| {
+            assert_eq!(path, absolute_path.as_ref());
+            Some(trimmed_path.clone())
+        });
+
+        assert_eq!(debug_info[file_idx].path_idx, path_idx);
+        assert_eq!(debug_info.get_string(path_idx).as_deref(), Some(trimmed_path.as_ref()));
+        assert!(!debug_info.strings().iter().any(|string| string == &absolute_path));
+    }
+
+    #[test]
+    fn trimming_file_paths_does_not_mutate_a_remap_target() {
+        let path_a: Arc<str> = Arc::from("a.masm");
+        let path_b: Arc<str> = Arc::from("b.masm");
+        let path_c: Arc<str> = Arc::from("c.masm");
+
+        for paths in [[path_a.clone(), path_b.clone()], [path_b.clone(), path_a.clone()]] {
+            let mut builder = PackageDebugInfoBuilder::default();
+            let mut file_a = None;
+            let mut file_b = None;
+            for path in paths {
+                let file_idx = builder.add_file(Uri::from(path.clone()), None);
+                if path == path_a {
+                    file_a = Some(file_idx);
+                } else {
+                    file_b = Some(file_idx);
+                }
+            }
+            assert!(builder.add_error_message(7, path_a.clone()));
+            let mut debug_info = *builder.build();
+
+            debug_info.trim_file_paths(|path| match path {
+                "a.masm" => Some(path_b.clone()),
+                "b.masm" => Some(path_c.clone()),
+                _ => None,
+            });
+
+            let file_a = file_a.unwrap();
+            let file_b = file_b.unwrap();
+            assert_eq!(
+                debug_info.get_string(debug_info[file_a].path_idx).as_deref(),
+                Some("b.masm")
+            );
+            assert_eq!(
+                debug_info.get_string(debug_info[file_b].path_idx).as_deref(),
+                Some("c.masm")
+            );
+            assert_eq!(debug_info.error_message(7).as_deref(), Some("a.masm"));
+        }
+    }
+
+    #[test]
+    fn trimming_file_paths_preserves_retained_targets_when_paths_converge() {
+        let shared_path: Arc<str> = Arc::from("shared.masm");
+        let path_a: Arc<str> = Arc::from("a.masm");
+        let path_b: Arc<str> = Arc::from("b.masm");
+        let path_x: Arc<str> = Arc::from("x.masm");
+        let mut builder = PackageDebugInfoBuilder::default();
+        let shared_file = builder.add_file(Uri::from(shared_path.clone()), None);
+        let file_b = builder.add_file(Uri::from(path_b), None);
+        let file_a = builder.add_file(Uri::from(path_a.clone()), None);
+        assert!(builder.add_error_message(7, shared_path));
+        let mut debug_info = *builder.build();
+
+        debug_info.trim_file_paths(|path| match path {
+            "shared.masm" => Some(path_a.clone()),
+            "a.masm" | "b.masm" => Some(path_x.clone()),
+            _ => None,
+        });
+
+        assert_eq!(
+            debug_info.get_string(debug_info[shared_file].path_idx).as_deref(),
+            Some("a.masm")
+        );
+        assert_eq!(debug_info.get_string(debug_info[file_a].path_idx).as_deref(), Some("x.masm"));
+        assert_eq!(debug_info.get_string(debug_info[file_b].path_idx).as_deref(), Some("x.masm"));
+        assert_eq!(debug_info[file_a].path_idx, debug_info[file_b].path_idx);
+        assert_eq!(debug_info.error_message(7).as_deref(), Some("shared.masm"));
+    }
+
+    #[test]
+    fn trimming_file_paths_reuses_an_in_place_duplicate() {
+        let path_a: Arc<str> = Arc::from("a.masm");
+        let path_b: Arc<str> = Arc::from("b.masm");
+        let path_c: Arc<str> = Arc::from("c.masm");
+        let path_d: Arc<str> = Arc::from("d.masm");
+        let mut builder = PackageDebugInfoBuilder::default();
+        let file_a = builder.add_file(Uri::from(path_a), None);
+        builder.add_file(Uri::from(path_b.clone()), None);
+        let file_d = builder.add_file(Uri::from(path_d.clone()), None);
+        assert!(builder.add_error_message(7, path_d));
+        let mut debug_info = *builder.build();
+
+        debug_info.trim_file_paths(|path| match path {
+            "a.masm" | "d.masm" => Some(path_b.clone()),
+            "b.masm" => Some(path_c.clone()),
+            _ => None,
+        });
+
+        assert_eq!(debug_info[file_a].path_idx, debug_info[file_d].path_idx);
+        assert_eq!(
+            debug_info.strings().iter().filter(|string| string.as_ref() == "b.masm").count(),
+            1
+        );
+        assert_eq!(debug_info.error_message(7).as_deref(), Some("d.masm"));
+    }
+
+    #[test]
+    fn trimming_file_paths_keeps_distinct_file_only_indices_and_calls_trimmer_once() {
+        let path_a: Arc<str> = Arc::from("a.masm");
+        let path_b: Arc<str> = Arc::from("b.masm");
+        let mut builder = PackageDebugInfoBuilder::default();
+        let file_a = builder.add_file(Uri::from(path_a), None);
+        let file_b = builder.add_file(Uri::from(path_b.clone()), None);
+        let mut debug_info = *builder.build();
+
+        debug_info.trim_file_paths(|path| (path == "a.masm").then(|| path_b.clone()));
+        assert_ne!(debug_info[file_a].path_idx, debug_info[file_b].path_idx);
+
+        let mut trim_calls = 0;
+        debug_info.trim_file_paths(|path| {
+            assert_eq!(path, "b.masm");
+            trim_calls += 1;
+            Some(Arc::from(format!("trimmed-{trim_calls}.masm")))
+        });
+
+        assert_eq!(trim_calls, 1);
+        assert_eq!(
+            debug_info.get_string(debug_info[file_a].path_idx).as_deref(),
+            Some("trimmed-1.masm")
+        );
+        assert_eq!(
+            debug_info.get_string(debug_info[file_b].path_idx).as_deref(),
+            Some("trimmed-1.masm")
+        );
+    }
+
+    #[test]
+    fn trimming_file_paths_twice_reuses_and_preserves_assembly_contexts() {
+        let path_a: Arc<str> = Arc::from("a.masm");
+        let path_b: Arc<str> = Arc::from("b.masm");
+        let path_c: Arc<str> = Arc::from("c.masm");
+        let mut builder = PackageDebugInfoBuilder::default();
+        let file_idx = builder.add_file(Uri::from(path_a.clone()), None);
+        let source_context_idx = builder.add_string(path_a.clone());
+        let unrelated_context_idx = builder.add_string(path_b.clone());
+        let op_name_idx = builder.add_string("add");
+        let location_idx = builder.add_location(Location::new(
+            Uri::from(path_a.clone()),
+            ByteIndex::new(0),
+            ByteIndex::new(1),
+        ));
+        let mut source_node_row = source_node(MastNodeId::new_unchecked(0), Vec::new(), 0, 1);
+        source_node_row.asm_ops.push(DebugSourceAsmOp::new(
+            0,
+            Some(location_idx),
+            source_context_idx,
+            op_name_idx,
+            1,
+        ));
+        let source_node_idx = builder.add_node(source_node_row).unwrap();
+        let mut unrelated_node = source_node(MastNodeId::new_unchecked(1), Vec::new(), 0, 1);
+        unrelated_node.asm_ops.push(DebugSourceAsmOp::new(
+            0,
+            Some(location_idx),
+            unrelated_context_idx,
+            op_name_idx,
+            1,
+        ));
+        let unrelated_node_idx = builder.add_node(unrelated_node).unwrap();
+        assert!(builder.add_error_message(7, path_a));
+        let mut debug_info = *builder.build();
+
+        debug_info.trim_file_paths(|path| (path == "a.masm").then(|| path_b.clone()));
+        assert_eq!(debug_info[file_idx].path_idx, unrelated_context_idx);
+
+        debug_info.trim_file_paths(|path| (path == "b.masm").then(|| path_c.clone()));
+
+        let source_context_idx = debug_info[source_node_idx].asm_ops[0].context_name_idx;
+        let unrelated_context_idx = debug_info[unrelated_node_idx].asm_ops[0].context_name_idx;
+        assert_eq!(debug_info.get_string(debug_info[file_idx].path_idx).as_deref(), Some("c.masm"));
+        assert_eq!(debug_info.get_string(source_context_idx).as_deref(), Some("a.masm"));
+        assert_eq!(debug_info.get_string(unrelated_context_idx).as_deref(), Some("b.masm"));
+        assert_eq!(debug_info.error_message(7).as_deref(), Some("a.masm"));
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid debug function linkage name index")]
+    fn trimming_file_paths_rejects_invalid_function_linkage_options() {
+        let (mut builder, function_idx) = debug_info_builder_with_function();
+        builder.debug_info_mut().functions[function_idx].linkage_name_idx =
+            OptionalIndex::invalid(3);
+        let mut debug_info = *builder.build();
+
+        debug_info.trim_file_paths(|_| None);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "debug file path index DebugStringIdx(3) exceeds string table length 1"
+    )]
+    fn trimming_file_paths_rejects_invalid_file_path_indices() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let file_idx = builder.add_file(Uri::new("source.masm"), None);
+        builder.debug_info_mut().files[file_idx].path_idx = DebugStringIdx::from(3);
+        let mut debug_info = *builder.build();
+
+        debug_info.trim_file_paths(|_| None);
+    }
+
+    #[test]
+    fn trimming_file_paths_preserves_same_location_same_text_context() {
+        let absolute_path: Arc<str> = Arc::from("/workspace/src/main.masm");
+        let trimmed_path: Arc<str> = Arc::from("src/main.masm");
+        let mut builder = PackageDebugInfoBuilder::default();
+        let file_idx = builder.add_file(Uri::from(absolute_path.clone()), None);
+        let context_name_idx = builder.add_string(absolute_path.clone());
+        let op_name_idx = builder.add_string("add");
+        let location_idx = builder.add_location(Location::new(
+            Uri::from(absolute_path.clone()),
+            ByteIndex::new(0),
+            ByteIndex::new(1),
+        ));
+        let mut source_node_row = source_node(MastNodeId::new_unchecked(0), Vec::new(), 0, 1);
+        source_node_row.asm_ops.push(DebugSourceAsmOp::new(
+            0,
+            Some(location_idx),
+            context_name_idx,
+            op_name_idx,
+            1,
+        ));
+        let source_node_idx = builder.add_node(source_node_row).unwrap();
+        assert!(builder.add_error_message(7, absolute_path.clone()));
+        let mut debug_info = *builder.build();
+
+        debug_info.trim_file_paths(|path| {
+            assert_eq!(path, absolute_path.as_ref());
+            Some(trimmed_path.clone())
+        });
+
+        let file_path = debug_info.get_string(debug_info[file_idx].path_idx).unwrap();
+        let source_context_idx = debug_info[source_node_idx].asm_ops[0].context_name_idx;
+        assert_eq!(file_path.as_ref(), trimmed_path.as_ref());
+        assert_eq!(
+            debug_info.get_string(source_context_idx).as_deref(),
+            Some(absolute_path.as_ref())
+        );
+        assert_eq!(debug_info.error_message(7).as_deref(), Some(absolute_path.as_ref()));
     }
 
     #[test]

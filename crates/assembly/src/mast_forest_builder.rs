@@ -186,6 +186,14 @@ impl<'a> StaticLibrary<'a> {
         library: &'a LinkLibrary,
         debug_info: Option<PackageDebugInfo>,
     ) -> Result<Self, ManifestValidationError> {
+        #[cfg(feature = "std")]
+        let debug_info = debug_info.map(|mut debug_info| {
+            crate::assembler::debuginfo::namespace_linked_source_paths(
+                &mut debug_info,
+                &library.package.name,
+            );
+            debug_info
+        });
         Ok(Self::from_mast_forest(library.mast().as_ref(), debug_info)
             .with_source_library_commitment(library.commitment())
             .with_alternate_source_library_commitment(library.interface_commitment()?))

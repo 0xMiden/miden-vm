@@ -383,6 +383,9 @@ where
 
         let profile = project.resolve_profile(profile_name)?;
         let mut assembler = self.assembler.clone().with_profile(profile);
+        if let Some(project_root) = project.manifest_path().and_then(FsPath::parent) {
+            assembler = assembler.with_source_path_base(project_root);
+        }
         let mut runtime_dependencies = RuntimeDependencies::default();
         debug_assert!(
             required_lib.is_none() || target.ty.is_executable(),

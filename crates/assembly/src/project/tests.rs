@@ -1,4 +1,4 @@
-use std::{path::Path, process::Command, string::String, sync::Arc};
+use std::{collections::BTreeSet, path::PathBuf, process::Command, string::String, sync::Arc};
 
 use miden_assembly_syntax::{ast::DebugVarLocation, source_file};
 use miden_core::{
@@ -278,7 +278,7 @@ end
         if !source_node.asm_ops.is_empty() {
             source_nodes_by_exec
                 .entry(source_node.exec_node)
-                .or_insert_with(std::collections::BTreeSet::<DebugSourceNodeId>::new)
+                .or_insert_with(BTreeSet::<DebugSourceNodeId>::new)
                 .insert(DebugSourceNodeId::from(source_idx as u32));
         }
     }
@@ -580,77 +580,298 @@ end
     assert_eq!(depb_vars[0].as_ref(), "depb_var");
 }
 
+const TRIM_PATHS_CHILD_OUTPUT: &str = "MIDEN_TRIM_PATHS_TEST_OUTPUT";
+const TRIM_PATHS_CHILD_MANIFEST: &str = "MIDEN_TRIM_PATHS_TEST_MANIFEST";
+const TRIM_PATHS_CHILD_TEST: &str = "project::tests::trim_paths_package_child";
+
+#[test]
+#[ignore = "invoked by trim_paths_rewrites_mast_and_package_debug_paths"]
+fn trim_paths_package_child() {
+    let (Some(output_path), Some(manifest_path)) = (
+        std::env::var_os(TRIM_PATHS_CHILD_OUTPUT),
+        std::env::var_os(TRIM_PATHS_CHILD_MANIFEST),
+    ) else {
+        return;
+    };
+    let mut context = TestContext::new();
+    let package = context
+        .assemble_library_package(manifest_path, Some("dev"))
+        .expect("trim-paths build should succeed");
+    fs::write(output_path, package.to_bytes()).unwrap();
+}
+
 #[test]
 fn trim_paths_rewrites_mast_and_package_debug_paths() {
-    let cwd = std::env::current_dir().unwrap();
-    let tempdir = tempfile::Builder::new().prefix("trim-paths-").tempdir_in(&cwd).unwrap();
-    let manifest_path = tempdir.path().join("miden-project.toml");
-    write_file(
-        &manifest_path,
-        r#"[package]
+    let caller_dir = tempfile::tempdir().unwrap();
+    let builds = ["trim-paths-a-", "trim-paths-b-"].map(|prefix| {
+        let tempdir = tempfile::Builder::new().prefix(prefix).tempdir().unwrap();
+        let project_dir = tempdir.path().join("project");
+        let shared_dir = tempdir.path().join("shared");
+        let manifest_path = project_dir.join("miden-project.toml");
+        write_file(
+            &manifest_path,
+            r#"[package]
 name = "trimmed"
 version = "1.0.0"
 
 [lib]
+path = "../shared/mod.masm"
+
+[profile.dev]
+trim-paths = true
+"#,
+        );
+        write_file(
+            &shared_dir.join("mod.masm"),
+            r#"pub mod left
+pub mod right
+
+pub proc entry
+    exec.left::one
+    exec.right::two
+end
+"#,
+        );
+        write_file(
+            &shared_dir.join("left/mod.masm"),
+            r#"pub proc one
+    push.1
+end
+"#,
+        );
+        write_file(
+            &shared_dir.join("right/mod.masm"),
+            r#"pub proc two
+    push.2
+end
+"#,
+        );
+
+        let output_path = tempdir.path().join("package.masp");
+        let status = Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg(TRIM_PATHS_CHILD_TEST)
+            .arg("--ignored")
+            .env(TRIM_PATHS_CHILD_OUTPUT, &output_path)
+            .env(TRIM_PATHS_CHILD_MANIFEST, &manifest_path)
+            .current_dir(caller_dir.path())
+            .status()
+            .unwrap();
+        assert!(status.success(), "child package build failed");
+        let serialized = fs::read(output_path).unwrap();
+        (tempdir, serialized)
+    });
+
+    let mut serialized_packages = Vec::new();
+    for (tempdir, serialized) in builds {
+        let tempdir_prefix = tempdir.path().display().to_string();
+        let package = MastPackage::read_from_bytes_trusted(&serialized).unwrap();
+        let debug_info = package
+            .debug_info()
+            .expect("package debug info should decode")
+            .expect("package should contain debug info");
+        let asm_op_sources = debug_info
+            .nodes()
+            .iter()
+            .flat_map(|node| node.asm_ops.iter())
+            .filter_map(|asm_op| {
+                let op_name = debug_info
+                    .get_string(asm_op.op_name_idx)
+                    .expect("assembly operation name should exist");
+                if !matches!(op_name.as_ref(), "push.1" | "push.2") {
+                    return None;
+                }
+                let location_idx = asm_op
+                    .location_idx
+                    .into_option()
+                    .expect("fixture push operation should have a source location");
+                let location = debug_info
+                    .get_location(location_idx)
+                    .expect("fixture push operation location should exist");
+                Some((op_name.to_string(), PathBuf::from(location.uri.path())))
+            })
+            .collect::<BTreeSet<_>>();
+        let expected_asm_op_sources = [
+            (String::from("push.1"), PathBuf::from("..").join("shared/left/mod.masm")),
+            (String::from("push.2"), PathBuf::from("..").join("shared/right/mod.masm")),
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+        assert_eq!(asm_op_sources, expected_asm_op_sources);
+
+        assert!(!debug_info.files().is_empty());
+        let file_paths = debug_info
+            .files()
+            .iter()
+            .map(|file| {
+                let path =
+                    debug_info.get_string(file.path_idx).expect("source file path should exist");
+                PathBuf::from(path.as_ref())
+            })
+            .collect::<BTreeSet<_>>();
+        let expected_file_paths = [
+            PathBuf::from("..").join("shared/mod.masm"),
+            PathBuf::from("..").join("shared/left/mod.masm"),
+            PathBuf::from("..").join("shared/right/mod.masm"),
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+        assert_eq!(file_paths, expected_file_paths);
+
+        assert!(
+            !serialized
+                .windows(tempdir_prefix.len())
+                .any(|window| { window == tempdir_prefix.as_bytes() }),
+            "serialized package contains the build directory: {tempdir_prefix}"
+        );
+        let caller_dir_prefix = caller_dir.path().display().to_string();
+        assert!(
+            !serialized
+                .windows(caller_dir_prefix.len())
+                .any(|window| { window == caller_dir_prefix.as_bytes() }),
+            "serialized package contains the caller directory: {caller_dir_prefix}"
+        );
+        serialized_packages.push(serialized);
+    }
+
+    assert_eq!(serialized_packages[0], serialized_packages[1]);
+}
+
+#[test]
+fn static_linking_namespaces_relative_debug_paths_by_package() {
+    let tempdir = TempDir::new().unwrap();
+    let banana_dir = tempdir.path().join("banana");
+    write_file(
+        &banana_dir.join("miden-project.toml"),
+        r#"[package]
+name = "banana"
+version = "1.0.0"
+
+[lib]
 path = "lib.masm"
+namespace = "fruit::banana"
 
 [profile.dev]
 trim-paths = true
 "#,
     );
     write_file(
-        &tempdir.path().join("lib.masm"),
-        r#"pub proc entry
+        &banana_dir.join("lib.masm"),
+        r#"pub proc one
     push.1
+end
+"#,
+    );
+
+    let basket_dir = tempdir.path().join("basket");
+    write_file(
+        &basket_dir.join("miden-project.toml"),
+        r#"[package]
+name = "basket"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "fruit::basket"
+
+[dependencies]
+banana = { path = "../banana", linkage = "static" }
+
+[profile.dev]
+trim-paths = true
+"#,
+    );
+    write_file(
+        &basket_dir.join("lib.masm"),
+        r#"pub proc one
+    exec.::fruit::banana::one
+end
+"#,
+    );
+
+    let plantain_dir = tempdir.path().join("plantain");
+    write_file(
+        &plantain_dir.join("miden-project.toml"),
+        r#"[package]
+name = "plantain"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "fruit::plantain"
+
+[profile.dev]
+trim-paths = true
+"#,
+    );
+    write_file(
+        &plantain_dir.join("lib.masm"),
+        r#"pub proc two
     push.2
-    add
+end
+"#,
+    );
+
+    let root_dir = tempdir.path().join("root");
+    let root_manifest = root_dir.join("miden-project.toml");
+    write_file(
+        &root_manifest,
+        r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+basket = { path = "../basket", linkage = "static" }
+plantain = { path = "../plantain", linkage = "static" }
+
+[profile.dev]
+trim-paths = true
+"#,
+    );
+    write_file(
+        &root_dir.join("lib.masm"),
+        r#"pub proc entry
+    exec.::fruit::basket::one
+    exec.::fruit::plantain::two
 end
 "#,
     );
 
     let mut context = TestContext::new();
     let package = context
-        .assemble_library_package(&manifest_path, Some("dev"))
-        .expect("trim-paths build should succeed");
-    let tempdir_prefix = tempdir.path().display().to_string();
-
+        .assemble_library_package(&root_manifest, Some("dev"))
+        .expect("statically linked package should build");
     let debug_info = package
         .debug_info()
         .expect("package debug info should decode")
         .expect("package should contain debug info");
-    let asm_op_path = debug_info
+    let asm_op_sources = debug_info
         .nodes()
         .iter()
         .flat_map(|node| node.asm_ops.iter())
-        .find_map(|asm_op| {
-            asm_op
-                .location_idx
-                .into_option()
-                .and_then(|location_idx| debug_info.get_location(location_idx))
-                .map(|location| location.uri.path().to_string())
+        .filter_map(|asm_op| {
+            let op_name = debug_info.get_string(asm_op.op_name_idx).unwrap();
+            if !matches!(op_name.as_ref(), "push.1" | "push.2") {
+                return None;
+            }
+            let location_idx = asm_op.location_idx.into_option().unwrap();
+            let location = debug_info.get_location(location_idx).unwrap();
+            Some((op_name.to_string(), location.uri.to_string()))
         })
-        .expect("assembled package should contain asm-op locations");
-    assert!(
-        !asm_op_path.contains(tempdir_prefix.as_str()),
-        "asm-op path was not trimmed: {asm_op_path}"
-    );
-    assert!(
-        !Path::new(&asm_op_path).is_absolute(),
-        "asm-op path remained absolute: {asm_op_path}"
-    );
+        .collect::<BTreeSet<_>>();
 
-    assert!(!debug_info.files().is_empty());
-    for file in debug_info.files() {
-        let path = debug_info.get_string(file.path_idx).expect("source file path should exist");
-        assert!(
-            !path.contains(tempdir_prefix.as_str()),
-            "package debug path was not trimmed: {path}"
-        );
-        assert!(
-            !Path::new(path.as_ref()).is_absolute(),
-            "package debug path remained absolute: {path}"
-        );
-    }
+    assert_eq!(
+        asm_op_sources,
+        [
+            (String::from("push.1"), String::from("miden-pkg://banana/lib.masm")),
+            (String::from("push.2"), String::from("miden-pkg://plantain/lib.masm")),
+        ]
+        .into_iter()
+        .collect()
+    );
 }
 
 #[test]

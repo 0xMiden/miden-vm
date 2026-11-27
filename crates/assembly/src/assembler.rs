@@ -1,5 +1,5 @@
 #[cfg(feature = "std")]
-pub(super) mod debuginfo;
+pub(crate) mod debuginfo;
 pub(crate) mod error;
 mod product;
 
@@ -173,6 +173,9 @@ pub struct Assembler {
     pub(super) emit_debug_info: bool,
     /// Whether to trim source file paths in debug information.
     pub(super) trim_paths: bool,
+    /// The base directory from which source file paths are trimmed.
+    #[cfg(feature = "std")]
+    source_path_base: Option<std::path::PathBuf>,
 }
 
 impl Default for Assembler {
@@ -185,6 +188,8 @@ impl Default for Assembler {
             warnings_as_errors: false,
             emit_debug_info: true,
             trim_paths: false,
+            #[cfg(feature = "std")]
+            source_path_base: None,
         }
     }
 }
@@ -201,6 +206,8 @@ impl Assembler {
             warnings_as_errors: false,
             emit_debug_info: true,
             trim_paths: false,
+            #[cfg(feature = "std")]
+            source_path_base: None,
         }
     }
 
@@ -229,6 +236,13 @@ impl Assembler {
     pub fn with_profile(mut self, profile: &miden_project::Profile) -> Self {
         self.emit_debug_info = profile.should_emit_debug_info();
         self.trim_paths = profile.should_trim_paths();
+        self
+    }
+
+    /// Sets the base directory from which source file paths are trimmed.
+    #[cfg(feature = "std")]
+    pub(crate) fn with_source_path_base(mut self, base: impl Into<std::path::PathBuf>) -> Self {
+        self.source_path_base = Some(base.into());
         self
     }
 }
@@ -1096,7 +1110,7 @@ impl Assembler {
 
         #[cfg(feature = "std")]
         if self.emit_debug_info
-            && let Some(trimmer) = self.source_path_trimmer()
+            && let Some(trimmer) = self.source_path_trimmer()?
         {
             debuginfo::trim_paths(&mut debug_info, &trimmer);
         }
@@ -1152,7 +1166,7 @@ impl Assembler {
         );
 
         #[cfg(feature = "std")]
-        if let Some(trimmer) = self.source_path_trimmer() {
+        if let Some(trimmer) = self.source_path_trimmer()? {
             debuginfo::trim_paths(&mut debug_info, &trimmer);
         }
 
@@ -1160,12 +1174,20 @@ impl Assembler {
     }
 
     #[cfg(feature = "std")]
-    fn source_path_trimmer(&self) -> Option<debuginfo::SourcePathTrimmer> {
+    fn source_path_trimmer(&self) -> Result<Option<debuginfo::SourcePathTrimmer>, Report> {
         if !self.trim_paths {
-            return None;
+            return Ok(None);
         }
 
-        std::env::current_dir().ok().map(debuginfo::SourcePathTrimmer::new)
+        let base = match self.source_path_base.clone() {
+            Some(base) => base,
+            None => std::env::current_dir().map_err(|err| {
+                Report::msg(format!(
+                    "failed to get current directory for debug source path trimming: {err}"
+                ))
+            })?,
+        };
+        Ok(Some(debuginfo::SourcePathTrimmer::new(base)))
     }
 
     /// Compile the uncompiled procedure in the linked module graph which are members of the

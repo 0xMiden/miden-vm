@@ -20,7 +20,7 @@ use super::{
     PackageBuildProvenance, PackageBuildSettings, ProjectSourceProvenanceInputs,
     SourceProviderRegistry, providers::TargetAssemblyContext,
 };
-use crate::SourceManager;
+use crate::{SourceManager, assembler::debuginfo::relative_path};
 
 // DEPENDENCY GRAPH
 // ================================================================================================
@@ -385,24 +385,17 @@ impl DependencyGraph {
         let ProjectSourceProvenanceInputs { root, support } = source_provenance;
 
         let mut inputs = Vec::with_capacity(1 + support.len());
-        let root_label = if let Some(project_root) = project_root {
-            match root.path.strip_prefix(project_root) {
-                Ok(stripped) => stripped.display().to_string(),
-                Err(_) => root.path.display().to_string(),
-            }
-        } else {
-            root.path.display().to_string()
+        let source_label = |path: &FsPath| {
+            project_root
+                .and_then(|project_root| relative_path(path, project_root))
+                .unwrap_or_else(|| path.to_path_buf())
+                .display()
+                .to_string()
         };
+        let root_label = source_label(&root.path);
         inputs.push((format!("root:{root_label}"), root));
         for support_file in support {
-            let label = if let Some(project_root) = project_root {
-                match support_file.path.strip_prefix(project_root) {
-                    Ok(stripped) => stripped.display().to_string(),
-                    Err(_) => support_file.path.display().to_string(),
-                }
-            } else {
-                support_file.path.display().to_string()
-            };
+            let label = source_label(&support_file.path);
             inputs.push((format!("support:{label}"), support_file));
         }
         inputs.sort_by(|a, b| a.0.cmp(&b.0));

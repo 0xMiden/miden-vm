@@ -41,6 +41,8 @@ pub type PackageDebugInfoBuilder = DebugInfoBuilder<MastNodeId, DebugSourceNodeI
 pub struct DebugInfoBuilder<Exec: Idx, Src: Idx> {
     /// Provides uniquing of values stored in the strings table of the underlying `DebugInfo`
     string_indices: FxHashMap<Arc<str>, DebugStringIdx>,
+    /// Whether mutable access to `debug_info` may have invalidated `string_indices`.
+    string_indices_stale: bool,
     /// Provides uniquing of locations stored in the locations table of the underlying `DebugInfo`
     location_indices: FxHashMap<DebugLoc, DebugLocIdx>,
     /// Provides uniquing of locations stored in the locations table of the underlying `DebugInfo`
@@ -71,6 +73,7 @@ impl<Exec: Idx, Src: Idx> Default for DebugInfoBuilder<Exec, Src> {
     fn default() -> Self {
         Self {
             string_indices: Default::default(),
+            string_indices_stale: false,
             location_indices: Default::default(),
             type_indices: Default::default(),
             reserved_recursive_types: Default::default(),
@@ -83,6 +86,7 @@ impl<Exec: Idx + Clone, Src: Idx + Clone> Clone for DebugInfoBuilder<Exec, Src> 
     fn clone(&self) -> Self {
         Self {
             string_indices: self.string_indices.clone(),
+            string_indices_stale: self.string_indices_stale,
             location_indices: self.location_indices.clone(),
             type_indices: self.type_indices.clone(),
             reserved_recursive_types: self.reserved_recursive_types.clone(),
@@ -178,6 +182,7 @@ impl<Exec: Idx, Src: Idx> From<Box<DebugInfo<Exec, Src>>> for DebugInfoBuilder<E
         }
         Self {
             string_indices,
+            string_indices_stale: false,
             location_indices,
             type_indices,
             reserved_recursive_types: Default::default(),
@@ -207,6 +212,7 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
 
     /// Get a mutable reference to the current state of the `DebugInfo` being built
     pub fn debug_info_mut(&mut self) -> &mut DebugInfo<Exec, Src> {
+        self.string_indices_stale = true;
         &mut self.debug_info
     }
 }
@@ -222,13 +228,24 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
 
     /// Gets the [DebugStringIdx] for a string, if it is already interned by the builder
     pub fn get_string_index(&self, s: &str) -> Option<DebugStringIdx> {
-        self.string_indices.get(s).copied()
+        if self.string_indices_stale {
+            self.debug_info
+                .strings
+                .iter()
+                .position(|string| string.as_ref() == s)
+                .map(|index| DebugStringIdx::from(index as u32))
+        } else {
+            self.string_indices.get(s).copied()
+        }
     }
 
     /// Adds a string to the string table and returns its index.
     ///
     /// Strings are uniqued/interned - so adding the same string twice will return the same index
     pub fn add_string(&mut self, s: impl Into<Arc<str>>) -> DebugStringIdx {
+        if self.string_indices_stale {
+            self.rebuild_string_indices();
+        }
         let s = s.into();
         if let Some(exists) = self.string_indices.get(&s).copied() {
             return exists;
@@ -236,6 +253,16 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
         let idx = self.debug_info.strings.push(s.clone()).expect("too many strings");
         self.string_indices.insert(s, idx);
         idx
+    }
+
+    fn rebuild_string_indices(&mut self) {
+        self.string_indices.clear();
+        for (index, string) in self.debug_info.strings.iter().enumerate() {
+            self.string_indices
+                .entry(string.clone())
+                .or_insert_with(|| DebugStringIdx::from(index as u32));
+        }
+        self.string_indices_stale = false;
     }
 }
 
@@ -874,6 +901,23 @@ mod tests {
         assert_eq!(idx3.to_usize(), 0); // Should return same index
         assert_eq!(builder.string_indices.len(), 2);
         assert_eq!(builder.debug_info.strings.len(), 2);
+    }
+
+    #[test]
+    fn debug_info_mut_keeps_string_index_in_sync() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let file_idx = builder.add_file(Uri::new("/project/source.masm"), None);
+        let path_idx = builder[file_idx].path_idx;
+
+        builder.debug_info_mut().trim_file_paths(|_| Some(Arc::from("source.masm")));
+
+        assert_eq!(builder.get_string_index("/project/source.masm"), None);
+        assert_eq!(builder.get_string_index("source.masm"), Some(path_idx));
+        assert_eq!(builder.add_string("source.masm"), path_idx);
+
+        let absolute_path_idx = builder.add_string("/project/source.masm");
+        assert_ne!(absolute_path_idx, path_idx);
+        assert_eq!(builder.get_string(absolute_path_idx).unwrap().as_ref(), "/project/source.masm");
     }
 
     fn add_test_function(
