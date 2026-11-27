@@ -5,53 +5,69 @@ This crate contains an implementation of Miden VM processor. The purpose of the 
 The processor provides multiple APIs depending on your use case:
 
 ### High-level API
-The `ProgramExecutor` trait provides a pluggable ordinary-execution interface returning
-`ExecutionOutput`, with `FastProcessor` as its default implementation:
+`Processor::new(&program)` collects inputs, execution options, and source context before
+choosing ordinary execution or witness recording. The live machine is
+initialized and advice is validated against the final options at `prepare`, `run_sync`, `run`, or
+`start`, independently of setter order.
+
+```rust
+use miden_processor::{DefaultHost, Processor, WitnessOutput};
+# fn example(program: &miden_processor::Program) -> Result<(), miden_processor::ExecutionError> {
+let WitnessOutput { claim, witness, advice } = Processor::new(program)
+    .record_witness()
+    .run_sync(&mut DefaultHost::default())?;
+# Ok(())
+# }
+```
+
+Ordinary execution uses `.execute().run_sync(...)` or `.execute().run(...).await` and returns
+`ExecutionOutput` with the final stack, advice provider, memory, and deferred work. Pass a recorded
+witness to the [prover](../prover/) for local or remote proving.
 
 Pass the program as `&Program`, its public inputs as `StackInputs`, and its private inputs as
 `AdviceInputs`. The `Host` supplies non-deterministic inputs and receives messages from the VM.
 `ExecutionOptions` sets limits such as the maximum allowed number of cycles.
 
-The async trait method returns `Result<ExecutionOutput, ExecutionError>`, containing the final stack
-state, advice provider, memory, and deferred state on success.
+### Execution and sessions
 
-### Low-level API
-For more control over execution and trace generation, you can use `FastProcessor` directly:
+Use `ExecutionPlan::prepare()` to initialize the machine before a run or session. Benchmarks can use it
+to initialize the machine outside the measured section.
 
-`FastProcessor::execute()` runs a program without trace generation overhead and returns an
-`ExecutionOutput` with the final stack state and other execution results.
+Use `.with_source_context(Some(PackageSourceDebugContext::new(&debug_info, source_node)))` on the
+request to identify the source occurrence for diagnostics. Source resolution and recorder setup
+happen at run or start. Every mode supports `.start()`, which returns an `ExecutionSession`
+that owns the machine, continuation, and recorder.
 
-`FastProcessor::execute_for_proving()` and `FastProcessor::execute_for_proving_sync()` run a
-program while collecting the complete post-execution `ExecutionWitness`. Pass the `VmWitness`
-from `ExecutionWitness::into_parts()` and a caller-supplied proving budget to `build_trace()` to
-construct the full `VmTrace`. Trace
-building is parallel when the `concurrent` feature is enabled.
+`state()` remains available after halt, failure, or cancellation. Use borrowed `step_sync` and
+`step` for individual steps, or `run_until_halt_sync` and `run_until_halt` to drive the remaining
+execution and keep the session.
 
-With the `std` feature, `FastProcessor::execute_and_build_trace_sync()` preserves the optimized
-synchronous path that overlaps execution with hasher trace construction. It returns
-`(VmTrace, Option<PrecompileWitness>)`. Execution stays on the calling thread while Rayon may run
-the hasher builder on a worker. A caller with no separate Rayon worker uses compact buffered replay
-and builds the trace after execution.
+`.run_to_completion_sync(&mut host)` and `.run_to_completion(&mut host).await` return
+`HaltedExecution` after successful termination. Its `state()` exposes the halted machine until
+`finish()` consumes it and exports the execution output and any recorded artifact. Deferred
+precompile witness export happens during `finish()`, so export failures occur after VM completion.
+Each stage returns `ExecutionError` on failure. Failed or cancelled sessions cannot resume or
+complete.
+
+On a halted witness recording, `trace_len_upper_bound()` reports the core and chiplet sizes from
+the live recorder. The Eidos compression count bounds the distinct requests that replay will keep.
 
 ## Processor components
 The processor is separated into two main components: **execution** and **trace generation**.
 
 ### Execution with `FastProcessor`
-The `FastProcessor` is designed for fast program execution with minimal overhead. It can operate in two modes:
-
-* **Pure execution** via `FastProcessor::execute()`: Executes a program without generating any trace-related metadata. This mode is optimized for maximum performance when proof generation is not required.
-* **Witness-producing execution** via `FastProcessor::execute_for_proving()` /
-  `FastProcessor::execute_for_proving_sync()`: Executes a program while collecting the complete
-  post-execution `ExecutionWitness`.
+`FastProcessor` holds the machine state and runs the same engine for all execution modes. Construct
+it directly for raw stepping and machine inspection. Ordinary execution uses the no-op tracer.
 
 ### Trace generation with `build_trace()`
-After execution with `FastProcessor::execute_for_proving*()`, split the returned
-`ExecutionWitness` and call `build_trace(vm_witness, &budget)`. The VM backend provides
-`miden_vm_stark::memory::default_budget()` and `canonical_budget(limit_bytes)` using the canonical
-proof configuration. Processor enforces the supplied model before final allocations and retains
-independent row-index and raw-buffer limits. When the `concurrent` feature is enabled, trace
-generation is parallelized for improved performance.
+The prover consumes the recorded witness and builds the trace after execution. For row-level
+inspection or AIR diagnostics, call `witness.into_parts()` to obtain the VM witness and the
+optional precompile witness. Then call `vm_witness.build_trace(&budget)`.
 
+Use `miden_vm_stark::memory::default_budget()` or `canonical_budget(limit_bytes)` for the
+canonical VM proof configuration. The processor checks the model against the padded heights
+before final allocations and enforces independent row-index and raw-buffer limits.
+With `std`, the builder can replay core fragments and build chiplets in parallel.
 
 Trace generation produces the four matrices in the Miden proof statement:
 

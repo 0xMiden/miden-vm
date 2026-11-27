@@ -113,7 +113,7 @@ You can inspect VM state by importing the [`miden::core::debug`](./user_docs/ass
 ./target/optimized/miden-vm run [path_to.masm]
 ```
 
-If trace building would exceed the VM trace row limit, `run` returns a trace length error instead of trying to build a larger trace.
+After execution, `run` prints the stack outputs and the unpadded and padded sizes of the VM trace components.
 
 ### Precompile policies
 
@@ -167,9 +167,15 @@ described above. Independent stage budgets remain configurable through the Rust 
 
 These are separate modelled proving-stage budgets rather than a combined allocation cap or a
 bound on total process memory. Precompile witness preparation/Session import and concurrent
-proofs are outside the proving budgets. Logical work limits remain independent. For `run`,
-`--max-prover-memory` controls VM trace construction; the command does not generate a precompile
-STARK.
+proofs are outside the proving budgets. Logical work limits remain independent.
+
+`run` reads stack outputs from the execution claim and reports trace sizes from the recording.
+Core rows include HALT. Chiplet rows include aligned hash controller rows, expanded AEAD and ACE
+work, and the mandatory padding row. Eidos compression rows and their padded height are upper
+bounds because the prover combines repeated compression requests. The byte-pair lookup table has
+a fixed height. If the exact heights already require more than `--max-prover-memory` at the
+minimum Eidos height, `run` fails. If only the upper bound exceeds the limit, `run` warns and
+returns the outputs. The prover enforces its budget using the actual padded heights.
 
 ### Complete and deferred proofs
 

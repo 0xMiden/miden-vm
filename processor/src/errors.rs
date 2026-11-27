@@ -137,17 +137,6 @@ pub enum ExecutionError {
     PackageDebugInfoError(#[from] PackageDebugInfoError),
 }
 
-impl ExecutionError {
-    /// Wraps an advice error without source-location context.
-    pub fn advice_error_no_context(err: AdviceError) -> Self {
-        Self::AdviceError {
-            label: SourceSpan::UNKNOWN,
-            source_file: None,
-            err,
-        }
-    }
-}
-
 impl AsRef<dyn Diagnostic> for ExecutionError {
     fn as_ref(&self) -> &(dyn Diagnostic + 'static) {
         self
@@ -494,7 +483,7 @@ impl<'a> PackageSourceDebugContext<'a> {
     }
 
     /// Creates a package debug context when source location metadata may be unavailable.
-    pub(crate) fn new_optional(
+    pub fn new_optional(
         debug_info: &'a PackageDebugInfo,
         source_node_id: Option<DebugSourceNodeId>,
     ) -> Self {

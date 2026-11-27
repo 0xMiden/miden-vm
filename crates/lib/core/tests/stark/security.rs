@@ -630,9 +630,9 @@ fn common_security_estimator_preserves_the_caller_stack() {
         u64::from(security::testing::conjectured_security_level(27, 17, 12, 4, 22, 255));
     let mut expected = vec![expected_level];
     expected.extend(caller_values);
-    let trace = build_test!(source, &inputs).execute().expect("the estimator must execute");
-    let actual: Vec<u64> = trace
-        .last_stack_state()
+    let claim = build_test!(source, &inputs).execute().expect("the estimator must execute");
+    let actual: Vec<u64> = claim
+        .stack_outputs()
         .get_num_elements(expected.len())
         .iter()
         .map(Felt::as_canonical_u64)

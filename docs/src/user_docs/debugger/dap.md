@@ -10,10 +10,10 @@ sidebar_position: 5
 shows up in two complementary places:
 
 - **Server side** — the `miden-debug-engine` crate provides a
-  `DapExecutor` that implements the VM's `ProgramExecutor` trait. Anything
-  that knows how to drive a `ProgramExecutor` (most importantly
-  `miden-client exec`) can swap in `DapExecutor` and serve a standard DAP
-  session over TCP instead of executing the program directly.
+  `DapExecutor`. Its `execute_async(program, host)` method drives a program
+  with a borrowed host while serving a standard DAP session over TCP.
+  Embedders such as `miden-client exec` use this executor to expose program
+  execution to a debugger.
 - **Client side** — the `miden-debug` binary can act as a DAP client by
   passing `--dap-connect HOST:PORT`. It connects to the TCP server, drives
   it through the same TUI you'd use locally, and renders the program's
@@ -43,9 +43,9 @@ same server.
                                          └───────────────────────┘
 ```
 
-When the client side asks for a DAP session, `miden-client` builds a
-`TransactionExecutor` configured with `DapExecutor` instead of the default
-`FastProcessor`. The executor binds a TCP listener on the address you
+When the client side asks for a DAP session, `miden-client` configures its
+`TransactionExecutor` with a `DapExecutor`, which drives a `FastProcessor`.
+The executor binds a TCP listener on the address you
 provide, waits for a DAP client to connect, and from then on every
 `continue`, `step`, `setBreakpoints`, and `evaluate` request flows over the
 DAP wire — execution only progresses when the client tells it to.

@@ -18,11 +18,9 @@ use miden_core::{
 ///
 /// # Binary encoding
 ///
-/// The encoding writes fields in declaration order and has no version byte. Variable-length
-/// integers must use the shortest vint64 encoding. Decoding rejects invalid booleans, invalid
-/// UTF-8 class names, duplicate policy classes, truncated input, trailing input, and options that
-/// violate the invariants enforced by [`Self::new`] and [`Self::with_max_stack_depth`]. Both byte
-/// entrypoints require the decoded snapshot to consume the entire input.
+/// Version 1 starts with four `0xff` bytes followed by the version byte. Variable-length
+/// integers use the shortest vint64 encoding. The reader rejects invalid field values, truncated
+/// data, and trailing bytes in the byte-slice entrypoints.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionOptions {
     max_cycles: u32,
@@ -30,9 +28,6 @@ pub struct ExecutionOptions {
     core_trace_fragment_size: usize,
     /// Maximum combined logical size, in bytes, of the advice stack, map, and Merkle store.
     max_advice_size_bytes: usize,
-    /// Whether the synchronous prover may overlap hasher-chiplet trace building with program
-    /// execution (std-only; the sequential path is used on no_std regardless).
-    overlapped_trace_build: bool,
     /// Maximum number of input bytes allowed for a single hash precompile invocation.
     max_hash_len_bytes: usize,
     /// Maximum number of continuations allowed on the continuation stack at any point during
@@ -67,7 +62,6 @@ impl Default for ExecutionOptions {
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
-            overlapped_trace_build: true,
             execution_precompile_limits: miden_precompiles::default_execution_precompile_limits(),
             verification_precompile_limits:
                 miden_precompiles::default_verification_precompile_limits(),
@@ -179,7 +173,6 @@ impl ExecutionOptions {
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
-            overlapped_trace_build: true,
             execution_precompile_limits: miden_precompiles::default_execution_precompile_limits(),
             verification_precompile_limits:
                 miden_precompiles::default_verification_precompile_limits(),
@@ -233,20 +226,6 @@ impl ExecutionOptions {
     #[inline]
     pub fn max_hash_len_bytes(&self) -> usize {
         self.max_hash_len_bytes
-    }
-
-    /// Sets whether the synchronous prover may overlap hasher-chiplet trace building with program
-    /// execution (defaults to `true`; ignored on no_std, which always uses the sequential path).
-    /// When enabled, overlap is opportunistic. A caller with no separate Rayon worker uses compact
-    /// buffered replay.
-    pub fn with_overlapped_trace_build(mut self, overlapped: bool) -> Self {
-        self.overlapped_trace_build = overlapped;
-        self
-    }
-
-    /// Returns whether the synchronous prover may overlap trace building with execution.
-    pub fn overlapped_trace_build(&self) -> bool {
-        self.overlapped_trace_build
     }
 
     /// Sets the maximum combined logical size, in bytes, of the advice provider.
@@ -337,6 +316,9 @@ impl ExecutionOptions {
 // SERIALIZATION
 // ================================================================================================
 
+const OPTIONS_VERSION_MARKER: u32 = u32::MAX;
+const OPTIONS_VERSION: u8 = 1;
+
 fn read_shortest_usize<R: ByteReader>(
     source: &mut R,
     label: &str,
@@ -387,11 +369,12 @@ fn validate_decoded_options(
 
 impl Serializable for ExecutionOptions {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_u32(OPTIONS_VERSION_MARKER);
+        target.write_u8(OPTIONS_VERSION);
         self.max_cycles.write_into(target);
         self.expected_cycles.write_into(target);
         self.core_trace_fragment_size.write_into(target);
         self.max_advice_size_bytes.write_into(target);
-        target.write_bool(self.overlapped_trace_build);
         self.max_hash_len_bytes.write_into(target);
         self.max_num_continuations.write_into(target);
         self.max_stack_depth.write_into(target);
@@ -401,11 +384,12 @@ impl Serializable for ExecutionOptions {
     }
 
     fn get_size_hint(&self) -> usize {
-        self.max_cycles.get_size_hint()
+        OPTIONS_VERSION_MARKER.get_size_hint()
+            + OPTIONS_VERSION.get_size_hint()
+            + self.max_cycles.get_size_hint()
             + self.expected_cycles.get_size_hint()
             + self.core_trace_fragment_size.get_size_hint()
             + self.max_advice_size_bytes.get_size_hint()
-            + 1
             + self.max_hash_len_bytes.get_size_hint()
             + self.max_num_continuations.get_size_hint()
             + self.max_stack_depth.get_size_hint()
@@ -417,11 +401,21 @@ impl Serializable for ExecutionOptions {
 
 impl Deserializable for ExecutionOptions {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        if source.read_u32()? != OPTIONS_VERSION_MARKER {
+            return Err(DeserializationError::InvalidValue(
+                "invalid execution options magic".into(),
+            ));
+        }
+        let version = source.read_u8()?;
+        if version != OPTIONS_VERSION {
+            return Err(DeserializationError::InvalidValue(format!(
+                "unsupported execution options version {version} (expected {OPTIONS_VERSION})"
+            )));
+        }
         let max_cycles = source.read_u32()?;
         let expected_cycles = source.read_u32()?;
         let core_trace_fragment_size = read_shortest_usize(source, "core_trace_fragment_size")?;
         let max_advice_size_bytes = read_shortest_usize(source, "max_advice_size_bytes")?;
-        let overlapped_trace_build = source.read_bool()?;
         let max_hash_len_bytes = read_shortest_usize(source, "max_hash_len_bytes")?;
         let max_num_continuations = read_shortest_usize(source, "max_num_continuations")?;
         let max_stack_depth = read_shortest_usize(source, "max_stack_depth")?;
@@ -441,7 +435,6 @@ impl Deserializable for ExecutionOptions {
             expected_cycles,
             core_trace_fragment_size,
             max_advice_size_bytes,
-            overlapped_trace_build,
             max_hash_len_bytes,
             max_num_continuations,
             max_stack_depth,
@@ -472,9 +465,9 @@ impl Deserializable for ExecutionOptions {
     }
 
     fn min_serialized_size() -> usize {
-        2 * u32::min_serialized_size()
+        3 * u32::min_serialized_size()
+            + u8::min_serialized_size()
             + 6 * usize::min_serialized_size()
-            + 1
             + 2 * PrecompileLimits::min_serialized_size()
     }
 }
@@ -504,7 +497,10 @@ pub enum ExecutionOptionsError {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{string::String, vec::Vec};
+    use alloc::{
+        string::{String, ToString},
+        vec::Vec,
+    };
 
     use miden_core::{
         deferred::{WorkClass, WorkLimit},
@@ -514,11 +510,12 @@ mod tests {
     use super::*;
 
     fn write_option_header(bytes: &mut Vec<u8>) {
+        bytes.write_u32(OPTIONS_VERSION_MARKER);
+        bytes.write_u8(OPTIONS_VERSION);
         (MIN_TRACE_LEN as u32).write_into(bytes);
         (MIN_TRACE_LEN as u32).write_into(bytes);
         1usize.write_into(bytes);
         0usize.write_into(bytes);
-        bytes.write_bool(true);
         0usize.write_into(bytes);
         0usize.write_into(bytes);
         MIN_STACK_DEPTH.write_into(bytes);
@@ -530,7 +527,6 @@ mod tests {
         expected_cycles: u32,
         core_trace_fragment_size: usize,
         max_advice_size_bytes: usize,
-        overlapped_trace_build: bool,
         max_hash_len_bytes: usize,
         max_num_continuations: usize,
         max_stack_depth: usize,
@@ -539,11 +535,12 @@ mod tests {
         verification: &PrecompileLimits,
     ) -> Vec<u8> {
         let mut bytes = Vec::new();
+        bytes.write_u32(OPTIONS_VERSION_MARKER);
+        bytes.write_u8(OPTIONS_VERSION);
         max_cycles.write_into(&mut bytes);
         expected_cycles.write_into(&mut bytes);
         core_trace_fragment_size.write_into(&mut bytes);
         max_advice_size_bytes.write_into(&mut bytes);
-        bytes.write_bool(overlapped_trace_build);
         max_hash_len_bytes.write_into(&mut bytes);
         max_num_continuations.write_into(&mut bytes);
         max_stack_depth.write_into(&mut bytes);
@@ -665,7 +662,6 @@ mod tests {
             .with_core_trace_fragment_size(1)
             .unwrap()
             .with_max_advice_size_bytes(17)
-            .with_overlapped_trace_build(false)
             .with_max_hash_len_bytes(19)
             .with_max_num_continuations(23)
             .with_max_stack_depth(MIN_STACK_DEPTH)
@@ -699,11 +695,11 @@ mod tests {
     #[test]
     fn execution_options_fixed_vector_roundtrip() {
         let expected = vec![
+            0xff, 0xff, 0xff, 0xff, 1, // version header
             128, 0, 0, 0, // max_cycles
             64, 0, 0, 0, // expected_cycles
             5, // core_trace_fragment_size = 2
             7, // max_advice_size_bytes = 3
-            0, // overlapped_trace_build = false
             2, 2,  // max_hash_len_bytes = 128
             11, // max_num_continuations = 5
             35, // max_stack_depth = 17
@@ -714,7 +710,6 @@ mod tests {
         let options = ExecutionOptions::new(Some(128), 64, 2)
             .unwrap()
             .with_max_advice_size_bytes(3)
-            .with_overlapped_trace_build(false)
             .with_max_hash_len_bytes(128)
             .with_max_num_continuations(5)
             .with_max_stack_depth(17)
@@ -726,6 +721,12 @@ mod tests {
         assert_eq!(options.to_bytes(), expected);
         let decoded = ExecutionOptions::read_from_bytes(&expected).unwrap();
         assert_eq!(decoded, options);
+
+        let stream = expected.repeat(2);
+        let mut reader = SliceReader::new(&stream);
+        assert_eq!(ExecutionOptions::read_from(&mut reader).unwrap(), options);
+        assert_eq!(ExecutionOptions::read_from(&mut reader).unwrap(), options);
+        assert!(!reader.has_more_bytes());
     }
 
     #[test]
@@ -763,7 +764,6 @@ mod tests {
             MIN_TRACE_LEN as u32,
             1,
             0,
-            true,
             0,
             0,
             MIN_STACK_DEPTH,
@@ -774,23 +774,23 @@ mod tests {
         assert!(ExecutionOptions::read_from_bytes(&valid).is_ok());
 
         let mut bytes = valid.clone();
-        bytes[0..4].copy_from_slice(&((MIN_TRACE_LEN as u32) - 1).to_le_bytes());
+        bytes[5..9].copy_from_slice(&((MIN_TRACE_LEN as u32) - 1).to_le_bytes());
         assert!(ExecutionOptions::read_from_bytes(&bytes).is_err());
 
         let mut bytes = valid.clone();
-        bytes[0..4].copy_from_slice(&(ExecutionOptions::MAX_CYCLES + 1).to_le_bytes());
+        bytes[5..9].copy_from_slice(&(ExecutionOptions::MAX_CYCLES + 1).to_le_bytes());
         assert!(ExecutionOptions::read_from_bytes(&bytes).is_err());
 
         let mut bytes = valid.clone();
-        bytes[4..8].copy_from_slice(&((MIN_TRACE_LEN as u32) + 1).to_le_bytes());
+        bytes[9..13].copy_from_slice(&((MIN_TRACE_LEN as u32) + 1).to_le_bytes());
         assert!(ExecutionOptions::read_from_bytes(&bytes).is_err());
 
         let mut bytes = valid.clone();
-        bytes[4..8].copy_from_slice(&((MIN_TRACE_LEN as u32) - 1).to_le_bytes());
+        bytes[9..13].copy_from_slice(&((MIN_TRACE_LEN as u32) - 1).to_le_bytes());
         assert!(ExecutionOptions::read_from_bytes(&bytes).is_err());
 
         let mut bytes = valid;
-        bytes[4..8].copy_from_slice(&((MIN_TRACE_LEN as u32) * 2).to_le_bytes());
+        bytes[9..13].copy_from_slice(&((MIN_TRACE_LEN as u32) * 2).to_le_bytes());
         assert!(ExecutionOptions::read_from_bytes(&bytes).is_err());
 
         let zero_fragment = encode_options(
@@ -798,7 +798,6 @@ mod tests {
             MIN_TRACE_LEN as u32,
             0,
             0,
-            true,
             0,
             0,
             MIN_STACK_DEPTH,
@@ -813,7 +812,6 @@ mod tests {
             MIN_TRACE_LEN as u32,
             1,
             0,
-            true,
             0,
             0,
             MIN_STACK_DEPTH - 1,
@@ -825,13 +823,12 @@ mod tests {
     }
 
     #[test]
-    fn execution_options_reject_invalid_bool_and_bad_bytes() {
+    fn execution_options_reject_invalid_header_and_bad_bytes() {
         let valid = encode_options(
             MIN_TRACE_LEN as u32,
             MIN_TRACE_LEN as u32,
             1,
             0,
-            true,
             0,
             0,
             MIN_STACK_DEPTH,
@@ -840,9 +837,15 @@ mod tests {
             &PrecompileLimits::new(0),
         );
 
-        let mut invalid_bool = valid.clone();
-        invalid_bool[10] = 2;
-        assert!(ExecutionOptions::read_from_bytes(&invalid_bool).is_err());
+        let mut bad_magic = valid.clone();
+        bad_magic[0] = 0;
+        let err = ExecutionOptions::read_from_bytes(&bad_magic).unwrap_err();
+        assert!(err.to_string().contains("invalid execution options magic"));
+
+        let mut unknown_version = valid.clone();
+        unknown_version[4] = OPTIONS_VERSION + 1;
+        let err = ExecutionOptions::read_from_bytes(&unknown_version).unwrap_err();
+        assert!(err.to_string().contains("unsupported execution options version"));
 
         for len in 0..valid.len() {
             assert!(ExecutionOptions::read_from_bytes(&valid[..len]).is_err());
@@ -861,11 +864,12 @@ mod tests {
     #[test]
     fn execution_options_reject_overlong_scalar_usize() {
         let mut bytes = Vec::new();
+        bytes.write_u32(OPTIONS_VERSION_MARKER);
+        bytes.write_u8(OPTIONS_VERSION);
         (MIN_TRACE_LEN as u32).write_into(&mut bytes);
         (MIN_TRACE_LEN as u32).write_into(&mut bytes);
         bytes.extend_from_slice(&[0x06, 0x00]);
         0usize.write_into(&mut bytes);
-        bytes.write_bool(true);
         0usize.write_into(&mut bytes);
         0usize.write_into(&mut bytes);
         MIN_STACK_DEPTH.write_into(&mut bytes);

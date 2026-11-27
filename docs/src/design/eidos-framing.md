@@ -357,9 +357,10 @@ generated MASM constants.
 | `0x000d` | 1       | `ECGFP5_SEAL_NONCE`     | `FeltSequence` |
 | `0x000e` | 1       | `ECGFP5_SEAL_CONTEXT`   | `FeltSequence` |
 | `0x000f` | 1       | `ECGFP5_SEAL_EXTRACT`   | `FeltSequence` |
-| `0x0010` | 1       | `ECGFP5_PUBLIC_KEY`    | `FeltSequence` |
+| `0x0010` | 1       | `ECGFP5_PUBLIC_KEY`     | `FeltSequence` |
 | `0x0011` | 1       | `ECGFP5_PREPROCESSED_PUBLIC_KEY` | `FeltSequence` |
-| `0x0012` | 1       | `ECGFP5_SEAL_BYTE_CONTEXT` | `ByteString` |
+| `0x0012` | 1       | `ECGFP5_SEAL_BYTE_CONTEXT`   | `ByteString`   |
+| `0x0013` | 1       | `ECGFP5_ENVELOPE`            | `FeltSequence` |
 
 ## `miden-vm` local registry
 

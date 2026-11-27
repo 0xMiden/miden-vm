@@ -21,7 +21,7 @@ mod continuation_stack;
 mod errors;
 mod execution;
 mod execution_options;
-mod executor;
+mod execution_plan;
 mod fast;
 mod host;
 mod processor;
@@ -37,7 +37,7 @@ use crate::{
     advice::{AdviceInputs, AdviceProvider},
     continuation_stack::ContinuationStack,
     errors::MapExecErr,
-    processor::{Processor, SystemInterface},
+    processor::{Processor as _, SystemInterface},
     trace::RowIndex,
 };
 
@@ -59,11 +59,14 @@ pub use errors::{
     procedure_not_found_with_package_source_context,
 };
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
-pub use executor::ProgramExecutor;
+pub use execution_plan::{
+    Execute, ExecutionPlan, ExecutionSession, HaltedExecution, Processor, RecordWitness,
+    StepStatus, WitnessOutput,
+};
 pub(crate) use fast::BreakReason;
 pub use fast::{
     DebugCallFrame, DebugCallFrameResolver, DebugFrameOrigin, ExecutionOutput, FastProcessor,
-    ResumeContext,
+    Memory, ResumeContext,
 };
 pub use host::{
     BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestLoadError, MastForestStore,
@@ -130,6 +133,12 @@ impl<'a> ProcessorState<'a> {
     #[inline(always)]
     pub fn execution_options(&self) -> &ExecutionOptions {
         self.processor.execution_options()
+    }
+
+    /// Returns the live root of the execution's authenticated precompile obligation.
+    #[inline(always)]
+    pub fn precompile_root(&self) -> Digest {
+        self.processor.deferred_state().root()
     }
 
     /// Returns the current clock cycle of a process.

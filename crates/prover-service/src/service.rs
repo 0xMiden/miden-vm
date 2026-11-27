@@ -220,7 +220,7 @@ impl State {
             return prove(witness);
         }
         let proof = match self.config.proof_mode() {
-            ProofMode::Complete => self.prover.prove_full(witness),
+            ProofMode::Complete => self.prover.prove_full(witness).map(Into::into),
             ProofMode::Deferred => self.prover.prove(witness),
         };
         Ok(proof.map_err(prover_error)?.to_bytes())

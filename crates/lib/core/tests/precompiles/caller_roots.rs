@@ -498,8 +498,8 @@ fn manual_hashes_reject_forged_digest_advice() {
         },
     };
     use miden_processor::{
-        DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, StackInputs,
-        advice::{AdviceInputs, AdviceMutation, AdviceStack},
+        DefaultHost, ExecutionError, Processor,
+        advice::{AdviceMutation, AdviceStack},
         event::EventHandler,
     };
 
@@ -526,14 +526,7 @@ fn manual_hashes_reject_forged_digest_advice() {
             .unwrap_program();
         let mut host = DefaultHost::default().with_library(&library).unwrap();
         assert!(host.replace_handler(event, handler).unwrap());
-        let error = FastProcessor::new_with_options(
-            StackInputs::default(),
-            AdviceInputs::default(),
-            ExecutionOptions::default(),
-        )
-        .unwrap()
-        .execute_sync(&program, &mut host)
-        .unwrap_err();
+        let error = Processor::new(&program).execute().run_sync(&mut host).unwrap_err();
         assert!(
             matches!(error,ExecutionError::DeferredError { ref err, .. } if matches!(err.root(),PrecompileError::AssertionFailed)),
             "{module}: {error}"

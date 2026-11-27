@@ -14,7 +14,7 @@ use miden_crypto::hash::{
 };
 use miden_event_handler_abi::{ABI_VERSION, Status};
 use miden_processor::{
-    DefaultHost, FastProcessor, Felt, StackInputs, Word,
+    DefaultHost, FastProcessor, Felt, Processor, StackInputs, Word,
     advice::{AdviceInputs, AdviceMap, AdviceMutation, AdviceStack},
     crypto::{
         hash::Eidos,
@@ -348,8 +348,9 @@ fn mem_get_zero_fills_across_word_boundaries() {
     for (event, handler) in module.handlers() {
         host.register_handler(event, handler).expect("registration succeeds");
     }
-    FastProcessor::new(StackInputs::default())
-        .execute_sync(&program, &mut host)
+    Processor::new(&program)
+        .execute()
+        .run_sync(&mut host)
         .expect("memory the program never wrote reads as zero, inside and outside a written word");
 }
 

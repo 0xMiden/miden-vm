@@ -14,7 +14,7 @@ use miden_core::{
     proof::{ExecutionProof, HashFunction},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use miden_processor::{DefaultHost, Processor, StackInputs, WitnessOutput};
 use miden_stark::verifier::VerifierError;
 use miden_verifier::{StarkVerificationError, VerificationError, Verifier};
 use miden_vm_stark::prover::prove;
@@ -50,14 +50,12 @@ fn verifier_rejects_forged_overflow_pop_order() {
     let stack_values = (1..17).rev().map(Felt::new_unchecked).collect::<Vec<_>>();
     let stack_inputs = StackInputs::new(&stack_values).unwrap();
     let mut host = DefaultHost::default();
-    let (trace, precompile_witness) = FastProcessor::new(stack_inputs)
-        .execute_and_build_trace_sync(
-            &program,
-            &mut host,
-            &miden_vm_stark::memory::default_budget(),
-        )
+    let WitnessOutput { witness, .. } = Processor::new(&program)
+        .with_stack_inputs(stack_inputs)
+        .record_witness()
+        .run_sync(&mut host)
         .unwrap();
-    assert!(precompile_witness.is_none());
+    let trace = crate::repro_harness::materialize_vm_trace(witness);
     assert_eq!(trace.precompile_root(), TRUE_DIGEST);
 
     let main = trace.main_trace();

@@ -197,7 +197,7 @@ impl Eidos {
     /// let byte_tag = Felt::new_unchecked(0x0000_0301);
     /// let _ = Eidos::hash_elements_in_domain(&values, byte_tag);
     /// ```
-    pub fn hash_elements_in_domain<E, D>(elements: &[E], _: D) -> Word
+    pub fn hash_elements_in_domain<E, D>(elements: &[E], domain: D) -> Word
     where
         E: BasedVectorSpace<Felt>,
         D: EidosDomain<Encoding = FeltSequence>,
@@ -209,7 +209,16 @@ impl Eidos {
         let iter = elements
             .iter()
             .flat_map(|element| E::as_basis_coefficients_slice(element).iter().copied());
-        Word::new(hash_felt_iter_in_domain_with_len(iter, len, D::TAG.as_u32()))
+        Self::hash_felt_iter_in_domain(iter, len, domain)
+    }
+
+    /// Hashes a Felt sequence whose iterator yields exactly `len` elements.
+    pub(crate) fn hash_felt_iter_in_domain<D: EidosDomain<Encoding = FeltSequence>>(
+        elements: impl Iterator<Item = Felt>,
+        len: usize,
+        _: D,
+    ) -> Word {
+        Word::new(hash_felt_iter_in_domain_with_len(elements, len, D::TAG.as_u32()))
     }
 
     /// Compress two digest words as one reserved Merkle inner node.

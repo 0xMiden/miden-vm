@@ -2,7 +2,7 @@ use std::hint::black_box;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{ExecutionOptions, FastProcessor, advice::AdviceInputs};
+use miden_processor::{ExecutionOptions, Processor, advice::AdviceInputs};
 use miden_vm::{Assembler, DefaultHost, StackInputs, internal::InputFile};
 use tokio::runtime::Runtime;
 use walkdir::WalkDir;
@@ -66,20 +66,21 @@ fn program_execution_for_trace(c: &mut Criterion) {
                                 .with_library(&CoreLibrary::default())
                                 .unwrap();
 
-                            let processor = FastProcessor::new_with_options(
-                                stack_inputs,
-                                advice_inputs.clone(),
-                                ExecutionOptions::default()
-                                    .with_core_trace_fragment_size(TRACE_FRAGMENT_SIZE)
-                                    .unwrap(),
-                            )
-                            .expect("processor advice inputs should fit advice map limits");
+                            let options = ExecutionOptions::default()
+                                .with_core_trace_fragment_size(TRACE_FRAGMENT_SIZE)
+                                .unwrap();
+                            let execution = Processor::new(&program)
+                                .with_stack_inputs(stack_inputs)
+                                .with_advice(advice_inputs.clone())
+                                .with_options(options)
+                                .record_witness()
+                                .prepare()
+                                .expect("processor advice inputs should fit advice map limits");
 
-                            (host, program.clone(), processor)
+                            (host, execution)
                         },
-                        |(mut host, program, processor)| async move {
-                            let out =
-                                processor.execute_for_proving(&program, &mut host).await.unwrap();
+                        |(mut host, execution)| async move {
+                            let out = execution.run(&mut host).await.unwrap().witness;
                             black_box(out);
                         },
                         BatchSize::SmallInput,

@@ -74,7 +74,7 @@ mod tests {
     use miden_assembly::Assembler;
 
     use super::NonTracingTestHost;
-    use crate::{AdviceInputs, ExecutionOptions, FastProcessor, Program, StackInputs};
+    use crate::{Processor, Program};
 
     /// A host which does not implement `on_trace` should still execute trace events gracefully via
     /// the default no-op implementation, and trace events must not be routed to `on_event`.
@@ -103,14 +103,7 @@ mod tests {
             .unwrap()
             .unwrap_program();
         let mut host = NonTracingTestHost::default();
-        FastProcessor::new_with_options(
-            StackInputs::default(),
-            AdviceInputs::default(),
-            ExecutionOptions::default(),
-        )
-        .expect("failed to construct FastProcessor")
-        .execute_sync(&program, &mut host)
-        .unwrap();
+        Processor::new(&program).execute().run_sync(&mut host).unwrap();
 
         assert_eq!(host.events, vec![REGULAR_EVENT_ID_1, REGULAR_EVENT_ID_2]);
     }

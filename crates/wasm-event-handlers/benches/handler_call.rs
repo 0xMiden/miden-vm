@@ -27,7 +27,7 @@ use std::{sync::Arc, time::Duration};
 use criterion::{Criterion, criterion_group, criterion_main};
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_event_handler_abi::ABI_VERSION;
-use miden_processor::{DefaultHost, FastProcessor, StackInputs, event::EventName};
+use miden_processor::{DefaultHost, Processor, Program, event::EventName};
 use miden_wasm_event_handlers::{WasmHandlerLimits, WasmHandlerModule};
 
 const EVENT: EventName = EventName::new("bench::wasm::handler");
@@ -118,11 +118,11 @@ const MEM_READ_WAT: &str = r#"(module
   (func (export "handler")
     (drop (call $mem_read (i32.const 0) (i32.const 0) (i32.const 4096)))))"#;
 
-/// Returns a processor whose memory holds [`MEMORY_WORDS`] written words.
+/// Builds the program that writes [`MEMORY_WORDS`] words for the populated-memory fixture.
 ///
 /// Only a program writes VM memory, so a MASM loop stores one element per word. The program runs
 /// once, in bench setup; the measured handler then probes the map the program left behind.
-fn processor_with_populated_memory() -> FastProcessor {
+fn populated_memory_program() -> Program {
     let source = format!(
         r#"
         begin
@@ -140,16 +140,10 @@ fn processor_with_populated_memory() -> FastProcessor {
         end"#,
         limit = MEMORY_WORDS * 4,
     );
-    let program = Assembler::new(Arc::new(DefaultSourceManager::default()))
+    Assembler::new(Arc::new(DefaultSourceManager::default()))
         .assemble_program("bench_memory", source)
         .expect("the bench program assembles")
-        .unwrap_program();
-
-    let mut processor = FastProcessor::new(StackInputs::default());
-    processor
-        .execute_mut_sync(&program, &mut DefaultHost::default())
-        .expect("the bench program populates the memory");
-    processor
+        .unwrap_program()
 }
 
 fn bench_handlers(c: &mut Criterion) {
@@ -157,10 +151,15 @@ fn bench_handlers(c: &mut Criterion) {
     group.warm_up_time(Duration::from_millis(500));
     group.measurement_time(Duration::from_secs(2));
 
-    let processor = FastProcessor::new(StackInputs::default());
-    let populated = processor_with_populated_memory();
+    let program = populated_memory_program();
+    let start = || Processor::new(&program).execute().start().expect("start bench session");
+    let processor = start();
+    let mut populated = start();
+    populated
+        .run_until_halt_sync(&mut DefaultHost::default())
+        .expect("the bench program populates the memory");
 
-    for (name, wat_src, processor) in [
+    for (name, wat_src, session) in [
         ("call_empty_handler", EMPTY_WAT, &processor),
         ("guest_arith_100k_iters", ARITH_WAT, &processor),
         ("host_extend_4096_felts", EXTEND_WAT, &processor),
@@ -187,7 +186,7 @@ fn bench_handlers(c: &mut Criterion) {
 
         group.bench_function(name, |bencher| {
             bencher.iter(|| {
-                let state = processor.state();
+                let state = session.state();
                 std::hint::black_box(handler.on_event(&state).expect("bench handler succeeds"))
             })
         });

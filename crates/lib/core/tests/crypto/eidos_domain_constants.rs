@@ -8,10 +8,10 @@ use miden_core::{
 use miden_crypto::hash::eidos::{
     BLOCK_LEN as EIDOS_BLOCK_WIDTH, Eidos,
     domains::{
-        AEAD_CTR_KEY, AEAD_MAC_KEY, ECGFP5_PREPROCESSED_PUBLIC_KEY, ECGFP5_PUBLIC_KEY,
-        ECGFP5_SEAL_CONTEXT, ECGFP5_SEAL_EXTRACT, ECGFP5_SEAL_KEY, ECGFP5_SEAL_NONCE,
-        FALCON_HASH_TO_POINT, FALCON_PUBLIC_KEY, GENERIC_FELT_SEQUENCE, LMCS_LEAF, MMR_PEAKS,
-        SMT_BUCKET_LEAF,
+        AEAD_CTR_KEY, AEAD_MAC_KEY, ECGFP5_ENVELOPE, ECGFP5_PREPROCESSED_PUBLIC_KEY,
+        ECGFP5_PUBLIC_KEY, ECGFP5_SEAL_CONTEXT, ECGFP5_SEAL_EXTRACT, ECGFP5_SEAL_KEY,
+        ECGFP5_SEAL_NONCE, FALCON_HASH_TO_POINT, FALCON_PUBLIC_KEY, GENERIC_FELT_SEQUENCE,
+        LMCS_LEAF, MMR_PEAKS, SMT_BUCKET_LEAF,
     },
 };
 use miden_precompiles::{Keccak256Precompile, Sha256Precompile, Sha512Precompile};
@@ -111,6 +111,10 @@ fn masm_domain_tags_match_rust_registries() {
     assert_eq!(
         masm_scalar(ECGFP5_IES, "ECGFP5_SEAL_CONTEXT"),
         domain_tag(ECGFP5_SEAL_CONTEXT).as_canonical_u64(),
+    );
+    assert_eq!(
+        masm_scalar(ECGFP5_IES, "ECGFP5_ENVELOPE"),
+        domain_tag(ECGFP5_ENVELOPE).as_canonical_u64(),
     );
     assert_eq!(
         masm_scalar(EIDOS, "GENERIC_FELT_SEQUENCE_DOMAIN_TAG"),

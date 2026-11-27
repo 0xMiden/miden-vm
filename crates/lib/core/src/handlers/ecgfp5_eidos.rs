@@ -1,15 +1,14 @@
 //! Host events for EcGFp5/Eidos sealing.
 //!
-//! `seal` and `seal_preprocessed` request private key-agreement advice from the host.
-//! [`Ecgfp5SealHandler`] generates this advice from a cryptographic RNG and registered keys.
-//! Hosts can also implement the event contract directly.
+//! [`Ecgfp5SealHandler`] supplies private key-agreement advice using a cryptographic RNG and
+//! registered keys.
 //!
-//! Each event carries `[event_id, public_key_commitment(4), ...]` on the operand stack.
-//! [`PublicKey::advise`] builds advice for `seal`; [`PreparedPublicKey::advise`] builds it for
-//! `seal_preprocessed`. Use a key matching the commitment and a fresh random ephemeral secret
-//! for each new encryption. Put the returned elements on the advice stack in consumption order
-//! and the returned Merkle nodes in the Merkle store. Hosts with preloaded advice must still
-//! handle the event without adding another response.
+//! Each event carries `[event_id, public_key_commitment(4), ...]` on the operand stack. Custom
+//! hosts use [`PublicKey::advise`] for the direct event and [`PreparedPublicKey::advise`] for the
+//! preprocessed event. Use a key matching the commitment and a fresh random ephemeral secret for
+//! each encryption. Put the returned elements on the advice stack in consumption order and the
+//! Merkle nodes in the Merkle store. Hosts with preloaded advice must still handle the event
+//! without adding another response.
 //!
 //! To reproduce ciphertext during transaction re-execution, record each advice response with its
 //! event ID and key commitment, then replay the responses for matching requests in order.
@@ -28,11 +27,13 @@ use miden_processor::{
 use miden_utils_sync::RwLock;
 use rand::CryptoRng;
 
-/// Requests private key-agreement inputs for `crypto::ies::ecgfp5_eidos::seal`.
+/// Requests private key-agreement inputs for `crypto::ies::ecgfp5_eidos::seal` and
+/// `seal_and_commit`.
 pub const ECGFP5_EIDOS_SEAL_EVENT_NAME: EventName =
     EventName::new("miden::core::crypto::ies::ecgfp5_eidos::seal");
 
-/// Requests private key-agreement inputs for `crypto::ies::ecgfp5_eidos::seal_preprocessed`.
+/// Requests private key-agreement inputs for `crypto::ies::ecgfp5_eidos::seal_preprocessed` and
+/// `seal_preprocessed_and_commit`.
 pub const ECGFP5_EIDOS_SEAL_PREPROCESSED_EVENT_NAME: EventName =
     EventName::new("miden::core::crypto::ies::ecgfp5_eidos::seal_preprocessed");
 

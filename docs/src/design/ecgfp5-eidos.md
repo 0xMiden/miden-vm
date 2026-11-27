@@ -55,7 +55,7 @@ the DH, Eidos, and [AEAD security terms](./eidos-aead.md#usage-limits).
 
 ### Public-key commitments
 
-The MASM `agree` and `seal` procedures take the four-Felt commitment returned by Rust's
+The MASM `agree` and `seal` procedures take the key commitment returned by Rust's
 `PublicKey::to_commitment()`. This hashes the canonical five-Felt encoding of `Q` under
 `ECGFP5_PUBLIC_KEY`. The procedures read `Q` from advice and check its commitment.
 
@@ -80,6 +80,7 @@ The length is also bound in Eidos's initial chaining value.
 | Nonce | `0x00000d01` | 8 | `prk || c` |
 | Public key | `0x00001001` | 5 | `Q` |
 | Preprocessed public key | `0x00001101` | 80 | Twenty ordered window roots |
+| Envelope | `0x00001301` | `8 + 2 * plaintext_len` | Envelope |
 
 These roles have fixed output lengths, so no variable output-length parameter is needed.
 
@@ -97,6 +98,20 @@ The MASM envelope is
 The context is supplied separately. Decryption validates the
 canonical nonidentity point, envelope length, and u32 ciphertext limbs, then checks the
 tag before returning plaintext. Decrypted limb pairs must encode canonical Felts.
+
+### Envelope commitment
+
+`commit_envelope` takes the address of a complete envelope in memory and reads its plaintext
+length from the header. It returns the same commitment as Rust's `Envelope::to_commitment()`.
+Both `seal_and_commit` and `seal_preprocessed_and_commit` return this commitment after writing
+the envelope.
+
+```text
+e = H_envelope(R(5) || tag(2) || plaintext_len || ciphertext(2 * plaintext_len))
+```
+
+The hash input consists of the envelope fields. The recipient key and context are separate
+inputs to sealing.
 
 ### Byte messages
 
@@ -117,15 +132,20 @@ For an explicit ephemeral scalar, use `miden_crypto::ies::ecgfp5_eidos::seal_wit
 
 In the VM, call `crypto::ies::ecgfp5_eidos::seal` with the recipient's key commitment,
 plaintext, context, and destination. It requests private agreement advice from the host
-and writes the envelope.
+and writes the envelope. `seal_and_commit` takes the same arguments and also returns the
+[envelope commitment](#envelope-commitment). With a preprocessed key, use
+`seal_preprocessed_and_commit`. To commit to an envelope already in memory, call
+`commit_envelope` with its address.
 
 | Procedure | Public-key input | Host key for advice generation |
 | --- | --- | --- |
 | `seal` | Commitment to `Q` (four Felts) | `PublicKey` |
 | `seal_preprocessed` | Commitment `I` (four Felts) | `PreparedPublicKey` |
+| `seal_and_commit` | Commitment to `Q` (four Felts) | `PublicKey` |
+| `seal_preprocessed_and_commit` | Commitment `I` (four Felts) | `PreparedPublicKey` |
 
-Both procedures produce the same envelope for the same recipient, scalar, plaintext, and context.
-The recipient does not need the preprocessed tables to decrypt it.
+All four sealing procedures produce the same envelope for the same recipient, scalar, plaintext,
+and context. The recipient does not need the preprocessed tables to decrypt it.
 
 Decode a MASM envelope with `miden_crypto::ies::ecgfp5_eidos::Envelope::from_elements`, then call
 `ecgfp5_eidos::open` with the recipient's secret key and original context. `Envelope` also converts

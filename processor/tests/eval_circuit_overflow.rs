@@ -4,8 +4,7 @@ use miden_core::{
     mast::{BasicBlockNodeBuilder, MastForest},
 };
 use miden_processor::{
-    AceError, DefaultHost, ExecutionError, FastProcessor, Felt, Program, StackInputs,
-    advice::AdviceInputs,
+    AceError, DefaultHost, ExecutionError, Felt, Processor, Program, StackInputs,
     operation::Operation,
     trace::chiplets::{MAX_EVAL_CIRCUIT_INVOCATIONS, MAX_EVAL_CIRCUIT_WIRES},
 };
@@ -21,16 +20,11 @@ fn eval_circuit_overflow_panic_check() {
     let program = eval_circuit_program();
 
     let mut host = DefaultHost::default();
-    let processor = FastProcessor::new_with_options(
-        stack_inputs,
-        AdviceInputs::default(),
-        miden_processor::ExecutionOptions::default(),
-    )
-    .expect("processor advice inputs should fit advice map limits");
+    let execution = Processor::new(&program).with_stack_inputs(stack_inputs).execute();
 
     // Namely, this checks that execution doesn't panic due to an overflow.
     assert!(matches!(
-        processor.execute_sync(&program, &mut host),
+        execution.run_sync(&mut host),
         Err(ExecutionError::AceChipError {
             label: _,
             source_file: _,
@@ -49,8 +43,10 @@ fn eval_circuit_rejects_excessive_wires_before_memory_access() {
         let stack_inputs =
             StackInputs::new(&[Felt::new_unchecked(1), Felt::from(num_read), Felt::from(num_eval)])
                 .unwrap();
-        let error = FastProcessor::new(stack_inputs)
-            .execute_sync(&program, &mut DefaultHost::default())
+        let error = Processor::new(&program)
+            .with_stack_inputs(stack_inputs)
+            .execute()
+            .run_sync(&mut DefaultHost::default())
             .unwrap_err();
         let ExecutionError::AceChipError { error: AceError(message), .. } = error else {
             panic!("expected an ACE resource-limit error, got {error}");
@@ -81,8 +77,10 @@ fn eval_circuit_witness_invocation_limit_across_calls() {
             .unwrap()
             .unwrap_program();
         // Each call enters a fresh context, but all evaluations belong to the same witness.
-        let result = FastProcessor::new(StackInputs::default())
-            .execute_for_proving_sync(&program, &mut DefaultHost::default());
+        let result = Processor::new(&program)
+            .record_witness()
+            .run_sync(&mut DefaultHost::default())
+            .map(|output| output.witness);
         if invocations == limit {
             result.unwrap();
         } else {

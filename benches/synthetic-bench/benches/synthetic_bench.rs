@@ -25,13 +25,8 @@ use std::{collections::BTreeSet, hint::black_box, path::PathBuf, time::Duration}
 use codspeed_criterion_compat as criterion;
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
 use miden_core::program::ExecutionClaim;
-use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
-};
-use miden_vm::{
-    Assembler, ExecutionProof, HashFunction, Program, ProgramInfo, Prover, StackOutputs, Verifier,
-    prove_sync,
-};
+use miden_processor::{DefaultHost, Processor, StackInputs, advice::AdviceInputs};
+use miden_vm::{Assembler, ExecutionProof, HashFunction, Program, Prover, Verifier};
 use miden_vm_synthetic_bench::{
     calibrator::{Calibration, calibrate},
     snapshot::{DEFAULT_SCENARIOS, TraceSnapshot},
@@ -100,27 +95,21 @@ fn env_u64(name: &str, default: u64) -> u64 {
     }
 }
 
-/// Builds the per-iteration inputs shared by the `exec` and `trace_prep` axes.
-fn processor_inputs(program: &Program) -> (DefaultHost, Program, FastProcessor) {
-    let host = DefaultHost::default();
-    let processor = FastProcessor::new_with_options(
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    )
-    .expect("processor advice inputs should fit advice map limits");
-    (host, program.clone(), processor)
-}
-
 fn execute_and_prove(
     prover: &Prover,
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
     host: &mut DefaultHost,
-) -> (StackOutputs, ExecutionProof) {
-    prove_sync(prover, program, stack_inputs, advice_inputs, host, ExecutionOptions::default())
-        .expect("execute and prove program")
+) -> (ExecutionClaim, ExecutionProof) {
+    let output = Processor::new(program)
+        .with_stack_inputs(stack_inputs)
+        .with_advice(advice_inputs)
+        .record_witness()
+        .run_sync(host)
+        .expect("execute program and record witness");
+    let proof = prover.prove_full(output.witness).expect("prove program");
+    (output.claim, proof.into())
 }
 
 fn synthetic_bench(c: &mut Criterion) {
@@ -244,19 +233,20 @@ fn bench_one_scenario(
         .measurement_time(Duration::from_secs(measurement_time_secs));
 
     // Four axes per scenario:
-    //   exec       -- FastProcessor::execute_sync (no trace data)
-    //   trace_prep -- FastProcessor::execute_for_proving_sync (post-execution witness creation)
-    //   prove      -- configured prove_sync with overlapped trace construction
+    //   exec       -- ordinary execution (no trace data)
+    //   trace_prep -- record_witness (post-execution witness creation)
+    //   prove      -- configured complete proving from a recorded witness
     //   verify     -- Verifier::new().verify against a proof generated once outside the timed loop
     if axes.contains("exec") {
         group.bench_function("exec", |b| {
             b.iter_batched_ref(
                 || {
-                    let (host, program, processor) = processor_inputs(&program);
-                    (host, program, Some(processor))
+                    let host = DefaultHost::default();
+                    let execution = Processor::new(&program).execute().prepare().unwrap();
+                    (host, Some(execution))
                 },
-                |(host, program, processor)| {
-                    black_box(processor.take().unwrap().execute_sync(program, host).expect("exec"))
+                |(host, execution)| {
+                    black_box(execution.take().unwrap().run_sync(host).expect("exec"))
                 },
                 BatchSize::PerIteration,
             );
@@ -267,17 +257,12 @@ fn bench_one_scenario(
         group.bench_function("trace_prep", |b| {
             b.iter_batched_ref(
                 || {
-                    let (host, program, processor) = processor_inputs(&program);
-                    (host, program, Some(processor))
+                    let host = DefaultHost::default();
+                    let execution = Processor::new(&program).record_witness().prepare().unwrap();
+                    (host, Some(execution))
                 },
-                |(host, program, processor)| {
-                    black_box(
-                        processor
-                            .take()
-                            .unwrap()
-                            .execute_for_proving_sync(program, host)
-                            .expect("trace_prep"),
-                    )
+                |(host, execution)| {
+                    black_box(execution.take().unwrap().run_sync(host).expect("trace_prep").witness)
                 },
                 BatchSize::PerIteration,
             );
@@ -294,13 +279,14 @@ fn bench_one_scenario(
                     (host, program.clone(), Some(stack), Some(advice))
                 },
                 |(host, program, stack, advice)| {
-                    black_box(execute_and_prove(
+                    let (claim, proof) = execute_and_prove(
                         &prover,
                         program,
                         stack.take().unwrap(),
                         advice.take().unwrap(),
                         host,
-                    ))
+                    );
+                    black_box((*claim.stack_outputs(), proof))
                 },
                 BatchSize::PerIteration,
             );
@@ -309,17 +295,12 @@ fn bench_one_scenario(
 
     if axes.contains("verify") {
         let mut host = DefaultHost::default();
-        let (stack_outputs, proof) = execute_and_prove(
+        let (claim, proof) = execute_and_prove(
             &prover,
             &program,
             StackInputs::default(),
             AdviceInputs::default(),
             &mut host,
-        );
-        let claim = ExecutionClaim::from_program_info(
-            ProgramInfo::from(program.clone()),
-            StackInputs::default(),
-            stack_outputs,
         );
         group.bench_function("verify", |b| {
             b.iter(|| {

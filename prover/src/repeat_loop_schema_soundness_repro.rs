@@ -23,7 +23,7 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_processor::{
-    DefaultHost, FastProcessor, StackInputs,
+    DefaultHost, Processor, StackInputs, WitnessOutput,
     trace::{VmTrace, chiplets::build_external_eidos_compression_traces},
 };
 use miden_stark::{
@@ -51,11 +51,12 @@ fn build_basic_program(ops: Vec<Operation>) -> Program {
 fn execute(program: &Program, stack: &[u64]) -> VmTrace {
     let stack = stack.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
     let mut host = DefaultHost::default();
-    let (trace, precompile_witness) = FastProcessor::new(StackInputs::new(&stack).unwrap())
-        .execute_and_build_trace_sync(program, &mut host, &miden_vm_stark::memory::default_budget())
+    let WitnessOutput { witness, .. } = Processor::new(program)
+        .with_stack_inputs(StackInputs::new(&stack).unwrap())
+        .record_witness()
+        .run_sync(&mut host)
         .unwrap();
-    assert!(precompile_witness.is_none());
-    trace
+    crate::repro_harness::materialize_vm_trace(witness)
 }
 
 fn core_row(
