@@ -605,7 +605,9 @@ fn trim_paths_rewrites_mast_and_package_debug_paths() {
     let caller_dir = tempfile::tempdir().unwrap();
     let builds = ["trim-paths-a-", "trim-paths-b-"].map(|prefix| {
         let tempdir = tempfile::Builder::new().prefix(prefix).tempdir().unwrap();
-        let manifest_path = tempdir.path().join("miden-project.toml");
+        let project_dir = tempdir.path().join("project");
+        let shared_dir = tempdir.path().join("shared");
+        let manifest_path = project_dir.join("miden-project.toml");
         write_file(
             &manifest_path,
             r#"[package]
@@ -613,14 +615,14 @@ name = "trimmed"
 version = "1.0.0"
 
 [lib]
-path = "mod.masm"
+path = "../shared/mod.masm"
 
 [profile.dev]
 trim-paths = true
 "#,
         );
         write_file(
-            &tempdir.path().join("mod.masm"),
+            &shared_dir.join("mod.masm"),
             r#"pub mod left
 pub mod right
 
@@ -631,14 +633,14 @@ end
 "#,
         );
         write_file(
-            &tempdir.path().join("left/mod.masm"),
+            &shared_dir.join("left/mod.masm"),
             r#"pub proc one
     push.1
 end
 "#,
         );
         write_file(
-            &tempdir.path().join("right/mod.masm"),
+            &shared_dir.join("right/mod.masm"),
             r#"pub proc two
     push.2
 end
@@ -690,8 +692,8 @@ end
             })
             .collect::<BTreeSet<_>>();
         let expected_asm_op_sources = [
-            (String::from("push.1"), PathBuf::from("left").join("mod.masm")),
-            (String::from("push.2"), PathBuf::from("right").join("mod.masm")),
+            (String::from("push.1"), PathBuf::from("..").join("shared/left/mod.masm")),
+            (String::from("push.2"), PathBuf::from("..").join("shared/right/mod.masm")),
         ]
         .into_iter()
         .collect::<BTreeSet<_>>();
@@ -708,9 +710,9 @@ end
             })
             .collect::<BTreeSet<_>>();
         let expected_file_paths = [
-            PathBuf::from("mod.masm"),
-            PathBuf::from("left").join("mod.masm"),
-            PathBuf::from("right").join("mod.masm"),
+            PathBuf::from("..").join("shared/mod.masm"),
+            PathBuf::from("..").join("shared/left/mod.masm"),
+            PathBuf::from("..").join("shared/right/mod.masm"),
         ]
         .into_iter()
         .collect::<BTreeSet<_>>();

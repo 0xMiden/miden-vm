@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use miden_assembly_syntax::debuginfo::Uri;
 use miden_mast_package::debug_info::PackageDebugInfo;
@@ -42,11 +42,28 @@ impl SourcePathTrimmer {
             self.cwd.join(path)
         };
         let absolute_path = absolute_path.canonicalize().unwrap_or(absolute_path);
-        absolute_path
-            .strip_prefix(&self.cwd)
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|_| path.to_path_buf())
+        relative_path(&absolute_path, &self.cwd).unwrap_or_else(|| path.to_path_buf())
     }
+}
+
+pub(crate) fn relative_path(path: &Path, base: &Path) -> Option<PathBuf> {
+    let mut path_components = path.components().peekable();
+    let mut base_components = base.components().peekable();
+    while path_components.peek() == base_components.peek() {
+        path_components.next();
+        base_components.next();
+    }
+
+    let mut relative = PathBuf::new();
+    for component in base_components {
+        match component {
+            Component::Normal(_) => relative.push(".."),
+            Component::CurDir => {},
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    relative.extend(path_components);
+    Some(relative)
 }
 
 // HELPER FUNCTIONS
