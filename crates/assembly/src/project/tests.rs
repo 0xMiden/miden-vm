@@ -738,6 +738,143 @@ end
 }
 
 #[test]
+fn static_linking_namespaces_relative_debug_paths_by_package() {
+    let tempdir = TempDir::new().unwrap();
+    let banana_dir = tempdir.path().join("banana");
+    write_file(
+        &banana_dir.join("miden-project.toml"),
+        r#"[package]
+name = "banana"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "fruit::banana"
+
+[profile.dev]
+trim-paths = true
+"#,
+    );
+    write_file(
+        &banana_dir.join("lib.masm"),
+        r#"pub proc one
+    push.1
+end
+"#,
+    );
+
+    let basket_dir = tempdir.path().join("basket");
+    write_file(
+        &basket_dir.join("miden-project.toml"),
+        r#"[package]
+name = "basket"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "fruit::basket"
+
+[dependencies]
+banana = { path = "../banana", linkage = "static" }
+
+[profile.dev]
+trim-paths = true
+"#,
+    );
+    write_file(
+        &basket_dir.join("lib.masm"),
+        r#"pub proc one
+    exec.::fruit::banana::one
+end
+"#,
+    );
+
+    let plantain_dir = tempdir.path().join("plantain");
+    write_file(
+        &plantain_dir.join("miden-project.toml"),
+        r#"[package]
+name = "plantain"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "fruit::plantain"
+
+[profile.dev]
+trim-paths = true
+"#,
+    );
+    write_file(
+        &plantain_dir.join("lib.masm"),
+        r#"pub proc two
+    push.2
+end
+"#,
+    );
+
+    let root_dir = tempdir.path().join("root");
+    let root_manifest = root_dir.join("miden-project.toml");
+    write_file(
+        &root_manifest,
+        r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+basket = { path = "../basket", linkage = "static" }
+plantain = { path = "../plantain", linkage = "static" }
+
+[profile.dev]
+trim-paths = true
+"#,
+    );
+    write_file(
+        &root_dir.join("lib.masm"),
+        r#"pub proc entry
+    exec.::fruit::basket::one
+    exec.::fruit::plantain::two
+end
+"#,
+    );
+
+    let mut context = TestContext::new();
+    let package = context
+        .assemble_library_package(&root_manifest, Some("dev"))
+        .expect("statically linked package should build");
+    let debug_info = package
+        .debug_info()
+        .expect("package debug info should decode")
+        .expect("package should contain debug info");
+    let asm_op_sources = debug_info
+        .nodes()
+        .iter()
+        .flat_map(|node| node.asm_ops.iter())
+        .filter_map(|asm_op| {
+            let op_name = debug_info.get_string(asm_op.op_name_idx).unwrap();
+            if !matches!(op_name.as_ref(), "push.1" | "push.2") {
+                return None;
+            }
+            let location_idx = asm_op.location_idx.into_option().unwrap();
+            let location = debug_info.get_location(location_idx).unwrap();
+            Some((op_name.to_string(), location.uri.to_string()))
+        })
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(
+        asm_op_sources,
+        [
+            (String::from("push.1"), String::from("miden-pkg://banana/lib.masm")),
+            (String::from("push.2"), String::from("miden-pkg://plantain/lib.masm")),
+        ]
+        .into_iter()
+        .collect()
+    );
+}
+
+#[test]
 fn assembles_mixed_dependencies_and_inherits_static_runtime_deps() {
     let tempdir = TempDir::new().unwrap();
     let mut context = TestContext::new();

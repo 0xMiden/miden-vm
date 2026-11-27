@@ -1,13 +1,30 @@
 use std::path::{Component, Path, PathBuf};
 
 use miden_assembly_syntax::debuginfo::Uri;
-use miden_mast_package::debug_info::PackageDebugInfo;
+use miden_mast_package::{PackageId, debug_info::PackageDebugInfo};
+
+const LINKED_PACKAGE_URI_SCHEME: &str = "miden-pkg";
 
 pub(super) fn trim_paths(debug_info: &mut PackageDebugInfo, trimmer: &SourcePathTrimmer) {
     debug_info.trim_file_paths(move |path| {
         let uri = Uri::new(path);
         let trimmed = trimmer.trim_uri(&uri);
         if uri == trimmed { None } else { Some(trimmed.into()) }
+    });
+}
+
+pub(crate) fn namespace_linked_source_paths(
+    debug_info: &mut PackageDebugInfo,
+    package: &PackageId,
+) {
+    debug_info.trim_file_paths(|source| {
+        let uri = Uri::new(source);
+        let path = uri.to_path()?;
+        if path.is_absolute() {
+            return None;
+        }
+
+        Some(Uri::new(format!("{LINKED_PACKAGE_URI_SCHEME}://{package}/{}", path.display())).into())
     });
 }
 

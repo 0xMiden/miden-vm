@@ -383,6 +383,15 @@ impl MastForestBuilder {
     ) -> Result<Option<DebugFunctionIdx>, Report> {
         if !self.imported_debug_tables.contains_key(&library_id) {
             let imported = if let Some(debug) = library.package.debug_info().into_diagnostic()? {
+                #[cfg(feature = "std")]
+                let debug = {
+                    let mut debug = debug;
+                    crate::assembler::debuginfo::namespace_linked_source_paths(
+                        &mut debug,
+                        &library.package.name,
+                    );
+                    debug
+                };
                 let static_index = self
                     .statically_linked_package_debug_info
                     .iter()

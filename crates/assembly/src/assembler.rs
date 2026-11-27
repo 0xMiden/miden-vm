@@ -1,5 +1,5 @@
 #[cfg(feature = "std")]
-pub(super) mod debuginfo;
+pub(crate) mod debuginfo;
 pub(crate) mod error;
 mod product;
 

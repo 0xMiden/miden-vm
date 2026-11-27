@@ -1280,16 +1280,19 @@ fn package_source_debug_static_call_selects_identical_proc_from_called_file() {
         row.location_idx
             .into_option()
             .and_then(|location_idx| package_debug_info.get_location(location_idx))
-            .is_some_and(|location| location.uri().as_str() == "lib/b.masm")
+            .is_some_and(|location| location.uri().as_str() == "miden-pkg://lib/lib/b.masm")
     });
 
-    assert!(selected_row_found, "the selected call should keep lib/b.masm metadata");
+    assert!(
+        selected_row_found,
+        "the selected call should keep package-qualified lib/b.masm metadata"
+    );
     assert!(
         !asm_ops.clone().any(|row| {
             row.location_idx
                 .into_option()
                 .and_then(|location_idx| package_debug_info.get_location(location_idx))
-                .is_some_and(|location| location.uri().as_str() == "lib/a.masm")
+                .is_some_and(|location| location.uri().as_str() == "miden-pkg://lib/lib/a.masm")
         }),
         "the uncalled identical procedure should not leak into the executable source map",
     );
