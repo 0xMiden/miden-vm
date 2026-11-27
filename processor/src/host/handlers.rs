@@ -8,7 +8,7 @@ use core::{error::Error, fmt, fmt::Debug};
 
 use miden_core::events::{EventId, EventName};
 
-use crate::{ExecutionError, ProcessorState, advice::AdviceMutation};
+use crate::{HostError, ProcessorState, advice::AdviceMutation};
 
 // EVENT HANDLER TRAIT
 // ================================================================================================
@@ -80,14 +80,12 @@ pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 ///
 /// # Errors
 /// Returns an error if the name is empty or is in the reserved namespace.
-fn validate_event_name(event: &EventName) -> Result<(), ExecutionError> {
+fn validate_event_name(event: &EventName) -> Result<(), HostError> {
     if event.as_str().is_empty() {
-        return Err(crate::errors::HostError::EmptyEventName.into());
+        return Err(HostError::EmptyEventName);
     }
     if event.is_reserved() {
-        return Err(
-            crate::errors::HostError::ReservedEventNamespace { event: event.clone() }.into()
-        );
+        return Err(HostError::ReservedEventNamespace { event: event.clone() });
     }
     Ok(())
 }
@@ -144,7 +142,7 @@ impl EventHandlerRegistry {
         &mut self,
         event: EventName,
         handler: Arc<dyn EventHandler>,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), HostError> {
         validate_event_name(&event)?;
 
         // Compute EventId from the event name
@@ -152,7 +150,7 @@ impl EventHandlerRegistry {
         match self.handlers.entry(id) {
             Entry::Vacant(e) => e.insert((event, handler)),
             Entry::Occupied(_) => {
-                return Err(crate::errors::HostError::DuplicateEventHandler { event }.into());
+                return Err(HostError::DuplicateEventHandler { event });
             },
         };
         Ok(())
@@ -171,7 +169,7 @@ impl EventHandlerRegistry {
         &mut self,
         event: EventName,
         handler: Arc<dyn EventHandler>,
-    ) -> Result<bool, ExecutionError> {
+    ) -> Result<bool, HostError> {
         validate_event_name(&event)?;
 
         let id = event.to_event_id();
@@ -282,14 +280,14 @@ impl TraceHandlerRegistry {
         &mut self,
         event: EventName,
         handler: Arc<dyn TraceHandler>,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), HostError> {
         validate_event_name(&event)?;
 
         let id = event.to_event_id();
         match self.handlers.entry(id) {
             Entry::Vacant(e) => e.insert((event, handler)),
             Entry::Occupied(_) => {
-                return Err(crate::errors::HostError::DuplicateEventHandler { event }.into());
+                return Err(HostError::DuplicateEventHandler { event });
             },
         };
         Ok(())
@@ -308,7 +306,7 @@ impl TraceHandlerRegistry {
         &mut self,
         event: EventName,
         handler: Arc<dyn TraceHandler>,
-    ) -> Result<bool, ExecutionError> {
+    ) -> Result<bool, HostError> {
         validate_event_name(&event)?;
 
         let id = event.to_event_id();
@@ -362,8 +360,8 @@ mod tests {
         TraceHandlerRegistry,
     };
     use crate::{
-        BaseHost, DefaultHost, ExecutionError, FastProcessor, HostError, ProcessorState,
-        StackInputs, advice::AdviceMutation,
+        BaseHost, DefaultHost, FastProcessor, HostError, ProcessorState, StackInputs,
+        advice::AdviceMutation,
     };
 
     #[derive(Debug, thiserror::Error)]
@@ -471,7 +469,7 @@ mod tests {
         let mut registry = EventHandlerRegistry::new();
         let err = registry.register(reserved.clone(), Arc::new(NoopEventHandler)).unwrap_err();
         match err {
-            ExecutionError::HostError(HostError::ReservedEventNamespace { event }) => {
+            HostError::ReservedEventNamespace { event } => {
                 assert_eq!(event, reserved);
             },
             other => panic!("expected ReservedEventNamespace, got {other:?}"),
@@ -485,7 +483,7 @@ mod tests {
         let mut registry = EventHandlerRegistry::new();
         let err = registry.register(reserved.clone(), Arc::new(NoopEventHandler)).unwrap_err();
         match err {
-            ExecutionError::HostError(HostError::ReservedEventNamespace { event }) => {
+            HostError::ReservedEventNamespace { event } => {
                 assert_eq!(event, reserved);
             },
             other => panic!("expected ReservedEventNamespace, got {other:?}"),
@@ -496,10 +494,7 @@ mod tests {
     fn event_register_rejects_empty_name() {
         let mut registry = EventHandlerRegistry::new();
         let err = registry.register(EventName::new(""), Arc::new(NoopEventHandler)).unwrap_err();
-        assert!(
-            matches!(err, ExecutionError::HostError(HostError::EmptyEventName)),
-            "expected EmptyEventName, got {err:?}"
-        );
+        assert!(matches!(err, HostError::EmptyEventName), "expected EmptyEventName, got {err:?}");
     }
 
     #[test]
@@ -510,7 +505,7 @@ mod tests {
 
         let err = registry.register(NAME, Arc::new(NoopEventHandler)).unwrap_err();
         match err {
-            ExecutionError::HostError(HostError::DuplicateEventHandler { event }) => {
+            HostError::DuplicateEventHandler { event } => {
                 assert_eq!(event, NAME);
             },
             other => panic!("expected DuplicateEventHandler, got {other:?}"),
@@ -586,7 +581,7 @@ mod tests {
         let mut registry = TraceHandlerRegistry::new();
         let err = registry.register(reserved.clone(), Arc::new(NoopTraceHandler)).unwrap_err();
         match err {
-            ExecutionError::HostError(HostError::ReservedEventNamespace { event }) => {
+            HostError::ReservedEventNamespace { event } => {
                 assert_eq!(event, reserved);
             },
             other => panic!("expected ReservedEventNamespace, got {other:?}"),
@@ -599,7 +594,7 @@ mod tests {
         let mut registry = TraceHandlerRegistry::new();
         let err = registry.register(reserved.clone(), Arc::new(NoopTraceHandler)).unwrap_err();
         match err {
-            ExecutionError::HostError(HostError::ReservedEventNamespace { event }) => {
+            HostError::ReservedEventNamespace { event } => {
                 assert_eq!(event, reserved);
             },
             other => panic!("expected ReservedEventNamespace, got {other:?}"),
@@ -610,10 +605,7 @@ mod tests {
     fn trace_register_rejects_empty_name() {
         let mut registry = TraceHandlerRegistry::new();
         let err = registry.register(EventName::new(""), Arc::new(NoopTraceHandler)).unwrap_err();
-        assert!(
-            matches!(err, ExecutionError::HostError(HostError::EmptyEventName)),
-            "expected EmptyEventName, got {err:?}"
-        );
+        assert!(matches!(err, HostError::EmptyEventName), "expected EmptyEventName, got {err:?}");
     }
 
     #[test]
@@ -624,7 +616,7 @@ mod tests {
 
         let err = registry.register(NAME, Arc::new(NoopTraceHandler)).unwrap_err();
         match err {
-            ExecutionError::HostError(HostError::DuplicateEventHandler { event }) => {
+            HostError::DuplicateEventHandler { event } => {
                 assert_eq!(event, NAME);
             },
             other => panic!("expected DuplicateEventHandler, got {other:?}"),
@@ -649,7 +641,7 @@ mod tests {
         // Re-registering the same event directly is rejected.
         assert!(matches!(
             host.register_handler(NAME, Arc::new(NoopEventHandler)),
-            Err(ExecutionError::HostError(HostError::DuplicateEventHandler { .. }))
+            Err(HostError::DuplicateEventHandler { .. })
         ));
 
         assert!(host.unregister_handler(id));
@@ -685,7 +677,7 @@ mod tests {
 
         assert!(matches!(
             host.register_trace_handler(NAME, Arc::new(NoopTraceHandler)),
-            Err(ExecutionError::HostError(HostError::DuplicateEventHandler { .. }))
+            Err(HostError::DuplicateEventHandler { .. })
         ));
 
         assert!(host.unregister_trace_handler(id));

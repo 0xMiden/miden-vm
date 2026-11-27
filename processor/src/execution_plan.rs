@@ -11,9 +11,9 @@ use self::private::ExecutionMode;
 use crate::{
     AdviceInputs, AdviceProvider, ExecutionClaim, ExecutionError, ExecutionOptions,
     ExecutionOutput, ExecutionWitness, FastProcessor, Host, KernelDescriptor,
-    PackageSourceDebugContext, ProcessorState, Program, ProgramInfo, ResumeContext, StackInputs,
-    StackOutputs, SyncHost, Word,
-    errors::MapExecErrNoCtx,
+    PackageSourceDebugContext, ProcessorError, ProcessorState, Program, ProgramInfo, ResumeContext,
+    SessionUnavailableReason, StackInputs, StackOutputs, SyncHost, Word,
+    advice::AdviceError,
     fast::{NoopTracer, ResumeOutcome},
     trace::execution_tracer::ExecutionTracer,
     tracer::Tracer,
@@ -110,14 +110,13 @@ enum ProcessorSource {
 }
 
 impl ProcessorSource {
-    fn into_processor(self) -> Result<FastProcessor, ExecutionError> {
+    fn into_processor(self) -> Result<FastProcessor, AdviceError> {
         match self {
             Self::Inputs(inputs) => FastProcessor::new_with_options(
                 inputs.stack_inputs,
                 inputs.advice_inputs,
                 inputs.options,
-            )
-            .map_exec_err_no_ctx(),
+            ),
             Self::Initialized(processor) => Ok(processor),
         }
     }
@@ -143,7 +142,9 @@ impl<'p, M: ExecutionMode> ExecutionPlan<'p, M> {
         mode: M,
     ) -> Result<Self, ExecutionError> {
         if u32::from(processor.state().clock()) != 0 {
-            return Err(ExecutionError::Internal("an execution plan requires a fresh processor"));
+            return Err(
+                ProcessorError::Internal("an execution plan requires a fresh processor").into()
+            );
         }
         Ok(Self {
             processor: ProcessorSource::Initialized(processor),
@@ -254,18 +255,19 @@ impl StepStatus {
 
 enum SessionState {
     Ready(ResumeContext),
-    Busy,
+    Unavailable(SessionUnavailableReason),
     Finished {
         stack: StackOutputs,
         kernel: KernelDescriptor,
     },
-    Failed,
 }
 
 /// A resumable execution retaining its continuation context and recorder.
 ///
 /// The session owns the VM context prepared at startup. Dropping an in-flight async step or drive
-/// leaves the session busy and prevents further execution. The VM state remains inspectable.
+/// prevents further execution. The VM state remains inspectable. A subsequent step or drive
+/// reports [`SessionUnavailableReason::Interrupted`]. If execution returned an error, subsequent
+/// attempts report [`SessionUnavailableReason::PreviouslyFailed`].
 ///
 /// Only a [`HaltedExecution`] can export the selected artifact with `finish`.
 ///
@@ -311,17 +313,18 @@ impl<M: ExecutionMode> ExecutionSession<M> {
     }
 
     fn before_step(&mut self) -> Result<Option<ResumeContext>, ExecutionError> {
-        match core::mem::replace(&mut self.state, SessionState::Busy) {
+        match core::mem::replace(
+            &mut self.state,
+            SessionState::Unavailable(SessionUnavailableReason::Interrupted),
+        ) {
             SessionState::Ready(context) => Ok(Some(context)),
             finished @ SessionState::Finished { .. } => {
                 self.state = finished;
                 Ok(None)
             },
-            SessionState::Busy | SessionState::Failed => {
-                self.state = SessionState::Failed;
-                Err(ExecutionError::Internal(
-                    "execution session failed or a previous step was cancelled",
-                ))
+            SessionState::Unavailable(reason) => {
+                self.state = SessionState::Unavailable(reason);
+                Err(ProcessorError::SessionUnavailable(reason).into())
             },
         }
     }
@@ -340,7 +343,7 @@ impl<M: ExecutionMode> ExecutionSession<M> {
                 Ok(StepStatus::Finished)
             },
             Err(error) => {
-                self.state = SessionState::Failed;
+                self.state = SessionState::Unavailable(SessionUnavailableReason::PreviouslyFailed);
                 Err(error)
             },
         }

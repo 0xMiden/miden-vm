@@ -1,4 +1,4 @@
-use miden_processor::{ExecutionError, operation::OperationError};
+use miden_processor::{ProcessorError, operation::OperationError};
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
 #[cfg(feature = "arbitrary")]
@@ -426,10 +426,7 @@ fn u32div_fail() {
     // should fail if b == 0.
     let test = build_op_test!(asm_op, &[0, 1]);
 
-    expect_exec_error_matches!(
-        test,
-        ExecutionError::OperationError { err: OperationError::DivideByZero, .. }
-    );
+    expect_exec_error_matches!(test, ProcessorError::Operation(OperationError::DivideByZero));
 }
 
 #[test]
@@ -472,10 +469,7 @@ fn u32mod_fail() {
     // should fail if b == 0
     let test = build_op_test!(asm_op, &[0, 1]);
 
-    expect_exec_error_matches!(
-        test,
-        ExecutionError::OperationError { err: OperationError::DivideByZero, .. }
-    );
+    expect_exec_error_matches!(test, ProcessorError::Operation(OperationError::DivideByZero));
 }
 
 #[test]
@@ -526,10 +520,7 @@ fn u32divmod_fail() {
     // should fail if b == 0.
     let test = build_op_test!(asm_op, &[0, 1]);
 
-    expect_exec_error_matches!(
-        test,
-        ExecutionError::OperationError { err: OperationError::DivideByZero, .. }
-    );
+    expect_exec_error_matches!(test, ProcessorError::Operation(OperationError::DivideByZero));
 }
 
 // U32 OPERATIONS TESTS - RANDOMIZED - ARITHMETIC OPERATIONS

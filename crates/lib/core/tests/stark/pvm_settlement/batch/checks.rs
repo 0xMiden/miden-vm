@@ -9,7 +9,7 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, ExecutionError, Processor, Program, StackInputs, WitnessOutput,
+    DefaultHost, ExecutionError, Processor, ProcessorError, Program, StackInputs, WitnessOutput,
     advice::AdviceInputs, operation::OperationError,
 };
 use miden_prover::Prover;
@@ -191,13 +191,7 @@ fn assert_rejects_pvm_response(
 #[track_caller]
 fn assert_failed_assertion(error: ExecutionError) {
     assert!(
-        matches!(
-            error,
-            ExecutionError::OperationError {
-                err: OperationError::FailedAssertion { .. },
-                ..
-            }
-        ),
+        matches!(error.kind(), ProcessorError::Operation(OperationError::FailedAssertion { .. })),
         "{error}",
     );
 }

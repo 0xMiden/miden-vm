@@ -80,21 +80,22 @@ exec.register_library_dependency(standards_lib);
 
 ### Event handlers
 
-You can register custom event handlers using `Executor::register_event_handler`, specifying the event and a callback to execute when the event occurs, like so:
+Use `Executor::register_event_handler` to queue a handler. The executor checks event names and duplicates when it builds the debugger or stepper host.
 
 ```rust
+use std::sync::Arc;
 use miden_debug::{
-    Executor, 
-    events::EventName, 
-    processor::{advice::AdviceStack, host::AdviceMutation},
-    RawFelt
+    Executor, events::EventName,
+    processor::{ONE, ProcessorState, advice::AdviceMutation},
 };
 
-let mut exec = Executor::for_package(program_package, args).unwrap();
-
-exec.register_event_handler(EventName::new("my-event"), |_state| {
-    vec![AdviceMutation::extend_advice_stack(AdviceStack::from(vec![RawFelt::from(1u32)]))]
-}).expect("invalid event handler");
+let mut exec = Executor::new(Vec::new());
+exec.register_event_handler(
+    EventName::new("my-event"),
+    Arc::new(|_: &ProcessorState<'_>| {
+        Ok(vec![AdviceMutation::extend_advice_stack_with([ONE])])
+    }),
+);
 ```
 
 ## Controlling execution with breakpoints

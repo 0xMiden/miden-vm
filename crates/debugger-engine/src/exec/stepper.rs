@@ -5,7 +5,8 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_core::{deferred::TRUE_DIGEST, program::StackOutputs};
 use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 use miden_processor::{
-    ExecutionError, ExecutionOutput, FastProcessor, Host, ResumeContext, SyncHost,
+    ExecutionError, ExecutionOutput, FastProcessor, Host, ProcessorError, ResumeContext,
+    SessionUnavailableReason, SyncHost,
 };
 
 use super::{
@@ -72,7 +73,7 @@ enum State {
     Finished,
     /// A step failed, or did not complete and the next step found the execution lost; the
     /// program is stopped and has no output.
-    Failed,
+    Failed(SessionUnavailableReason),
 }
 
 impl Stepper {
@@ -150,13 +151,13 @@ impl Stepper {
     /// Whether the program has terminated, successfully or not. A program whose step did not
     /// complete has not, until the next step finds the execution lost.
     pub fn stopped(&self) -> bool {
-        matches!(self.state, State::Finished | State::Failed)
+        matches!(self.state, State::Finished | State::Failed(_))
     }
 
     /// Whether the program failed: a step failed, or a step did not complete and a later one
     /// found the execution lost. A failed program is stopped and has no output.
     pub fn failed(&self) -> bool {
-        matches!(self.state, State::Failed)
+        matches!(self.state, State::Failed(_))
     }
 
     /// The processor being stepped.
@@ -281,18 +282,24 @@ impl Stepper {
     pub fn into_output(self) -> Result<ExecutionOutput, ExecutionError> {
         match self.state {
             State::Finished => {},
-            State::Ready(_) | State::Stepping => {
-                return Err(ExecutionError::Internal("the program has not terminated"));
+            State::Stepping => {
+                return Err(ProcessorError::SessionUnavailable(
+                    SessionUnavailableReason::Interrupted,
+                )
+                .into());
             },
-            State::Failed => {
-                return Err(ExecutionError::Internal("the program failed and has no output"));
+            State::Ready(_) => {
+                return Err(ProcessorError::Internal("the program has not terminated").into());
+            },
+            State::Failed(reason) => {
+                return Err(ProcessorError::SessionUnavailable(reason).into());
             },
         }
         // The processor keeps the stack bottom first and the outputs want the top first. The
         // last step already rejected a final stack deeper than the output width.
         let stack: Vec<_> = self.processor.stack().iter().rev().copied().collect();
         let stack = StackOutputs::new(&stack)
-            .map_err(|_| ExecutionError::Internal("the final stack is not a valid output"))?;
+            .map_err(|_| ProcessorError::Internal("the final stack is not a valid output"))?;
         execution_output(self.processor, stack)
     }
 
@@ -308,17 +315,18 @@ impl Stepper {
                 self.state = State::Finished;
                 return Ok(None);
             },
-            State::Failed => {
-                self.state = State::Failed;
-                return Err(ExecutionError::Internal("the program failed; it cannot be stepped"));
+            State::Failed(reason) => {
+                self.state = State::Failed(reason);
+                return Err(ProcessorError::SessionUnavailable(reason).into());
             },
             // The execution is lost; the program counts as failed from here on, so that a
             // caller looping until the program stops is not kept waiting.
             State::Stepping => {
-                self.state = State::Failed;
-                return Err(ExecutionError::Internal(
-                    "a step did not complete; the execution is lost",
-                ));
+                self.state = State::Failed(SessionUnavailableReason::Interrupted);
+                return Err(ProcessorError::SessionUnavailable(
+                    SessionUnavailableReason::Interrupted,
+                )
+                .into());
             },
         };
         // The pending debug info is consumed by the first step whatever the context carries:
@@ -348,7 +356,7 @@ impl Stepper {
                 Ok(running)
             },
             Err(error) => {
-                self.state = State::Failed;
+                self.state = State::Failed(SessionUnavailableReason::PreviouslyFailed);
                 Err(error)
             },
         }
@@ -376,18 +384,10 @@ pub(crate) fn execution_output(
     let precompile_witness = if precompile_root == TRUE_DIGEST {
         None
     } else {
-        Some(
-            deferred
-                .witness_for(
-                    precompile_root,
-                    processor.execution_options().verification_precompile_limits(),
-                )
-                .map_err(|err| ExecutionError::DeferredError {
-                    label: Default::default(),
-                    source_file: None,
-                    err,
-                })?,
-        )
+        Some(deferred.witness_for(
+            precompile_root,
+            processor.execution_options().verification_precompile_limits(),
+        )?)
     };
     let (advice, memory) = processor.into_parts();
     Ok(ExecutionOutput {

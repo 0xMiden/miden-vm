@@ -10,7 +10,7 @@ use core::{cmp::min, ops::ControlFlow};
 use miden_air_definitions::vm::trace::RowIndex;
 use miden_core::{
     EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO,
-    deferred::{DeferredState, Digest, PrecompileWitness},
+    deferred::{DeferredState, Digest, PrecompileError, PrecompileWitness},
     mast::{ExecutableMastForest, MastForest},
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
@@ -19,11 +19,9 @@ use miden_mast_package::Package;
 
 use crate::{
     AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, LoadedMastForest,
-    ProcessorState,
+    ProcessorError, ProcessorState,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::MapExecErrNoCtx,
-    operation::OperationError,
     tracer::{OperationHelperRegisters, Tracer},
 };
 
@@ -35,7 +33,6 @@ mod memory;
 mod operation;
 mod step;
 
-pub use basic_block::SystemEventError;
 pub use debug::{DebugCallFrame, DebugCallFrameResolver, DebugFrameOrigin};
 pub use memory::Memory;
 pub use step::ResumeContext;
@@ -171,13 +168,11 @@ impl FastProcessor {
     pub(crate) fn into_execution_output(
         self,
         stack: StackOutputs,
-    ) -> Result<ExecutionOutput, ExecutionError> {
+    ) -> Result<ExecutionOutput, PrecompileError> {
         let precompile_root = self.deferred_state.root();
         let precompile_witness = self
             .deferred_state
-            .into_witness(self.options.verification_precompile_limits())
-            .map_err(OperationError::from)
-            .map_exec_err_no_ctx()?;
+            .into_witness(self.options.verification_precompile_limits())?;
         Ok(ExecutionOutput {
             stack,
             advice: self.advice,
@@ -194,7 +189,9 @@ impl FastProcessor {
         processor: Self,
     ) -> Result<ExecutionOutput, ExecutionError> {
         match flow {
-            ControlFlow::Continue(stack_outputs) => processor.into_execution_output(stack_outputs),
+            ControlFlow::Continue(stack_outputs) => {
+                processor.into_execution_output(stack_outputs).map_err(ExecutionError::from)
+            },
             ControlFlow::Break(break_reason) => match break_reason {
                 BreakReason::Err(err) => Err(err),
                 BreakReason::Stopped(_) => {
@@ -309,9 +306,12 @@ impl FastProcessor {
         package: Arc<Package>,
     ) -> Result<ResumeContext, ExecutionError> {
         let program = package.unwrap_program();
-        let package_debug_info = package.debug_info()?.map(Arc::new);
+        let package_debug_info = package
+            .debug_info()
+            .map_err(|error| ProcessorError::PackageDebugInfo(Arc::new(error)))?
+            .map(Arc::new);
         let current_forest = program.mast_forest().clone();
-        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
+        self.advice.extend_map(current_forest.advice_map())?;
 
         let entrypoint_source_node_id = package.entrypoint_source_node();
         let continuation_stack = if let Some(debug_info) = package_debug_info.as_deref() {
@@ -558,11 +558,11 @@ impl FastProcessor {
     /// and only grows on a push, so enforcing the bound here is sufficient to cap total
     /// operand-stack memory.
     #[inline(always)]
-    fn ensure_stack_capacity_for_push(&mut self) -> Result<(), ExecutionError> {
+    fn ensure_stack_capacity_for_push(&mut self) -> Result<(), ProcessorError> {
         let depth = self.stack_size() + self.saved_overflow_len + 1;
         let max = self.options.max_stack_depth();
         if depth > max {
-            return Err(ExecutionError::StackDepthLimitExceeded { depth, max });
+            return Err(ProcessorError::StackDepthLimitExceeded { depth, max });
         }
 
         if self.stack_top_idx >= self.stack.len() - 1 {
@@ -718,8 +718,9 @@ impl Tracer for NoopTracer {
         _continuation: Continuation<Arc<MastForest>>,
         _continuation_stack: &ContinuationStack<Arc<MastForest>>,
         _current_forest: &Arc<MastForest>,
-    ) {
+    ) -> Result<(), ProcessorError> {
         // do nothing
+        Ok(())
     }
 
     #[inline(always)]
@@ -728,7 +729,7 @@ impl Tracer for NoopTracer {
         _processor: &FastProcessor,
         _op_helper_registers: OperationHelperRegisters,
         _current_forest: &Arc<MastForest>,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), ProcessorError> {
         // do nothing
         Ok(())
     }

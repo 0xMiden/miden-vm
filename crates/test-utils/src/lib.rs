@@ -85,6 +85,25 @@ pub(crate) fn module_source(path: impl AsRef<Path>, source: impl ToString) -> St
     }
 }
 
+/// Failure while recording a test execution or building its VM trace.
+#[cfg(not(target_family = "wasm"))]
+#[derive(Debug, thiserror::Error, miden_utils_diagnostics::Diagnostic)]
+pub enum ExecutionTraceError {
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Execution(#[from] ExecutionError),
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    TraceGeneration(#[from] miden_processor::TraceGenerationError),
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl AsRef<dyn miden_utils_diagnostics::Diagnostic> for ExecutionTraceError {
+    fn as_ref(&self) -> &(dyn miden_utils_diagnostics::Diagnostic + 'static) {
+        self
+    }
+}
+
 // CONSTANTS
 // ================================================================================================
 
@@ -163,14 +182,16 @@ assertion failed (expected assembly error, but got a different type):
     };
 }
 
-/// Asserts that running the given execution test will result in the expected error.
+/// Asserts that running the given execution test will result in the expected execution error kind.
 #[cfg(all(feature = "std", not(target_family = "wasm")))]
 #[macro_export]
 macro_rules! expect_exec_error_matches {
     ($test:expr, $(|)? $( $pattern:pat_param )|+ $( if $guard: expr )? $(,)?) => {
         match $test.execute() {
             Ok(_) => panic!("expected execution to fail @ {}:{}", file!(), line!()),
-            Err(error) => ::core::assert_matches!(error, $( $pattern )|+ $( if $guard )?),
+            Err(error) => {
+                ::core::assert_matches!(error.into_kind(), $( $pattern )|+ $( if $guard )?)
+            },
         }
     };
 }
@@ -557,7 +578,7 @@ impl Test {
     /// Builds a VM trace for AIR checks and assertions on trace rows.
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
-    pub fn build_trace(&self) -> Result<VmTrace, ExecutionError> {
+    pub fn build_trace(&self) -> Result<VmTrace, ExecutionTraceError> {
         let output = self.record_with_stack_inputs(self.stack_inputs)?;
         let (vm, _) = output.witness.into_parts();
         let trace = vm.build_trace(&miden_vm_stark::memory::default_budget())?;

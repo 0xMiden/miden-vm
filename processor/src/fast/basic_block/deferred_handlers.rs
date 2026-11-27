@@ -15,8 +15,9 @@ use miden_core::{
     utils::bytes_to_packed_u32_elements,
 };
 
-use super::SystemEventError;
-use crate::{AdviceProvider, MemoryError, fast::FastProcessor};
+use crate::{
+    AdviceProvider, MemoryError, ProcessorError, advice::AdviceError, fast::FastProcessor,
+};
 
 // STACK LAYOUT — `DeferredRegister`
 // ================================================================================================
@@ -88,7 +89,7 @@ fn payload_node_num_elements(n_blocks: u32) -> usize {
 /// instructions from the exact same initial chaining word and payload.
 pub(super) fn handle_deferred_register(
     processor: &mut FastProcessor,
-) -> Result<(), SystemEventError> {
+) -> Result<(), ProcessorError> {
     let lo = processor.stack_get_word(DEFERRED_PAYLOAD_LO_OFFSET);
     let hi = processor.stack_get_word(DEFERRED_PAYLOAD_HI_OFFSET);
     let frame = decode_frame_from_cv(processor.stack_get_word(DEFERRED_CV_OFFSET))?;
@@ -128,7 +129,7 @@ pub(super) fn handle_deferred_register(
 /// Pushes the current accumulator commitment as advice without evaluating or changing it.
 pub(super) fn handle_deferred_root_to_stack(
     processor: &mut FastProcessor,
-) -> Result<(), SystemEventError> {
+) -> Result<(), ProcessorError> {
     let root = processor.deferred_state().root();
     processor.advice.push_stack_word(&root)?;
     Ok(())
@@ -143,7 +144,7 @@ pub(super) fn handle_deferred_root_to_stack(
 /// ordering used by [`handle_deferred_evaluate_payload`]. TRUE emits one zero word.
 pub(super) fn handle_deferred_evaluate(
     processor: &mut FastProcessor,
-) -> Result<(), SystemEventError> {
+) -> Result<(), ProcessorError> {
     let canonical_node = evaluate_canonical_node(processor)?;
     push_evaluated_payload(&mut processor.advice, &canonical_node)?;
     push_evaluated_frame(&mut processor.advice, &canonical_node)?;
@@ -153,7 +154,7 @@ pub(super) fn handle_deferred_evaluate(
 /// Handles deferred-node evaluation and returns only the canonical frame as advice.
 pub(super) fn handle_deferred_evaluate_frame(
     processor: &mut FastProcessor,
-) -> Result<(), SystemEventError> {
+) -> Result<(), ProcessorError> {
     let canonical_node = evaluate_canonical_node(processor)?;
     push_evaluated_frame(&mut processor.advice, &canonical_node)?;
     Ok(())
@@ -169,27 +170,27 @@ pub(super) fn handle_deferred_evaluate_frame(
 /// `[lhs, rhs, ...]` after two `adv_pushw`s. TRUE emits no advice.
 pub(super) fn handle_deferred_evaluate_payload(
     processor: &mut FastProcessor,
-) -> Result<(), SystemEventError> {
+) -> Result<(), ProcessorError> {
     let canonical_node = evaluate_canonical_node(processor)?;
     push_evaluated_payload(&mut processor.advice, &canonical_node)?;
     Ok(())
 }
 
 /// Evaluates the digest on the operand stack and returns the registered canonical node.
-fn evaluate_canonical_node(processor: &mut FastProcessor) -> Result<Node, SystemEventError> {
+fn evaluate_canonical_node(processor: &mut FastProcessor) -> Result<Node, PrecompileError> {
     let digest: Digest = processor.stack_get_word(DEFERRED_NODE_DIGEST_OFFSET);
     let canonical_digest = processor.deferred_state_mut().evaluate_digest(digest)?;
     processor
         .deferred_state()
         .get_node(&canonical_digest)
         .cloned()
-        .ok_or(PrecompileError::MissingNode.into())
+        .ok_or(PrecompileError::MissingNode)
 }
 
 /// Computes the original graph of a registered true assertion and replaces its advice-map value.
 pub(super) fn handle_deferred_export_witness(
     processor: &mut FastProcessor,
-) -> Result<(), SystemEventError> {
+) -> Result<(), ProcessorError> {
     let digest = processor.stack_get_word(DEFERRED_NODE_DIGEST_OFFSET);
     if processor.deferred_state_mut().evaluate_digest(digest)? != TRUE_DIGEST {
         return Err(PrecompileError::AssertionFailed.into());
@@ -207,17 +208,13 @@ pub(super) fn handle_deferred_export_witness(
 }
 
 /// Pushes `node`'s canonical frame onto the advice stack.
-fn push_evaluated_frame(advice: &mut AdviceProvider, node: &Node) -> Result<(), SystemEventError> {
+fn push_evaluated_frame(advice: &mut AdviceProvider, node: &Node) -> Result<(), AdviceError> {
     let frame = node.frame().map(EidosFrame::as_word).unwrap_or_default();
-    advice.push_stack_word(&frame)?;
-    Ok(())
+    advice.push_stack_word(&frame)
 }
 
 /// Pushes `node`'s canonical payload onto the advice stack in `adv_pushw`-ergonomic order.
-fn push_evaluated_payload(
-    advice: &mut AdviceProvider,
-    node: &Node,
-) -> Result<(), SystemEventError> {
+fn push_evaluated_payload(advice: &mut AdviceProvider, node: &Node) -> Result<(), AdviceError> {
     // `AdviceProvider::push_stack_word` front-pushes, while `adv_pushw` pushes each consumed word
     // onto the operand stack. Push payload blocks from the back, preserving LOW/HIGH order within
     // each block, so repeated `adv_pushw`s leave later blocks above earlier blocks.
@@ -247,7 +244,7 @@ fn push_evaluated_payload(
 /// MASM wrapper does so by hashing the exact same range.
 pub(super) fn handle_deferred_register_data(
     processor: &mut FastProcessor,
-) -> Result<(), SystemEventError> {
+) -> Result<(), ProcessorError> {
     let frame = decode_frame_from_cv(processor.stack_get_word(DATA_CV_OFFSET))?;
     let ptr = processor.stack_get(DATA_PTR_OFFSET).as_canonical_u64();
     let n_chunks_felt = processor.stack_get(DATA_N_CHUNKS_OFFSET).as_canonical_u64();
@@ -331,8 +328,8 @@ pub(super) fn handle_deferred_register_data(
     Ok(())
 }
 
-fn decode_frame_from_cv(cv: Word) -> Result<EidosFrame, SystemEventError> {
-    EidosFrame::from_initial_chaining_word(cv).ok_or_else(|| PrecompileError::InvalidNode.into())
+fn decode_frame_from_cv(cv: Word) -> Result<EidosFrame, PrecompileError> {
+    EidosFrame::from_initial_chaining_word(cv).ok_or(PrecompileError::InvalidNode)
 }
 
 #[cfg(test)]
@@ -363,7 +360,7 @@ mod tests {
 
         assert!(matches!(
             handle_deferred_root_to_stack(&mut processor),
-            Err(SystemEventError::Advice(AdviceError::SizeBudgetExceeded { .. }))
+            Err(ProcessorError::Advice(AdviceError::SizeBudgetExceeded { .. }))
         ));
         assert_eq!(processor.advice, advice);
         assert_eq!(processor.stack(), stack);
@@ -389,7 +386,7 @@ mod tests {
                 }
                 let advice = processor.advice.clone();
                 let stack = processor.stack().to_vec();
-                let SystemEventError::Deferred(error) =
+                let ProcessorError::Deferred(error) =
                     handle_deferred_export_witness(&mut processor).unwrap_err()
                 else {
                     panic!("expected a deferred error");
@@ -426,7 +423,7 @@ mod tests {
         let advice = processor.advice.clone();
         assert!(matches!(
             handle_deferred_export_witness(&mut processor),
-            Err(SystemEventError::Advice(AdviceError::SizeBudgetExceeded { .. }))
+            Err(ProcessorError::Advice(AdviceError::SizeBudgetExceeded { .. }))
         ));
         assert_eq!(processor.advice, advice);
     }
@@ -456,7 +453,7 @@ mod tests {
                 Ok(()) => panic!("{name} should be rejected"),
                 Err(error) => error,
             };
-            let SystemEventError::Deferred(error) = error else {
+            let ProcessorError::Deferred(error) = error else {
                 panic!("{name} returned the wrong error class: {error}");
             };
             assert!(
@@ -482,7 +479,7 @@ mod tests {
             (value, PrecompileError::AssertionFailed),
         ] {
             processor.stack_write_word(5, &child);
-            let SystemEventError::Deferred(error) =
+            let ProcessorError::Deferred(error) =
                 handle_deferred_register(&mut processor).unwrap_err()
             else {
                 panic!("expected invalid AND child");
@@ -517,7 +514,7 @@ mod tests {
                 Ok(()) => panic!("{name} should be rejected"),
                 Err(error) => error,
             };
-            let SystemEventError::Deferred(error) = error else {
+            let ProcessorError::Deferred(error) = error else {
                 panic!("{name} returned the wrong error class: {error}");
             };
             if exact {
@@ -569,7 +566,7 @@ mod tests {
                 Ok(()) => panic!("{name} should be rejected"),
                 Err(error) => error,
             };
-            let SystemEventError::Deferred(error) = error else {
+            let ProcessorError::Deferred(error) = error else {
                 panic!("{name} returned the wrong error class: {error}");
             };
             assert!(

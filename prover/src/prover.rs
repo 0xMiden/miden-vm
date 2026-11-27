@@ -1,4 +1,4 @@
-use alloc::{string::ToString, vec::Vec};
+use alloc::vec::Vec;
 
 use miden_core::{
     Word,
@@ -8,10 +8,11 @@ use miden_core::{
     },
 };
 use miden_processor::{
-    ExecutionError, ExecutionWitness, PrecompileWitness, VmWitness, trace::VmTraceBudget,
+    ExecutionWitness, PrecompileWitness, TraceGenerationError, VmWitness, trace::VmTraceBudget,
 };
+use miden_utils_diagnostics::Diagnostic;
 
-use crate::PrecompileProvingError;
+use crate::{PrecompileProvingError, VmProvingError};
 
 /// A synchronous, configurable prover for Miden VM execution witnesses.
 ///
@@ -193,12 +194,9 @@ impl Prover {
     }
 
     fn prove_vm(&self, witness: VmWitness) -> Result<VmProof, ProverError> {
-        let trace = witness
-            .build_trace(&self.trace_budget())
-            .map_err(ProverError::TraceGeneration)?;
-        miden_vm_stark::prover::prove(trace, self.hash_fn, self.hash_lde_blocks).map_err(|error| {
-            ProverError::VmProofGeneration(ExecutionError::ProvingError(error.to_string()))
-        })
+        let trace = witness.build_trace(&self.trace_budget())?;
+        miden_vm_stark::prover::prove(trace, self.hash_fn, self.hash_lde_blocks)
+            .map_err(ProverError::VmProofGeneration)
     }
 }
 
@@ -209,7 +207,7 @@ impl Default for Prover {
 }
 
 /// Errors produced while proving execution artifacts.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Diagnostic)]
 #[non_exhaustive]
 pub enum ProverError {
     /// The VM witness authenticates deferred precompile work that this proving path cannot carry.
@@ -217,10 +215,11 @@ pub enum ProverError {
     VmWitnessHasPrecompiles,
     /// The processor witness could not be materialized into a valid execution trace.
     #[error("failed to materialize VM execution trace: {0}")]
-    TraceGeneration(#[source] ExecutionError),
+    #[diagnostic(transparent)]
+    TraceGeneration(#[from] TraceGenerationError),
     /// The materialized VM trace could not be proved.
     #[error("failed to prove VM execution trace: {0}")]
-    VmProofGeneration(#[source] ExecutionError),
+    VmProofGeneration(#[source] VmProvingError),
     /// The deferred precompile witness could not be proved.
     #[error("failed to prove precompile witness: {0}")]
     PrecompileProofGeneration(#[source] PrecompileProvingError),

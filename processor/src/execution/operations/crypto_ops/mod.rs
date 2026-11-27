@@ -8,11 +8,8 @@ use miden_core::{
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
-    BaseHost, ContextId, ExecutionError, Felt, MemoryError, ONE, RowIndex, Word, ZERO,
-    errors::{
-        CryptoError, IoError, MapExecErrWithOpIdx, MerklePathVerificationFailedInner,
-        OperationError, PackageSourceDebugContext,
-    },
+    ContextId, Felt, MemoryError, ONE, ProcessorError, RowIndex, Word, ZERO,
+    errors::{MerklePathVerificationFailedInner, OperationError},
     field::{BasedVectorSpace, QuadFelt},
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, StackInterface,
@@ -72,10 +69,10 @@ pub(super) fn op_compress<P: Processor, T: Tracer>(
 /// The AIR enforces the same range through two range-check interactions. This explicit execution
 /// guard keeps ordinary execution, trace generation, and proof verification in agreement. Running
 /// it before advice access prevents MRUPDATE from mutating a tree for a rejected depth.
-fn validate_merkle_depth(depth: Felt) -> Result<(), CryptoError> {
+fn validate_merkle_depth(depth: Felt) -> Result<(), OperationError> {
     let depth_u64 = depth.as_canonical_u64();
     if depth_u64 == 0 || depth_u64 > MAX_MERKLE_DEPTH.into() {
-        return Err(OperationError::MerkleDepthOutOfRange { depth }.into());
+        return Err(OperationError::MerkleDepthOutOfRange { depth });
     }
     Ok(())
 }
@@ -87,7 +84,7 @@ fn validate_merkle_depth(depth: Felt) -> Result<(), CryptoError> {
 fn validate_merkle_path_length(
     path: Option<&MerklePath>,
     expected_depth: Felt,
-) -> Result<(), CryptoError> {
+) -> Result<(), OperationError> {
     if let Some(path) = path {
         validate_materialized_merkle_path_length(path.nodes().len(), expected_depth)?;
     }
@@ -98,12 +95,10 @@ fn validate_merkle_path_length(
 fn validate_materialized_merkle_path_length(
     path_len: usize,
     expected_depth: Felt,
-) -> Result<(), CryptoError> {
+) -> Result<(), OperationError> {
     // Compare without narrowing `path_len`: a wrapped length must not appear to match the depth.
     if u64::try_from(path_len).ok() != Some(expected_depth.as_canonical_u64()) {
-        return Err(
-            OperationError::InvalidMerklePathLength { path_len, depth: expected_depth }.into()
-        );
+        return Err(OperationError::InvalidMerklePathLength { path_len, depth: expected_depth });
     }
     Ok(())
 }
@@ -134,7 +129,7 @@ pub(super) fn op_mpverify<P: Processor, T: Tracer>(
     processor: &mut P,
     err_code: Felt,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, CryptoError> {
+) -> Result<OperationHelperRegisters, ProcessorError> {
     // read node value, depth, index and root value from the stack
     let node = processor.stack().get_word(0);
     let depth = processor.stack().get(4);
@@ -203,7 +198,7 @@ pub(super) fn op_mpverify<P: Processor, T: Tracer>(
 pub(super) fn op_mrupdate<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, CryptoError> {
+) -> Result<OperationHelperRegisters, ProcessorError> {
     // read old node value, depth, index, tree root and new node values from the stack
     let old_value = processor.stack().get_word(0);
     let depth = processor.stack().get(4);
@@ -268,7 +263,7 @@ fn read_horner_eval_point<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
     addr: Felt,
-) -> Result<QuadFelt, IoError> {
+) -> Result<QuadFelt, ProcessorError> {
     let clk = processor.system().clock();
     let ctx = processor.system().ctx();
     let word = processor.memory_mut().read_word(ctx, addr, clk)?;
@@ -339,7 +334,7 @@ fn read_horner_eval_point<P: Processor, T: Tracer>(
 pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, IoError> {
+) -> Result<OperationHelperRegisters, ProcessorError> {
     // Stack positions: low coefficient closer to top (lower index)
     const ALPHA_ADDR_INDEX: usize = 13;
     const ACC_LOW_INDEX: usize = 14;
@@ -432,7 +427,7 @@ pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
 pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, IoError> {
+) -> Result<OperationHelperRegisters, ProcessorError> {
     // Stack positions: low coefficient closer to top (lower index)
     const ALPHA_ADDR_INDEX: usize = 13;
     const ACC_LOW_INDEX: usize = 14;
@@ -475,53 +470,6 @@ pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
 // STREAM CIPHER OPERATION
 // ================================================================================================
 
-#[derive(Debug)]
-pub(super) enum AeadStreamError {
-    Memory(MemoryError),
-    Operation(OperationError),
-}
-
-impl From<MemoryError> for AeadStreamError {
-    fn from(err: MemoryError) -> Self {
-        Self::Memory(err)
-    }
-}
-
-impl From<OperationError> for AeadStreamError {
-    fn from(err: OperationError) -> Self {
-        Self::Operation(err)
-    }
-}
-
-impl<T> MapExecErrWithOpIdx<T> for Result<T, AeadStreamError> {
-    fn map_exec_err_with_op_idx(self) -> Result<T, ExecutionError> {
-        match self {
-            Ok(result) => Ok(result),
-            Err(AeadStreamError::Memory(err)) => {
-                Result::<T, MemoryError>::Err(err).map_exec_err_with_op_idx()
-            },
-            Err(AeadStreamError::Operation(err)) => {
-                Result::<T, OperationError>::Err(err).map_exec_err_with_op_idx()
-            },
-        }
-    }
-
-    fn map_exec_err_with_package_source_op_idx(
-        self,
-        context: Option<PackageSourceDebugContext<'_>>,
-        host: &(dyn BaseHost + '_),
-        op_idx: usize,
-    ) -> Result<T, ExecutionError> {
-        match self {
-            Ok(result) => Ok(result),
-            Err(AeadStreamError::Memory(err)) => Result::<T, MemoryError>::Err(err)
-                .map_exec_err_with_package_source_op_idx(context, host, op_idx),
-            Err(AeadStreamError::Operation(err)) => Result::<T, OperationError>::Err(err)
-                .map_exec_err_with_package_source_op_idx(context, host, op_idx),
-        }
-    }
-}
-
 /// Encrypts two memory words with an Eidos XOF keystream.
 ///
 /// Stack transition:
@@ -531,7 +479,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, AeadStreamError> {
 pub(super) fn op_aead_stream<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, AeadStreamError> {
+) -> Result<OperationHelperRegisters, ProcessorError> {
     const K_CTR_IDX: usize = 0;
     const COUNTER_IDX: usize = 4;
     const SRC_PTR_IDX: usize = 5;

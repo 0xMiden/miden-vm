@@ -1,7 +1,7 @@
 use core::ops::ControlFlow;
 
 use crate::{
-    BaseHost, BreakReason, MapExecErr, ONE, Stopper, ZERO,
+    BaseHost, BreakReason, ONE, Stopper, ZERO,
     continuation_stack::Continuation,
     execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
     mast::{ExecutableMastForest, LoopNode, MastNode, MastNodeId},
@@ -34,12 +34,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(current_node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state.start_clock_cycle(Continuation::StartNode(current_node_id), current_forest, None)?;
 
     // Unconditionally enter the loop body for the first iteration.
     //
@@ -48,7 +43,9 @@ where
     // computes the value for the `is_loop_body` flag will be incorrect and needs to be adjusted.
     let body_source_node_id = match state.child_source_node_id(0) {
         Ok(source_node_id) => source_node_id,
-        Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
+        Err(err) => {
+            return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
+        },
     };
     state.continuation_stack.push_with_source_node_id(
         Continuation::FinishLoop(current_node_id),
@@ -83,12 +80,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(current_node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state.start_clock_cycle(Continuation::StartNode(current_node_id), current_forest, None)?;
 
     // Unconditionally enter the loop body for the first iteration.
     //
@@ -137,21 +129,18 @@ where
     if condition == ONE {
         // Start the clock cycle corresponding to the REPEAT operation, before re-entering the loop
         // body.
-        state.tracer.start_clock_cycle(
-            state.processor,
-            Continuation::FinishLoop(current_node_id),
-            state.continuation_stack,
-            current_forest,
-        );
+        state.start_clock_cycle(Continuation::FinishLoop(current_node_id), current_forest, None)?;
 
         // Drop the condition from the stack.
-        if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err() {
-            return ControlFlow::Break(BreakReason::Err(err));
+        if let Err(err) = state.processor.stack_mut().decrement_size() {
+            return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
         }
 
         let body_source_node_id = match state.child_source_node_id(0) {
             Ok(source_node_id) => source_node_id,
-            Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
+            Err(err) => {
+                return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
+            },
         };
         state.continuation_stack.push_with_source_node_id(
             Continuation::FinishLoop(current_node_id),
@@ -172,17 +161,12 @@ where
         )
     } else if condition == ZERO {
         // Exit the loop - start the clock cycle corresponding to the END operation.
-        state.tracer.start_clock_cycle(
-            state.processor,
-            Continuation::FinishLoop(current_node_id),
-            state.continuation_stack,
-            current_forest,
-        );
+        state.start_clock_cycle(Continuation::FinishLoop(current_node_id), current_forest, None)?;
 
         // The END operation drops the condition from the stack; the loop body always leaves the
         // condition there.
-        if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err() {
-            return ControlFlow::Break(BreakReason::Err(err));
+        if let Err(err) = state.processor.stack_mut().decrement_size() {
+            return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
         }
 
         // Finalize the clock cycle corresponding to the END operation.
@@ -199,7 +183,7 @@ where
             context: BinaryValueErrorContext::Loop,
             value: condition,
         };
-        ControlFlow::Break(BreakReason::Err(state.operation_error_with_current_context(err)))
+        ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)))
     }
 }
 
@@ -229,16 +213,11 @@ where
     if condition == ONE {
         // Start the clock cycle corresponding to the REPEAT operation, before re-entering the loop
         // body.
-        state.tracer.start_clock_cycle(
-            state.processor,
-            Continuation::FinishLoop(current_node_id),
-            state.continuation_stack,
-            current_forest,
-        );
+        state.start_clock_cycle(Continuation::FinishLoop(current_node_id), current_forest, None)?;
 
         // Drop the condition from the stack.
-        if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err() {
-            return ControlFlow::Break(BreakReason::Err(err));
+        if let Err(err) = state.processor.stack_mut().decrement_size() {
+            return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
         }
 
         state.continuation_stack.push_finish_loop(current_node_id);
@@ -254,17 +233,12 @@ where
         )
     } else if condition == ZERO {
         // Exit the loop - start the clock cycle corresponding to the END operation.
-        state.tracer.start_clock_cycle(
-            state.processor,
-            Continuation::FinishLoop(current_node_id),
-            state.continuation_stack,
-            current_forest,
-        );
+        state.start_clock_cycle(Continuation::FinishLoop(current_node_id), current_forest, None)?;
 
         // The END operation drops the condition from the stack; the loop body always leaves the
         // condition there.
-        if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err() {
-            return ControlFlow::Break(BreakReason::Err(err));
+        if let Err(err) = state.processor.stack_mut().decrement_size() {
+            return ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)));
         }
 
         // Finalize the clock cycle corresponding to the END operation.
@@ -281,6 +255,6 @@ where
             context: BinaryValueErrorContext::Loop,
             value: condition,
         };
-        ControlFlow::Break(BreakReason::Err(state.operation_error_with_current_context(err)))
+        ControlFlow::Break(BreakReason::Err(state.error_with_current_context(err)))
     }
 }

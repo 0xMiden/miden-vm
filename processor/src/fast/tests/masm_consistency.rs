@@ -350,8 +350,8 @@ fn test_masm_errors_consistency(
 
     let stack_inputs = StackInputs::new(&stack_inputs).unwrap();
     let execute = || Processor::new(&program).with_stack_inputs(stack_inputs).execute();
-    let fast_err = execute().run_sync(&mut host).unwrap_err();
-    let fast_stepped_err = execute_by_steps(execute(), &mut host).unwrap_err();
+    let fast_err = execute().run_sync(&mut host).unwrap_err().into_kind();
+    let fast_stepped_err = execute_by_steps(execute(), &mut host).unwrap_err().into_kind();
 
     assert_eq!(fast_err.to_string(), fast_stepped_err.to_string());
     insta::assert_debug_snapshot!(testname, fast_err);

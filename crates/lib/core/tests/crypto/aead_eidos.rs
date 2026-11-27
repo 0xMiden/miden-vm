@@ -12,7 +12,7 @@ use miden_crypto::{
     },
 };
 use miden_processor::{
-    ExecutionError, ProcessorState,
+    ProcessorError, ProcessorState,
     advice::AdviceMutation,
     event::{EventError, EventHandler},
     operation::OperationError,
@@ -1210,12 +1210,9 @@ fn assert_aead_error(case: &str, test: &Test, expected_error: &str) {
     let expected_code = miden_core::mast::error_code_from_msg(expected_error);
     assert!(
         matches!(
-            &error,
-            ExecutionError::OperationError {
-                err: OperationError::FailedAssertion { err_code, err_msg }
-                    | OperationError::U32AssertionFailed { err_code, err_msg, .. },
-                ..
-            } if *err_code == expected_code && err_msg.is_none()
+            error.kind(),
+            ProcessorError::Operation(OperationError::FailedAssertion { err_code, err_msg }
+                    | OperationError::U32AssertionFailed { err_code, err_msg, .. }) if *err_code == expected_code && err_msg.is_none()
         ),
         "{case}: expected {expected_error:?} ({expected_code}), got {error:?}"
     );

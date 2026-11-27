@@ -46,6 +46,8 @@ test-case = { version = "3.2", optional = true }
 pretty_assertions = { workspace = true, features = ["std"], optional = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+miden-utils-diagnostics.workspace = true
+thiserror.workspace = true
 env_logger = { workspace = true, optional = true }
 
 [lints]

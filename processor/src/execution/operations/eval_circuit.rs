@@ -2,8 +2,8 @@ use miden_air_definitions::vm::trace::RowIndex;
 use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
 
 use crate::{
-    ContextId, Felt,
-    errors::{AceError, AceEvalError},
+    ContextId, Felt, ProcessorError,
+    errors::AceError,
     processor::{MemoryInterface, Processor, StackInterface, SystemInterface},
     trace::chiplets::{
         CircuitEvaluation, MAX_EVAL_CIRCUIT_WIRES, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM,
@@ -34,7 +34,7 @@ use crate::{
 /// Stack transition:
 /// [ptr, num_read, num_eval, ...] -> [ptr, num_read, num_eval, ...]
 #[inline(always)]
-pub(super) fn op_eval_circuit<P, T>(processor: &mut P, tracer: &mut T) -> Result<(), AceEvalError>
+pub(super) fn op_eval_circuit<P, T>(processor: &mut P, tracer: &mut T) -> Result<(), ProcessorError>
 where
     P: Processor,
     T: Tracer<Processor = P>,
@@ -66,7 +66,7 @@ pub(crate) fn eval_circuit_impl(
     num_vars: Felt,
     num_eval: Felt,
     mem: &mut impl MemoryInterface,
-) -> Result<CircuitEvaluation, AceEvalError> {
+) -> Result<CircuitEvaluation, ProcessorError> {
     let num_vars = num_vars.as_canonical_u64();
     let num_eval = num_eval.as_canonical_u64();
 

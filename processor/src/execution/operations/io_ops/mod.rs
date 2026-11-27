@@ -1,7 +1,7 @@
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
-    Felt,
-    errors::IoError,
+    Felt, MemoryError, ProcessorError,
+    advice::AdviceError,
     processor::{
         AdviceProviderInterface, MemoryInterface, Processor, StackInterface, SystemInterface,
     },
@@ -22,7 +22,7 @@ mod tests;
 pub(super) fn op_advpop<P, T>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, IoError>
+) -> Result<OperationHelperRegisters, ProcessorError>
 where
     P: Processor,
     T: Tracer<Processor = P>,
@@ -45,7 +45,7 @@ where
 pub(super) fn op_advpopw<P, T>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, IoError>
+) -> Result<OperationHelperRegisters, AdviceError>
 where
     P: Processor,
     T: Tracer<Processor = P>,
@@ -76,7 +76,7 @@ where
 pub(super) fn op_mloadw<P, T>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, IoError>
+) -> Result<OperationHelperRegisters, ProcessorError>
 where
     P: Processor,
     T: Tracer<Processor = P>,
@@ -116,7 +116,7 @@ where
 pub(super) fn op_mstorew<P, T>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, IoError>
+) -> Result<OperationHelperRegisters, ProcessorError>
 where
     P: Processor,
     T: Tracer<Processor = P>,
@@ -158,7 +158,7 @@ where
 pub(super) fn op_mload<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, IoError> {
+) -> Result<OperationHelperRegisters, MemoryError> {
     let ctx = processor.system().ctx();
     let addr = processor.stack().get(0);
 
@@ -187,7 +187,7 @@ pub(super) fn op_mload<P: Processor, T: Tracer>(
 pub(super) fn op_mstore<P, T>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, IoError>
+) -> Result<OperationHelperRegisters, ProcessorError>
 where
     P: Processor,
     T: Tracer<Processor = P>,
@@ -226,7 +226,7 @@ where
 pub(super) fn op_mstream<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, IoError> {
+) -> Result<OperationHelperRegisters, MemoryError> {
     // The stack index where the memory address to load the words from is stored.
     const MEM_ADDR_STACK_IDX: usize = 12;
 
@@ -276,7 +276,7 @@ pub(super) fn op_mstream<P: Processor, T: Tracer>(
 pub(super) fn op_pipe<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, IoError> {
+) -> Result<OperationHelperRegisters, ProcessorError> {
     /// WORD_SIZE, but as a `Felt`.
     const WORD_SIZE_FELT: Felt = Felt::new_unchecked(4);
     /// The size of a double-word.

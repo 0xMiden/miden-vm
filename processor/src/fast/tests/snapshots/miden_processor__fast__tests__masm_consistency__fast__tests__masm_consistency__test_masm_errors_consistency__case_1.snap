@@ -2,21 +2,9 @@
 source: processor/src/fast/tests/masm_consistency.rs
 expression: fast_err
 ---
-OperationError {
-    label: SourceSpan {
-        source_id: SourceId(
-            4294967295,
-        ),
-        start: ByteIndex(
-            0,
-        ),
-        end: ByteIndex(
-            0,
-        ),
-    },
-    source_file: None,
-    err: NotBinaryValue {
+Operation(
+    NotBinaryValue {
         context: If,
         value: 2,
     },
-}
+)

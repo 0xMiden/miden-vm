@@ -1,7 +1,9 @@
 use miden_assembly::Assembler;
 use miden_core::serde::Serializable;
 use miden_precompiles_stark::prover::SessionInputError;
-use miden_processor::{DefaultHost, ExecutionError, ExecutionOptions, ExecutionWitness, Processor};
+use miden_processor::{
+    DefaultHost, ExecutionOptions, ExecutionWitness, Processor, TraceGenerationError,
+};
 use miden_prover::{PrecompileProvingError, Prover, ProverError};
 
 #[test]
@@ -38,7 +40,7 @@ fn witness_proving_enforces_the_provers_memory_budget() {
         assert!(matches!(
             result,
             Err(ProverError::TraceGeneration(
-                ExecutionError::ProverMemoryExceeded { estimated_bytes, budget_bytes }
+                TraceGenerationError::ProverMemoryExceeded { estimated_bytes, budget_bytes }
             )) if estimated_bytes == exact_peak && budget_bytes == limit
         ));
     }

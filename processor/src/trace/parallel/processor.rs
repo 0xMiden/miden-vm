@@ -17,15 +17,16 @@ use super::super::trace_state::{
     MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
 };
 use crate::{
-    BreakReason, ContextId, ExecutionError, Stopper,
+    BreakReason, ContextId, ProcessorError, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     errors::OperationError,
     execution::{
-        InternalBreakReason, execute_impl_noop_host, finish_emit_op_execution,
+        InternalBreakReason, ResolvedMastForest, execute_impl_noop_host, finish_emit_op_execution,
         finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
     },
     host::default::NoopHost,
     processor::{Processor, StackInterface, SystemInterface},
+    trace::TraceGenerationError,
     tracer::Tracer,
 };
 
@@ -104,45 +105,14 @@ impl ReplayProcessor {
         }
     }
 
-    /// Executes the processor until it reaches the end of the fragment, or until an error occurs.
+    /// Replays the fragment, distinguishing malformed replay data from processor failures.
     pub fn execute<T>(
         &mut self,
         continuation_stack: &mut ContinuationStack<Arc<SparseMastForest>>,
         current_forest: &mut Arc<SparseMastForest>,
         kernel: &KernelDescriptor,
         tracer: &mut T,
-    ) -> Result<(), ExecutionError>
-    where
-        T: Tracer<Processor = Self, Forest = Arc<SparseMastForest>>,
-    {
-        match self.execute_impl(continuation_stack, current_forest, kernel, tracer) {
-            ControlFlow::Continue(_) => {
-                // End of program reached - i.e. the execution loop exited without the end of
-                // fragment being reached (and thus the stopper breaking).
-                Ok(())
-            },
-            ControlFlow::Break(break_reason) => match break_reason {
-                BreakReason::Err(err) => Err(err),
-                BreakReason::Stopped(_continuation) => {
-                    // Our ReplayStopper stopped us because we reached the end of the fragment.
-                    // Hence, this is expected, and we can just return Ok.
-                    Ok(())
-                },
-            },
-        }
-    }
-
-    /// Core execution loop implementation for the replay processor.
-    ///
-    /// This method uses the [`crate::execution::execute_impl`] function to perform the core
-    /// execution loop. See its documentation for more details.
-    fn execute_impl<T>(
-        &mut self,
-        continuation_stack: &mut ContinuationStack<Arc<SparseMastForest>>,
-        current_forest: &mut Arc<SparseMastForest>,
-        kernel: &KernelDescriptor,
-        tracer: &mut T,
-    ) -> ControlFlow<BreakReason<Arc<SparseMastForest>>>
+    ) -> Result<(), TraceGenerationError>
     where
         T: Tracer<Processor = Self, Forest = Arc<SparseMastForest>>,
     {
@@ -162,12 +132,10 @@ impl ReplayProcessor {
             &mut package_debug_info,
             &mut inline_call_contexts,
         ) {
-            match internal_break_reason {
-                InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
+            let flow = match internal_break_reason {
+                InternalBreakReason::User(break_reason) => ControlFlow::Break(break_reason),
                 InternalBreakReason::Emit { op_idx: _, continuation, source_node_id } => {
-                    // do nothing - in replay processor we don't need to emit anything
-
-                    // Call `finish_emit_op_execution()`, as per the sans-IO contract.
+                    // Host events already ran while recording the witness. Only finish the clock.
                     finish_emit_op_execution(
                         continuation,
                         source_node_id,
@@ -176,30 +144,20 @@ impl ReplayProcessor {
                         current_forest,
                         tracer,
                         stopper,
-                    )?;
+                    )
                 },
                 InternalBreakReason::LoadMastForestFromDyn { .. } => {
-                    // load mast forest from replay
                     let (root_id, new_forest_id) =
-                        match self.mast_forest_resolution_replay.replay_resolution() {
-                            Ok(v) => v,
-                            Err(err) => {
-                                return ControlFlow::Break(BreakReason::Err(err));
-                            },
-                        };
-                    let new_forest =
-                        match super::lookup_mast_forest(&self.mast_forest_store, new_forest_id) {
-                            Ok(f) => f.clone(),
-                            Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
-                        };
-
-                    // Finish loading the MAST forest from the Dyn node, as per the sans-IO
-                    // contract.
+                        self.mast_forest_resolution_replay.replay_resolution()?;
+                    let forest =
+                        super::lookup_mast_forest(&self.mast_forest_store, new_forest_id)?.clone();
                     finish_load_mast_forest_from_dyn_start(
-                        root_id,
-                        new_forest,
-                        None,
-                        None,
+                        ResolvedMastForest {
+                            root_id,
+                            forest,
+                            package_debug_info: None,
+                            source_node_id: None,
+                        },
                         self,
                         current_forest,
                         &mut package_debug_info,
@@ -207,34 +165,20 @@ impl ReplayProcessor {
                         continuation_stack,
                         tracer,
                         stopper,
-                    )?;
+                    )
                 },
-                InternalBreakReason::LoadMastForestFromExternal {
-                    external_node_id,
-                    procedure_hash: _,
-                    source_node_id: _,
-                } => {
-                    // load mast forest from replay
+                InternalBreakReason::LoadMastForestFromExternal { external_node_id, .. } => {
                     let (root_id, new_forest_id) =
-                        match self.mast_forest_resolution_replay.replay_resolution() {
-                            Ok(v) => v,
-                            Err(err) => {
-                                return ControlFlow::Break(BreakReason::Err(err));
-                            },
-                        };
-                    let new_forest =
-                        match super::lookup_mast_forest(&self.mast_forest_store, new_forest_id) {
-                            Ok(f) => f.clone(),
-                            Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
-                        };
-
-                    // Finish loading the MAST forest from the External node, as per the sans-IO
-                    // contract.
+                        self.mast_forest_resolution_replay.replay_resolution()?;
+                    let forest =
+                        super::lookup_mast_forest(&self.mast_forest_store, new_forest_id)?.clone();
                     finish_load_mast_forest_from_external(
-                        root_id,
-                        new_forest,
-                        None,
-                        None,
+                        ResolvedMastForest {
+                            root_id,
+                            forest,
+                            package_debug_info: None,
+                            source_node_id: None,
+                        },
                         None,
                         (external_node_id, None),
                         current_forest,
@@ -242,13 +186,20 @@ impl ReplayProcessor {
                         &mut inline_call_contexts,
                         continuation_stack,
                         tracer,
-                    )?;
+                        host,
+                    )
                 },
+            };
+            match flow {
+                ControlFlow::Continue(()) => {},
+                ControlFlow::Break(BreakReason::Err(error)) => {
+                    return Err(error.into_kind().into());
+                },
+                // Reaching the fragment's stopping clock is successful replay.
+                ControlFlow::Break(BreakReason::Stopped(_)) => return Ok(()),
             }
         }
-
-        // End of program reached (since loop exited without the stopper breaking)
-        ControlFlow::Continue(())
+        Ok(())
     }
 }
 
@@ -285,19 +236,18 @@ impl SystemInterface for ReplayProcessor {
         &mut self,
         _statement_digest: Digest,
         expected_new_root: Word,
-    ) -> Result<(), OperationError> {
+    ) -> Result<(), PrecompileError> {
         self.system.deferred_root = expected_new_root;
         Ok(())
     }
 
-    fn clear_deferred(&mut self, expected_previous_root: Word) -> Result<(), OperationError> {
+    fn clear_deferred(&mut self, expected_previous_root: Word) -> Result<(), PrecompileError> {
         let actual = self.system.deferred_root;
         if actual != expected_previous_root {
             return Err(PrecompileError::from(DeferredError::InvalidDeferredRootReset {
                 expected: expected_previous_root,
                 actual,
-            })
-            .into());
+            }));
         }
         self.system.deferred_root = TRUE_DIGEST;
         Ok(())
@@ -416,13 +366,13 @@ impl StackInterface for ReplayProcessor {
         self.stack.stack_top[rotation_bot_index] = new_stack_bot_element;
     }
 
-    fn increment_size(&mut self) -> Result<(), ExecutionError> {
+    fn increment_size(&mut self) -> Result<(), ProcessorError> {
         const SENTINEL_VALUE: Felt = Felt::new_unchecked(Felt::ORDER_U64 - 1);
 
         let depth = self.depth() as usize + 1;
         let max = self.max_stack_depth;
         if depth > max {
-            return Err(ExecutionError::StackDepthLimitExceeded { depth, max });
+            return Err(ProcessorError::StackDepthLimitExceeded { depth, max });
         }
 
         // push the last element on the overflow table
@@ -598,9 +548,9 @@ mod tests {
         // Exercise the independent replay check without the opcode's context check.
         assert!(matches!(
             processor.clear_deferred(TRUE_DIGEST),
-            Err(OperationError::Deferred(PrecompileError::Other(
+            Err(PrecompileError::Other(
                 DeferredError::InvalidDeferredRootReset { expected, actual }
-            ))) if expected == TRUE_DIGEST && actual == root
+            )) if expected == TRUE_DIGEST && actual == root
         ));
         assert_eq!(processor.system.deferred_root, root);
         processor.clear_deferred(root).unwrap();

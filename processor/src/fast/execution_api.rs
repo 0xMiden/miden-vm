@@ -12,18 +12,17 @@ use miden_mast_package::debug_info::{
 
 use super::{
     FastProcessor, NoopTracer,
-    external::maybe_use_caller_error_context,
+    external::load_error_with_context,
     step::{BreakReason, NeverStopper, ResumeContext, ResumeOutcome, StepStopper},
 };
 use crate::{
-    ExecutionError, ExecutionOutput, Host, LoadedMastForest, Stopper, SyncHost,
+    ExecutionError, ExecutionOutput, Host, LoadedMastForest, ProcessorError, SourceContextError,
+    Stopper, SyncHost,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
-    errors::{
-        MapExecErr, MapExecErrNoCtx, PackageSourceDebugContext, malformed_mast_forest_with_context,
-    },
+    errors::{OperationError, PackageSourceDebugContext},
     execution::{
-        InternalBreakReason, execute_impl, finish_emit_op_execution,
+        InternalBreakReason, ResolvedMastForest, execute_impl, finish_emit_op_execution,
         finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
     },
     trace::execution_tracer::ExecutionTracer,
@@ -52,9 +51,7 @@ impl FastProcessor {
                 )
             })
             .transpose()?;
-        self.advice
-            .extend_map(program.mast_forest().advice_map())
-            .map_exec_err_no_ctx()?;
+        self.advice.extend_map(program.mast_forest().advice_map())?;
         Ok(ResumeContext {
             current_forest: program.mast_forest().clone(),
             continuation_stack: continuation_stack
@@ -249,34 +246,25 @@ impl FastProcessor {
         program: &Program,
         package_debug_info: &PackageDebugInfo,
         entrypoint_source_node_id: Option<DebugSourceNodeId>,
-    ) -> Result<ContinuationStack<Arc<MastForest>>, ExecutionError> {
+    ) -> Result<ContinuationStack<Arc<MastForest>>, SourceContextError> {
+        let entrypoint = program.entrypoint();
         if let Some(source_node_id) = entrypoint_source_node_id {
-            let Some(source_node) = package_debug_info.source_node(source_node_id) else {
-                return Err(ExecutionError::Internal(
-                    "package debug source graph is missing the entrypoint source node",
-                ));
-            };
-            if source_node.exec_node != program.entrypoint() {
-                return Err(ExecutionError::Internal(
-                    "package debug entrypoint source node does not match the program entrypoint",
-                ));
+            let source_node = package_debug_info.source_node(source_node_id).ok_or(
+                DebugSourceGraphLookupError::MissingSourceNode { source_node: source_node_id },
+            )?;
+            if source_node.exec_node != entrypoint {
+                return Err(SourceContextError::EntrypointMismatch {
+                    source_node: source_node_id,
+                    expected: entrypoint,
+                    actual: source_node.exec_node,
+                });
             }
 
             return Ok(ContinuationStack::new_with_source_node_id(program, source_node_id));
         }
 
-        let Some(source_node_id) = package_debug_info
-            .unique_source_root_for_exec_node(program.entrypoint())
-            .map_err(|_| {
-                ExecutionError::Internal(
-                    "package debug source graph has ambiguous or malformed entrypoint roots",
-                )
-            })?
-        else {
-            return Ok(ContinuationStack::new_with_optional_source_node_id(program, None));
-        };
-
-        Ok(ContinuationStack::new_with_source_node_id(program, source_node_id))
+        let source_node_id = package_debug_info.unique_source_root_for_exec_node(entrypoint)?;
+        Ok(ContinuationStack::new_with_optional_source_node_id(program, source_node_id))
     }
 
     fn ensure_source_aware_step_context(
@@ -302,7 +290,7 @@ impl FastProcessor {
     fn source_root_for_next_continuation(
         continuation_stack: &ContinuationStack<Arc<MastForest>>,
         package_debug_info: &PackageDebugInfo,
-    ) -> Result<Option<DebugSourceNodeId>, ExecutionError> {
+    ) -> Result<Option<DebugSourceNodeId>, SourceContextError> {
         let Some((continuation, _)) = continuation_stack.peek_continuation_with_source_node_id()
         else {
             return Ok(None);
@@ -312,11 +300,7 @@ impl FastProcessor {
             return Ok(None);
         };
 
-        package_debug_info.unique_source_root_for_exec_node(exec_node).map_err(|_| {
-            ExecutionError::Internal(
-                "package debug source graph has ambiguous or malformed continuation roots",
-            )
-        })
+        Ok(package_debug_info.unique_source_root_for_exec_node(exec_node)?)
     }
 
     /// Carries the terminal outputs or normalizes the continuation for the next step.
@@ -367,9 +351,9 @@ impl FastProcessor {
     fn final_stack_outputs(&self) -> ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs> {
         let stack = self.stack();
         if stack.len() > MIN_STACK_DEPTH {
-            return ControlFlow::Break(BreakReason::Err(ExecutionError::OutputStackOverflow(
-                stack.len() - MIN_STACK_DEPTH,
-            )));
+            return ControlFlow::Break(BreakReason::Err(
+                ProcessorError::OutputStackOverflow(stack.len() - MIN_STACK_DEPTH).into(),
+            ));
         }
 
         let mut outputs = [ZERO; MIN_STACK_DEPTH];
@@ -428,23 +412,26 @@ impl FastProcessor {
                     )?;
                 },
                 InternalBreakReason::LoadMastForestFromDyn { callee_hash, source_node_id } => {
-                    let (root_id, new_forest, new_package_debug_info, new_source_node_id) =
-                        match self.load_mast_forest_sync(
-                            callee_hash,
-                            host,
-                            current_package_debug_info,
-                            source_node_id,
-                            source_aware_execution,
-                        ) {
+                    let resolved =
+                        match self.load_mast_forest_sync(callee_hash, host, source_aware_execution)
+                        {
                             Ok(result) => result,
-                            Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
+                            Err(err) => {
+                                return ControlFlow::Break(BreakReason::Err(err.with_context(
+                                    current_package_debug_info.map(|debug_info| {
+                                        PackageSourceDebugContext::new_optional(
+                                            debug_info,
+                                            source_node_id,
+                                        )
+                                    }),
+                                    host,
+                                    None,
+                                )));
+                            },
                         };
 
                     finish_load_mast_forest_from_dyn_start(
-                        root_id,
-                        new_forest,
-                        new_package_debug_info,
-                        new_source_node_id,
+                        resolved,
                         self,
                         current_forest,
                         package_debug_info,
@@ -462,31 +449,26 @@ impl FastProcessor {
                     let inline_call_context = package_debug_info.clone().and_then(|debug_info| {
                         SourceInlineCallContext::for_source_boundary(debug_info, source_node_id)
                     });
-                    let (root_id, new_forest, new_package_debug_info, new_source_node_id) =
-                        match self.load_mast_forest_sync(
-                            procedure_hash,
-                            host,
-                            current_package_debug_info,
-                            source_node_id,
-                            source_aware_execution,
-                        ) {
-                            Ok(result) => result,
-                            Err(err) => {
-                                let maybe_enriched_err = maybe_use_caller_error_context(
-                                    err,
-                                    continuation_stack,
-                                    current_package_debug_info,
-                                    host,
-                                );
-                                return ControlFlow::Break(BreakReason::Err(maybe_enriched_err));
-                            },
-                        };
+                    let resolved = match self.load_mast_forest_sync(
+                        procedure_hash,
+                        host,
+                        source_aware_execution,
+                    ) {
+                        Ok(result) => result,
+                        Err(err) => {
+                            let err = load_error_with_context(
+                                err,
+                                source_node_id,
+                                continuation_stack,
+                                current_package_debug_info,
+                                host,
+                            );
+                            return ControlFlow::Break(BreakReason::Err(err));
+                        },
+                    };
 
                     finish_load_mast_forest_from_external(
-                        root_id,
-                        new_forest,
-                        new_package_debug_info,
-                        new_source_node_id,
+                        resolved,
                         inline_call_context,
                         (external_node_id, source_node_id),
                         current_forest,
@@ -494,6 +476,7 @@ impl FastProcessor {
                         inline_call_contexts,
                         continuation_stack,
                         tracer,
+                        host,
                     )?;
                 },
             }
@@ -550,26 +533,27 @@ impl FastProcessor {
                     )?;
                 },
                 InternalBreakReason::LoadMastForestFromDyn { callee_hash, source_node_id } => {
-                    let (root_id, new_forest, new_package_debug_info, new_source_node_id) =
-                        match self
-                            .load_mast_forest(
-                                callee_hash,
+                    let resolved = match self
+                        .load_mast_forest(callee_hash, host, source_aware_execution)
+                        .await
+                    {
+                        Ok(result) => result,
+                        Err(err) => {
+                            return ControlFlow::Break(BreakReason::Err(err.with_context(
+                                current_package_debug_info.map(|debug_info| {
+                                    PackageSourceDebugContext::new_optional(
+                                        debug_info,
+                                        source_node_id,
+                                    )
+                                }),
                                 host,
-                                current_package_debug_info,
-                                source_node_id,
-                                source_aware_execution,
-                            )
-                            .await
-                        {
-                            Ok(result) => result,
-                            Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
-                        };
+                                None,
+                            )));
+                        },
+                    };
 
                     finish_load_mast_forest_from_dyn_start(
-                        root_id,
-                        new_forest,
-                        new_package_debug_info,
-                        new_source_node_id,
+                        resolved,
                         self,
                         current_forest,
                         package_debug_info,
@@ -587,34 +571,25 @@ impl FastProcessor {
                     let inline_call_context = package_debug_info.clone().and_then(|debug_info| {
                         SourceInlineCallContext::for_source_boundary(debug_info, source_node_id)
                     });
-                    let (root_id, new_forest, new_package_debug_info, new_source_node_id) =
-                        match self
-                            .load_mast_forest(
-                                procedure_hash,
-                                host,
-                                current_package_debug_info,
+                    let resolved = match self
+                        .load_mast_forest(procedure_hash, host, source_aware_execution)
+                        .await
+                    {
+                        Ok(result) => result,
+                        Err(err) => {
+                            let err = load_error_with_context(
+                                err,
                                 source_node_id,
-                                source_aware_execution,
-                            )
-                            .await
-                        {
-                            Ok(result) => result,
-                            Err(err) => {
-                                let maybe_enriched_err = maybe_use_caller_error_context(
-                                    err,
-                                    continuation_stack,
-                                    current_package_debug_info,
-                                    host,
-                                );
-                                return ControlFlow::Break(BreakReason::Err(maybe_enriched_err));
-                            },
-                        };
+                                continuation_stack,
+                                current_package_debug_info,
+                                host,
+                            );
+                            return ControlFlow::Break(BreakReason::Err(err));
+                        },
+                    };
 
                     finish_load_mast_forest_from_external(
-                        root_id,
-                        new_forest,
-                        new_package_debug_info,
-                        new_source_node_id,
+                        resolved,
                         inline_call_context,
                         (external_node_id, source_node_id),
                         current_forest,
@@ -622,6 +597,7 @@ impl FastProcessor {
                         inline_call_contexts,
                         continuation_stack,
                         tracer,
+                        host,
                     )?;
                 },
             }
@@ -637,147 +613,82 @@ impl FastProcessor {
         &mut self,
         node_digest: Word,
         host: &mut impl SyncHost,
-        package_debug_info: Option<&PackageDebugInfo>,
-        source_node_id: Option<DebugSourceNodeId>,
         source_aware_execution: bool,
-    ) -> Result<
-        (
-            MastNodeId,
-            Arc<MastForest>,
-            Option<Arc<PackageDebugInfo>>,
-            Option<DebugSourceNodeId>,
-        ),
-        ExecutionError,
-    > {
+    ) -> Result<ResolvedMastForest<Arc<MastForest>>, ProcessorError> {
         let cached = self.loaded_mast_forests.get(&node_digest).cloned();
         let was_cached = cached.is_some();
         let loaded_mast_forest = match cached {
             Some(mast_forest) => mast_forest,
             None => host
                 .get_mast_forest(&node_digest)
-                .map_err(|error| match (package_debug_info, source_node_id) {
-                    (Some(debug_info), Some(source_node_id)) => {
-                        crate::errors::mast_forest_error_with_package_source_context(
-                            node_digest,
-                            error,
-                            PackageSourceDebugContext::new(debug_info, source_node_id),
-                            host,
-                        )
-                    },
-                    _ => crate::errors::mast_forest_error_with_context(node_digest, error),
+                .map_err(|source| ProcessorError::MastForestLoad {
+                    root_digest: node_digest,
+                    source,
                 })?
-                .ok_or_else(|| match (package_debug_info, source_node_id) {
-                    (Some(debug_info), Some(source_node_id)) => {
-                        crate::errors::procedure_not_found_with_package_source_context(
-                            node_digest,
-                            PackageSourceDebugContext::new(debug_info, source_node_id),
-                            host,
-                        )
-                    },
-                    _ => crate::errors::procedure_not_found_with_context(node_digest),
-                })?,
+                .ok_or(ProcessorError::ProcedureNotFound { root_digest: node_digest })?,
         };
-        let mast_forest = loaded_mast_forest.mast_forest().clone();
-
-        let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
-            let context = match (package_debug_info, source_node_id) {
-                (Some(debug_info), Some(source_node_id)) => {
-                    Some(PackageSourceDebugContext::new(debug_info, source_node_id))
-                },
-                _ => None,
-            };
-            malformed_mast_forest_with_context(node_digest, context, host)
-        })?;
-
-        if !was_cached {
-            self.cache_loaded_mast_forest(&loaded_mast_forest);
-        }
-        self.merge_mast_forest_advice(&mast_forest).map_exec_err()?;
-        let (loaded_package_debug_info, loaded_source_node_id) =
-            Self::loaded_package_source_context(
-                &loaded_mast_forest,
-                root_id,
-                source_aware_execution,
-            )?;
-
-        Ok((root_id, mast_forest, loaded_package_debug_info, loaded_source_node_id))
+        self.finish_loading_mast_forest(
+            loaded_mast_forest,
+            node_digest,
+            was_cached,
+            source_aware_execution,
+        )
     }
 
     async fn load_mast_forest(
         &mut self,
         node_digest: Word,
         host: &mut impl Host,
-        package_debug_info: Option<&PackageDebugInfo>,
-        source_node_id: Option<DebugSourceNodeId>,
         source_aware_execution: bool,
-    ) -> Result<
-        (
-            MastNodeId,
-            Arc<MastForest>,
-            Option<Arc<PackageDebugInfo>>,
-            Option<DebugSourceNodeId>,
-        ),
-        ExecutionError,
-    > {
+    ) -> Result<ResolvedMastForest<Arc<MastForest>>, ProcessorError> {
         let cached = self.loaded_mast_forests.get(&node_digest).cloned();
         let was_cached = cached.is_some();
         let loaded_mast_forest = match cached {
             Some(mast_forest) => mast_forest,
-            None => {
-                if let Some(mast_forest) =
-                    host.get_mast_forest(&node_digest).await.map_err(|error| {
-                        match (package_debug_info, source_node_id) {
-                            (Some(debug_info), Some(source_node_id)) => {
-                                crate::errors::mast_forest_error_with_package_source_context(
-                                    node_digest,
-                                    error,
-                                    PackageSourceDebugContext::new(debug_info, source_node_id),
-                                    host,
-                                )
-                            },
-                            _ => crate::errors::mast_forest_error_with_context(node_digest, error),
-                        }
-                    })?
-                {
-                    mast_forest
-                } else {
-                    return Err(match (package_debug_info, source_node_id) {
-                        (Some(debug_info), Some(source_node_id)) => {
-                            crate::errors::procedure_not_found_with_package_source_context(
-                                node_digest,
-                                PackageSourceDebugContext::new(debug_info, source_node_id),
-                                host,
-                            )
-                        },
-                        _ => crate::errors::procedure_not_found_with_context(node_digest),
-                    });
-                }
-            },
+            None => host
+                .get_mast_forest(&node_digest)
+                .await
+                .map_err(|source| ProcessorError::MastForestLoad {
+                    root_digest: node_digest,
+                    source,
+                })?
+                .ok_or(ProcessorError::ProcedureNotFound { root_digest: node_digest })?,
         };
+        self.finish_loading_mast_forest(
+            loaded_mast_forest,
+            node_digest,
+            was_cached,
+            source_aware_execution,
+        )
+    }
+
+    fn finish_loading_mast_forest(
+        &mut self,
+        loaded_mast_forest: LoadedMastForest,
+        node_digest: Word,
+        was_cached: bool,
+        source_aware_execution: bool,
+    ) -> Result<ResolvedMastForest<Arc<MastForest>>, ProcessorError> {
         let mast_forest = loaded_mast_forest.mast_forest().clone();
-
-        let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
-            let context = match (package_debug_info, source_node_id) {
-                (Some(debug_info), Some(source_node_id)) => {
-                    Some(PackageSourceDebugContext::new(debug_info, source_node_id))
-                },
-                _ => None,
-            };
-            malformed_mast_forest_with_context(node_digest, context, host)
-        })?;
-
+        let root_id = mast_forest
+            .find_procedure_root(node_digest)
+            .ok_or(OperationError::MalformedMastForestInHost { root_digest: node_digest })?;
         if !was_cached {
             self.cache_loaded_mast_forest(&loaded_mast_forest);
         }
-        self.merge_mast_forest_advice(&mast_forest).map_exec_err()?;
+        self.merge_mast_forest_advice(&mast_forest)?;
         let (loaded_package_debug_info, loaded_source_node_id) =
             Self::loaded_package_source_context(
                 &loaded_mast_forest,
                 root_id,
                 source_aware_execution,
             )?;
-
-        Ok((root_id, mast_forest, loaded_package_debug_info, loaded_source_node_id))
+        Ok(ResolvedMastForest {
+            root_id,
+            forest: mast_forest,
+            package_debug_info: loaded_package_debug_info,
+            source_node_id: loaded_source_node_id,
+        })
     }
 
     fn cache_loaded_mast_forest(&mut self, loaded_mast_forest: &LoadedMastForest) {
@@ -803,26 +714,19 @@ impl FastProcessor {
         loaded_mast_forest: &LoadedMastForest,
         root_id: MastNodeId,
         source_aware_execution: bool,
-    ) -> Result<(Option<Arc<PackageDebugInfo>>, Option<DebugSourceNodeId>), ExecutionError> {
+    ) -> Result<(Option<Arc<PackageDebugInfo>>, Option<DebugSourceNodeId>), ProcessorError> {
         if !source_aware_execution {
             return Ok((None, None));
         }
 
-        let Some(package_debug_info) = loaded_mast_forest
-            .package_debug_info()
-            .map_err(|_| ExecutionError::Internal("loaded package debug info is malformed"))?
-        else {
+        let Some(package_debug_info) = loaded_mast_forest.package_debug_info()? else {
             return Ok((None, None));
         };
 
         let source_node_id = match package_debug_info.unique_source_root_for_exec_node(root_id) {
             Ok(source_node_id) => source_node_id,
             Err(DebugSourceGraphLookupError::AmbiguousRoot { .. }) => None,
-            Err(_) => {
-                return Err(ExecutionError::Internal(
-                    "loaded package debug source graph has malformed entrypoint roots",
-                ));
-            },
+            Err(error) => return Err(SourceContextError::from(error).into()),
         };
 
         Ok((Some(package_debug_info), source_node_id))

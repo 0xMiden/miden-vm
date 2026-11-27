@@ -14,7 +14,7 @@ use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
 };
 use miden_processor::{
-    DefaultHost, ExecutionError, Processor,
+    DefaultHost, ExecutionError, Processor, ProcessorError,
     advice::{AdviceMutation, AdviceStack},
     event::EventHandler,
     operation::OperationError,
@@ -62,11 +62,8 @@ fn deferred_dynamic_chunks_rejects_encoded_length_overflow() {
         miden_core::mast::error_code_from_msg("Deferred CHUNKS length must fit in u32");
     assert!(
         matches!(
-            error,
-            ExecutionError::OperationError {
-                err: OperationError::U32AssertionFailed { err_code, .. },
-                ..
-            } if err_code == expected_error_code
+            error.kind(),
+            ProcessorError::Operation(OperationError::U32AssertionFailed { err_code, .. }) if *err_code == expected_error_code
         ),
         "encoded length overflow reached the wrong guard: {error:?}",
     );

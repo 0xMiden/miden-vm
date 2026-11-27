@@ -3367,6 +3367,7 @@ dependencies = [
  "miden-precompiles-stark",
  "miden-processor",
  "miden-stark",
+ "miden-utils-diagnostics",
  "miden-verifier",
  "miden-vm-stark",
  "rayon",
@@ -3496,11 +3497,13 @@ dependencies = [
  "miden-mast-package",
  "miden-processor",
  "miden-prover",
+ "miden-utils-diagnostics",
  "miden-verifier",
  "miden-vm-stark",
  "pretty_assertions",
  "proptest",
  "test-case",
+ "thiserror 2.0.19",
 ]
 
 [[package]]

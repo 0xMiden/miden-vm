@@ -5,7 +5,7 @@ use miden_core::{
     deferred::{DeferredError, PrecompileError, TRUE_DIGEST},
 };
 use miden_precompiles::UintSpec;
-use miden_processor::{ExecutionError, ExecutionOutput};
+use miden_processor::{ExecutionError, ExecutionOutput, ProcessorError};
 
 use super::helpers::{
     TRUNCATE_STACK_TO_OUTPUT_PROC, U32x8, assert_memory_u32x8,
@@ -22,7 +22,7 @@ const TWO: U32x8 = [2, 0, 0, 0, 0, 0, 0, 0];
 const MAX: U32x8 = [u32::MAX; 8];
 
 fn assert_invalid_payload_error(error: ExecutionError) {
-    let ExecutionError::DeferredError { err, .. } = error else {
+    let ProcessorError::Deferred(err) = error.kind() else {
         panic!("expected deferred invalid-payload error, got {error:?}");
     };
     assert!(

@@ -630,10 +630,9 @@ fn test_smt_set_rejects_forged_merkle_path_on_noop_delete() {
 
     miden_utils_testing::expect_exec_error_matches!(
         test,
-        miden_processor::ExecutionError::OperationError {
-            err: miden_processor::operation::OperationError::MerklePathVerificationFailed { .. },
-            ..
-        }
+        miden_processor::ProcessorError::Operation(
+            miden_processor::operation::OperationError::MerklePathVerificationFailed { .. }
+        )
     );
 }
 

@@ -3,7 +3,7 @@ use miden_core_lib::{
     handlers::sorted_array::{LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME},
 };
 use miden_processor::{
-    ExecutionError, ProcessorState,
+    ProcessorError, ProcessorState,
     advice::{AdviceMutation, AdviceStack},
     event::EventError,
 };
@@ -99,8 +99,8 @@ fn test_sorted_array_lookups_reject_oversized_ranges() {
             .execute()
             .expect_err("oversized sorted-array range should fail");
 
-        match err {
-            ExecutionError::EventError { error, .. } => assert_eq!(
+        match err.into_kind() {
+            ProcessorError::Event { source: error, .. } => assert_eq!(
                 error.to_string(),
                 "sorted array entry count 65537 exceeds maximum of 65536"
             ),

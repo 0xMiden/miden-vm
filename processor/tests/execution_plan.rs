@@ -8,12 +8,15 @@ use std::sync::Arc;
 use miden_assembly::Assembler;
 use miden_core::deferred::{PrecompileError, PrecompileLimitError, PrecompileLimits, TRUE_DIGEST};
 use miden_debug_types::{Location, SourceFile, SourceSpan};
-use miden_mast_package::{Package, debug_info::PackageDebugInfo};
+use miden_mast_package::{
+    Package,
+    debug_info::{DebugSourceGraphLookupError, PackageDebugInfo},
+};
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, Felt,
     FutureMaybeSend, HaltedExecution, Host, LoadedMastForest, MastForestLoadError,
-    PackageSourceDebugContext, Processor, ProcessorState, RecordWitness, StepStatus, WitnessOutput,
-    Word,
+    PackageSourceDebugContext, Processor, ProcessorError, ProcessorState, RecordWitness,
+    SessionUnavailableReason, SourceContextError, StepStatus, WitnessOutput, Word,
     advice::{AdviceError, AdviceInputs, AdviceMap, AdviceMutation, AdviceProvider},
     event::{EventError, EventName},
     operation::OperationError,
@@ -61,18 +64,14 @@ fn preparing_execution_validates_initial_advice_before_program_advice() {
             .with_advice(advice.clone())
             .with_options(options.clone())
     };
-    for error in [
-        request().execute().prepare().err(),
-        request().execute().run_sync(&mut DefaultHost::default()).err(),
-    ] {
-        assert!(matches!(
-            error,
-            Some(ExecutionError::AdviceError {
-                err: AdviceError::SizeBudgetExceeded { max, .. },
-                ..
-            }) if max == budget
-        ));
-    }
+    assert!(matches!(
+        request().execute().prepare().map_err(ExecutionError::into_kind),
+        Err(ProcessorError::Advice(AdviceError::SizeBudgetExceeded { max, .. })) if max == budget
+    ));
+    assert!(matches!(
+        request().execute().run_sync(&mut DefaultHost::default()).map_err(ExecutionError::into_kind),
+        Err(ProcessorError::Advice(AdviceError::SizeBudgetExceeded { max, .. })) if max == budget
+    ));
 
     let output = request()
         .with_options(ExecutionOptions::default())
@@ -84,11 +83,8 @@ fn preparing_execution_validates_initial_advice_before_program_advice() {
     let program = program.with_advice_map(advice_map);
     let prepared = Processor::new(&program).with_options(options).execute().prepare().unwrap();
     assert!(matches!(
-        prepared.start(),
-        Err(ExecutionError::AdviceError {
-            err: AdviceError::SizeBudgetExceeded { max, .. },
-            ..
-        }) if max == budget
+        prepared.start().map_err(ExecutionError::into_kind),
+        Err(ProcessorError::Advice(AdviceError::SizeBudgetExceeded { max, .. })) if max == budget
     ));
 }
 
@@ -183,13 +179,10 @@ fn completed_execution_defers_precompile_witness_export_until_finish() {
 
     assert_ne!(completed.state().precompile_root(), TRUE_DIGEST);
     assert!(matches!(
-        completed.finish(),
-        Err(ExecutionError::OperationError {
-            err: OperationError::Deferred(PrecompileError::Limit(
-                PrecompileLimitError::Elements { actual, max: 0 }
-            )),
-            ..
-        }) if actual > 0
+        completed.finish().map_err(ExecutionError::into_kind),
+        Err(ProcessorError::Deferred(PrecompileError::Limit(PrecompileLimitError::Elements {
+            actual, max: 0,
+        }))) if actual > 0
     ));
 }
 
@@ -203,11 +196,8 @@ fn failed_execution_retains_state_without_resuming_or_completing() {
     let mut host = DefaultHost::default();
     let error = session.run_until_halt_sync(&mut host).expect_err("the assertion must fail");
     assert!(matches!(
-        error,
-        ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { .. },
-            ..
-        }
+        error.kind(),
+        ProcessorError::Operation(OperationError::FailedAssertion { .. })
     ));
     let clock = session.state().clock();
     let root = session.state().precompile_root();
@@ -217,7 +207,10 @@ fn failed_execution_retains_state_without_resuming_or_completing() {
         ControlFlow::Continue(session) => session,
         ControlFlow::Break(_) => panic!("failed execution must not produce completion"),
     };
-    assert!(matches!(session.step_sync(&mut host), Err(ExecutionError::Internal(_))));
+    assert!(matches!(
+        session.step_sync(&mut host).map_err(ExecutionError::into_kind),
+        Err(ProcessorError::SessionUnavailable(SessionUnavailableReason::PreviouslyFailed))
+    ));
     assert_eq!(session.state().clock(), clock);
     assert_eq!(session.state().precompile_root(), root);
 }
@@ -258,25 +251,52 @@ fn emitting_package() -> Box<Package> {
 
 #[tokio::test(flavor = "current_thread")]
 async fn invalid_source_context_fails_before_execution() {
-    let package = emitting_package();
+    let event = EventName::new("test::execution_plan::pending").to_event_id().as_u64();
+    let package = Assembler::default()
+        .assemble_program(
+            "source_context",
+            format!("begin push.1 if.true push.{event} emit drop end end"),
+        )
+        .unwrap();
     let debug_info = package.debug_info().unwrap().unwrap();
     let program = package.unwrap_program();
-    let source = PackageSourceDebugContext::new(&debug_info, 123_u32.into());
-    let request = || Processor::new(&program).with_source_context(Some(source));
+    let (idx, node) = debug_info
+        .nodes()
+        .iter()
+        .enumerate()
+        .find(|(_, node)| node.exec_node != program.entrypoint())
+        .expect("conditional has a child distinct from its entrypoint");
+    let child = u32::try_from(idx).unwrap().into();
+    let missing = 123_u32.into();
     let mut host = PendingHost { event_calls: 0 };
-    let errors = [
-        request().execute().run_sync(&mut DefaultHost::default()).err(),
-        request().record_witness().run(&mut host).await.err(),
-        request().record_witness().start().err(),
-        request().execute().prepare().unwrap().start().err(),
-    ];
-    for error in errors {
-        assert!(matches!(
-            error,
-            Some(ExecutionError::Internal(
-                "package debug source graph is missing the entrypoint source node"
-            ))
-        ));
+    for (source_node, expected) in [
+        (
+            missing,
+            SourceContextError::Lookup(DebugSourceGraphLookupError::MissingSourceNode {
+                source_node: missing,
+            }),
+        ),
+        (
+            child,
+            SourceContextError::EntrypointMismatch {
+                source_node: child,
+                expected: program.entrypoint(),
+                actual: node.exec_node,
+            },
+        ),
+    ] {
+        let source = PackageSourceDebugContext::new(&debug_info, source_node);
+        let request = || Processor::new(&program).with_source_context(Some(source));
+        for error in [
+            request().execute().run_sync(&mut DefaultHost::default()).err(),
+            request().record_witness().run(&mut host).await.err(),
+            request().record_witness().start().err(),
+            request().execute().prepare().unwrap().start().err(),
+        ] {
+            assert!(
+                matches!(error.map(ExecutionError::into_kind), Some(ProcessorError::SourceContext(actual)) if actual == expected)
+            );
+        }
     }
     assert_eq!(host.event_calls, 0);
 }
@@ -324,8 +344,8 @@ async fn cancelled_async_execution_cannot_be_resumed_or_completed() {
             session.run_until_halt(&mut host).await.unwrap_err()
         };
         assert!(matches!(
-            error,
-            ExecutionError::Internal("execution session failed or a previous step was cancelled")
+            error.kind(),
+            ProcessorError::SessionUnavailable(SessionUnavailableReason::Interrupted)
         ));
         assert_eq!(host.event_calls, 1);
         assert_eq!(session.state().clock(), clock);

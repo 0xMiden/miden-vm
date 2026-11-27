@@ -26,8 +26,8 @@ use miden_mast_package::{
 };
 use miden_processor::{
     BaseHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, FutureMaybeSend,
-    Host, LoadedMastForest, MastForestLoadError, ProcessorState, ResumeContext, StackInputs,
-    StackOutputs,
+    Host, LoadedMastForest, MastForestLoadError, ProcessorError, ProcessorState, ResumeContext,
+    StackInputs, StackOutputs,
     advice::{AdviceInputs, AdviceMutation},
     event::{EventError, TraceError},
     trace::RowIndex,
@@ -1276,7 +1276,7 @@ impl DapExecutor {
             Ok(listener) => listener,
             Err(err) => {
                 log::error!("{err}");
-                return Err(ExecutionError::Internal("failed to start DAP server"));
+                return Err(ProcessorError::Internal("failed to start DAP server").into());
             },
         };
         self.execute_on_listener(root_package, host, listener)
@@ -1315,7 +1315,7 @@ impl DapExecutor {
             Ok(accepted) => accepted,
             Err(err) => {
                 log::error!("DAP server accept failed: {err}");
-                return Err(ExecutionError::Internal("DAP server accept failed"));
+                return Err(ProcessorError::Internal("DAP server accept failed").into());
             },
         };
         log::info!("DAP client connected from {addr}");
@@ -1324,7 +1324,7 @@ impl DapExecutor {
             Ok(stream) => stream,
             Err(err) => {
                 log::error!("failed to clone TCP stream: {err}");
-                return Err(ExecutionError::Internal("failed to clone TCP stream"));
+                return Err(ProcessorError::Internal("failed to clone TCP stream").into());
             },
         });
         let writer = BufWriter::new(stream);

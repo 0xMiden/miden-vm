@@ -18,6 +18,7 @@ pub mod chiplets;
 pub(crate) mod execution_tracer;
 
 mod block_stack;
+mod errors;
 mod parallel;
 mod range;
 mod stack;
@@ -29,6 +30,7 @@ mod tests;
 // RE-EXPORTS
 // ================================================================================================
 
+pub use errors::TraceGenerationError;
 pub(crate) use execution_tracer::TraceReplay;
 pub use miden_air_definitions::vm::{
     ChipletsLengths, TraceLenSummary, TraceLenSummaryError, VmTrace,
@@ -297,10 +299,10 @@ mod wire_tests {
     use rstest::rstest;
 
     use super::{
-        ExecutionWitness, Serializable,
+        ExecutionWitness, Serializable, TraceGenerationError,
         trace_state::{AeadStreamReplayEntry, BitwiseOp, BitwiseReplayEntry},
     };
-    use crate::{DefaultHost, ExecutionError, Felt, Processor, StackInputs, mast::MastNodeId};
+    use crate::{DefaultHost, Felt, Processor, ProcessorError, StackInputs, mast::MastNodeId};
 
     fn execution_witness(source: &str) -> ExecutionWitness {
         let program = Assembler::default()
@@ -513,7 +515,7 @@ mod wire_tests {
         let Err(error) = vm_witness.build_trace(&miden_vm_stark::memory::default_budget()) else {
             panic!("invalid AEAD stream replay must return an error");
         };
-        assert!(matches!(error, ExecutionError::OperationError { .. }));
+        assert!(matches!(error, TraceGenerationError::Replay(ProcessorError::Operation(_))));
         assert!(format!("{error}").contains(expected_error), "unexpected error: {error}");
     }
 
