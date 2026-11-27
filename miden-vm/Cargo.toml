@@ -66,6 +66,7 @@ executable = [
     "dep:tempfile",
     "dep:miden-wasm-event-handlers",
     "dep:same-file",
+    "dep:toml",
     "dep:tracing-subscriber",
     "internal",
     "serde",
@@ -107,6 +108,7 @@ same-file = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
+toml = { workspace = true, optional = true, features = ["parse", "serde", "std"] }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, optional = true, features = ["std", "env-filter"] }
 tracing-forest = { workspace = true, optional = true, features = ["ansi", "smallvec"] }

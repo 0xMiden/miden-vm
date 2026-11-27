@@ -3581,6 +3581,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "toml",
  "tracing",
  "tracing-forest",
  "tracing-subscriber",

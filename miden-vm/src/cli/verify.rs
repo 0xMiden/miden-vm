@@ -7,17 +7,16 @@ use miden_assembly::{
 };
 use miden_mast_package::Package;
 use miden_vm::{
-    ExecutionClaim, KernelDescriptor, PrecompileStatus, ProgramInfo,
-    default_verification_precompile_limits, internal::InputFile,
+    ExecutionClaim, KernelDescriptor, PrecompileStatus, ProgramInfo, internal::InputFile,
 };
 
 use super::{
+    ProofMode,
+    config::Settings,
     data::{OutputFile, ProgramHash, ProofFile},
-    precompile_limits::PrecompileArgs,
 };
 
 #[derive(Debug, Clone, Parser)]
-#[command(about = "Verify a Miden program")]
 pub struct VerifyCmd {
     /// Path to input file
     #[arg(short = 'i', long = "input", value_parser)]
@@ -35,23 +34,14 @@ pub struct VerifyCmd {
     /// Path to a file (.masm or .masp) containing the kernel to be loaded with the program
     #[arg(long = "kernel", value_parser)]
     kernel_file: Option<PathBuf>,
-
-    #[command(flatten)]
-    precompile_limits: PrecompileArgs,
-
-    /// Require a complete STARK-backed proof
-    ///
-    /// By default, accept valid deferred proofs after VM STARK verification and native witness
-    /// validation, reporting deferred status, VM-only security, and the outstanding root.
-    /// This option rejects deferred artifacts before verification, without claiming validity.
-    #[arg(long = "require-complete")]
-    require_complete: bool,
 }
 
 impl VerifyCmd {
-    pub fn execute(&self) -> Result<(), Report> {
-        let verification_limits =
-            self.precompile_limits.apply(default_verification_precompile_limits());
+    pub(crate) fn execute(
+        &self,
+        settings: &Settings,
+        required: Option<ProofMode>,
+    ) -> Result<(), Report> {
         // Validate the kernel file's extension before doing any other file I/O (mirrors the
         // same ordering issue already fixed for `prove` in #3587).
         if let Some(ref kernel_path) = self.kernel_file {
@@ -83,10 +73,20 @@ impl VerifyCmd {
 
         // This unauthenticated variant is sufficient for CLI policy rejection. Only the
         // verifier below can establish proof validity, authenticate roots, and evaluate witnesses.
-        if self.require_complete && matches!(proof.precompile(), PrecompileStatus::Deferred(_)) {
-            return Err(Report::msg(
-                "--require-complete rejects deferred proofs; proof has not been verified",
-            ));
+        match (required, proof.precompile()) {
+            (Some(ProofMode::Complete), PrecompileStatus::Deferred(_)) => {
+                return Err(Report::msg(
+                    "verify-complete rejects deferred proofs. The proof has not been verified",
+                ));
+            },
+            (Some(ProofMode::Deferred), PrecompileStatus::Empty | PrecompileStatus::Proven(_)) => {
+                return Err(Report::msg(
+                    "verify-partial requires a deferred precompile witness. The proof has not been verified",
+                ));
+            },
+            (None, _)
+            | (Some(ProofMode::Complete), PrecompileStatus::Empty | PrecompileStatus::Proven(_))
+            | (Some(ProofMode::Deferred), PrecompileStatus::Deferred(_)) => {},
         }
 
         let now = Instant::now();
@@ -108,8 +108,8 @@ impl VerifyCmd {
         // verify proof
         let stack_outputs = outputs_data.stack_outputs().map_err(Report::msg)?;
         let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
-        let outcome = miden_vm::Verifier::new()
-            .with_verification_precompile_limits(verification_limits)
+        let outcome = settings
+            .verifier
             .verify(&claim, &proof)
             .into_diagnostic()
             .wrap_err("Program failed verification!")?;
@@ -252,8 +252,6 @@ mod tests {
             proof_file: proof_path.clone(),
             program_hash: "00".to_string(),
             kernel_file: None,
-            precompile_limits: PrecompileArgs::default(),
-            require_complete: false,
         };
 
         // exercise
@@ -278,11 +276,12 @@ mod tests {
             proof_file: PathBuf::from("/nonexistent/does-not-exist.proof"),
             program_hash: "00".to_string(),
             kernel_file: Some(PathBuf::from("kernel.txt")),
-            precompile_limits: PrecompileArgs::default(),
-            require_complete: false,
         };
 
-        let err = cmd.execute().expect_err("expected the bad kernel extension to be rejected");
+        let settings = Settings::from_overrides(&[]).unwrap();
+        let err = cmd
+            .execute(&settings, None)
+            .expect_err("expected the bad kernel extension to be rejected");
         let message = format!("{err}");
         assert!(
             message.contains("must have a .masm or .masp extension"),

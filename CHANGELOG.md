@@ -10,6 +10,8 @@
 
 #### Changes
 
+- [BREAKING] `miden-vm prove` now writes a deferred proof when the program uses precompiles. Its raw witness can disclose inputs from private advice. Use `prove-complete` to generate a fully STARK-backed proof. `verify` accepts either proof type, `verify-complete` requires a complete proof, and `verify-partial` requires a deferred proof and validates its witness. See [Complete and deferred proofs](docs/src/usage.md#complete-and-deferred-proofs).
+- [BREAKING] Configure `miden-vm` with `miden-vm.toml`, `--config PATH` and repeatable `--set KEY=VALUE`. Execution and proving limits, display settings and bundle release mode replace their dedicated flags. The CLI now uses Eidos for proving by default. Set `proving.hasher = "blake3-256"` to keep the former hash selection. See the [migration table](docs/src/usage.md#migrating-command-lines) ([#4031](https://github.com/0xMiden/miden-vm/issues/4031)).
 - [BREAKING] Replaced Miette with local diagnostic types in `miden-utils-diagnostics`. Use the existing Miden `Report` re-export, implement `Diagnostic` for custom error metadata, and use `diagnostic!` for messages with labels. The renderer emits plain text ([#4246](https://github.com/0xMiden/miden-vm/pull/4246)).
 - Consolidated Word conversion, Word ordering and String/Arc serialization tests using Proptest ([#4252](https://github.com/0xMiden/miden-vm/pull/4252)).
 

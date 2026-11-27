@@ -8,6 +8,8 @@ use miden_assembly::{
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::{Package, Version};
 
+use super::config::Settings;
+
 fn parse_version(value: &str) -> Result<Version, String> {
     value.parse().map_err(|err| format!("invalid package version: {err}"))
 }
@@ -18,9 +20,6 @@ fn parse_version(value: &str) -> Result<Version, String> {
     about = "Bundles .masm files into a single .masp library with access to the core library."
 )]
 pub struct BundleCmd {
-    /// Disable debug symbols (release mode)
-    #[arg(short = 'r', long = "release")]
-    release: bool,
     /// Path to the root `.masm` file for the library
     #[arg(value_parser)]
     root: PathBuf,
@@ -42,7 +41,7 @@ pub struct BundleCmd {
 }
 
 impl BundleCmd {
-    pub fn execute(&self) -> Result<(), Report> {
+    pub(crate) fn execute(&self, settings: &Settings) -> Result<(), Report> {
         println!("============================================================");
         println!("Build library");
         println!("============================================================");
@@ -71,7 +70,7 @@ impl BundleCmd {
             };
             let mut library = assembler.assemble_kernel_from_root(namespace, &self.root)?;
             library.version = self.version.clone();
-            if self.release {
+            if settings.release {
                 library.strip_debug_info().into_diagnostic()?;
             }
             library.write_to_file(output_file).into_diagnostic()?;
@@ -85,7 +84,7 @@ impl BundleCmd {
             let mut library =
                 assembler.assemble_library_from_root(&self.root, library_namespace.as_deref())?;
             library.version = self.version.clone();
-            if self.release {
+            if settings.release {
                 library.strip_debug_info().into_diagnostic()?;
             }
             library.write_to_file(output_file).into_diagnostic()?;
