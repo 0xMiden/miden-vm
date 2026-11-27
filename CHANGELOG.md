@@ -4,6 +4,7 @@
 
 #### Features
 
+- Added `Verifier::verify_masm` and `Verifier::verify_precompile_masm` to verify Eidos proofs in the processor with the `masm` feature.
 - Added `seal_and_commit` and `seal_preprocessed_and_commit` to encrypt with EcGFp5/Eidos and return the envelope commitment. Added `commit_envelope` to compute the same commitment from an envelope in memory. Rust callers use `Envelope::to_commitment` ([#4245](https://github.com/0xMiden/miden-vm/pull/4245)).
 - [BREAKING] Added sparse MAST extraction from local procedure roots with a predicate for known procedures. Dense conversion deduplicates local procedures by digest, represents unresolved digests as externals, and returns the source-to-dense node ID mapping. Exhaustive matches on `MastForestError` must handle the new `ExternalProcedureRoot` variant ([#4251](https://github.com/0xMiden/miden-vm/pull/4251)).
 - Added `Processor` for synchronous, asynchronous, and resumable VM execution. Record a witness for local or remote proving ([#4232](https://github.com/0xMiden/miden-vm/pull/4232)).

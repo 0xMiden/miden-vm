@@ -71,6 +71,7 @@ executable = [
     "serde",
     "std",
 ]
+masm = ["std", "miden-verifier/masm"]
 serde = ["dep:serde", "dep:serde_json"]
 std = [
     "hex?/std",

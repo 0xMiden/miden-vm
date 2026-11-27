@@ -7,6 +7,10 @@ extern crate std;
 
 use alloc::{boxed::Box, sync::Arc};
 
+#[cfg(feature = "masm")]
+mod masm;
+#[cfg(feature = "masm")]
+pub use masm::MasmVerificationError;
 #[cfg(test)]
 use miden_air::vm::{MidenMultiAir, config};
 #[cfg(test)]
@@ -64,6 +68,25 @@ const VERIFIER_SUPPORT_V2: VerifierSupport = VerifierSupport {
 
 // VERIFIER
 // ================================================================================================
+
+#[derive(Clone, Copy)]
+enum Backend {
+    Native,
+    #[cfg(feature = "masm")]
+    Masm,
+}
+
+impl Backend {
+    fn check_hash(self, hash: HashFunction) -> Result<(), VerificationError> {
+        match (self, hash) {
+            #[cfg(feature = "masm")]
+            (Self::Masm, hash) if hash != HashFunction::Eidos => {
+                Err(VerificationError::UnsupportedMasmHashFunction(hash))
+            },
+            _ => Ok(()),
+        }
+    }
+}
 
 /// Verifier for deferred and complete Miden execution proofs.
 #[derive(Debug, Clone)]
@@ -138,21 +161,34 @@ impl Verifier {
         claim: &ExecutionClaim,
         proof: &ExecutionProof,
     ) -> Result<VerificationOutcome, VerificationError> {
-        match proof.compatibility().format() {
-            ExecutionProofCompatibility::FORMAT_V2 => {
-                VERIFIER_SUPPORT_V2.check(proof)?;
-                self.verify_v2(claim, proof)
-            },
-            format => Err(VerificationError::UnsupportedProofFormat(format)),
-        }
+        self.verify_with(Backend::Native, claim, proof)
     }
 
-    /// Verifies an execution proof encoded with transport format 2.
-    fn verify_v2(
+    /// Verifies an execution proof by running the recursive STARK verifiers in the Miden VM.
+    ///
+    /// Applies the same verification policy and returns the same outcome as [`Self::verify`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VerificationError::UnsupportedMasmHashFunction`] if the VM STARK or an attached
+    /// precompile STARK uses a hash other than Eidos. Advice preparation and VM execution errors
+    /// are reported as [`VerificationError::Masm`]. See [`Self::verify`] for policy errors.
+    #[cfg(feature = "masm")]
+    pub fn verify_masm(
         &self,
         claim: &ExecutionClaim,
         proof: &ExecutionProof,
     ) -> Result<VerificationOutcome, VerificationError> {
+        self.verify_with(Backend::Masm, claim, proof)
+    }
+
+    fn verify_with(
+        &self,
+        backend: Backend,
+        claim: &ExecutionClaim,
+        proof: &ExecutionProof,
+    ) -> Result<VerificationOutcome, VerificationError> {
+        VERIFIER_SUPPORT_V2.check(proof)?;
         let vm = proof.vm();
         let (outstanding_root, precompile) = match proof.precompile() {
             PrecompileStatus::Deferred(_) => {
@@ -176,11 +212,18 @@ impl Verifier {
         };
 
         self.preflight_vm_stark(claim, vm)?;
+        backend.check_hash(vm.proof.hash_fn())?;
         if let Some(precompile) = precompile {
-            self.preflight_precompile_stark(precompile)?;
+            self.preflight_precompile_stark(backend, precompile)?;
         }
 
-        let vm_security_parameters = self.verify_vm(claim, vm)?;
+        let vm_security_parameters = match backend {
+            Backend::Native => miden_vm_stark::verifier::verify(claim, vm).map_err(|error| {
+                VerificationError::StarkVerificationError(claim.program_root(), Box::new(error))
+            })?,
+            #[cfg(feature = "masm")]
+            Backend::Masm => masm::verify_vm(claim, proof)?,
+        };
         self.check_security_level(&vm_security_parameters)?;
         // Authenticate the VM statement and enforce the configured minimum security before
         // performing potentially expensive witness evaluation.
@@ -195,7 +238,7 @@ impl Verifier {
             prepared.evaluate()?;
         }
         let precompile_security_parameters = precompile
-            .map(|precompile| self.verify_precompile(precompile, vm.precompile_root))
+            .map(|precompile| self.verify_precompile_stark(backend, precompile))
             .transpose()?;
 
         Ok(VerificationOutcome::new(
@@ -224,13 +267,53 @@ impl Verifier {
         proof: &PrecompileProof,
         expected_root: DeferredRoot,
     ) -> Result<ProofSecurityParameters, VerificationError> {
-        self.validate_precompile(proof, expected_root)?;
-        self.preflight_precompile_stark(proof)?;
+        self.verify_precompile_with(Backend::Native, proof, expected_root)
+    }
 
-        let aggregate_root =
-            proof.aggregate_root().expect("precompile roots were checked to be non-empty");
-        let security_parameters =
-            miden_precompiles_stark::verifier::verify_deferred(&proof.proof, aggregate_root)?;
+    /// Verifies an Eidos precompile proof by running the recursive verifier in the Miden VM.
+    ///
+    /// Checks coverage of `expected_root` and verifies the full ordered aggregate, applying the
+    /// security policy of [`Self::verify_precompile`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VerificationError::UnsupportedMasmHashFunction`] for a non-Eidos STARK and
+    /// [`VerificationError::Masm`] if the proof cannot be prepared or verified in the VM.
+    /// See [`Self::verify_precompile`] for policy errors.
+    #[cfg(feature = "masm")]
+    pub fn verify_precompile_masm(
+        &self,
+        proof: &PrecompileProof,
+        expected_root: DeferredRoot,
+    ) -> Result<ProofSecurityParameters, VerificationError> {
+        self.verify_precompile_with(Backend::Masm, proof, expected_root)
+    }
+
+    fn verify_precompile_with(
+        &self,
+        backend: Backend,
+        proof: &PrecompileProof,
+        expected_root: DeferredRoot,
+    ) -> Result<ProofSecurityParameters, VerificationError> {
+        self.validate_precompile(proof, expected_root)?;
+        self.preflight_precompile_stark(backend, proof)?;
+        self.verify_precompile_stark(backend, proof)
+    }
+
+    fn verify_precompile_stark(
+        &self,
+        backend: Backend,
+        proof: &PrecompileProof,
+    ) -> Result<ProofSecurityParameters, VerificationError> {
+        let security_parameters = match backend {
+            Backend::Native => {
+                let aggregate_root =
+                    proof.aggregate_root().expect("precompile roots were checked to be non-empty");
+                miden_precompiles_stark::verifier::verify_deferred(&proof.proof, aggregate_root)?
+            },
+            #[cfg(feature = "masm")]
+            Backend::Masm => masm::verify_precompile(proof)?,
+        };
         self.check_security_level(&security_parameters)?;
         Ok(security_parameters)
     }
@@ -286,7 +369,11 @@ impl Verifier {
         })
     }
 
-    fn preflight_precompile_stark(&self, proof: &PrecompileProof) -> Result<(), VerificationError> {
+    fn preflight_precompile_stark(
+        &self,
+        backend: Backend,
+        proof: &PrecompileProof,
+    ) -> Result<(), VerificationError> {
         let size = proof.proof.bytes().len();
         if size > MAX_STARK_PROOF_BYTES {
             return Err(VerificationError::PrecompileStarkVerification(
@@ -296,23 +383,7 @@ impl Verifier {
                 },
             ));
         }
-        Ok(())
-    }
-
-    /// Verifies the Miden VM STARK proof and returns its authenticated security parameters.
-    ///
-    /// The returned parameters include the largest AIR trace height, the DEEP term count implied
-    /// by the commitment scheme's column alignment, and the lookup boundary terms implied by the
-    /// authenticated kernel. The PCS parameters and commitment collision resistance come from the
-    /// configuration used to verify the proof.
-    fn verify_vm(
-        &self,
-        claim: &ExecutionClaim,
-        proof: &VmProof,
-    ) -> Result<ProofSecurityParameters, VerificationError> {
-        miden_vm_stark::verifier::verify(claim, proof).map_err(|error| {
-            VerificationError::StarkVerificationError(claim.program_root(), Box::new(error))
-        })
+        backend.check_hash(proof.proof.hash_fn())
     }
 }
 
@@ -375,6 +446,12 @@ impl VerificationOutcome {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum VerificationError {
+    #[cfg(feature = "masm")]
+    #[error("MASM verification requires Eidos, but the STARK uses {0:?}")]
+    UnsupportedMasmHashFunction(HashFunction),
+    #[cfg(feature = "masm")]
+    #[error(transparent)]
+    Masm(#[from] MasmVerificationError),
     #[error("conjectured security level is {actual} bits, below the required {required} bits")]
     InsufficientSecurityLevel { actual: u32, required: u32 },
     #[error("execution proof format {0} is not supported")]
@@ -468,6 +545,30 @@ mod tests {
             None => PrecompileStatus::Empty,
         };
         ExecutionProof::new(vm_proof(vm_root), precompile)
+    }
+
+    #[cfg(feature = "masm")]
+    #[test]
+    fn masm_rejects_unsupported_hashes_for_each_component() {
+        let verifier = Verifier::new();
+        let expected_root = root(1);
+        for hash in [HashFunction::Blake3_256, HashFunction::Keccak] {
+            let stark = StarkProof::new(vec![], hash);
+            let vm = VmProof {
+                proof: stark.clone(),
+                precompile_root: TRUE_DIGEST,
+            };
+            let execution = ExecutionProof::new(vm, PrecompileStatus::Empty);
+            assert!(matches!(
+                verifier.verify_masm(&claim(), &execution),
+                Err(VerificationError::UnsupportedMasmHashFunction(found)) if found == hash
+            ));
+            let precompile = PrecompileProof { proof: stark, roots: vec![expected_root] };
+            assert!(matches!(
+                verifier.verify_precompile_masm(&precompile, expected_root),
+                Err(VerificationError::UnsupportedMasmHashFunction(found)) if found == hash
+            ));
+        }
     }
 
     #[test]
