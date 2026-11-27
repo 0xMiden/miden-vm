@@ -281,8 +281,11 @@ Once the executable has been compiled, you can run Miden VM like so:
 Currently, Miden VM can be executed with the following subcommands:
 
 - `run` executes a Miden assembly program and outputs the result without generating a proof.
-- `prove` executes a Miden assembly program and generates a STARK proof.
-- `verify` verifies a previously generated proof for a given program.
+- `prove` generates the VM STARK. When the program uses precompiles, the proof file also contains their raw witness, which can reveal inputs from private advice.
+- `prove-complete` generates the VM STARK and any required precompile STARK.
+- `verify` verifies either a complete or a deferred proof and reports its status.
+- `verify-complete` verifies a complete proof, including one for a program with no precompile work.
+- `verify-partial` verifies a deferred proof carrying an outstanding precompile root and checks its witness natively.
 - `compile` compiles a Miden assembly program and reports compilation statistics.
 - `bundle` combines Miden assembly modules into a `.masp` library or kernel package.
 

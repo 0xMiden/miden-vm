@@ -11,12 +11,12 @@ use miden_vm::{
 };
 
 use super::{
+    ProofMode,
     config::Settings,
     data::{OutputFile, ProgramHash, ProofFile},
 };
 
 #[derive(Debug, Clone, Parser)]
-#[command(about = "Verify a Miden program")]
 pub struct VerifyCmd {
     /// Path to input file
     #[arg(short = 'i', long = "input", value_parser)]
@@ -37,7 +37,11 @@ pub struct VerifyCmd {
 }
 
 impl VerifyCmd {
-    pub(crate) fn execute(&self, settings: &Settings) -> Result<(), Report> {
+    pub(crate) fn execute(
+        &self,
+        settings: &Settings,
+        required: Option<ProofMode>,
+    ) -> Result<(), Report> {
         // Validate the kernel file's extension before doing any other file I/O (mirrors the
         // same ordering issue already fixed for `prove` in #3587).
         if let Some(ref kernel_path) = self.kernel_file {
@@ -69,11 +73,20 @@ impl VerifyCmd {
 
         // This unauthenticated variant is sufficient for CLI policy rejection. Only the
         // verifier below can establish proof validity, authenticate roots, and evaluate witnesses.
-        if settings.require_complete && matches!(proof.precompile(), PrecompileStatus::Deferred(_))
-        {
-            return Err(Report::msg(
-                "verification.require-complete rejects deferred proofs; proof has not been verified",
-            ));
+        match (required, proof.precompile()) {
+            (Some(ProofMode::Complete), PrecompileStatus::Deferred(_)) => {
+                return Err(Report::msg(
+                    "verify-complete rejects deferred proofs. The proof has not been verified",
+                ));
+            },
+            (Some(ProofMode::Deferred), PrecompileStatus::Empty | PrecompileStatus::Proven(_)) => {
+                return Err(Report::msg(
+                    "verify-partial requires a deferred precompile witness. The proof has not been verified",
+                ));
+            },
+            (None, _)
+            | (Some(ProofMode::Complete), PrecompileStatus::Empty | PrecompileStatus::Proven(_))
+            | (Some(ProofMode::Deferred), PrecompileStatus::Deferred(_)) => {},
         }
 
         let now = Instant::now();
@@ -267,7 +280,7 @@ mod tests {
 
         let settings = Settings::from_overrides(&[]).unwrap();
         let err = cmd
-            .execute(&settings)
+            .execute(&settings, None)
             .expect_err("expected the bad kernel extension to be rejected");
         let message = format!("{err}");
         assert!(

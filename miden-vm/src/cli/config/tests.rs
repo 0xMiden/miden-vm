@@ -34,8 +34,7 @@ fn shared_values_apply_before_specific_values_in_each_layer() {
         execution.precompiles.hash.max-count = 7
         verification.precompiles.hash.max-total-size = '12MiB'
         resources.vm-prover-memory = '1GiB'
-        proving.hash-lde-blocks = true
-        verification.require-complete = true
+        bundle.release = true
     "#,
         )
         .unwrap();
@@ -51,7 +50,7 @@ fn shared_values_apply_before_specific_values_in_each_layer() {
             .chain([
                 "resources.max-prover-memory=32MiB",
                 "resources.precompile-prover-memory=16MiB",
-                "verification.require-complete=false",
+                "bundle.release=false",
                 "display.num-outputs=0",
             ])
             .map(String::from)
@@ -70,7 +69,7 @@ fn shared_values_apply_before_specific_values_in_each_layer() {
         );
         assert_eq!(settings.prover.max_prover_memory_bytes(), 32 << 20);
         assert_eq!(settings.prover.max_precompile_prover_memory_bytes(), 16 << 20);
-        assert!(!settings.require_complete);
+        assert!(!settings.release);
         assert_eq!(settings.num_outputs, 0);
     }
 }

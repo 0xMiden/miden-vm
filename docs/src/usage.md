@@ -70,8 +70,10 @@ Once the executable has been compiled, you can run Miden VM like so:
 Currently, Miden VM can be executed with the following subcommands:
 
 - `run` - this will execute a Miden assembly program and output the result, but will not generate a proof of execution.
-- `prove` - this will execute a Miden assembly program, and will also generate a STARK proof of execution.
-- `verify` - this will verify a previously generated proof of execution for a given program.
+- `prove` generates the VM STARK and exports a raw witness for any precompile work. The witness can reveal private advice.
+- `prove-complete` generates the VM STARK and any required precompile STARK.
+- `verify` verifies either a complete or a deferred proof and reports its status.
+- `verify-complete` and `verify-partial` require a complete or deferred proof, respectively. See [Complete and deferred proofs](#complete-and-deferred-proofs) for the accepted proof types.
 - `compile` - this will compile a Miden assembly program (i.e., build a program [MAST](./design/programs.md)) and outputs stats about the compilation process.
 - `bundle` builds a MASP library or kernel package.
 
@@ -137,9 +139,6 @@ max-total-size = "16Mi"
 
 [verification.precompiles.hash]
 max-total-size = "4Mi"
-
-[verification]
-require-complete = true
 ```
 
 Each `--set section.key=value` assigns one setting for this invocation. File values and
@@ -149,7 +148,7 @@ applies before the CLI overrides. Repeating the same key in `--set` uses its las
 
 ```shell
 miden-vm run program.masp --config ci.toml
-miden-vm verify --proof program.proof --program-hash "$PROGRAM_HASH" --set verification.require-complete=false
+miden-vm verify-complete --proof program.proof --program-hash "$PROGRAM_HASH" --config ci.toml
 miden-vm prove program.masm --set precompiles.hash.max-total-size=8Mi
 ```
 
@@ -168,7 +167,7 @@ it sets a ceiling of zero. Missing fields inherit defaults. Unknown keys, unsupp
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `execution.max-cycles` | 536,870,912 | Maximum cycles for `run` and `prove`. Valid range 64 through 536,870,912. |
+| `execution.max-cycles` | 536,870,912 | Maximum cycles for `run`, `prove` and `prove-complete`. Valid range 64 through 536,870,912. |
 | `execution.expected-cycles` | 64 | Expected cycle count. The processor rounds up to a power of two, with a minimum of 64. It validates the result against `max-cycles` and stores it in the serialized execution options. |
 | `execution.core-trace-fragment-size` | 4,096 | Cycles in each core trace fragment. Must be positive. |
 | `execution.max-advice-size-bytes` | 16 MiB | Combined logical size of the advice stack, advice map and Merkle store. |
@@ -181,12 +180,11 @@ it sets a ceiling of zero. Missing fields inherit defaults. Unknown keys, unsupp
 | `resources.precompile-prover-memory` | 64 GiB | Budget for the precompile proving stage. |
 | `proving.hasher` | `"eidos"` | Commitment hash. Choices are `"eidos"`, `"blake3-256"` and `"keccak"`. |
 | `proving.hash-lde-blocks` | `false` | Hash completed blocks during the final VM trace low-degree extension where the commitment scheme supports it. |
-| `verification.require-complete` | `false` | Require a complete STARK-backed proof. |
 | `verification.min-security-bits` | Unset | Minimum conjectured security in bits, applied independently to each verified STARK. |
 | `display.num-outputs` | 16 | Stack elements to print, up to the number available. Output files always contain all stack outputs. |
 | `bundle.release` | `false` | Strip debug symbols when writing a bundled library or kernel. |
 
-The CLI supplies the display, completeness and bundle defaults. Execution, prover and
+The CLI supplies the display and bundle defaults. Execution, prover and
 verifier controls use their respective library defaults.
 
 #### Precompile policies
@@ -215,11 +213,11 @@ own values. Hard transport, allocation and root-count ceilings apply independent
 
 #### Prover memory budgets
 
-`prove` budgets VM and precompile proving separately. `prove --deferred` runs only the VM
-proving stage. The precompile prover checks conservative reservations during witness
-preparation and session construction, then checks its modelled peak before allocating
-traces. Caller-owned inputs, concurrent proofs and process-wide RSS fall outside these
-per-stage budgets.
+`prove` uses the VM proving budget. `prove-complete` also uses the precompile budget
+when execution produces precompile work. The precompile prover checks conservative
+reservations during witness preparation and session construction, then checks its modelled
+peak before allocating traces. Caller-owned inputs, concurrent proofs and process-wide
+RSS fall outside these per-stage budgets.
 
 `run` reads the trace sizes from the execution recording. Core rows include HALT, chiplet
 rows include alignment and padding, and the byte-pair lookup table has a fixed height.
@@ -230,11 +228,11 @@ enforces the budget against the actual padded heights.
 
 #### Migrating command lines
 
-Move each old flag to the equivalent TOML key, or pass `--set KEY=VALUE` for a single
-invocation. Program, input, output, proof, library and kernel paths and the expected
-program hash are invocation arguments.
+Choose the proof mode with the subcommand. For reusable settings, use the TOML key or pass
+`--set KEY=VALUE` for a single invocation. Program, input, output, proof, library and kernel
+paths and the expected program hash are invocation arguments.
 
-| Previous flag | Replacement |
+| Previous invocation or flag | Replacement |
 | --- | --- |
 | `--max-cycles`, `-m` | `execution.max-cycles` |
 | `--exp-cycles`, `-e` | `execution.expected-cycles` |
@@ -246,41 +244,53 @@ program hash are invocation arguments.
 | `--max-precompile-total-msm-terms` | `precompiles.msm.max-total-size` |
 | `--hasher` | `proving.hasher`. Set `"blake3-256"` to retain the previous CLI default. |
 | `--num-outputs`, `-n` on `run` or `prove` | `display.num-outputs` |
-| `verify --require-complete` | `verification.require-complete = true` |
+| `verify --require-complete` or `verification.require-complete = true` | Use `verify-complete` and remove the setting from your TOML file. |
+| `verification.require-complete = false` | Use `verify` and remove the setting from your TOML file. |
 | `bundle --release`, `-r` | `bundle.release = true` |
-| `prove --complete` | Omit the flag. Complete proofs are the default. |
+| `prove` to generate a complete proof, or `prove --complete` | `prove-complete` |
+| `prove --deferred` | `prove` |
 | `prove --security 96bits`, `-s 96bits` | Omit the flag. Its sole accepted value selected the existing proving parameters. |
 
 ### Complete and deferred proofs
 
-By default, `prove` calls `Prover::prove_full` and writes the VM STARK and any required
-precompile STARK to the proof file.
+`prove` calls `Prover::prove`. When a program uses precompiles, the proof file includes
+the VM STARK and a raw precompile witness for later proving. **The witness can disclose
+inputs from private advice.** `prove-complete` calls `Prover::prove_full` and includes a
+precompile STARK for that work. Both commands report the proof status. When the program
+has no precompile work, the VM STARK alone is a complete proof.
 
-Use `prove --deferred` to call `Prover::prove` and export the raw precompile witness in
-the proof file for later proving. The witness includes precompile inputs and can reveal
-values taken from private advice. Select this mode explicitly when producing the artifact.
+| Valid proof file | `verify` | `verify-complete` | `verify-partial` |
+| --- | --- | --- | --- |
+| VM STARK, no precompile work | Accept | Accept | Reject |
+| VM STARK and precompile STARK | Accept | Accept | Reject |
+| VM STARK and deferred precompile witness | Accept | Reject | Accept |
 
-Without precompile work, the VM STARK alone is already complete in either mode. Deferral applies
-to the precompile STARK; normal execution still checks precompile predicates natively. Proving
-reports the resulting proof status and, for a deferred proof, the witness-export disclosure, its
-missing precompile STARK and outstanding root.
+Every successful verification checks the VM STARK against the public execution claim.
+For a complete proof, the verifier also checks any required precompile STARK. On success it prints
+`Proof status: complete` and the minimum conjectured and proven security levels across
+the verified STARKs.
 
-`verify` accepts valid complete and deferred proofs by default. For a deferred proof, the
-verifier authenticates the VM STARK, checks the witness limits, binds its reconstructed root to
-the VM-authenticated root, and evaluates it natively. Only after these checks succeed does it
-exit with status 0 and print `Proof status: deferred`, the VM STARK conjectured and proven
-security levels, the natively validated witness, missing precompile STARK, and outstanding root.
-Native validation does not establish a cryptographically complete precompile proof.
+For a deferred proof, `verify` and `verify-partial` check the witness limits, reconstruct
+the precompile root, match it to the root authenticated by the VM STARK, and evaluate the
+witness natively. On success they print `Proof status: deferred`, the VM security levels,
+and the outstanding root that still needs a precompile STARK. A command can reject an
+unexpected proof type before cryptographic verification. A zero exit status always requires
+successful verification of the accepted type.
 
-Use `verify --set verification.require-complete=true` to require a fully STARK-backed proof. A serialized deferred
-artifact then exits with status 1 before STARK verification or native witness evaluation. This
-is a policy rejection based on unauthenticated proof metadata; it does not establish whether the
-proof is valid.
+Use these commands to generate and verify a complete proof.
 
-Complete proofs that satisfy the verification policy exit with status 0. They print
-`Proof status: complete` and the minimum conjectured and proven security levels of the verified
-STARKs (the VM levels alone if there is no precompile work). Invalid STARKs, malformed or false
-witnesses, root mismatches, and admission failures always fail verification.
+```shell
+miden-vm prove-complete program.masm
+miden-vm verify-complete --proof program.proof --program-hash "$PROGRAM_HASH"
+```
+
+For a program with outstanding precompile work, use `verify-partial` to check the
+exported witness before passing it on for precompile proving.
+
+```shell
+miden-vm prove program.masm
+miden-vm verify-partial --proof program.proof --program-hash "$PROGRAM_HASH"
+```
 
 ### Inputs
 

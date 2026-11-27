@@ -49,7 +49,6 @@ hash-lde-blocks = { type = "bool", description = "Hash completed blocks during t
 
 [settings.verification]
 precompiles = { group = "precompile-policy" }
-require-complete = { type = "bool", default = false, description = "Require a complete STARK-backed proof." }
 min-security-bits = { type = "u32", description = "Minimum conjectured security in bits for each verified STARK." }
 
 [settings.display]

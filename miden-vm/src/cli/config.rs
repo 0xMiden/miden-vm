@@ -17,7 +17,6 @@ pub(crate) struct Settings {
     pub prover: Prover,
     pub verifier: Verifier,
     pub num_outputs: usize,
-    pub require_complete: bool,
     pub release: bool,
 }
 
@@ -160,8 +159,6 @@ impl Settings {
 
         let num_outputs = take!(values, "display.num-outputs", Usize)
             .expect("CLI schema supplies display.num-outputs");
-        let require_complete = take!(values, "verification.require-complete", Bool)
-            .expect("CLI schema supplies verification.require-complete");
         let release =
             take!(values, "bundle.release", Bool).expect("CLI schema supplies bundle.release");
         if let Some(key) = values.keys().next() {
@@ -172,7 +169,6 @@ impl Settings {
             prover,
             verifier,
             num_outputs,
-            require_complete,
             release,
         })
     }

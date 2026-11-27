@@ -11,6 +11,7 @@ use miden_processor::{DefaultHost, PackageSourceDebugContext};
 use miden_vm::{PrecompileStatus, Processor, WitnessOutput, internal::InputFile};
 
 use super::{
+    ProofMode,
     config::Settings,
     data::{Libraries, OutputFile, ProofFile},
     utils::{
@@ -20,7 +21,6 @@ use super::{
 };
 
 #[derive(Debug, Clone, Parser)]
-#[command(about = "Prove a Miden program")]
 pub struct ProveCmd {
     /// Path to a .masm assembly file or a .masp package file
     #[arg(value_parser)]
@@ -33,15 +33,6 @@ pub struct ProveCmd {
     /// Paths to .masp library files
     #[arg(short = 'l', long = "libraries", value_parser)]
     library_paths: Vec<PathBuf>,
-
-    /// Export a deferred proof containing the raw precompile witness
-    ///
-    /// The witness includes raw precompile inputs and can reveal inputs from private advice.
-    /// Use this option only when that disclosure is intended. By default, generate a complete
-    /// STARK-backed proof without exporting the witness. Without precompile work, either mode
-    /// produces a complete proof.
-    #[arg(long)]
-    deferred: bool,
 
     /// Path to output file
     #[arg(short = 'o', long = "output", value_parser)]
@@ -57,7 +48,7 @@ pub struct ProveCmd {
 }
 
 impl ProveCmd {
-    pub(crate) fn execute(&self, settings: &Settings) -> Result<(), Report> {
+    pub(crate) fn execute(&self, settings: &Settings, mode: ProofMode) -> Result<(), Report> {
         println!("===============================================================================");
         println!("Prove program: {}", self.program_file.display());
         println!("-------------------------------------------------------------------------------");
@@ -149,10 +140,9 @@ impl ProveCmd {
             .run_sync(&mut host)
             .wrap_err("Failed to execute program")?;
         let stack_outputs = *claim.stack_outputs();
-        let proof = if self.deferred {
-            settings.prover.prove(witness)
-        } else {
-            settings.prover.prove_full(witness).map(Into::into)
+        let proof = match mode {
+            ProofMode::Deferred => settings.prover.prove(witness),
+            ProofMode::Complete => settings.prover.prove_full(witness).map(Into::into),
         }
         .into_diagnostic()
         .wrap_err("Failed to prove program")?;

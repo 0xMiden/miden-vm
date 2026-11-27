@@ -49,10 +49,10 @@ fn write_program(dir: &Path, source: &str) -> Program {
     package.unwrap_program()
 }
 
-fn verify_command(dir: &Path, program: &Program) -> Command {
+fn verify_command(dir: &Path, action: &str, program: &Program) -> Command {
     let mut command = bin_under_test(dir);
     let hash: [u8; 32] = program.hash().into();
-    command.args(["verify", "--proof", "program.proof", "--program-hash", &hex::encode(hash)]);
+    command.args([action, "--proof", "program.proof", "--program-hash", &hex::encode(hash)]);
     command
 }
 
@@ -71,15 +71,16 @@ fn cli_precompile_policy_errors_precede_input_loading() {
         .args(["prove", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("--deferred"))
         .stdout(predicate::str::contains("private advice"))
-        .stdout(predicate::str::contains("when that disclosure is intended"));
-    bin_under_test(dir.path())
-        .args(["prove", "missing.masm", "--complete"])
-        .assert()
-        .code(2)
-        .stderr(predicate::str::contains("--complete"))
-        .stdout(predicate::str::is_empty());
+        .stdout(predicate::str::contains("prove-complete"));
+    for flag in ["--deferred", "--complete"] {
+        bin_under_test(dir.path())
+            .args(["prove", "missing.masm", flag])
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains(flag))
+            .stdout(predicate::str::is_empty());
+    }
     bin_under_test(dir.path())
         .args(["verify", "--help"])
         .assert()
@@ -91,12 +92,14 @@ fn cli_precompile_policy_errors_precede_input_loading() {
         ("precompiles.hash.max-total-size", format!("{}Gi", u64::MAX)),
         ("precompiles.msm.max-size", (u64::from(u32::MAX) + 1).to_string()),
         ("precompiles.msm.max-total-size", "1Mi".to_owned()),
+        ("verification.require-complete", "true".to_owned()),
     ];
-    for action in ["run", "prove", "verify"] {
+    for action in ["run", "prove", "prove-complete", "verify", "verify-complete", "verify-partial"]
+    {
         for (key, value) in &invalid {
             let mut command = bin_under_test(dir.path());
             command.arg(action);
-            if action == "verify" {
+            if action.starts_with("verify") {
                 command.args(["--proof", "missing.proof", "--program-hash", "00"]);
             } else {
                 command.arg("missing.masm");
@@ -113,7 +116,7 @@ fn cli_precompile_policy_errors_precede_input_loading() {
 }
 
 #[test]
-fn cli_private_precompile_witness_export_requires_opt_in() {
+fn proving_commands_select_witness_export_or_a_precompile_stark() {
     let dir = TempDir::new().unwrap();
     let value = UintPrecompile::value_frame(UintDomain::U256).initial_chaining_word();
     let eq = UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID).initial_chaining_word();
@@ -133,36 +136,34 @@ fn cli_private_precompile_witness_export_requires_opt_in() {
     .unwrap();
 
     bin_under_test(dir.path())
-        .args(["prove", "program.masm", "--set", "resources.precompile-prover-memory=0"])
+        .args([
+            "prove-complete",
+            "program.masm",
+            "--set",
+            "resources.precompile-prover-memory=0",
+        ])
         .assert()
         .failure()
         .stderr(predicate::str::contains("precompile prover memory"))
         .stderr(predicate::str::contains("budget of 0 bytes"));
 
     bin_under_test(dir.path())
-        .args(["prove", "program.masm"])
+        .args(["prove-complete", "program.masm"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Proof status: complete"))
         .stdout(predicate::str::contains("Precompile witness: exported").not());
-    // The default artifact carries a precompile STARK, with no portable witness to disclose.
     assert!(matches!(read_proof(dir.path()).precompile(), PrecompileStatus::Proven(_)));
 
     bin_under_test(dir.path())
-        .args([
-            "prove",
-            "program.masm",
-            "--deferred",
-            "--set",
-            "resources.precompile-prover-memory=0",
-        ])
+        .args(["prove", "program.masm", "--set", "resources.precompile-prover-memory=0"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Proof status: deferred"))
         .stdout(predicate::str::contains("may reveal private advice inputs"));
     let proof = read_proof(dir.path());
     let PrecompileStatus::Deferred(witness) = proof.precompile() else {
-        panic!("explicit opt-in must export the deferred witness")
+        panic!("prove must export the deferred witness")
     };
     let private_limbs = [Felt::from_u32(42); 8];
     assert!(witness.entries().iter().any(|entry| matches!(
@@ -214,9 +215,6 @@ fn cli_precompile_execution_and_export_limits_cover_masm_and_masp() {
             for action in ["run", "prove"] {
                 let mut command = bin_under_test(dir.path());
                 command.arg(action).arg(format!("program.{extension}"));
-                if action == "prove" {
-                    command.arg("--deferred");
-                }
                 command.assert().success();
                 let mut command = bin_under_test(dir.path());
                 command
@@ -224,9 +222,6 @@ fn cli_precompile_execution_and_export_limits_cover_masm_and_masp() {
                     .arg(format!("program.{extension}"))
                     .arg("--set")
                     .arg(format!("{scope}.precompiles.max-elements={}", boundary - 1));
-                if action == "prove" {
-                    command.arg("--deferred");
-                }
                 command
                     .assert()
                     .failure()
@@ -241,7 +236,7 @@ fn cli_precompile_verification_status_limits_and_failures() {
     let dir = TempDir::new().unwrap();
     let program = write_program(dir.path(), &precompile_source(1, 1));
     bin_under_test(dir.path())
-        .args(["prove", "program.masm", "--deferred"])
+        .args(["prove", "program.masm"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Proof status: deferred"));
@@ -257,46 +252,44 @@ fn cli_precompile_verification_status_limits_and_failures() {
         )
         .unwrap();
     let elements = prepared.work().elements();
-    verify_command(dir.path(), &program)
-        .args(["--set", "verification.min-security-bits=1000"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("below the required 1000 bits"))
-        .stdout(predicate::str::contains("validated natively").not());
-    verify_command(dir.path(), &program)
-        .args(["--set", "verification.require-complete=true"])
+    verify_command(dir.path(), "verify-complete", &program)
         .assert()
         .code(1)
-        .stderr(predicate::str::contains("rejects deferred proofs"))
+        .stderr(predicate::str::contains("verify-complete"))
         .stderr(predicate::str::contains("proof has not been verified"))
         .stdout(predicate::str::contains("Proof status:").not())
         .stdout(predicate::str::contains("validated natively").not());
-    verify_command(dir.path(), &program)
-        .assert()
-        .code(0)
-        .stdout(predicate::str::contains("Proof status: deferred"))
-        .stdout(predicate::str::contains("VM STARK security level:"))
-        .stdout(predicate::str::contains("bits conjectured,"))
-        .stdout(predicate::str::contains("bits proven"))
-        .stdout(predicate::str::contains("Precompile witness: validated natively"))
-        .stdout(predicate::str::contains("Precompile STARK: not supplied"))
-        .stdout(predicate::str::contains(format!(
-            "Outstanding precompile root: {}",
-            deferred.vm().precompile_root
-        )))
-        .stdout(predicate::str::contains("Minimum per-STARK security level:").not());
-    verify_command(dir.path(), &program)
-        .args(["--set", &format!("verification.precompiles.max-elements={elements}")])
-        .assert()
-        .success();
-    verify_command(dir.path(), &program)
-        .args(["--set", &format!("verification.precompiles.max-elements={}", elements - 1)])
-        .assert()
-        .failure()
-        .stdout(predicate::str::contains("Proof status:").not());
+    for action in ["verify", "verify-partial"] {
+        verify_command(dir.path(), action, &program)
+            .args(["--set", &format!("verification.precompiles.max-elements={elements}")])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Proof status: deferred"))
+            .stdout(predicate::str::contains("VM STARK security level:"))
+            .stdout(predicate::str::contains("bits conjectured,"))
+            .stdout(predicate::str::contains("bits proven"))
+            .stdout(predicate::str::contains("Precompile witness: validated natively"))
+            .stdout(predicate::str::contains("Precompile STARK: not supplied"))
+            .stdout(predicate::str::contains(format!(
+                "Outstanding precompile root: {}",
+                deferred.vm().precompile_root
+            )))
+            .stdout(predicate::str::contains("Minimum per-STARK security level:").not());
+        verify_command(dir.path(), action, &program)
+            .args(["--set", &format!("verification.precompiles.max-elements={}", elements - 1)])
+            .assert()
+            .failure()
+            .stdout(predicate::str::contains("Proof status:").not());
+        verify_command(dir.path(), action, &program)
+            .args(["--set", "verification.min-security-bits=1000"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("below the required 1000 bits"))
+            .stdout(predicate::str::contains("validated natively").not());
+    }
 
     bin_under_test(dir.path())
-        .args(["prove", "program.masm"])
+        .args(["prove-complete", "program.masm"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Proof status: complete"));
@@ -304,9 +297,8 @@ fn cli_precompile_verification_status_limits_and_failures() {
     // Verification consumes the proof, public inputs/outputs and expected hash.
     fs::remove_file(dir.path().join("program.masm")).unwrap();
     fs::remove_file(dir.path().join("program.masp")).unwrap();
-    for args in [vec![], vec!["--set", "verification.require-complete=true"]] {
-        verify_command(dir.path(), &program)
-            .args(args)
+    for action in ["verify", "verify-complete"] {
+        verify_command(dir.path(), action, &program)
             .args(["--set", "precompiles.max-elements=0"])
             .assert()
             .code(0)
@@ -315,6 +307,12 @@ fn cli_precompile_verification_status_limits_and_failures() {
             .stdout(predicate::str::contains("bits proven"))
             .stdout(predicate::str::contains("validated natively").not());
     }
+    verify_command(dir.path(), "verify-partial", &program)
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("verify-partial"))
+        .stderr(predicate::str::contains("proof has not been verified"))
+        .stdout(predicate::str::contains("Proof status:").not());
 
     let PrecompileStatus::Proven(precompile) = complete.precompile() else {
         panic!("expected precompile STARK")
@@ -329,9 +327,8 @@ fn cli_precompile_verification_status_limits_and_failures() {
         }),
     );
     write_proof(dir.path(), &invalid_precompile);
-    for args in [vec![], vec!["--set", "verification.require-complete=true"]] {
-        verify_command(dir.path(), &program)
-            .args(args)
+    for action in ["verify", "verify-complete"] {
+        verify_command(dir.path(), action, &program)
             .assert()
             .failure()
             .stdout(predicate::str::contains("Proof status:").not());
@@ -345,11 +342,13 @@ fn cli_precompile_verification_status_limits_and_failures() {
     let wrong_root =
         ExecutionProof::new(deferred.vm().clone(), PrecompileStatus::Deferred(unrelated));
     write_proof(dir.path(), &wrong_root);
-    verify_command(dir.path(), &program)
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("does not match the VM obligation"))
-        .stdout(predicate::str::contains("Proof status:").not());
+    for action in ["verify", "verify-partial"] {
+        verify_command(dir.path(), action, &program)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("does not match the VM obligation"))
+            .stdout(predicate::str::contains("Proof status:").not());
+    }
 
     let mut bytes = deferred.vm().proof.bytes().to_vec();
     bytes.push(0);
@@ -361,31 +360,25 @@ fn cli_precompile_verification_status_limits_and_failures() {
         deferred.precompile().clone(),
     );
     write_proof(dir.path(), &invalid_vm);
-    // Complete-only policy rejects this artifact before cryptographic verification.
-    // Default verification must authenticate the VM and reject the invalid STARK.
-    for require_complete in [false, true] {
-        let mut command = verify_command(dir.path(), &program);
-        if require_complete {
-            command.args(["--set", "verification.require-complete=true"]);
-        }
-        command
+    // The two commands that accept deferred proofs must authenticate the VM STARK.
+    for (action, expected_error) in [
+        ("verify", "Program failed verification!"),
+        ("verify-partial", "Program failed verification!"),
+        ("verify-complete", "proof has not been verified"),
+    ] {
+        verify_command(dir.path(), action, &program)
             .assert()
             .failure()
-            .stderr(predicate::str::contains(if require_complete {
-                "proof has not been verified"
-            } else {
-                "Program failed verification!"
-            }))
+            .stderr(predicate::str::contains(expected_error))
             .stdout(predicate::str::contains("Proof status:").not())
             .stdout(predicate::str::contains("validated natively").not());
     }
 
     // Deferring the precompile STARK must not bypass native execution checks in either mode.
     let program = write_program(dir.path(), &precompile_source(1, 2));
-    for args in [vec![], vec!["--deferred"]] {
+    for action in ["prove", "prove-complete"] {
         bin_under_test(dir.path())
-            .args(["prove", "program.masm"])
-            .args(args)
+            .args([action, "program.masm"])
             .assert()
             .failure()
             .stderr(predicate::str::contains("values disagree"))
@@ -393,7 +386,7 @@ fn cli_precompile_verification_status_limits_and_failures() {
     }
 
     fs::write(dir.path().join("program.proof"), []).unwrap();
-    verify_command(dir.path(), &program)
+    verify_command(dir.path(), "verify", &program)
         .assert()
         .failure()
         .stderr(predicate::str::contains("Failed to decode proof data"))
@@ -418,18 +411,13 @@ fn cli_proves_and_verifies_empty_precompile_work_with_each_hash_schedule() {
         }
 
         let mut eager_proof = None;
-        for hash_lde_blocks in [false, true] {
+        for (action, hash_lde_blocks) in [("prove", false), ("prove-complete", true)] {
             let mut prove = bin_under_test(dir.path());
             // A single worker makes proof-of-work witness selection deterministic across runs.
             prove
                 .env("RAYON_NUM_THREADS", "1")
-                .args(["prove", file, "--set", "display.num-outputs=0"])
-                .args(["--set", &format!("proving.hash-lde-blocks={hash_lde_blocks}")]);
-            if hash_lde_blocks {
-                // An execution without precompiles yields a complete proof even with --deferred.
-                prove.arg("--deferred");
-            }
-            prove
+                .args([action, file, "--set", "display.num-outputs=0"])
+                .args(["--set", &format!("proving.hash-lde-blocks={hash_lde_blocks}")])
                 .assert()
                 .success()
                 .stdout(predicate::str::contains("Proof status: complete"))
@@ -445,11 +433,17 @@ fn cli_proves_and_verifies_empty_precompile_work_with_each_hash_schedule() {
             assert_eq!(stack.len(), miden_core::program::MIN_STACK_DEPTH);
             assert_eq!(stack[0], "7");
 
-            verify_command(dir.path(), &program)
-                .args(["--set", "verification.require-complete=true"])
+            for action in ["verify", "verify-complete"] {
+                verify_command(dir.path(), action, &program)
+                    .assert()
+                    .success()
+                    .stdout(predicate::str::contains("Proof status: complete"));
+            }
+            verify_command(dir.path(), "verify-partial", &program)
                 .assert()
-                .success()
-                .stdout(predicate::str::contains("Proof status: complete"));
+                .code(1)
+                .stderr(predicate::str::contains("verify-partial"))
+                .stdout(predicate::str::contains("Proof status:").not());
 
             if let Some(eager) = eager_proof.as_ref() {
                 assert_eq!(&proof, eager, "block scheduling must preserve the proof");

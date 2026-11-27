@@ -343,7 +343,7 @@ mod tests {
                 Value::Hash(HashFunction::Blake3_256),
             ),
             ("display.num-outputs", "0", "0", Value::Usize(0)),
-            ("verification.require-complete", "false", "false", Value::Bool(false)),
+            ("bundle.release", "false", "false", Value::Bool(false)),
         ] {
             let file = schema.file(Path::new("test.toml"), &format!("{key}={literal}")).unwrap();
             let overrides = schema.overrides(&[format!("{key}={argument}")]).unwrap();
@@ -367,6 +367,7 @@ mod tests {
             ("execution.max-cycles = '64'", "execution.max-cycles"),
             ("execution.max-stack-depth = 18446744073709551616", "execution.max-stack-depth"),
             ("verification = true", "verification"),
+            ("verification.require-complete = true", "verification.require-complete"),
             ("proving.hasher = 'unknown'", "proving.hasher"),
         ] {
             let error = schema.file(Path::new("test.toml"), source).unwrap_err().to_string();

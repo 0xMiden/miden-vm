@@ -16,6 +16,8 @@ use tracing_subscriber::{EnvFilter, prelude::*};
 
 mod cli;
 
+use cli::ProofMode;
+
 /// Root CLI struct
 #[derive(Parser, Debug)]
 #[command(
@@ -140,9 +142,24 @@ impl<T: Args> Invocation<T> {
 enum Actions {
     Compile(Invocation<cli::CompileCmd>),
     Bundle(Invocation<cli::BundleCmd>),
+    /// Prove the VM execution and export a witness for any precompile work
+    ///
+    /// The witness contains raw precompile inputs and can reveal private advice. Use
+    /// prove-complete to generate a precompile STARK. With no precompile work, either command
+    /// produces a complete proof.
     Prove(Invocation<cli::ProveCmd>),
+    /// Generate a complete proof, including a STARK for any precompile work
+    ProveComplete(Invocation<cli::ProveCmd>),
     Run(Invocation<cli::RunCmd>),
+    /// Verify a complete or deferred execution proof and report its status
     Verify(Invocation<cli::VerifyCmd>),
+    /// Verify a complete execution proof, including any precompile STARK
+    VerifyComplete(Invocation<cli::VerifyCmd>),
+    /// Verify a partial execution proof that carries a deferred precompile witness
+    ///
+    /// Verifies the VM STARK, checks the witness against the authenticated precompile root,
+    /// and evaluates the witness natively. Reports the outstanding precompile root on success.
+    VerifyPartial(Invocation<cli::VerifyCmd>),
 }
 
 impl Cli {
@@ -150,9 +167,22 @@ impl Cli {
         match self.action {
             Actions::Compile(cmd) => cmd.execute(self.parameters, |cmd, _| cmd.execute()),
             Actions::Bundle(cmd) => cmd.execute(self.parameters, cli::BundleCmd::execute),
-            Actions::Prove(cmd) => cmd.execute(self.parameters, cli::ProveCmd::execute),
+            Actions::Prove(cmd) => cmd.execute(self.parameters, |cmd, settings| {
+                cmd.execute(settings, ProofMode::Deferred)
+            }),
+            Actions::ProveComplete(cmd) => cmd.execute(self.parameters, |cmd, settings| {
+                cmd.execute(settings, ProofMode::Complete)
+            }),
             Actions::Run(cmd) => cmd.execute(self.parameters, cli::RunCmd::execute),
-            Actions::Verify(cmd) => cmd.execute(self.parameters, cli::VerifyCmd::execute),
+            Actions::Verify(cmd) => {
+                cmd.execute(self.parameters, |cmd, settings| cmd.execute(settings, None))
+            },
+            Actions::VerifyComplete(cmd) => cmd.execute(self.parameters, |cmd, settings| {
+                cmd.execute(settings, Some(ProofMode::Complete))
+            }),
+            Actions::VerifyPartial(cmd) => cmd.execute(self.parameters, |cmd, settings| {
+                cmd.execute(settings, Some(ProofMode::Deferred))
+            }),
         }
     }
 
@@ -226,7 +256,7 @@ mod test {
                 file.to_str().unwrap(),
                 "--set",
                 "execution.expected-cycles=128",
-                "run",
+                "prove-complete",
                 "unused.masm",
                 "--set",
                 "display.num-outputs=4",
@@ -234,8 +264,8 @@ mod test {
             .unwrap()
             .try_into()
             .unwrap();
-            let Actions::Run(cmd) = cli.action else {
-                panic!("expected run")
+            let Actions::ProveComplete(cmd) = cli.action else {
+                panic!("expected prove-complete")
             };
             cmd.execute(cli.parameters, |_, settings| {
                 assert_eq!(settings.execution.expected_cycles(), 128);
