@@ -298,12 +298,41 @@ For example:
 ./target/optimized/miden-vm prove --help
 ```
 
+### Configuration
+
+Run `miden-vm <command> --help` to see that command's arguments and flags. For reusable
+settings, the [CLI settings reference](https://github.com/0xMiden/miden-vm/blob/next/docs/src/usage.md#settings-and-defaults)
+lists each key, what it controls, its default, and its accepted values or units. For
+example, `proving.hasher` accepts `"eidos"` (the default), `"blake3-256"`, or `"keccak"`.
+
+The CLI reads `miden-vm.toml` from the working directory when present. To use a file
+named `ci.toml`, put the settings in that file and pass `--config ci.toml`.
+
+```toml
+schema-version = 1
+
+[execution]
+max-cycles = 1_000_000
+
+[proving]
+hasher = "blake3-256"
+```
+
+Repeat `--set KEY=VALUE` to override individual settings for one invocation.
+
+```shell
+miden-vm prove program.masm --config ci.toml --set resources.vm-prover-memory=8GiB
+```
+
+The executable gets the setting names, types, and descriptions from
+[cli-schema.toml](src/cli/cli-schema.toml).
+
 ### Fibonacci example
 
 In the `miden-vm/masm-examples/fib` directory, we provide a very simple Fibonacci calculator example. This example computes the 1001st Fibonacci number modulo the VM field. You can execute this example on Miden VM like so:
 
 ```shell
-./target/optimized/miden-vm run miden-vm/masm-examples/fib/fib.masm -n 1
+./target/optimized/miden-vm run miden-vm/masm-examples/fib/fib.masm --set display.num-outputs=1
 ```
 
 This will run the example code to completion and will output the top element remaining on the stack.

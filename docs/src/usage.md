@@ -59,8 +59,6 @@ make exec-sve
 
 This will place the resulting `miden-vm` executable into the `./target/optimized` directory.
 
-SVE/AVX2 acceleration is currently applicable only to recursive proofs which can be generated using the `-r` flag.
-
 ### Running Miden VM
 
 Once the executable has been compiled, you can run Miden VM like so:
@@ -75,7 +73,7 @@ Currently, Miden VM can be executed with the following subcommands:
 - `prove` - this will execute a Miden assembly program, and will also generate a STARK proof of execution.
 - `verify` - this will verify a previously generated proof of execution for a given program.
 - `compile` - this will compile a Miden assembly program (i.e., build a program [MAST](./design/programs.md)) and outputs stats about the compilation process.
-- `example` - this will execute a Miden assembly example program, generate a STARK proof of execution and verify it. Currently, it is possible to run `blake3` and `fibonacci` examples.
+- `bundle` builds a MASP library or kernel package.
 
 All of the above subcommands require various parameters to be provided. To get more detailed help on what is needed for a given subcommand, you can run the following:
 
@@ -89,7 +87,7 @@ For example:
 ./target/optimized/miden-vm prove --help
 ```
 
-To execute a program using the Miden VM there needs to be a `.masm` file containing the Miden Assembly code and a `.inputs` file containing the inputs.
+To execute a program, pass a `.masm` assembly source or a `.masp` program package. Supply the input JSON with `--input` or place a `.inputs` file beside the program with the same basename.
 
 #### Enabling logging
 
@@ -115,79 +113,152 @@ You can inspect VM state by importing the [`miden::core::debug`](./user_docs/ass
 
 After execution, `run` prints the stack outputs and the unpadded and padded sizes of the VM trace components.
 
-### Precompile policies
+### CLI configuration
 
-`run`, `prove`, and `verify` accept four optional limits:
+Place `miden-vm.toml` in the working directory to reuse settings across commands. Pass
+`--config PATH` to select a different file. If the default file is absent, the CLI uses
+its built-in defaults. The optional top-level `schema-version` defaults to 1.
+An unreadable or invalid file, including a missing explicit path,
+is an error. Help and version reporting work before configuration loading.
 
-| Option | Ceiling | Type/unit |
-| --- | --- | --- |
-| `--max-precompile-elements` | Structural elements in each accounting scope | `u64` field elements |
-| `--max-precompile-hash-bytes` | Total hash input size in each scope | `u64` bytes |
-| `--max-precompile-msm-terms` | Terms in one MSM | `u32` terms |
-| `--max-precompile-total-msm-terms` | Total MSM terms in each scope | `u64` terms |
+```toml
+schema-version = 1
 
-Each supplied value overrides the corresponding field in both execution and verification
-policies. Their accounting remains independent: execution counts all guest-induced deferred
-work, including repeated registration attempts; verification counts the final root-reachable
-witness. Verification limits apply during export, prover admission, and native deferred
-verification. Standalone `verify` applies only the verification policy. Complete precompile
-STARKs contain no portable witness to admit.
+[execution]
+max-cycles = 10_000_000
+max-advice-size-bytes = "32Mi"
 
-Unspecified fields retain each scope's library defaults, supplied by
-`miden_vm::default_execution_precompile_limits()` and
-`miden_vm::default_verification_precompile_limits()`. The CLI defines no separate policy defaults.
-The per-MSM and total-MSM term ceilings are independent: changing one preserves the other.
-Class counts, per-hash item sizes, and uint/curve-specific limits keep their library defaults;
-advanced callers can configure these through the Rust interfaces.
+[resources]
+max-prover-memory = "8Gi"
+precompile-prover-memory = "12Gi"
 
-Hash byte sizes accept bare integers or case-sensitive `K/M/G` (powers of 1000) and `Ki/Mi/Gi`
-(powers of 1024) suffixes. Elements and term counts use unsigned decimal integers within the
-listed types' ranges. Zero is a real ceiling, never an unlimited sentinel. Each option may be
-supplied once. For example:
+[precompiles.hash]
+max-total-size = "16Mi"
 
-```shell
-miden-vm prove program.masm \
-    --max-precompile-hash-bytes 16Mi \
-    --max-precompile-msm-terms 8192 \
-    --max-precompile-total-msm-terms 131072
+[verification.precompiles.hash]
+max-total-size = "4Mi"
+
+[verification]
+require-complete = true
 ```
 
-Raising these logical ceilings does not change hard transport, allocation, or root-count safety
-ceilings, or combine different work classes into an aggregate budget.
+Each `--set section.key=value` assigns one setting for this invocation. File values and
+overrides share the same keys, types and units. Within either source, shared values apply
+first, then the values specific to an execution scope or proving stage. The whole file
+applies before the CLI overrides. Repeating the same key in `--set` uses its last value.
 
-### Prover memory budgets
+```shell
+miden-vm run program.masp --config ci.toml
+miden-vm verify --proof program.proof --program-hash "$PROGRAM_HASH" --set verification.require-complete=false
+miden-vm prove program.masm --set precompiles.hash.max-total-size=8Mi
+```
 
-For `prove`, `--max-prover-memory SIZE` sets the modelled peak-memory budget for each enabled
-proving stage. Default proving includes the VM and any precompile STARK; `--deferred` runs only
-the VM proving stage and exports the precompile witness.
-The explicit option sets the same budget for both stages. When omitted, each stage uses its own
-library default (`Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES` and
-`Prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES`). The option uses the byte suffixes
-described above. Independent stage budgets remain configurable through the Rust interfaces.
+With the example file, the last command gives both execution and verification an 8 MiB
+aggregate hash budget. Adding `--set verification.precompiles.hash.max-total-size=2Mi`
+gives verification 2 MiB and execution 8 MiB in either argument order. Each command
+validates the full configuration and uses the settings that apply to it.
 
-These are separate modelled proving-stage budgets rather than a combined allocation cap or a
-bound on total process memory. Precompile witness preparation/Session import and concurrent
-proofs are outside the proving budgets. Logical work limits remain independent.
+#### Settings and defaults
 
-`run` reads stack outputs from the execution claim and reports trace sizes from the recording.
-Core rows include HALT. Chiplet rows include aligned hash controller rows, expanded AEAD and ACE
-work, and the mandatory padding row. Eidos compression rows and their padded height are upper
-bounds because the prover combines repeated compression requests. The byte-pair lookup table has
-a fixed height. If the exact heights already require more than `--max-prover-memory` at the
-minimum Eidos height, `run` fails. If only the upper bound exceeds the limit, `run` warns and
-returns the outputs. The prover enforces its budget using the actual padded heights.
+Counts use nonnegative integers. Byte sizes accept integers or strings with case-sensitive
+decimal suffixes (`K`, `M`, `G`) or binary suffixes (`Ki`, `Mi`, `Gi`). An optional final
+`B` denotes bytes. Underscores may separate digits, as in `1_024` or `"1_024KiB"`. Quote
+suffixed values in TOML. Every byte size must fit its destination type. Where zero is valid
+it sets a ceiling of zero. Missing fields inherit defaults. Unknown keys, unsupported schema versions, invalid values and overflow are errors.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `execution.max-cycles` | 536,870,912 | Maximum cycles for `run` and `prove`. Valid range 64 through 536,870,912. |
+| `execution.expected-cycles` | 64 | Expected cycle count. The processor rounds up to a power of two, with a minimum of 64. It validates the result against `max-cycles` and stores it in the serialized execution options. |
+| `execution.core-trace-fragment-size` | 4,096 | Cycles in each core trace fragment. Must be positive. |
+| `execution.max-advice-size-bytes` | 16 MiB | Combined logical size of the advice stack, advice map and Merkle store. |
+| `execution.max-hash-input-bytes` | 1 MiB | Input bytes for one guest hash invocation. Deferred hash work also obeys the precompile policy below. |
+| `execution.max-num-continuations` | 65,536 | Entries on the execution continuation stack. |
+| `execution.max-stack-depth` | 6,615 | Operand-stack elements across the active and suspended contexts. Minimum 16. |
+| `execution.max-memory-elements` | 268,435,456 | Field elements in processor memory, rounded up to a whole number of four-element words. |
+| `resources.max-prover-memory` | Unset | Assigns the same modelled memory budget to both stages. |
+| `resources.vm-prover-memory` | 64 GiB | VM trace construction and proving budget. Also used by `run` to check its trace-size estimate. |
+| `resources.precompile-prover-memory` | 64 GiB | Budget for the precompile proving stage. |
+| `proving.hasher` | `"eidos"` | Commitment hash. Choices are `"eidos"`, `"blake3-256"` and `"keccak"`. |
+| `proving.hash-lde-blocks` | `false` | Hash completed blocks during the final VM trace low-degree extension where the commitment scheme supports it. |
+| `verification.require-complete` | `false` | Require a complete STARK-backed proof. |
+| `verification.min-security-bits` | Unset | Minimum conjectured security in bits, applied independently to each verified STARK. |
+| `display.num-outputs` | 16 | Stack elements to print, up to the number available. Output files always contain all stack outputs. |
+| `bundle.release` | `false` | Strip debug symbols when writing a bundled library or kernel. |
+
+The CLI supplies the display, completeness and bundle defaults. Execution, prover and
+verifier controls use their respective library defaults.
+
+#### Precompile policies
+
+Apply shared precompile settings under `[precompiles]`. Use `[execution.precompiles]`
+and `[verification.precompiles]` for scope-specific settings. Execution charges guest
+registration attempts, including duplicates. Verification charges the final root-reachable
+witness during export, admission for precompile proving and native deferred verification.
+A complete precompile STARK carries the proof of the work.
+
+In each scope, `max-elements` bounds structural field elements and defaults to 1,048,576.
+For each class, `max-count` bounds the number of operations, `max-total-size` their summed
+size and `max-size` the size of one operation. Counts, structural elements and aggregate
+sizes fit in `u64`. Per-operation sizes fit in `u32`.
+
+| Class under each policy | Size unit | Default `max-count` | Default `max-total-size` | Default `max-size` |
+| --- | --- | ---: | ---: | ---: |
+| `hash` | Input bytes | 256 | 256 KiB | 128 KiB |
+| `msm` | Terms | 64 | 256 | 32 |
+| `uint` | Fixed-size operation units | 4,096 | 4,096 | 1 |
+| `curve` | Fixed-size operation units | 512 | 512 | 1 |
+
+For example, `--set execution.precompiles.msm.max-size=64` permits up to 64 terms per MSM
+during execution. Other dimensions, classes and the verification policy inherit their
+own values. Hard transport, allocation and root-count ceilings apply independently.
+
+#### Prover memory budgets
+
+`prove` budgets VM and precompile proving separately. `prove --deferred` runs only the VM
+proving stage. The precompile prover checks conservative reservations during witness
+preparation and session construction, then checks its modelled peak before allocating
+traces. Caller-owned inputs, concurrent proofs and process-wide RSS fall outside these
+per-stage budgets.
+
+`run` reads the trace sizes from the execution recording. Core rows include HALT, chiplet
+rows include alignment and padding, and the byte-pair lookup table has a fixed height.
+Recorded Eidos compression rows are an upper bound because the prover combines repeated
+requests. If the model exceeds the VM budget even at minimum Eidos height, `run` fails.
+If only the upper bound exceeds it, `run` warns and returns the outputs. The prover
+enforces the budget against the actual padded heights.
+
+#### Migrating command lines
+
+Move each old flag to the equivalent TOML key, or pass `--set KEY=VALUE` for a single
+invocation. Program, input, output, proof, library and kernel paths and the expected
+program hash are invocation arguments.
+
+| Previous flag | Replacement |
+| --- | --- |
+| `--max-cycles`, `-m` | `execution.max-cycles` |
+| `--exp-cycles`, `-e` | `execution.expected-cycles` |
+| `--max-advice-size` | `execution.max-advice-size-bytes` |
+| `--max-prover-memory` | `resources.max-prover-memory` |
+| `--max-precompile-elements` | `precompiles.max-elements` |
+| `--max-precompile-hash-bytes` | `precompiles.hash.max-total-size` |
+| `--max-precompile-msm-terms` | `precompiles.msm.max-size` |
+| `--max-precompile-total-msm-terms` | `precompiles.msm.max-total-size` |
+| `--hasher` | `proving.hasher`. Set `"blake3-256"` to retain the previous CLI default. |
+| `--num-outputs`, `-n` on `run` or `prove` | `display.num-outputs` |
+| `verify --require-complete` | `verification.require-complete = true` |
+| `bundle --release`, `-r` | `bundle.release = true` |
+| `prove --complete` | Omit the flag. Complete proofs are the default. |
+| `prove --security 96bits`, `-s 96bits` | Omit the flag. Its sole accepted value selected the existing proving parameters. |
 
 ### Complete and deferred proofs
 
-`prove` follows the library's `Prover::prove_full` workflow by default: it generates the VM STARK
-and any required precompile STARK, without exporting a raw precompile witness. `prove --complete`
-explicitly selects the same behavior.
+By default, `prove` calls `Prover::prove_full` and writes the VM STARK and any required
+precompile STARK to the proof file.
 
-Use `prove --deferred` to opt into the library's `Prover::prove` workflow: generate only the VM
-STARK and include the raw precompile witness in the `.proof` file for later proving. That witness
-includes raw precompile inputs and can reveal inputs taken from private advice. Only use this
-option when that disclosure is intended; keep the default complete proof for publication without
-the raw witness. The two proving options cannot be combined.
+Use `prove --deferred` to call `Prover::prove` and export the raw precompile witness in
+the proof file for later proving. The witness includes precompile inputs and can reveal
+values taken from private advice. Select this mode explicitly when producing the artifact.
 
 Without precompile work, the VM STARK alone is already complete in either mode. Deferral applies
 to the precompile STARK; normal execution still checks precompile predicates natively. Proving
@@ -201,12 +272,12 @@ exit with status 0 and print `Proof status: deferred`, the VM STARK conjectured 
 security levels, the natively validated witness, missing precompile STARK, and outstanding root.
 Native validation does not establish a cryptographically complete precompile proof.
 
-Use `verify --require-complete` to require a fully STARK-backed proof. A serialized deferred
+Use `verify --set verification.require-complete=true` to require a fully STARK-backed proof. A serialized deferred
 artifact then exits with status 1 before STARK verification or native witness evaluation. This
 is a policy rejection based on unauthenticated proof metadata; it does not establish whether the
 proof is valid.
 
-Complete results exit with status 0 with or without `--require-complete`. They print
+Complete proofs that satisfy the verification policy exit with status 0. They print
 `Proof status: complete` and the minimum conjectured and proven security levels of the verified
 STARKs (the VM levels alone if there is no precompile work). Invalid STARKs, malformed or false
 witnesses, root mismatches, and admission failures always fail verification.
@@ -218,7 +289,7 @@ As described [here](https://docs.miden.xyz/miden-vm/overview#inputs-and-outputs)
 - Public inputs:
   - `operand_stack` - can be supplied to the VM to initialize the stack with the desired values before a program starts executing. If the number of provided input values is less than 16, the input stack will be padded with zeros to the length of 16. The maximum number of the stack inputs is limited by 16 values, providing more than 16 values will cause an error.
 - Secret (or nondeterministic) inputs:
-  - `advice_stack` - can be supplied to the VM. There is no limit on how much data the advice provider can hold. This is provided as a string array where each string entry represents a field element.
+  - `advice_stack` - can be supplied to the VM. The combined logical advice size is bounded by `execution.max-advice-size-bytes`. This is provided as a string array where each string entry represents a field element.
   - `advice_map` - is supplied as a map of 64-character hex keys, each mapped to an array of numbers. The hex keys are interpreted as 4 field elements and the arrays of numbers are interpreted as arrays of field elements.
   - `merkle_store` - the Merkle store is container that allows the user to define `merkle_tree`, `sparse_merkle_tree` and `partial_merkle_tree` data structures.
     - `merkle_tree` - is supplied as an array of 64-character hex values where each value represents a leaf (4 elements) in the tree.
@@ -234,7 +305,7 @@ After a program finishes executing, the elements that remain on the stack become
 In the `miden-vm/masm-examples/fib` directory, we provide a very simple Fibonacci calculator example. This example computes the 1001st term of the Fibonacci sequence. You can execute this example on Miden VM like so:
 
 ```shell
-./target/optimized/miden-vm run miden-vm/masm-examples/fib/fib.masm
+./target/optimized/miden-vm run miden-vm/masm-examples/fib/fib.masm --set display.num-outputs=1
 ```
 
 ### Capturing Output

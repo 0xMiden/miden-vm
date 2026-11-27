@@ -187,7 +187,8 @@ pub fn get_masm_program(
 /// Parses a byte-size string into a byte count.
 ///
 /// A bare integer is interpreted as bytes. A trailing `K`/`M`/`G` suffix scales it by
-/// 1000/1000²/1000³; a trailing `Ki`/`Mi`/`Gi` suffix scales it by 1024/1024²/1024³.
+/// powers of 1000. The binary suffixes `Ki`, `Mi`, and `Gi` use powers of 1024.
+/// An optional final `B` denotes bytes. Underscores may separate decimal digits.
 pub fn parse_byte_size(input: &str) -> Result<u64, String> {
     const KI: u64 = 1024;
     const MI: u64 = KI * 1024;
@@ -197,6 +198,7 @@ pub fn parse_byte_size(input: &str) -> Result<u64, String> {
     const G: u64 = M * 1000;
 
     let trimmed = input.trim();
+    let trimmed = trimmed.strip_suffix('B').unwrap_or(trimmed);
     let (digits, multiplier) = [("Ki", KI), ("Mi", MI), ("Gi", GI), ("K", K), ("M", M), ("G", G)]
         .into_iter()
         .find_map(|(suffix, multiplier)| {
@@ -204,11 +206,17 @@ pub fn parse_byte_size(input: &str) -> Result<u64, String> {
         })
         .unwrap_or((trimmed, 1));
 
-    let value: u64 = digits.trim().parse().map_err(|_| {
-        format!(
-            "`{input}` is not a valid byte size (expected a bare integer or a K/M/G/Ki/Mi/Gi suffix, e.g. `512M`, `32Gi`)"
-        )
-    })?;
+    let digits = digits.trim();
+    if !digits
+        .split('_')
+        .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return Err(format!("`{input}` is not a valid whole byte size (e.g. 512MB or 32GiB)"));
+    }
+    let value: u64 = digits
+        .replace('_', "")
+        .parse()
+        .map_err(|_| format!("`{input}` overflows a 64-bit byte count"))?;
 
     value
         .checked_mul(multiplier)
@@ -223,6 +231,7 @@ mod tests {
     fn parse_byte_size_accepts_bare_integers() {
         assert_eq!(parse_byte_size("0").unwrap(), 0);
         assert_eq!(parse_byte_size("12345").unwrap(), 12345);
+        assert_eq!(parse_byte_size("12_345B").unwrap(), 12345);
     }
 
     #[test]
@@ -230,6 +239,7 @@ mod tests {
         assert_eq!(parse_byte_size("1K").unwrap(), 1_000);
         assert_eq!(parse_byte_size("512M").unwrap(), 512_000_000);
         assert_eq!(parse_byte_size("32G").unwrap(), 32_000_000_000);
+        assert_eq!(parse_byte_size("32GB").unwrap(), 32_000_000_000);
     }
 
     #[test]
@@ -237,6 +247,7 @@ mod tests {
         assert_eq!(parse_byte_size("1Ki").unwrap(), 1024);
         assert_eq!(parse_byte_size("1Mi").unwrap(), 1024 * 1024);
         assert_eq!(parse_byte_size("64Gi").unwrap(), 64 << 30);
+        assert_eq!(parse_byte_size("1_024 KiB").unwrap(), 1 << 20);
     }
 
     #[test]
@@ -245,6 +256,9 @@ mod tests {
         assert!(parse_byte_size("G").is_err());
         assert!(parse_byte_size("12X").is_err());
         assert!(parse_byte_size("12.5M").is_err());
+        for invalid in ["_1", "1_", "1__2", "3BB", "-1B", "1e3B"] {
+            assert!(parse_byte_size(invalid).is_err(), "{invalid}");
+        }
     }
 
     #[test]

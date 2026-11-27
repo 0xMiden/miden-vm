@@ -7,9 +7,9 @@ use miden_core::{
 };
 use miden_precompiles::{UintDomain, UintPrecompile};
 use miden_vm::{
-    Assembler, DefaultHost, ExecutionProof, PrecompileProof, PrecompileStatus, PrecompileWitness,
-    Processor, Program, StarkProof, VmProof, default_verification_precompile_limits,
-    serde::Serializable,
+    Assembler, DefaultHost, ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus,
+    PrecompileWitness, Processor, Program, StarkProof, VmProof,
+    default_verification_precompile_limits, serde::Serializable,
 };
 use predicates::prelude::*;
 use tempfile::TempDir;
@@ -71,36 +71,29 @@ fn cli_precompile_policy_errors_precede_input_loading() {
         .args(["prove", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("--complete"))
         .stdout(predicate::str::contains("--deferred"))
         .stdout(predicate::str::contains("private advice"))
         .stdout(predicate::str::contains("when that disclosure is intended"));
     bin_under_test(dir.path())
-        .args(["prove", "missing.masm", "--complete", "--deferred"])
+        .args(["prove", "missing.masm", "--complete"])
         .assert()
         .code(2)
-        .stderr(predicate::str::contains("cannot be used with"))
+        .stderr(predicate::str::contains("--complete"))
         .stdout(predicate::str::is_empty());
     bin_under_test(dir.path())
         .args(["verify", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("--require-complete"))
-        .stdout(predicate::str::contains("By default, accept valid deferred proofs"))
-        .stdout(predicate::str::contains("--allow-deferred").not());
+        .stdout(predicate::str::contains("--set"))
+        .stdout(predicate::str::contains("--require-complete").not());
     let invalid = [
-        ("--max-precompile-elements", (u128::from(u64::MAX) + 1).to_string()),
-        ("--max-precompile-hash-bytes", format!("{}Gi", u64::MAX)),
-        ("--max-precompile-msm-terms", (u64::from(u32::MAX) + 1).to_string()),
-        ("--max-precompile-total-msm-terms", "1Mi".to_owned()),
+        ("precompiles.max-elements", (u128::from(u64::MAX) + 1).to_string()),
+        ("precompiles.hash.max-total-size", format!("{}Gi", u64::MAX)),
+        ("precompiles.msm.max-size", (u64::from(u32::MAX) + 1).to_string()),
+        ("precompiles.msm.max-total-size", "1Mi".to_owned()),
     ];
     for action in ["run", "prove", "verify"] {
-        for args in invalid.iter().map(|(flag, value)| vec![*flag, value.as_str()]).chain([vec![
-            "--max-precompile-elements",
-            "1",
-            "--max-precompile-elements",
-            "1",
-        ]]) {
+        for (key, value) in &invalid {
             let mut command = bin_under_test(dir.path());
             command.arg(action);
             if action == "verify" {
@@ -109,10 +102,11 @@ fn cli_precompile_policy_errors_precede_input_loading() {
                 command.arg("missing.masm");
             }
             command
-                .args(&args)
+                .arg("--set")
+                .arg(format!("{key}={value}"))
                 .assert()
-                .code(2)
-                .stderr(predicate::str::contains(args[0]))
+                .failure()
+                .stderr(predicate::str::contains(*key))
                 .stdout(predicate::str::is_empty());
         }
     }
@@ -139,6 +133,13 @@ fn cli_private_precompile_witness_export_requires_opt_in() {
     .unwrap();
 
     bin_under_test(dir.path())
+        .args(["prove", "program.masm", "--set", "resources.precompile-prover-memory=0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("precompile prover memory"))
+        .stderr(predicate::str::contains("budget of 0 bytes"));
+
+    bin_under_test(dir.path())
         .args(["prove", "program.masm"])
         .assert()
         .success()
@@ -148,7 +149,13 @@ fn cli_private_precompile_witness_export_requires_opt_in() {
     assert!(matches!(read_proof(dir.path()).precompile(), PrecompileStatus::Proven(_)));
 
     bin_under_test(dir.path())
-        .args(["prove", "program.masm", "--deferred"])
+        .args([
+            "prove",
+            "program.masm",
+            "--deferred",
+            "--set",
+            "resources.precompile-prover-memory=0",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("Proof status: deferred"))
@@ -174,9 +181,7 @@ fn cli_precompile_execution_and_export_limits_cover_masm_and_masp() {
     )
     .unwrap();
     let per_request = eq.felt_len() + Node::and(Word::default(), Word::default()).felt_len();
-    // One request reaches the export ceiling first; repeated registrations reach the execution
-    // ceiling first because the exported uint nodes are shared. The CLI applies the same ceiling
-    // while the library continues to account for both scopes independently.
+    // Repeated registrations are charged during execution even when export shares the uint nodes.
     for requests in [1, 3] {
         let program = write_program(dir.path(), &precompile_source(requests, 1));
         let (_, portable) = Processor::new(&program)
@@ -192,16 +197,23 @@ fn cli_precompile_execution_and_export_limits_cover_masm_and_masp() {
                 &default_verification_precompile_limits(),
             )
             .unwrap();
-        let boundary =
-            u64::try_from(requests * per_request).unwrap().max(prepared.work().elements());
+        let execution_elements = u64::try_from(requests * per_request).unwrap();
+        let verification_elements = prepared.work().elements();
+        let shared = execution_elements.max(verification_elements);
+        let (scope, boundary) = if requests == 1 {
+            ("verification", verification_elements)
+        } else {
+            ("execution", execution_elements)
+        };
+        fs::write(
+            dir.path().join("miden-vm.toml"),
+            format!("schema-version = 1\n[precompiles]\nmax-elements = {shared}\n"),
+        )
+        .unwrap();
         for extension in ["masm", "masp"] {
             for action in ["run", "prove"] {
                 let mut command = bin_under_test(dir.path());
-                command
-                    .arg(action)
-                    .arg(format!("program.{extension}"))
-                    .arg("--max-precompile-elements")
-                    .arg(boundary.to_string());
+                command.arg(action).arg(format!("program.{extension}"));
                 if action == "prove" {
                     command.arg("--deferred");
                 }
@@ -210,8 +222,8 @@ fn cli_precompile_execution_and_export_limits_cover_masm_and_masp() {
                 command
                     .arg(action)
                     .arg(format!("program.{extension}"))
-                    .arg("--max-precompile-elements")
-                    .arg((boundary - 1).to_string());
+                    .arg("--set")
+                    .arg(format!("{scope}.precompiles.max-elements={}", boundary - 1));
                 if action == "prove" {
                     command.arg("--deferred");
                 }
@@ -246,10 +258,16 @@ fn cli_precompile_verification_status_limits_and_failures() {
         .unwrap();
     let elements = prepared.work().elements();
     verify_command(dir.path(), &program)
-        .arg("--require-complete")
+        .args(["--set", "verification.min-security-bits=1000"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("below the required 1000 bits"))
+        .stdout(predicate::str::contains("validated natively").not());
+    verify_command(dir.path(), &program)
+        .args(["--set", "verification.require-complete=true"])
         .assert()
         .code(1)
-        .stderr(predicate::str::contains("--require-complete rejects deferred proofs"))
+        .stderr(predicate::str::contains("rejects deferred proofs"))
         .stderr(predicate::str::contains("proof has not been verified"))
         .stdout(predicate::str::contains("Proof status:").not())
         .stdout(predicate::str::contains("validated natively").not());
@@ -268,11 +286,11 @@ fn cli_precompile_verification_status_limits_and_failures() {
         )))
         .stdout(predicate::str::contains("Minimum per-STARK security level:").not());
     verify_command(dir.path(), &program)
-        .args(["--max-precompile-elements", &elements.to_string()])
+        .args(["--set", &format!("verification.precompiles.max-elements={elements}")])
         .assert()
         .success();
     verify_command(dir.path(), &program)
-        .args(["--max-precompile-elements", &(elements - 1).to_string()])
+        .args(["--set", &format!("verification.precompiles.max-elements={}", elements - 1)])
         .assert()
         .failure()
         .stdout(predicate::str::contains("Proof status:").not());
@@ -283,10 +301,13 @@ fn cli_precompile_verification_status_limits_and_failures() {
         .success()
         .stdout(predicate::str::contains("Proof status: complete"));
     let complete = read_proof(dir.path());
-    for args in [vec![], vec!["--require-complete"]] {
+    // Verification consumes the proof, public inputs/outputs and expected hash.
+    fs::remove_file(dir.path().join("program.masm")).unwrap();
+    fs::remove_file(dir.path().join("program.masp")).unwrap();
+    for args in [vec![], vec!["--set", "verification.require-complete=true"]] {
         verify_command(dir.path(), &program)
             .args(args)
-            .args(["--max-precompile-elements", "0"])
+            .args(["--set", "precompiles.max-elements=0"])
             .assert()
             .code(0)
             .stdout(predicate::str::contains("Proof status: complete"))
@@ -308,7 +329,7 @@ fn cli_precompile_verification_status_limits_and_failures() {
         }),
     );
     write_proof(dir.path(), &invalid_precompile);
-    for args in [vec![], vec!["--require-complete"]] {
+    for args in [vec![], vec!["--set", "verification.require-complete=true"]] {
         verify_command(dir.path(), &program)
             .args(args)
             .assert()
@@ -345,13 +366,13 @@ fn cli_precompile_verification_status_limits_and_failures() {
     for require_complete in [false, true] {
         let mut command = verify_command(dir.path(), &program);
         if require_complete {
-            command.arg("--require-complete");
+            command.args(["--set", "verification.require-complete=true"]);
         }
         command
             .assert()
             .failure()
             .stderr(predicate::str::contains(if require_complete {
-                "--require-complete rejects deferred proofs; proof has not been verified"
+                "proof has not been verified"
             } else {
                 "Program failed verification!"
             }))
@@ -361,7 +382,7 @@ fn cli_precompile_verification_status_limits_and_failures() {
 
     // Deferring the precompile STARK must not bypass native execution checks in either mode.
     let program = write_program(dir.path(), &precompile_source(1, 2));
-    for args in [vec![], vec!["--complete"], vec!["--deferred"]] {
+    for args in [vec![], vec!["--deferred"]] {
         bin_under_test(dir.path())
             .args(["prove", "program.masm"])
             .args(args)
@@ -380,23 +401,61 @@ fn cli_precompile_verification_status_limits_and_failures() {
 }
 
 #[test]
-fn cli_precompile_empty_proof_is_complete() {
+fn cli_proves_and_verifies_empty_precompile_work_with_each_hash_schedule() {
     let dir = TempDir::new().unwrap();
-    let program = write_program(dir.path(), "begin push.1 drop end");
-    for prove_args in [vec![], vec!["--complete"], vec!["--deferred"]] {
-        bin_under_test(dir.path())
-            .args(["prove", "program.masm"])
-            .args(prove_args)
-            .assert()
-            .success()
-            .stdout(predicate::str::contains("Proof status: complete"));
-        assert!(matches!(read_proof(dir.path()).precompile(), PrecompileStatus::Empty));
-        for verify_args in [vec![], vec!["--require-complete"]] {
+    let program = write_program(dir.path(), "begin push.7 swap drop end");
+    for (file, hasher) in [
+        ("program.masm", HashFunction::Eidos),
+        ("program.masp", HashFunction::Blake3_256),
+    ] {
+        // The first case exercises the default hasher. The second selects BLAKE3 from the file.
+        if hasher == HashFunction::Blake3_256 {
+            fs::write(
+                dir.path().join("miden-vm.toml"),
+                "schema-version = 1\n[proving]\nhasher = \"blake3-256\"\n",
+            )
+            .unwrap();
+        }
+
+        let mut eager_proof = None;
+        for hash_lde_blocks in [false, true] {
+            let mut prove = bin_under_test(dir.path());
+            // A single worker makes proof-of-work witness selection deterministic across runs.
+            prove
+                .env("RAYON_NUM_THREADS", "1")
+                .args(["prove", file, "--set", "display.num-outputs=0"])
+                .args(["--set", &format!("proving.hash-lde-blocks={hash_lde_blocks}")]);
+            if hash_lde_blocks {
+                // An execution without precompiles yields a complete proof even with --deferred.
+                prove.arg("--deferred");
+            }
+            prove
+                .assert()
+                .success()
+                .stdout(predicate::str::contains("Proof status: complete"))
+                .stdout(predicate::str::contains("Output: []"));
+
+            let proof = read_proof(dir.path());
+            assert_eq!(proof.vm().proof.hash_fn(), hasher);
+            assert!(matches!(proof.precompile(), PrecompileStatus::Empty));
+            let outputs: serde_json::Value =
+                serde_json::from_slice(&fs::read(dir.path().join("program.outputs")).unwrap())
+                    .unwrap();
+            let stack = outputs["stack"].as_array().unwrap();
+            assert_eq!(stack.len(), miden_core::program::MIN_STACK_DEPTH);
+            assert_eq!(stack[0], "7");
+
             verify_command(dir.path(), &program)
-                .args(verify_args)
+                .args(["--set", "verification.require-complete=true"])
                 .assert()
                 .success()
                 .stdout(predicate::str::contains("Proof status: complete"));
+
+            if let Some(eager) = eager_proof.as_ref() {
+                assert_eq!(&proof, eager, "block scheduling must preserve the proof");
+            } else {
+                eager_proof = Some(proof);
+            }
         }
     }
 }

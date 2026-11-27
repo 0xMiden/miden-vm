@@ -1,0 +1,59 @@
+# Settings form the public configuration tree. Named groups reuse the same
+# policy fields in multiple scopes. Runtime libraries supply omitted defaults.
+schema-version = 1
+
+[settings]
+precompiles = { group = "precompile-policy" }
+
+[settings.execution]
+precompiles = { group = "precompile-policy" }
+max-cycles = { type = "u32", description = "Maximum execution cycles." }
+expected-cycles = { type = "u32", description = "Expected cycles, rounded up to a power of two and at least the minimum trace length." }
+core-trace-fragment-size = { type = "usize", description = "Number of cycles in each core trace fragment. Must be positive." }
+max-advice-size-bytes = { type = "bytes-usize", description = "Maximum combined logical size of the advice stack, map, and Merkle store." }
+max-hash-input-bytes = { type = "bytes-usize", description = "Maximum input bytes in one hash invocation." }
+max-num-continuations = { type = "usize", description = "Maximum entries on the execution continuation stack." }
+max-stack-depth = { type = "usize", description = "Maximum operand-stack elements across active and suspended contexts." }
+max-memory-elements = { type = "usize", description = "Maximum memory elements, rounded up to whole words." }
+
+[settings.resources]
+max-prover-memory = { type = "bytes-u64", description = "Modelled memory budget for both proving stages." }
+vm-prover-memory = { type = "bytes-u64", description = "Modelled VM prover memory budget, also used for the run trace estimate." }
+precompile-prover-memory = { type = "bytes-u64", description = "Modelled precompile prover memory budget." }
+
+[groups.precompile-policy]
+max-elements = { type = "u64", description = "Maximum structural field elements in this accounting scope." }
+hash = { group = "hash-work" }
+msm = { group = "msm-work" }
+uint = { group = "fixed-size-work" }
+curve = { group = "fixed-size-work" }
+
+[groups.hash-work]
+max-count = { type = "u64", description = "Maximum hash operations." }
+max-total-size = { type = "bytes-u64", description = "Maximum total hash input bytes." }
+max-size = { type = "bytes-u32", description = "Maximum input bytes for one hash operation." }
+
+[groups.msm-work]
+max-count = { type = "u64", description = "Maximum MSM operations." }
+max-total-size = { type = "u64", description = "Maximum total MSM terms." }
+max-size = { type = "u32", description = "Maximum terms for one MSM operation." }
+
+[groups.fixed-size-work]
+max-count = { type = "u64", description = "Maximum operations in this class." }
+max-total-size = { type = "u64", description = "Maximum total fixed-size operation units in this class." }
+max-size = { type = "u32", description = "Maximum units for one operation in this class." }
+
+[settings.proving]
+hasher = { type = "hash-function", description = "Commitment hash function for proving." }
+hash-lde-blocks = { type = "bool", description = "Hash completed blocks during the final VM trace LDE when the commitment scheme supports it." }
+
+[settings.verification]
+precompiles = { group = "precompile-policy" }
+require-complete = { type = "bool", default = false, description = "Require a complete STARK-backed proof." }
+min-security-bits = { type = "u32", description = "Minimum conjectured security in bits for each verified STARK." }
+
+[settings.display]
+num-outputs = { type = "usize", default = 16, description = "Number of stack elements printed to the terminal." }
+
+[settings.bundle]
+release = { type = "bool", default = false, description = "Strip debug symbols from the bundled package." }

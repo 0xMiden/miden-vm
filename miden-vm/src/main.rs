@@ -2,10 +2,11 @@ extern crate alloc;
 
 use std::{
     ffi::{OsStr, OsString},
+    path::PathBuf,
     process::ExitCode,
 };
 
-use clap::{FromArgMatches, Parser, Subcommand};
+use clap::{Args, FromArgMatches, Parser, Subcommand};
 use miden_assembly::diagnostics::Report;
 #[cfg(feature = "tracing-forest")]
 use tracing_forest::ForestLayer;
@@ -82,10 +83,13 @@ enum Behavior {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "miden-vm")]
+#[command(name = "miden-vm", version)]
 pub struct Cli {
     #[command(subcommand)]
     action: Actions,
+
+    #[command(flatten)]
+    parameters: ParameterArgs,
 
     /// Indicates whether the vm's CLI is being called directly, or externally
     /// under an alias (like in the case of
@@ -94,25 +98,61 @@ pub struct Cli {
     external: bool,
 }
 
-/// CLI actions
-#[derive(Debug, Parser)]
-pub enum Actions {
-    Compile(cli::CompileCmd),
-    Bundle(cli::BundleCmd),
-    Prove(cli::ProveCmd),
-    Run(cli::RunCmd),
-    Verify(cli::VerifyCmd),
+#[derive(Args, Debug)]
+struct ParameterArgs {
+    /// Load reusable settings from PATH (defaults to ./miden-vm.toml when present).
+    #[arg(long, value_name = "PATH")]
+    config: Option<PathBuf>,
+
+    /// Override a configuration setting, e.g. --set resources.max-prover-memory=8GiB.
+    #[arg(long = "set", value_name = "KEY=VALUE")]
+    settings: Vec<String>,
 }
 
-/// CLI entry point
+// Clap propagates a global argument from the deepest subcommand that supplied it. For a
+// repeatable option this would discard earlier --set arguments. Parse the two positions
+// independently and join their assignments in command-line order.
+#[derive(Args, Debug)]
+struct Invocation<T: Args> {
+    #[command(flatten)]
+    parameters: ParameterArgs,
+    #[command(flatten)]
+    command: T,
+}
+
+impl<T: Args> Invocation<T> {
+    fn execute(
+        self,
+        mut leading: ParameterArgs,
+        run: impl FnOnce(&T, &cli::config::Settings) -> Result<(), Report>,
+    ) -> Result<(), Report> {
+        if leading.config.is_some() && self.parameters.config.is_some() {
+            return Err(Report::msg("--config may only be supplied once"));
+        }
+        let path = self.parameters.config.or(leading.config);
+        leading.settings.extend(self.parameters.settings);
+        let settings = cli::config::Settings::load(path.as_deref(), &leading.settings)?;
+        run(&self.command, &settings)
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum Actions {
+    Compile(Invocation<cli::CompileCmd>),
+    Bundle(Invocation<cli::BundleCmd>),
+    Prove(Invocation<cli::ProveCmd>),
+    Run(Invocation<cli::RunCmd>),
+    Verify(Invocation<cli::VerifyCmd>),
+}
+
 impl Cli {
-    pub fn execute(&self) -> Result<(), Report> {
-        match &self.action {
-            Actions::Compile(compile) => compile.execute(),
-            Actions::Bundle(compile) => compile.execute(),
-            Actions::Prove(prove) => prove.execute(),
-            Actions::Run(run) => run.execute(),
-            Actions::Verify(verify) => verify.execute(),
+    pub fn execute(self) -> Result<(), Report> {
+        match self.action {
+            Actions::Compile(cmd) => cmd.execute(self.parameters, |cmd, _| cmd.execute()),
+            Actions::Bundle(cmd) => cmd.execute(self.parameters, cli::BundleCmd::execute),
+            Actions::Prove(cmd) => cmd.execute(self.parameters, cli::ProveCmd::execute),
+            Actions::Run(cmd) => cmd.execute(self.parameters, cli::RunCmd::execute),
+            Actions::Verify(cmd) => cmd.execute(self.parameters, cli::VerifyCmd::execute),
         }
     }
 
@@ -173,6 +213,38 @@ fn run() -> Result<(), Report> {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn parameters_on_either_side_of_the_subcommand_work_in_both_entry_points() {
+        let cwd = tempfile::tempdir().unwrap();
+        let file = cwd.path().join("ci.toml");
+        std::fs::write(&file, "[display]\nnum-outputs = 8").unwrap();
+        for argv0 in ["miden-vm", "miden vm"] {
+            let cli: Cli = MidenVmCli::try_parse_from([
+                argv0,
+                "--config",
+                file.to_str().unwrap(),
+                "--set",
+                "execution.expected-cycles=128",
+                "run",
+                "unused.masm",
+                "--set",
+                "display.num-outputs=4",
+            ])
+            .unwrap()
+            .try_into()
+            .unwrap();
+            let Actions::Run(cmd) = cli.action else {
+                panic!("expected run")
+            };
+            cmd.execute(cli.parameters, |_, settings| {
+                assert_eq!(settings.execution.expected_cycles(), 128);
+                assert_eq!(settings.num_outputs, 4);
+                Ok(())
+            })
+            .unwrap();
+        }
+    }
 
     #[test]
     /// Check that the VM recognizes when it is being called under an alias.

@@ -9,15 +9,14 @@ use miden_processor::{
     trace::{MIN_TRACE_LEN, TraceLenSummary},
 };
 use miden_vm::{Processor, internal::InputFile};
-use miden_vm_stark::memory::{DEFAULT_MAX_PROVER_MEMORY_BYTES, canonical_budget};
 use tracing::instrument;
 
 use super::{
+    config::Settings,
     data::{Libraries, OutputFile},
-    precompile_limits::PrecompileArgs,
     utils::{
         get_masm_program, get_masp_package, load_package_with_handlers,
-        load_program_package_with_handlers, parse_byte_size,
+        load_program_package_with_handlers,
     },
 };
 
@@ -28,10 +27,6 @@ pub struct RunCmd {
     #[arg(value_parser)]
     program_file: PathBuf,
 
-    /// Number of cycles the program is expected to consume
-    #[arg(short = 'e', long = "exp-cycles", default_value = "64")]
-    expected_cycles: u32,
-
     /// Path to input file
     #[arg(short = 'i', long = "input", value_parser)]
     input_file: Option<PathBuf>,
@@ -39,30 +34,6 @@ pub struct RunCmd {
     /// Paths to .masp library files (only used for assembly files)
     #[arg(short = 'l', long = "libraries", value_parser)]
     library_paths: Vec<PathBuf>,
-
-    /// Maximum number of cycles a program is allowed to consume
-    #[arg(short = 'm', long = "max-cycles", default_value_t = ExecutionOptions::MAX_CYCLES)]
-    max_cycles: u32,
-
-    /// Maximum combined logical advice size in bytes, also bounding witness loading
-    #[arg(long = "max-advice-size", default_value_t = ExecutionOptions::DEFAULT_MAX_ADVICE_SIZE_BYTES)]
-    max_advice_size: usize,
-
-    /// VM prover memory limit for the recorded execution (512M, 32Gi).
-    /// A definite overrun fails the run. A possible overrun emits a warning.
-    #[arg(
-        long = "max-prover-memory",
-        default_value_t = DEFAULT_MAX_PROVER_MEMORY_BYTES,
-        value_parser = parse_byte_size
-    )]
-    max_prover_memory: u64,
-
-    #[command(flatten)]
-    precompile_limits: PrecompileArgs,
-
-    /// Number of outputs
-    #[arg(short = 'n', long = "num-outputs", default_value = "16")]
-    num_outputs: usize,
 
     /// Path to output file
     #[arg(short = 'o', long = "output", value_parser)]
@@ -74,19 +45,7 @@ pub struct RunCmd {
 }
 
 impl RunCmd {
-    fn get_execution_options(&self) -> Result<ExecutionOptions, Report> {
-        let options = ExecutionOptions::new(
-            Some(self.max_cycles),
-            self.expected_cycles,
-            ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-        )
-        .map(|options| options.with_max_advice_size_bytes(self.max_advice_size))
-        .map_err(|err| Report::msg(format!("{err}")))?;
-        Ok(self.precompile_limits.apply_to(options))
-    }
-
-    pub fn execute(&self) -> Result<(), Report> {
-        let execution_options = self.get_execution_options()?;
+    pub(crate) fn execute(&self, settings: &Settings) -> Result<(), Report> {
         println!("===============================================================================");
         println!("Run program: {}", self.program_file.display());
         println!("-------------------------------------------------------------------------------");
@@ -103,8 +62,8 @@ impl RunCmd {
 
         // use a single match expression based on file extension
         let (claim, summary) = match ext.as_str() {
-            "masp" => run_masp_program(self, execution_options)?,
-            "masm" => run_masm_program(self, execution_options)?,
+            "masp" => run_masp_program(self, settings.execution.clone())?,
+            "masm" => run_masm_program(self, settings.execution.clone())?,
             _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),
         };
 
@@ -114,23 +73,22 @@ impl RunCmd {
             now.elapsed().as_millis()
         );
 
-        let budget = canonical_budget(self.max_prover_memory);
+        let budget = settings.prover.trace_budget();
+        let max_prover_memory = settings.prover.max_prover_memory_bytes();
         let padded_heights = summary.padded_heights();
         if budget
             .prover_peak_bytes(&padded_heights)
-            .is_none_or(|bytes| bytes > self.max_prover_memory)
+            .is_none_or(|bytes| bytes > max_prover_memory)
         {
             let [core, chiplets, _, lookup] = padded_heights;
             let min_bytes = budget.prover_peak_bytes(&[core, chiplets, MIN_TRACE_LEN, lookup]);
-            if min_bytes.is_none_or(|bytes| bytes > self.max_prover_memory) {
+            if min_bytes.is_none_or(|bytes| bytes > max_prover_memory) {
                 return Err(Report::msg(format!(
-                    "VM trace requires more than the {} byte prover memory limit even at the minimum Eidos height",
-                    self.max_prover_memory,
+                    "VM trace requires more than the {max_prover_memory} byte prover memory limit even at the minimum Eidos height"
                 )));
             }
             eprintln!(
-                "Warning: VM prover memory upper bound exceeds the {} byte limit. The prover checks the exact padded heights.",
-                self.max_prover_memory
+                "Warning: VM prover memory upper bound exceeds the {max_prover_memory} byte limit. The prover checks the exact padded heights."
             );
         }
 
@@ -139,7 +97,7 @@ impl RunCmd {
             OutputFile::write(claim.stack_outputs(), output_path).map_err(Report::msg)?;
         } else {
             // write the stack outputs to the terminal
-            println!("Output: {:?}", claim.stack_outputs().get_num_elements(self.num_outputs));
+            println!("Output: {:?}", claim.stack_outputs().get_num_elements(settings.num_outputs));
         }
 
         let chiplets = summary.chiplets();

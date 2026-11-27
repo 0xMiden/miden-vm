@@ -86,12 +86,106 @@ fn cli_advice_budget_is_configurable_for_run_and_prove() {
     fs::write(&program_path, "begin push.1 end").unwrap();
     fs::write(program_path.with_extension("inputs"), r#"{"operand_stack":[]}"#).unwrap();
 
+    fs::write(
+        working_dir.path().join("limits.toml"),
+        "schema-version = 1\n[execution]\nmax-advice-size-bytes = 0\n",
+    )
+    .unwrap();
     for command in ["run", "prove"] {
-        let mut cmd = bin_under_test(working_dir.path());
-        cmd.arg(command).arg(&program_path).args(["--max-advice-size", "0"]);
-        cmd.assert()
+        for args in [["--config", "limits.toml"], ["--set", "execution.max-advice-size-bytes=0"]] {
+            bin_under_test(working_dir.path())
+                .arg(command)
+                .arg(&program_path)
+                .args(args)
+                .assert()
+                .failure()
+                .stderr(predicate::str::contains("advice provider size budget"));
+        }
+    }
+}
+
+#[test]
+fn config_selection_and_help_before_file_loading() {
+    let dir = TempDir::new().unwrap();
+    let run = || {
+        let mut cmd = bin_under_test(dir.path());
+        cmd.args(["run", "program.masm"]);
+        cmd
+    };
+    fs::write(dir.path().join("program.masm"), "begin push.7 add end").unwrap();
+    fs::write(dir.path().join("program.inputs"), r#"{"operand_stack":[]}"#).unwrap();
+    run().args(["--set", "proving.hasher=keccak"]).assert().success();
+
+    fs::write(dir.path().join("miden-vm.toml"), "display.num-outputs=0").unwrap();
+    run().assert().success().stdout(predicate::str::contains("Output: []"));
+    run()
+        .args(["--config", "missing.toml"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot read missing.toml"));
+    fs::write(dir.path().join("miden-vm.toml"), "display.num-outputs = false").unwrap();
+    run()
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("miden-vm.toml:1:23"))
+        .stderr(predicate::str::contains("display.num-outputs"));
+    fs::write(dir.path().join("ci.toml"), "display.num-outputs=1").unwrap();
+    run()
+        .args(["--config", "ci.toml"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Output: [7]"));
+    for arg in ["--version", "--help"] {
+        bin_under_test(dir.path()).arg(arg).assert().success();
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn unreadable_implicit_config_is_an_error() {
+    let dir = TempDir::new().unwrap();
+    std::os::unix::fs::symlink("missing-policy.toml", dir.path().join("miden-vm.toml")).unwrap();
+    bin_under_test(dir.path())
+        .args(["run", "missing.masm"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot read miden-vm.toml"));
+}
+
+#[test]
+fn execution_limits_reach_the_vm() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("program.inputs"), r#"{"operand_stack":[]}"#).unwrap();
+
+    for (assignment, source, error) in [
+        ("execution.max-cycles=64", "begin repeat.128 dup.0 add end end", "max cycles 64"),
+        (
+            "execution.max-stack-depth=16",
+            "begin push.7 drop end",
+            "operand stack depth 17",
+        ),
+        (
+            "execution.max-memory-elements=0",
+            "begin push.7 mem_store.0 end",
+            "maximum number of memory elements",
+        ),
+        (
+            "execution.max-num-continuations=0",
+            "begin push.1 if.true nop else nop end end",
+            "continuation stack size exceeded",
+        ),
+        (
+            "execution.max-hash-input-bytes=0",
+            "begin push.64.1.0 exec.::miden::core::precompiles::hashes::sha256::hash_bytes_mem end",
+            "sha256 input length 1 bytes",
+        ),
+    ] {
+        fs::write(dir.path().join("program.masm"), source).unwrap();
+        bin_under_test(dir.path())
+            .args(["run", "program.masm", "--set", assignment])
+            .assert()
             .failure()
-            .stderr(predicate::str::contains("advice provider size budget"));
+            .stderr(predicate::str::contains(error));
     }
 }
 
@@ -104,12 +198,9 @@ fn cli_run() {
 
     cmd.arg("run")
         .arg(fixture("masm-examples/fib/fib.masm"))
-        .arg("-n")
-        .arg("1")
-        .arg("-m")
-        .arg("8192")
-        .arg("-e")
-        .arg("8192");
+        .args(["--set", "display.num-outputs=1"])
+        .args(["--set", "execution.max-cycles=8192"])
+        .args(["--set", "execution.expected-cycles=8192"]);
 
     let output = cmd.unwrap();
 
@@ -177,17 +268,26 @@ fn run_and_prove_report_execution_source_location() {
 }
 
 #[test]
-fn run_rejects_definitely_insufficient_prover_memory() {
+fn run_and_prove_reject_definitely_insufficient_vm_prover_memory() {
     let working_dir = TempDir::new().unwrap();
     let program_path = working_dir.path().join("program.masm");
     fs::write(&program_path, "begin push.1 drop end").unwrap();
     fs::write(program_path.with_extension("inputs"), r#"{"operand_stack":[]}"#).unwrap();
 
     let mut cmd = bin_under_test(working_dir.path());
-    cmd.arg("run").arg(&program_path).args(["--max-prover-memory", "0"]);
+    cmd.arg("run")
+        .arg(&program_path)
+        .args(["--set", "resources.max-prover-memory=0"]);
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("more than the 0 byte prover memory limit"));
+    bin_under_test(working_dir.path())
+        .arg("prove")
+        .arg(&program_path)
+        .args(["--set", "resources.vm-prover-memory=0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("trace length exceeded the maximum of 0 rows"));
 }
 
 #[test]
@@ -215,8 +315,8 @@ fn run_warns_when_only_the_eidos_upper_bound_exceeds_the_budget() {
     cmd.args([
         "run",
         "program.masm",
-        "--max-prover-memory",
-        &exact_peak.to_string(),
+        "--set",
+        &format!("resources.vm-prover-memory={exact_peak}"),
         "-o",
         "result.json",
     ]);
@@ -702,6 +802,11 @@ fn atomic_artifact_writes_preserve_existing_files_on_io_failure() {
 #[test]
 fn cli_bundle_release_strips_debug_info() {
     let working_dir = TempDir::new().unwrap();
+    fs::write(
+        working_dir.path().join("miden-vm.toml"),
+        "schema-version = 1\n[bundle]\nrelease = true\n",
+    )
+    .unwrap();
     let cases = [
         (
             "library",
@@ -723,6 +828,7 @@ fn cli_bundle_release_strips_debug_info() {
         cmd.arg("bundle")
             .arg(&source)
             .args(&extra_args)
+            .args(["--set", "bundle.release=false"])
             .arg("--output")
             .arg(&debug_output);
         cmd.assert().success();
@@ -731,7 +837,6 @@ fn cli_bundle_release_strips_debug_info() {
         cmd.arg("bundle")
             .arg(&source)
             .args(&extra_args)
-            .arg("--release")
             .arg("--output")
             .arg(&release_output);
         cmd.assert().success();
@@ -979,8 +1084,7 @@ fn run_masm_program_honors_a_masp_kernel() {
         .arg(&program_path)
         .arg("--kernel")
         .arg(&kernel_path)
-        .arg("-n")
-        .arg("1");
+        .args(["--set", "display.num-outputs=1"]);
     cmd.assert().success();
 }
 
@@ -1046,7 +1150,7 @@ fn run_loads_a_masp_whose_kernel_shares_the_handler_section() {
     );
 
     let mut cmd = bin_under_test(working_dir.path());
-    cmd.arg("run").arg(&package_path).arg("-n").arg("1");
+    cmd.arg("run").arg(&package_path).args(["--set", "display.num-outputs=1"]);
     cmd.assert().success();
 }
 

@@ -1,8 +1,8 @@
 mod bundle;
 mod compile;
+pub(crate) mod config;
 pub mod data;
 
-mod precompile_limits;
 mod prove;
 mod run;
 pub mod utils;
