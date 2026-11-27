@@ -19,6 +19,12 @@ without first attaching it to an execution proof. It checks the expected-root me
 ordered aggregate statement, verifies the precompile STARK, and returns its authenticated security
 parameters.
 
+Enable the `masm` feature to run the Eidos STARK verifiers in the processor. Use
+`verifier.verify_masm(&claim, &proof)` for an execution proof or
+`verifier.verify_precompile_masm(&proof, expected_root)` for a standalone precompile proof.
+These methods apply the same configured limits and security threshold as the native methods.
+Every supplied STARK must use Eidos, including a precompile STARK attached to an execution proof.
+
 Stack inputs are in push order (the last value is on top), while stack outputs are in pop order (the
 first value is on top).
 
@@ -57,6 +63,7 @@ consumed by the MASM relation verifiers.
 Miden verifier can be compiled with the following features:
 
 * `std` - enabled by default and relies on the Rust standard library.
+* `masm` - enables processor-backed verification and requires `std`.
 * `no_std` does not rely on the Rust standard library and enables compilation to WebAssembly.
     * Only the `wasm32-unknown-unknown` and `wasm32-wasip1` targets are officially supported.
 

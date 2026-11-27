@@ -19,6 +19,7 @@ doctest = false
 
 [features]
 default = ["std"]
+masm = ["std", "dep:miden-air", "dep:miden-assembly", "dep:miden-core-lib", "dep:miden-processor"]
 std = [
     "miden-core/std",
     "miden-precompiles/std",
@@ -29,10 +30,13 @@ std = [
 
 [dependencies]
 # Miden dependencies
+miden-air = { workspace = true, optional = true }
 miden-core.workspace = true
+miden-core-lib = { workspace = true, optional = true, features = ["std"] }
 miden-stark.workspace = true
 miden-precompiles.workspace = true
 miden-precompiles-stark.workspace = true
+miden-processor = { workspace = true, optional = true, features = ["std"] }
 miden-vm-stark.workspace = true
 
 # External dependencies
@@ -40,6 +44,10 @@ thiserror.workspace = true
 
 [dev-dependencies]
 miden-air.workspace = true
+
+[build-dependencies]
+miden-assembly = { workspace = true, optional = true, features = ["std"] }
+miden-core-lib = { workspace = true, optional = true, features = ["std"] }
 
 [lints]
 workspace = true

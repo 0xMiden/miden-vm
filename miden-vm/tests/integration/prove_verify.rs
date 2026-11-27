@@ -456,6 +456,18 @@ mod prover_api_lifecycle {
         );
         assert_eq!(minimum_conjectured_security_level(&outcome), 96);
         assert_eq!(outcome.outstanding_precompile_root(), None);
+        #[cfg(feature = "masm")]
+        if matches!(proof.precompile(), PrecompileStatus::Empty) {
+            let verifier = Verifier::new();
+            assert_eq!(verifier.verify_masm(&claim, proof).unwrap(), outcome);
+            let wrong_claim = ExecutionClaim::new(
+                Word::default(),
+                claim.kernel().clone(),
+                stack_inputs,
+                stack_outputs,
+            );
+            assert!(verifier.verify_masm(&wrong_claim, proof).is_err());
+        }
     }
 
     #[test]
@@ -535,6 +547,19 @@ mod prover_api_lifecycle {
         assert_eq!(deferred_outcome.outstanding_precompile_root(), Some(one_root));
         assert!(deferred_outcome.precompile_security_parameters().is_none());
         assert_execution_security_levels(&one_claim, &one_deferred, &deferred_outcome);
+        #[cfg(feature = "masm")]
+        {
+            assert_eq!(
+                Verifier::new().verify_masm(&one_claim, &one_deferred).unwrap(),
+                deferred_outcome
+            );
+            assert!(matches!(
+                Verifier::new()
+                    .with_verification_precompile_limits(PrecompileLimits::new(0))
+                    .verify_masm(&one_claim, &one_deferred),
+                Err(VerificationError::DeferredWitnessPreparation(_))
+            ));
+        }
         assert!(matches!(
             Verifier::new()
                 .with_verification_precompile_limits(PrecompileLimits::new(0))
@@ -636,12 +661,44 @@ mod prover_api_lifecycle {
             .verify_precompile(&shared_precompile, two_root)
             .expect("compatible extra roots should directly verify root two");
         assert_eq!(root_two_security_parameters.conjectured_security_level(), 96);
+        #[cfg(feature = "masm")]
+        {
+            assert_eq!(
+                verifier.verify_precompile_masm(&shared_precompile, two_root).unwrap(),
+                root_two_security_parameters
+            );
+            let required = actual + 1;
+            assert!(matches!(
+                Verifier::new()
+                    .with_min_conjectured_security_level_per_stark(required)
+                    .verify_precompile_masm(&shared_precompile, two_root),
+                Err(VerificationError::InsufficientSecurityLevel { actual: found, required: min })
+                    if found == actual && min == required
+            ));
+            // The MVM proof is Eidos. A completed proof must check the PVM hash independently.
+            let unsupported_pvm = one_transported
+                .clone()
+                .complete(PrecompileProof {
+                    proof: StarkProof::new(vec![], HashFunction::Keccak),
+                    roots: vec![one_root],
+                })
+                .unwrap();
+            assert!(matches!(
+                verifier.verify_masm(&one_claim, &unsupported_pvm),
+                Err(VerificationError::UnsupportedMasmHashFunction(HashFunction::Keccak))
+            ));
+        }
 
         let mut reordered_precompile = shared_precompile.clone();
         reordered_precompile.roots.swap(0, 1);
         assert!(matches!(
             verifier.verify_precompile(&reordered_precompile, one_root),
             Err(VerificationError::PrecompileStarkVerification(_))
+        ));
+        #[cfg(feature = "masm")]
+        assert!(matches!(
+            verifier.verify_precompile_masm(&reordered_precompile, one_root),
+            Err(VerificationError::Masm(_))
         ));
 
         let mut missing_duplicate_precompile = shared_precompile.clone();
@@ -663,6 +720,11 @@ mod prover_api_lifecycle {
         assert!(matches!(
             verifier.verify(&one_claim, &mutated_vm_root),
             Err(VerificationError::StarkVerificationError(..))
+        ));
+        #[cfg(feature = "masm")]
+        assert!(matches!(
+            verifier.verify_masm(&one_claim, &mutated_vm_root),
+            Err(VerificationError::Masm(_))
         ));
 
         let mut trailing_vm_bytes = one_deferred.vm().proof.bytes().to_vec();
@@ -703,6 +765,8 @@ mod prover_api_lifecycle {
         let two_outcome = Verifier::new()
             .verify(&two_claim, &two_complete)
             .expect("completed root-two execution should verify");
+        #[cfg(feature = "masm")]
+        assert_eq!(verifier.verify_masm(&two_claim, &two_complete).unwrap(), two_outcome);
         assert!(one_outcome.is_complete());
         assert!(two_outcome.is_complete());
         assert_eq!(

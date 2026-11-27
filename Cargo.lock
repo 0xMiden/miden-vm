@@ -3547,9 +3547,12 @@ name = "miden-verifier"
 version = "1.0.0-rc.2"
 dependencies = [
  "miden-air",
+ "miden-assembly",
  "miden-core",
+ "miden-core-lib",
  "miden-precompiles",
  "miden-precompiles-stark",
+ "miden-processor",
  "miden-stark",
  "miden-vm-stark",
  "thiserror 2.0.19",

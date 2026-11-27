@@ -45,6 +45,8 @@ pub use miden_processor::{
     WitnessOutput, advice, crypto, field, serde, trace, utils,
 };
 pub use miden_prover::{PrecompileProvingError, Prover, ProverError};
+#[cfg(feature = "masm")]
+pub use miden_verifier::MasmVerificationError;
 pub use miden_verifier::{
     PrecompileVerificationError, ProofSecurityParameters, ProvenSecurityReport, SecurityReport,
     StarkVerificationError, VerificationError, VerificationOutcome, Verifier,
