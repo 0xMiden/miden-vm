@@ -11,8 +11,8 @@
 #### Changes
 
 - [BREAKING] Removed `Eq` and `PartialEq` from Falcon, ECDSA-k256, and EdDSA secret-key types in
-      non-test builds so production comparisons cannot materialize encoded private-key copies
-      ([0xMiden/crypto#1061](https://github.com/0xMiden/crypto/pull/1061), [#3456](https://github.com/0xMiden/miden-vm/pull/3456)).
+  non-test builds so production comparisons cannot materialize encoded private-key copies
+  ([0xMiden/crypto#1061](https://github.com/0xMiden/crypto/pull/1061), [#3456](https://github.com/0xMiden/miden-vm/pull/3456)).
 - [BREAKING] Replaced Miette with local diagnostic types in `miden-utils-diagnostics`. Use the existing Miden `Report` re-export, implement `Diagnostic` for custom error metadata, and use `diagnostic!` for messages with labels. The renderer emits plain text ([#4246](https://github.com/0xMiden/miden-vm/pull/4246)).
 - Consolidated Word conversion, Word ordering and String/Arc serialization tests using Proptest ([#4252](https://github.com/0xMiden/miden-vm/pull/4252)).
 
@@ -35,9 +35,9 @@
 
 - Wiped Falcon `Polynomial<FalconFelt>`, `Polynomial<i16>`, and `Polynomial<i64>` temporaries,
   `Vec<i16>` Gaussian-sample and balanced-value buffers, and encoded secret-key byte buffers during
-    key generation, deserialization, serialization, public-key derivation, NTRU checks, and signing.
-    ECDSA-k256 and EdDSA encoded serialization temporaries are also wiped
-    ([0xMiden/crypto#1061](https://github.com/0xMiden/crypto/pull/1061), [#3456](https://github.com/0xMiden/miden-vm/pull/3456)).
+  key generation, deserialization, serialization, public-key derivation, NTRU checks, and signing.
+  ECDSA-k256 and EdDSA encoded serialization temporaries are also wiped
+  ([0xMiden/crypto#1061](https://github.com/0xMiden/crypto/pull/1061), [#3456](https://github.com/0xMiden/miden-vm/pull/3456)).
   `BigInt` and `Complex64` temporaries remain tracked in
   [#3533](https://github.com/0xMiden/miden-vm/issues/3533).
 - Fixed `miden-format` writing signature commas into a preceding item's trailing comment, which produced MASM that no longer parsed. A trailing comma before `)` no longer makes signature wrapping flip between runs ([#4116](https://github.com/0xMiden/miden-vm/issues/4116)).
