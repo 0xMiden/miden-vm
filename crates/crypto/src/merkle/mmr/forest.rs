@@ -700,17 +700,17 @@ mod tests {
         assert_eq!(forest.num_leaves(), 1usize << max_height);
     }
 
+    #[cfg(target_pointer_width = "64")]
     #[test]
+    #[should_panic(expected = "forest height 32 exceeds maximum 31")]
     fn with_height_panics_above_the_largest_valid_height() {
-        let max_height = Forest::MAX_LEAVES.ilog2() as usize;
-        let height = max_height + 1;
-        let payload = std::panic::catch_unwind(|| Forest::with_height(height))
-            .expect_err("with_height should panic above the largest valid height");
-        let message = payload
-            .downcast_ref::<std::string::String>()
-            .map(|message| message.as_str())
-            .or_else(|| payload.downcast_ref::<&str>().copied())
-            .expect("panic payload should be a string");
-        assert_eq!(message, format!("forest height {height} exceeds maximum {max_height}"));
+        let _ = Forest::with_height(32);
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    #[should_panic(expected = "forest height 31 exceeds maximum 30")]
+    fn with_height_panics_above_the_largest_valid_height() {
+        let _ = Forest::with_height(31);
     }
 }
