@@ -10,7 +10,10 @@
 
 #### Changes
 
-- [BREAKING] Replaced Miette with local diagnostic types in `miden-utils-diagnostics`. Use the existing Miden `Report` re-export, implement `Diagnostic` for custom error metadata, and use `diagnostic!` for messages with labels. The renderer emits plain text ([#4246](https://github.com/0xMiden/miden-vm/pull/4246)).
+- [BREAKING] Removed `Eq` and `PartialEq` from Falcon, ECDSA-k256, and EdDSA secret-key types in
+  non-test builds so production comparisons cannot materialize encoded private-key copies
+    ([0xMiden/crypto#1061](https://github.com/0xMiden/crypto/pull/1061), [#3456](https://github.com/0xMiden/miden-vm/pull/3456)).
+  - [BREAKING] Replaced Miette with local diagnostic types in `miden-utils-diagnostics`. Use the existing Miden `Report` re-export, implement `Diagnostic` for custom error metadata, and use `diagnostic!` for messages with labels. The renderer emits plain text ([#4246](https://github.com/0xMiden/miden-vm/pull/4246)).
 - Consolidated Word conversion, Word ordering and String/Arc serialization tests using Proptest ([#4252](https://github.com/0xMiden/miden-vm/pull/4252)).
 
 - [BREAKING] Recreate serialized execution options in v1 format and re-record v4 debugger replay snapshots as v5. The readers reject unversioned execution options and v4 snapshots. The new encodings omit the overlap flag ([#4232](https://github.com/0xMiden/miden-vm/pull/4232)).
@@ -30,7 +33,14 @@
 
 #### Fixes
 
-- Fixed `miden-format` writing signature commas into a preceding item's trailing comment, which produced MASM that no longer parsed. A trailing comma before `)` no longer makes signature wrapping flip between runs ([#4116](https://github.com/0xMiden/miden-vm/issues/4116)).
+- Wiped Falcon `Polynomial<FalconFelt>`, `Polynomial<i16>`, and `Polynomial<i64>` temporaries,
+  `Vec<i16>` Gaussian-sample and balanced-value buffers, and encoded secret-key byte buffers during
+    key generation, deserialization, serialization, public-key derivation, NTRU checks, and signing.
+    ECDSA-k256 and EdDSA encoded serialization temporaries are also wiped
+    ([0xMiden/crypto#1061](https://github.com/0xMiden/crypto/pull/1061), [#3456](https://github.com/0xMiden/miden-vm/pull/3456)).
+    `BigInt` and `Complex64` temporaries remain tracked in
+    [#3533](https://github.com/0xMiden/miden-vm/issues/3533).
+  - Fixed `miden-format` writing signature commas into a preceding item's trailing comment, which produced MASM that no longer parsed. A trailing comma before `)` no longer makes signature wrapping flip between runs ([#4116](https://github.com/0xMiden/miden-vm/issues/4116)).
 - Fixed `PartialMmr::untrack` panicking in debug builds on a leaf position invalid for the forest. The position is now validated against the forest before `InOrderIndex::from_leaf_pos` runs, so invalid positions return the documented empty vec ([#4257](https://github.com/0xMiden/miden-vm/pull/4257)).
 - Fixed `Forest::trees_larger_than(u32::MAX)` panicking in debug builds and returning the input forest unchanged in release builds. It now returns the empty forest, since no tree has an index larger than `u32::MAX` ([#4259](https://github.com/0xMiden/miden-vm/pull/4259)).
 - [BREAKING] Rejected unused opcode 47, required zero padding in LOOP, CALL and SYSCALL hash inputs, and required short operation batches to be final in the VM decoder AIR. The VM proof relation and recursive VM verifier root change ([#4239](https://github.com/0xMiden/miden-vm/pull/4239)).
