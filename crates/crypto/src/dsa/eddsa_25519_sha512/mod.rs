@@ -5,7 +5,7 @@ use alloc::{string::ToString, vec::Vec};
 use core::fmt;
 
 use der::{Decode, asn1::BitStringRef};
-use ed25519_dalek::{Signer, Verifier};
+use ed25519_dalek::Signer;
 use miden_crypto_derive::{SilentDebug, SilentDisplay};
 use rand::CryptoRng;
 use thiserror::Error;
@@ -37,6 +37,10 @@ const SIGNATURE_BYTES: usize = 64;
 
 /// Secret key for EdDSA (Ed25519) signature verification over Curve25519.
 #[derive(Clone, SilentDebug, SilentDisplay)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 struct SecretKey {
     inner: ed25519_dalek::SigningKey,
 }
@@ -114,6 +118,10 @@ impl Eq for SecretKey {}
 /// A secret key for EdDSA (Ed25519) signature verification over Curve25519.
 #[derive(Clone, SilentDebug, SilentDisplay)]
 #[cfg_attr(test, derive(Eq, PartialEq))] // Safe as SecretKey has const-time eq in tests
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct SigningKey(SecretKey);
 
 impl SigningKey {
@@ -171,6 +179,10 @@ impl Deserializable for SigningKey {
 /// A key for ECDH key exchange over Curve25519
 #[derive(Clone, SilentDebug, SilentDisplay)]
 #[cfg_attr(test, derive(Eq, PartialEq))] // Safe as SecretKey has const-time eq in tests
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct KeyExchangeKey(SecretKey);
 
 impl KeyExchangeKey {
@@ -226,13 +238,18 @@ impl Deserializable for KeyExchangeKey {
 // PUBLIC KEY
 // ================================================================================================
 
+/// An Ed25519 public key with a canonical compressed point encoding.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct PublicKey {
-    pub(crate) inner: ed25519_dalek::VerifyingKey,
+    inner: ed25519_dalek::VerifyingKey,
 }
 
 impl PublicKey {
-    /// Returns a commitment to the public key using the Poseidon2 hash function.
+    /// Returns a commitment to the public key using Eidos.
     ///
     /// The commitment is computed by first converting the public key to field elements (4 bytes
     /// per element), and then computing a sequential hash of the elements.
@@ -241,9 +258,12 @@ impl PublicKey {
     }
 
     /// Verifies a signature against this public key and message.
+    ///
+    /// Requires canonical encodings of the public key, signature point `R`, and scalar `s`.
+    /// Rejects small-order public keys and signature points, matching the MASM verifier.
     pub fn verify(&self, message: Word, signature: &Signature) -> bool {
         let message_bytes: [u8; 32] = message.into();
-        self.inner.verify(&message_bytes, &signature.inner).is_ok()
+        self.inner.verify_strict(&message_bytes, &signature.inner).is_ok()
     }
 
     /// Computes the Ed25519 challenge hash from a message and signature.
@@ -336,25 +356,20 @@ impl PublicKey {
     /// - You fully understand the security implications and have a threat model that accounts for
     ///   them
     ///
-    /// When the hash is computed correctly, this method implements standard Ed25519 verification.
+    /// When the hash is computed correctly, this method implements the same verification policy
+    /// as [`Self::verify`].
     ///
     /// ## Standard Usage:
     ///
     /// For normal Ed25519 verification, use `verify()` instead.
-    ///
-    /// ## Performance
-    ///
-    /// This helper decompresses the signature's `R` component before performing group arithmetic
-    /// and reuses the cached Edwards form of the public key. Expect it to be slower than
-    /// calling `verify()` directly.
     ///
     /// # Arguments
     /// * `k_hash` - A 64-byte hash (typically computed as `SHA-512(R || A || message)`)
     /// * `signature` - The signature to verify
     ///
     /// # Returns
-    /// `Ok(())` if the verification equation `[s]B = R + [k]A` holds, or an error describing why
-    /// the verification failed.
+    /// `Ok(())` if the inputs meet the encoding and point-order requirements of [`Self::verify`]
+    /// and the equation `[s]B = R + [k]A` holds, or an error describing why verification failed.
     ///
     /// # Warning
     /// Do NOT use this method unless you fully understand Ed25519's cryptographic properties,
@@ -394,9 +409,7 @@ impl PublicKey {
 
         let a_point = self.inner.to_edwards();
 
-        // Match the stricter ed25519-dalek semantics by rejecting small-order inputs instead of
-        // multiplying the whole equation by the cofactor. dalek leaves this check opt-in via
-        // `verify_strict()`; we enforce it here to guard this hazmat API against torsion exploits.
+        // Reject small-order inputs to match `verify()` and dalek's `verify_strict()`.
         if r_point.is_small_order() {
             return Err(UncheckedVerificationError::SmallOrderSignature);
         }
@@ -404,8 +417,7 @@ impl PublicKey {
             return Err(UncheckedVerificationError::SmallOrderPublicKey);
         }
 
-        // Compute the verification equation: -[k]A + [s]B == R, mirroring dalek's raw_verify.
-        // Small-order points are rejected above and hence no need for multiplication by co-factor
+        // Compare the canonical encoding of [s]B - [k]A with R to reject noncanonical R.
         let minus_a = -a_point;
         let expected_r =
             EdwardsPoint::vartime_double_scalar_mul_basepoint(&k_scalar, &minus_a, &s_scalar)
@@ -450,7 +462,7 @@ pub enum PublicKeyError {
 /// Errors that can arise when invoking [`PublicKey::verify_with_unchecked_k`].
 #[derive(Debug, Error)]
 pub enum UncheckedVerificationError {
-    #[error("challenge scalar is not canonical")]
+    #[error("signature scalar is not canonical")]
     NonCanonicalScalar,
     #[error("signature R component failed to decompress")]
     InvalidSignaturePoint,
@@ -467,12 +479,16 @@ pub enum UncheckedVerificationError {
 
 /// EdDSA (Ed25519) signature
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct Signature {
     inner: ed25519_dalek::Signature,
 }
 
 impl Signature {
-    /// Verify against (message, public key).
+    /// Verifies this signature according to [`PublicKey::verify`].
     pub fn verify(&self, message: Word, pub_key: &PublicKey) -> bool {
         pub_key.verify(message, self)
     }
@@ -541,6 +557,12 @@ impl Deserializable for PublicKey {
         let inner = ed25519_dalek::VerifyingKey::from_bytes(&bytes).map_err(|_| {
             DeserializationError::InvalidValue("Invalid Ed25519 public key".to_string())
         })?;
+        // Dalek accepts noncanonical encodings, so compare with the canonical compression.
+        if inner.to_edwards().compress().to_bytes() != bytes {
+            return Err(DeserializationError::InvalidValue(
+                "Noncanonical Ed25519 public key".to_string(),
+            ));
+        }
         Ok(Self { inner })
     }
 }
@@ -568,5 +590,79 @@ impl Deserializable for Signature {
 impl fmt::Display for Signature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         crate::utils::write_hex(f, &self.to_bytes())
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod key_arbitrary {
+    use proptest::prelude::*;
+
+    use super::{
+        KeyExchangeKey, PublicKey, SECRET_KEY_BYTES, SIGNATURE_BYTES, SecretKey, Signature,
+        SigningKey,
+    };
+
+    impl Arbitrary for SecretKey {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // An Ed25519 secret key is an unconstrained 32-byte seed.
+            any::<[u8; SECRET_KEY_BYTES]>()
+                .prop_map(|bytes| Self {
+                    inner: ed25519_dalek::SigningKey::from_bytes(&bytes),
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for SigningKey {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            any::<SecretKey>().prop_map(Self).boxed()
+        }
+    }
+
+    impl Arbitrary for KeyExchangeKey {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            any::<SecretKey>().prop_map(Self).boxed()
+        }
+    }
+
+    impl Arbitrary for PublicKey {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader decompresses the curve point, so derive the public key from a generated
+            // secret key - valid by construction.
+            any::<SigningKey>()
+                .prop_map(|signing_key| Self {
+                    inner: signing_key.0.inner.verifying_key(),
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for Signature {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // from_bytes is infallible: any 64 bytes are a wire-valid signature.
+            any::<[u8; SIGNATURE_BYTES]>()
+                .prop_map(|bytes| Self {
+                    inner: ed25519_dalek::Signature::from_bytes(&bytes),
+                })
+                .boxed()
+        }
     }
 }

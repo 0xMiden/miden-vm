@@ -2,11 +2,11 @@ mod basic_block_node;
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-pub(crate) use basic_block_node::collect_immediate_placements;
 pub use basic_block_node::{
     BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, BasicBlockNodeBuilder,
     GROUP_SIZE as OP_GROUP_SIZE, OpBatch,
 };
+pub(crate) use basic_block_node::{collect_immediate_placements, hash_op_batches};
 use derive_more::From;
 use miden_utils_core_derive::MastNodeExt;
 
@@ -36,7 +36,10 @@ mod mast_forest_contributor;
 pub(super) use mast_forest_contributor::fingerprint_with_child_fingerprints;
 pub use mast_forest_contributor::{MastForestContributor, MastNodeBuilder, MastNodeContext};
 
-use crate::mast::{MastForest, MastNodeId};
+use crate::{
+    chiplets::hasher,
+    mast::{MastForest, MastForestError, MastNodeId},
+};
 
 pub trait MastNodeExt {
     /// Returns a commitment/hash of the node.
@@ -93,6 +96,45 @@ pub enum MastNode {
 // ------------------------------------------------------------------------------------------------
 /// Public accessors
 impl MastNode {
+    /// Recomputes this node's digest from its payload and the supplied child digests.
+    /// External nodes retain their opaque dependency digest.
+    pub(in crate::mast) fn compute_digest(
+        &self,
+        mut child_digest: impl FnMut(MastNodeId) -> Result<Word, MastForestError>,
+    ) -> Result<Word, MastForestError> {
+        Ok(match self {
+            Self::Block(block) => hash_op_batches(block.op_batches()),
+            Self::Join(join) => hasher::merge_in_mast_domain(
+                &[child_digest(join.first())?, child_digest(join.second())?],
+                JoinNode::DOMAIN,
+            ),
+            Self::Split(split) => hasher::merge_in_mast_domain(
+                &[child_digest(split.on_true())?, child_digest(split.on_false())?],
+                SplitNode::DOMAIN,
+            ),
+            Self::Loop(loop_node) => hasher::merge_in_mast_domain(
+                &[child_digest(loop_node.body())?, Word::default()],
+                LoopNode::DOMAIN,
+            ),
+            Self::Call(call) => hasher::merge_in_mast_domain(
+                &[child_digest(call.callee())?, Word::default()],
+                if call.is_syscall() {
+                    CallNode::SYSCALL_DOMAIN
+                } else {
+                    CallNode::CALL_DOMAIN
+                },
+            ),
+            Self::Dyn(dyn_node) => {
+                if dyn_node.is_dyncall() {
+                    DynNode::DYNCALL_DEFAULT_DIGEST
+                } else {
+                    DynNode::DYN_DEFAULT_DIGEST
+                }
+            },
+            Self::External(_) => self.digest(),
+        })
+    }
+
     /// Returns the ordering class used by finalized dense MAST forests.
     pub(in crate::mast) fn order_class(&self) -> MastNodeOrderClass {
         if self.is_external() {

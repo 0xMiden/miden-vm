@@ -97,6 +97,10 @@ type Leaves = super::Leaves<SmtLeaf>;
 ///              hash = H(key₁, value₁, key₂, value₂, ...)
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct Smt {
     root: Word,
     num_entries: usize,
@@ -346,7 +350,7 @@ impl Smt {
     }
 
     /// Returns an iterator over the [`InnerNode`] and the respective [`NodeIndex`] of the [`Smt`].
-    pub fn inner_node_indices(&self) -> impl Iterator<Item = (NodeIndex, InnerNode)> + '_ {
+    pub(crate) fn inner_node_indices(&self) -> impl Iterator<Item = (NodeIndex, InnerNode)> + '_ {
         self.inner_nodes.iter().map(|(idx, inner)| (*idx, inner.clone()))
     }
 
@@ -380,7 +384,8 @@ impl Smt {
     ///
     /// - [`MerkleError::DuplicateValuesForIndex`] if `kv_pairs` contains the same key more than
     ///   once.
-    /// - [`MerkleError::TooManyLeafEntries`] if mutations would exceed 1024 entries in a leaf.
+    /// - [`MerkleError::TooManyLeafEntries`] if a leaf would contain more than [`MAX_LEAF_ENTRIES`]
+    ///   after the changes.
     ///
     /// # Example
     ///
@@ -411,10 +416,12 @@ impl Smt {
     /// Applies the prospective mutations computed with [`Smt::compute_mutations()`] to this tree.
     ///
     /// # Errors
-    /// If `mutations` was computed on a tree with a different root than this one, returns
-    /// [`MerkleError::ConflictingRoots`] with a two-item [`Vec`]. The first item is the root hash
-    /// the `mutations` were computed against, and the second item is the actual current root of
-    /// this tree.
+    /// - [`MerkleError::ConflictingRoots`] if the mutation set's old root differs from the current
+    ///   tree root.
+    /// - [`MerkleError::TooManyLeafEntries`] if a leaf would contain more than [`MAX_LEAF_ENTRIES`]
+    ///   after applying the set.
+    ///
+    /// If an error is returned, the tree is unchanged.
     pub fn apply_mutations(
         &mut self,
         mutations: MutationSet<SMT_DEPTH, Word, Word>,
@@ -425,13 +432,11 @@ impl Smt {
     /// Applies the prospective mutations computed with [`Smt::compute_mutations()`] to this tree
     /// and returns the reverse mutation set.
     ///
-    /// Applying the reverse mutation sets to the updated tree will revert the changes.
+    /// Applying the reverse set to the updated tree reverts the changes.
     ///
     /// # Errors
-    /// If `mutations` was computed on a tree with a different root than this one, returns
-    /// [`MerkleError::ConflictingRoots`] with a two-item [`Vec`]. The first item is the root hash
-    /// the `mutations` were computed against, and the second item is the actual current root of
-    /// this tree.
+    /// Returns the same errors as [`Self::apply_mutations()`]. If an error is returned, the tree is
+    /// unchanged.
     pub fn apply_mutations_with_reversion(
         &mut self,
         mutations: MutationSet<SMT_DEPTH, Word, Word>,
@@ -674,6 +679,162 @@ impl Smt {
         kv_pairs: impl IntoIterator<Item = (Word, Word)>,
     ) -> Result<MutationSet<SMT_DEPTH, Word, Word>, MerkleError> {
         <Self as SparseMerkleTreeReader<SMT_DEPTH>>::compute_mutations(self, kv_pairs)
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    extern crate alloc;
+
+    use alloc::{collections::BTreeMap, vec::Vec};
+
+    use proptest::prelude::*;
+
+    use super::{LeafIndex, SMT_DEPTH, Smt, SmtLeaf, SmtProof, Word};
+
+    // Deduped key/value pairs -> a full Smt built by construction (distinct keys guaranteed).
+    pub(super) fn smt_from_pairs(pairs: Vec<(Word, Word)>) -> Smt {
+        // Drop empty values up front - `with_entries` would drop them anyway, but doing it
+        // before deduplication guarantees a non-empty anchor entry survives regardless of
+        // duplicate ordering (BTreeMap keeps the last value per key).
+        let entries: BTreeMap<Word, Word> =
+            pairs.into_iter().filter(|(_, value)| *value != crate::EMPTY_WORD).collect();
+        Smt::with_entries(entries).expect("keys are distinct")
+    }
+
+    fn absent_key(smt: &Smt, mut key: Word) -> Word {
+        while smt.get_value(&key) != Smt::EMPTY_VALUE {
+            key[0] += crate::ONE;
+        }
+        key
+    }
+
+    /// Uniform-random entries. Collisions into the same leaf are practically impossible, so this
+    /// branch is mixed with deliberately colliding entries below.
+    pub(super) fn random_pairs(
+        len: impl Strategy<Value = usize>,
+    ) -> impl Strategy<Value = Vec<(Word, Word)>> {
+        // The first entry is guaranteed a non-empty value (empty values are dropped by the tree
+        // builder and by `smt_from_pairs`), so the tree retains at least one entry even under
+        // shrinking.
+        len.prop_flat_map(|len| proptest::collection::vec((any::<Word>(), any::<Word>()), len))
+            .prop_map(|mut pairs| {
+                if let Some((_, value)) = pairs.first_mut()
+                    && *value == crate::EMPTY_WORD
+                {
+                    *value =
+                        Word::new([value[0], value[1], value[2], crate::Felt::new(1).unwrap()]);
+                }
+                pairs
+            })
+    }
+
+    impl Arbitrary for Smt {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Duplicate generated keys simply shrink the entry count; the empty Smt is a valid
+            // roundtrip input. The colliding branch generates keys sharing a leaf index so
+            // multi-entry leaves are actually exercised.
+            prop_oneof![
+                random_pairs(0usize..=6).prop_map(smt_from_pairs),
+                super::super::test_gen::colliding_leaf_entries().prop_map(smt_from_pairs),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for SmtLeaf {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Sound by construction: build a real Smt and take one of its actual leaves (keys
+            // grouped by leaf index, index derived from the keys). The explicit empty-leaf
+            // branch covers the Empty variant with an arbitrary index (any u64 is a valid
+            // position at SMT_MAX_DEPTH).
+            prop_oneof![
+                // Random branch: also covers the empty-leaf variant via the 0-length case.
+                (any::<u64>(), random_pairs(0usize..=6))
+                    .prop_map(|(empty_leaf_index, pairs)| {
+                        let smt = smt_from_pairs(pairs);
+                        if let Some((_, leaf)) = smt.leaves().next() {
+                            leaf.clone()
+                        } else {
+                            SmtLeaf::new_empty(LeafIndex::<SMT_DEPTH>::new_max_depth(
+                                empty_leaf_index,
+                            ))
+                        }
+                    })
+                    .boxed(),
+                // Colliding branch: leaves of a tree whose keys share leaf indices, so
+                // `SmtLeaf::Multiple` is exercised deliberately.
+                super::super::test_gen::colliding_leaf_entries()
+                    .prop_map(|pairs| {
+                        let smt = smt_from_pairs(pairs);
+                        let (_, leaf) =
+                            smt.leaves().next().expect("anchor entry keeps the tree non-empty");
+                        leaf.clone()
+                    })
+                    .boxed(),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for SmtProof {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Open a proof against a real Smt for a present key (inclusion proof) or an absent
+            // key (exclusion proof). Path and leaf are consistent because they share an open.
+            prop_oneof![
+                // Inclusion proof for a present key of a tree with independent keys.
+                random_pairs(1usize..=6)
+                    .prop_map(|pairs| {
+                        let smt = smt_from_pairs(pairs);
+                        let (k, _) =
+                            smt.entries().next().expect("anchor entry keeps the tree non-empty");
+                        smt.open(k)
+                    })
+                    .boxed(),
+                // Colliding branch: proofs whose leaf may hold multiple entries.
+                super::super::test_gen::colliding_leaf_entries()
+                    .prop_map(|pairs| {
+                        let smt = smt_from_pairs(pairs);
+                        let (k, _) =
+                            smt.entries().next().expect("anchor entry keeps the tree non-empty");
+                        smt.open(k)
+                    })
+                    .boxed(),
+                // Exclusion proof for a key guaranteed to be absent.
+                (random_pairs(1usize..=6), any::<Word>())
+                    .prop_map(|(pairs, fresh_key)| {
+                        let smt = smt_from_pairs(pairs);
+                        let fresh_key = absent_key(&smt, fresh_key);
+                        smt.open(&fresh_key)
+                    })
+                    .boxed(),
+            ]
+            .boxed()
+        }
+    }
+
+    #[test]
+    fn absent_key_skips_consecutive_stored_keys() {
+        let keys = [Word::empty(), Word::from([1u32, 0, 0, 0])];
+        let smt = smt_from_pairs(keys.map(|key| (key, Word::from([1u32; 4]))).to_vec());
+
+        for key in keys {
+            let key = absent_key(&smt, key);
+            assert_eq!(smt.get_value(&key), Smt::EMPTY_VALUE);
+            smt.open(&key).verify_unset(&key, &smt.root()).unwrap();
+        }
     }
 }
 

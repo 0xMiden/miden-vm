@@ -3,8 +3,8 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 
 use crate::{
-    BaseHost, LoadedMastForest, ProcessorState, SyncHost, Word, advice::AdviceMutation,
-    event::EventError,
+    BaseHost, LoadedMastForest, MastForestLoadError, ProcessorState, SyncHost, Word,
+    advice::AdviceMutation, event::EventError,
 };
 
 /// A minimal testing host that records regular events.
@@ -54,9 +54,12 @@ impl BaseHost for NonTracingTestHost {
 
 #[cfg(test)]
 impl SyncHost for NonTracingTestHost {
-    fn get_mast_forest(&self, _node_digest: &Word) -> Option<LoadedMastForest> {
+    fn get_mast_forest(
+        &self,
+        _node_digest: &Word,
+    ) -> Result<Option<LoadedMastForest>, MastForestLoadError> {
         // This host only runs self-contained programs; external MAST forests are not resolved.
-        None
+        Ok(None)
     }
 
     fn on_event(&mut self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
@@ -71,7 +74,7 @@ mod tests {
     use miden_assembly::Assembler;
 
     use super::NonTracingTestHost;
-    use crate::{AdviceInputs, ExecutionOptions, FastProcessor, Program, StackInputs};
+    use crate::{Processor, Program};
 
     /// A host which does not implement `on_trace` should still execute trace events gracefully via
     /// the default no-op implementation, and trace events must not be routed to `on_event`.
@@ -100,14 +103,7 @@ mod tests {
             .unwrap()
             .unwrap_program();
         let mut host = NonTracingTestHost::default();
-        FastProcessor::new_with_options(
-            StackInputs::default(),
-            AdviceInputs::default(),
-            ExecutionOptions::default(),
-        )
-        .expect("failed to construct FastProcessor")
-        .execute_sync(&program, &mut host)
-        .unwrap();
+        Processor::new(&program).execute().run_sync(&mut host).unwrap();
 
         assert_eq!(host.events, vec![REGULAR_EVENT_ID_1, REGULAR_EVENT_ID_2]);
     }

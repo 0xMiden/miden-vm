@@ -205,12 +205,14 @@ pub trait MastForestView {
 
     /// Returns the digest of the node at the specified index.
     ///
-    /// Returns an error if `index >= self.node_count()`.
+    /// Returns an error if `index >= self.node_count()` or the backing representation cannot decode
+    /// the digest. Wire-backed views validate non-external digest limbs on access.
     fn node_digest_at(&self, index: usize) -> Result<Word, DeserializationError>;
 
     /// Returns serialized-equivalent metadata for a node at the specified index.
     ///
-    /// Returns an error if `index >= self.node_count()`.
+    /// Returns an error if `index >= self.node_count()` or the backing representation cannot decode
+    /// the node metadata, including its digest.
     fn node_info_at(&self, index: usize) -> Result<MastNodeInfo, DeserializationError> {
         Ok(MastNodeInfo::from_entry(
             self.node_entry_at(index)?,
@@ -234,7 +236,9 @@ pub trait MastForestView {
         self.node_count() == 0
     }
 
-    /// Returns true when `index` is a valid node index.
+    /// Returns true when `index` is within the node index bounds.
+    ///
+    /// This does not check whether a wire-backed node's digest can be decoded.
     fn has_node(&self, index: usize) -> bool {
         index < self.node_count()
     }

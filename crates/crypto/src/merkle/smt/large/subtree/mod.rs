@@ -231,7 +231,7 @@ impl Subtree {
     ///
     /// # Panics
     /// Panics if `global.depth() < base.depth()`.
-    pub fn global_to_local(global: NodeIndex, base: NodeIndex) -> u8 {
+    pub(crate) fn global_to_local(global: NodeIndex, base: NodeIndex) -> u8 {
         assert!(
             global.depth() >= base.depth(),
             "Global depth is less than base depth = {}, global depth = {}",
@@ -268,7 +268,7 @@ impl Subtree {
     }
 
     /// Iterates over all inner nodes in this subtree, yielding their info.
-    pub fn iter_inner_node_info(&self) -> impl Iterator<Item = InnerNodeInfo> + '_ {
+    pub(crate) fn iter_inner_node_info(&self) -> impl Iterator<Item = InnerNodeInfo> + '_ {
         self.node_iter().filter_map(move |node| {
             self.get_by_local_index(node.local_index).map(|inner| InnerNodeInfo {
                 value: inner.hash(),
@@ -330,7 +330,7 @@ impl Subtree {
     /// more efficient when applying multiple changes.
     ///
     /// Returns the removed node, if any.
-    pub fn remove_inner_node(&mut self, index: NodeIndex) -> Option<InnerNode> {
+    pub(crate) fn remove_inner_node(&mut self, index: NodeIndex) -> Option<InnerNode> {
         let local_index = Self::global_to_local(index, self.root_index);
         let previous = self.get_by_local_index(local_index);
 
@@ -665,8 +665,8 @@ impl Subtree {
         let (word_idx, bit_idx) = Self::bit_position(bit_offset);
         let mut count = 0;
 
-        for i in 0..word_idx {
-            count += self.child_bits[i].count_ones() as usize;
+        for word in &self.child_bits[..word_idx] {
+            count += word.count_ones() as usize;
         }
 
         if bit_idx > 0 {

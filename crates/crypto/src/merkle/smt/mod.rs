@@ -9,7 +9,7 @@ use core::{
 use super::{EmptySubtreeRoots, InnerNodeInfo, MerkleError, NodeIndex, SparseMerklePath};
 use crate::{
     EMPTY_WORD, Map, Set, Word,
-    hash::poseidon2::Poseidon2,
+    hash::eidos::Eidos,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -32,6 +32,9 @@ pub use large::{
     RocksDbSnapshotStorage, RocksDbStorage, RocksDbTuningOptions, RocksDbWriteBufferManagerBudget,
 };
 
+#[cfg(feature = "rocksdb")]
+mod persistent_hash;
+
 mod large_forest;
 pub use large_forest::{
     AppliedLineageMutation, Backend, BackendError, BackendReader, Config as ForestConfig,
@@ -53,19 +56,15 @@ mod simple;
 pub use simple::{SimpleSmt, SimpleSmtProof};
 
 mod partial;
-use miden_field::Felt;
-pub use partial::{PartialSmt, UniqueNodes};
+pub use partial::{PartialSmt, SmtWitness, UniqueNodes};
 // CONSTANTS
 // ================================================================================================
 
 /// Minimum supported depth.
-pub const SMT_MIN_DEPTH: u8 = 1;
+pub(crate) const SMT_MIN_DEPTH: u8 = 1;
 
 /// Maximum supported depth.
 pub const SMT_MAX_DEPTH: u8 = 64;
-
-/// The felt used as a domain separator when hashing leaves in merkle trees.
-pub const LEAF_DOMAIN: Felt = Felt::new_unchecked(0x13af);
 
 // SPARSE MERKLE TREE
 // ================================================================================================
@@ -171,8 +170,12 @@ pub(crate) trait SparseMerkleTreeReader<const DEPTH: u8> {
     ) -> Result<MutationSet<DEPTH, Self::Key, Self::Value>, MerkleError> {
         use NodeMutation::*;
 
+        let mut kv_pairs: Vec<_> = kv_pairs.into_iter().collect();
+        sort_removals_first(&mut kv_pairs, &Self::EMPTY_VALUE);
+
         let mut new_root = self.root();
         let mut new_pairs: Map<Self::Key, Self::Value> = Default::default();
+        let mut new_leaves = Leaves::new();
         let mut node_mutations: NodeMutations = NodeMutations::new();
         let mut seen_keys: Set<Self::Key> = Set::new();
 
@@ -184,31 +187,15 @@ pub(crate) trait SparseMerkleTreeReader<const DEPTH: u8> {
                 ));
             }
 
-            // If the old value and the new value are the same, there is nothing to update.
-            let old_value = new_pairs.get(&key).cloned().unwrap_or_else(|| self.get_value(&key));
-            if value == old_value {
+            if value == self.get_value(&key) {
                 continue;
             }
 
             let leaf_index = Self::key_to_leaf_index(&key);
             let mut node_index = NodeIndex::from(leaf_index);
 
-            // We need the current leaf's hash to calculate the new leaf, but in the rare case that
-            // `kv_pairs` has multiple pairs that go into the same leaf, then those pairs are also
-            // part of the "current leaf".
-            let old_leaf = {
-                let pairs_at_index = new_pairs
-                    .iter()
-                    .filter(|&(new_key, _)| Self::key_to_leaf_index(new_key) == leaf_index);
-
-                pairs_at_index.fold(self.get_leaf(&key), |acc, (k, v)| {
-                    // Most of the time `pairs_at_index` should only contain a single entry (or
-                    // none at all), as multi-leaves should be really rare.
-                    let existing_leaf = acc;
-                    self.construct_prospective_leaf(existing_leaf, k, v)
-                        .expect("current leaf should be valid")
-                })
-            };
+            let old_leaf =
+                new_leaves.remove(&leaf_index.position()).unwrap_or_else(|| self.get_leaf(&key));
 
             let new_leaf =
                 self.construct_prospective_leaf(old_leaf, &key, &value).map_err(|e| match e {
@@ -219,6 +206,7 @@ pub(crate) trait SparseMerkleTreeReader<const DEPTH: u8> {
                 })?;
 
             let mut new_child_hash = Self::hash_leaf(&new_leaf);
+            new_leaves.insert(leaf_index.position(), new_leaf);
 
             for node_depth in (0..node_index.depth()).rev() {
                 // Whether the node we're replacing is the right child or the left child.
@@ -405,7 +393,7 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
             } else {
                 (node_hash, right)
             };
-            node_hash = Poseidon2::merge(&[left, right]);
+            node_hash = Eidos::merge(&[left, right]);
 
             if node_hash == *EmptySubtreeRoots::entry(DEPTH, node_depth) {
                 // If a subtree is empty, then can remove the inner node, since it's equal to the
@@ -418,17 +406,11 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
         self.set_root(node_hash);
     }
 
-    /// Applies the prospective mutations computed with [`SparseMerkleTree::compute_mutations()`] to
-    /// this tree.
+    /// Applies a mutation set to this tree.
     ///
     /// # Errors
-    /// If `mutations` was computed on a tree with a different root than this one, returns
-    /// [`MerkleError::ConflictingRoots`] with a two-item [`Vec`]. The first item is the root hash
-    /// the `mutations` were computed against, and the second item is the actual current root of
-    /// this tree.
-    /// If mutations would exceed [`crate::merkle::smt::MAX_LEAF_ENTRIES`] (1024 entries) in a leaf,
-    /// returns
-    /// [`MerkleError::TooManyLeafEntries`].
+    /// Leaves the tree unchanged if the old root differs from the current root or a leaf update
+    /// fails.
     fn apply_mutations(
         &mut self,
         mutations: MutationSet<DEPTH, Self::Key, Self::Value>,
@@ -453,6 +435,9 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
             });
         }
 
+        // Only the leaf updates can fail, so they come before the node changes.
+        self.apply_leaf_updates(new_pairs)?;
+
         for (index, mutation) in node_mutations {
             match mutation {
                 Removal => {
@@ -464,24 +449,17 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
             }
         }
 
-        for (key, value) in new_pairs {
-            self.insert_value(key, value)?;
-        }
-
         self.set_root(new_root);
 
         Ok(())
     }
 
-    /// Applies the prospective mutations computed with [`SparseMerkleTree::compute_mutations()`] to
-    /// this tree and returns the reverse mutation set. Applying the reverse mutation sets to the
-    /// updated tree will revert the changes.
+    /// Applies a mutation set and returns a set that reverts the changes when applied to the
+    /// updated tree.
     ///
     /// # Errors
-    /// If `mutations` was computed on a tree with a different root than this one, returns
-    /// [`MerkleError::ConflictingRoots`] with a two-item [`Vec`]. The first item is the root hash
-    /// the `mutations` were computed against, and the second item is the actual current root of
-    /// this tree.
+    /// Leaves the tree unchanged if the old root differs from the current root or a leaf update
+    /// fails.
     fn apply_mutations_with_reversion(
         &mut self,
         mutations: MutationSet<DEPTH, Self::Key, Self::Value>,
@@ -506,6 +484,9 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
             });
         }
 
+        // Only the leaf updates can fail, so they come before the node changes.
+        let reverse_pairs = self.apply_leaf_updates(new_pairs)?.into_iter().collect();
+
         let mut reverse_mutations = NodeMutations::new();
         for (index, mutation) in node_mutations {
             match mutation {
@@ -524,18 +505,6 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
             }
         }
 
-        let mut reverse_pairs = Map::new();
-        for (key, value) in new_pairs {
-            match self.insert_value(key.clone(), value)? {
-                Some(old_value) => {
-                    reverse_pairs.insert(key, old_value);
-                },
-                None => {
-                    reverse_pairs.insert(key, Self::EMPTY_VALUE);
-                },
-            }
-        }
-
         self.set_root(new_root);
 
         Ok(MutationSet {
@@ -544,6 +513,33 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
             new_pairs: reverse_pairs,
             new_root: old_root,
         })
+    }
+
+    /// Updates the leaves and returns the previous value of each key in write order.
+    ///
+    /// # Errors
+    /// If a leaf update fails, restores earlier writes before returning the error. This relies on
+    /// [`Self::insert_value()`] leaving the leaf unchanged on error.
+    fn apply_leaf_updates(
+        &mut self,
+        new_pairs: Map<Self::Key, Self::Value>,
+    ) -> Result<Vec<(Self::Key, Self::Value)>, MerkleError> {
+        let mut old_pairs = Vec::with_capacity(new_pairs.len());
+        for (key, value) in removals_first(new_pairs, &Self::EMPTY_VALUE) {
+            match self.insert_value(key.clone(), value) {
+                Ok(old_value) => old_pairs.push((key, old_value.unwrap_or(Self::EMPTY_VALUE))),
+                Err(err) => {
+                    // Undo insertions before restoring removed entries to stay within capacity.
+                    for (key, old_value) in old_pairs.into_iter().rev() {
+                        self.insert_value(key, old_value)
+                            .expect("restoring an earlier value should succeed");
+                    }
+                    return Err(err);
+                },
+            }
+        }
+
+        Ok(old_pairs)
     }
 
     // REQUIRED METHODS
@@ -558,7 +554,9 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
     /// Removes an inner node at the given index
     fn remove_inner_node(&mut self, index: NodeIndex) -> Option<InnerNode>;
 
-    /// Inserts a leaf node, and returns the value at the key if already exists
+    /// Updates the value at a key and returns its previous value, if present.
+    ///
+    /// An empty value removes the key.
     fn insert_value(
         &mut self,
         key: Self::Key,
@@ -573,6 +571,10 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
 /// part of the public API.
 #[doc(hidden)]
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct InnerNode {
     pub left: Word,
     pub right: Word,
@@ -580,7 +582,7 @@ pub struct InnerNode {
 
 impl InnerNode {
     pub fn hash(&self) -> Word {
-        Poseidon2::merge(&[self.left, self.right])
+        Eidos::merge(&[self.left, self.right])
     }
 }
 
@@ -672,6 +674,10 @@ impl<const DEPTH: u8> Display for LeafIndex<DEPTH> {
 /// [`MutationSet`] stores this type in relation to a [`NodeIndex`] to keep track of what changes
 /// need to occur at which node indices.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub enum NodeMutation {
     /// Node needs to be removed.
     Removal,
@@ -756,6 +762,26 @@ impl<const DEPTH: u8, K: Eq + Hash, V> MutationSet<DEPTH, K, V> {
             new_root,
         }
     }
+}
+
+/// Moves removals first so the final entry count determines whether a batch fits a leaf.
+fn sort_removals_first<K, V: PartialEq>(pairs: &mut [(K, V)], empty: &V) {
+    pairs.sort_by_key(|(_, value)| value != empty);
+}
+
+/// Yields removals before insertions so a leaf has room for replacement entries.
+fn removals_first<K: Ord + Hash, V: PartialEq>(
+    mut pairs: Map<K, V>,
+    empty: &V,
+) -> impl Iterator<Item = (K, V)> {
+    let is_removal = |_: &K, value: &mut V| *value == *empty;
+    #[cfg(feature = "std")]
+    let removals = pairs.extract_if(is_removal);
+    #[cfg(not(feature = "std"))]
+    let removals = pairs.extract_if(.., is_removal);
+
+    let removals: Vec<_> = removals.collect();
+    removals.into_iter().chain(pairs)
 }
 
 // SERIALIZATION
@@ -864,6 +890,44 @@ impl<const DEPTH: u8, K: Deserializable + Ord + Eq + Hash, V: Deserializable> De
 // TESTS
 // ================================================================================================
 
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::{InnerNode, NodeMutation, Word};
+
+    impl Arbitrary for InnerNode {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Any (left, right) pair is structurally valid; hashing consistency is the tree's
+            // concern, not the node's.
+            (any::<Word>(), any::<Word>())
+                .prop_map(|(left, right)| InnerNode { left, right })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for NodeMutation {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Both variants must be generated so the wire format's bool discriminant is exercised
+            // in both directions.
+            prop_oneof![
+                Just(NodeMutation::Removal),
+                any::<InnerNode>().prop_map(NodeMutation::Addition),
+            ]
+            .boxed()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{LeafIndex, NodeIndex, SMT_MAX_DEPTH};
@@ -893,5 +957,105 @@ mod tests {
         let decoded = LeafIndex::<SMT_MAX_DEPTH>::read_from_bytes(&leaf.to_bytes()).unwrap();
 
         assert_eq!(leaf, decoded);
+    }
+}
+
+// ARBITRARY TEST GENERATORS (proptest)
+// ================================================================================================
+
+/// Shared generators for the SMT family's `Arbitrary` strategies. Random `Word`s practically
+/// never share a leaf index, so these generate keys with deliberately colliding/sibling leaf
+/// positions to exercise `SmtLeaf::Multiple` and value-only-leaf serialization paths.
+#[cfg(any(test, feature = "arbitrary"))]
+mod test_gen {
+    extern crate alloc;
+
+    use alloc::vec::Vec;
+
+    use proptest::prelude::*;
+
+    use crate::{Felt, Word};
+
+    /// Entries grouped by a deliberately-shared leaf position (the most significant element,
+    /// `key[3]`, since `LeafIndex::<SMT_DEPTH>::from(key)` uses `key[3].as_canonical_u64()`).
+    /// Two or more keys in one group yield a multi-entry leaf (`SmtLeaf::Multiple`).
+    pub fn colliding_leaf_entries() -> impl Strategy<Value = Vec<(Word, Word)>> {
+        proptest::collection::vec(
+            (
+                any::<Felt>(),
+                proptest::collection::vec(
+                    (proptest::collection::vec(any::<Felt>(), 3), any::<Word>()),
+                    1..=3,
+                ),
+            ),
+            1..=3,
+        )
+        .prop_map(|mut groups| {
+            // Guarantee one retained entry even under shrinking: the first entry gets a
+            // non-empty value (with_entries drops empty values) and a key distinct from the
+            // other keys in its group (differing in the third element).
+            if let Some((_, keys)) = groups.first_mut()
+                && let Some((_, value)) = keys.first_mut()
+                && *value == crate::EMPTY_WORD
+            {
+                // Anchor entry: guaranteed non-empty value so the tree is never empty.
+                *value = Word::new([value[0], value[1], value[2], Felt::new(1).unwrap()]);
+            }
+            groups
+                .into_iter()
+                .flat_map(|(shared, keys)| {
+                    keys.into_iter().map(move |(prefix, value)| {
+                        (Word::new([prefix[0], prefix[1], prefix[2], shared]), value)
+                    })
+                })
+                .collect()
+        })
+    }
+
+    /// Entries grouped at adjacent even/odd leaf positions `2k` and `2k + 1` (sibling leaves at
+    /// SMT_MAX_DEPTH). Opening one leaf of a pair while the other is present-but-unopened is
+    /// what produces value-only leaves in partial SMTs. Positions are bounded to `2k + 1 <
+    /// 2^63 < Felt::ORDER`, so `Felt::new` cannot panic.
+    pub fn sibling_leaf_entries() -> impl Strategy<Value = Vec<(Word, Word)>> {
+        proptest::collection::vec(
+            (
+                0u64..(1 << 62),
+                proptest::collection::vec(
+                    (proptest::collection::vec(any::<Felt>(), 3), any::<Word>()),
+                    1..=2,
+                ),
+                proptest::collection::vec(
+                    (proptest::collection::vec(any::<Felt>(), 3), any::<Word>()),
+                    0..=2,
+                ),
+            ),
+            1..=3,
+        )
+        .prop_map(|mut groups| {
+            // Same shrinking guarantee as colliding_leaf_entries: the first entry keeps a
+            // non-empty value and a group-distinct key.
+            if let Some((_, keys_a, _)) = groups.first_mut()
+                && let Some((_, value)) = keys_a.first_mut()
+                && *value == crate::EMPTY_WORD
+            {
+                // Anchor entry: guaranteed non-empty value so the tree is never empty.
+                *value = Word::new([value[0], value[1], value[2], Felt::new(1).unwrap()]);
+            }
+            groups
+                .into_iter()
+                .flat_map(|(base, keys_a, keys_b)| {
+                    let pos_a = Felt::new(2 * base).expect("2k < 2^63 < Felt::ORDER");
+                    let pos_b = Felt::new(2 * base + 1).expect("2k+1 < 2^63 < Felt::ORDER");
+                    keys_a
+                        .into_iter()
+                        .map(move |(prefix, value)| {
+                            (Word::new([prefix[0], prefix[1], prefix[2], pos_a]), value)
+                        })
+                        .chain(keys_b.into_iter().map(move |(prefix, value)| {
+                            (Word::new([prefix[0], prefix[1], prefix[2], pos_b]), value)
+                        }))
+                })
+                .collect()
+        })
     }
 }

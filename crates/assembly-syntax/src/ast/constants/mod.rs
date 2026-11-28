@@ -51,7 +51,7 @@ impl Constant {
     }
 
     /// Returns the documentation associated with this item.
-    pub fn docs(&self) -> Option<Span<&str>> {
+    pub(crate) fn docs(&self) -> Option<Span<&str>> {
         self.docs.as_ref().map(|docstring| docstring.as_spanned_str())
     }
 
@@ -78,6 +78,9 @@ impl crate::prettier::PrettyPrint for Constant {
 
         let mut doc = self.docs.as_ref().map(PrettyPrint::render).unwrap_or(Document::Empty);
 
+        if self.visibility.is_public() {
+            doc += display(self.visibility) + const_text(" ");
+        }
         doc += flatten(const_text("const") + const_text(" ") + display(&self.name));
         doc += const_text(" = ");
 

@@ -34,6 +34,10 @@ const EXTERNAL: u8 = 8;
 /// on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub enum MastNodeEntry {
     Join {
         left_child_id: u32,
@@ -107,7 +111,7 @@ impl MastNodeEntry {
     ///
     /// The `node_count` is the total expected number of nodes in the
     /// [`crate::mast::MastForest`] **after deserialization**.
-    pub fn try_into_mast_node_builder(
+    pub(crate) fn try_into_mast_node_builder(
         self,
         node_count: usize,
         basic_block_data_decoder: &BasicBlockDataDecoder,
@@ -287,7 +291,7 @@ impl MastNodeEntry {
     /// Decodes one `u32` number from a 60-bit payload.
     ///
     /// Returns an error if the payload doesn't fit in a `u32`.
-    pub fn decode_u32_payload(payload: u64) -> Result<u32, DeserializationError> {
+    pub(crate) fn decode_u32_payload(payload: u64) -> Result<u32, DeserializationError> {
         payload.try_into().map_err(|_| {
             DeserializationError::InvalidValue(format!(
                 "Invalid payload: expected to fit in u32, but was {payload}"
@@ -304,6 +308,10 @@ impl MastNodeEntry {
 /// This is a convenience type for APIs that want both pieces together. The wire format does not
 /// require `MastNodeInfo` to appear as one contiguous fixed-width section.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct MastNodeInfo {
     entry: MastNodeEntry,
     digest: Word,
@@ -356,6 +364,69 @@ impl Deserializable for MastNodeInfo {
     /// Returns the minimum serialized size: 8 bytes for `MastNodeEntry` + 32 bytes for `Word`.
     fn min_serialized_size() -> usize {
         MastNodeEntry::min_serialized_size() + Word::min_serialized_size()
+    }
+}
+
+// ARBITRARY (proptest)
+// ===============================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::{MastNodeEntry, MastNodeInfo};
+    use crate::Word;
+
+    impl Arbitrary for MastNodeEntry {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Join/Split child ids must fit in 30 bits (encode_u32_pair asserts
+            // leading_zeros >= 2); single-payload variants accept any u32. The edge-biased id
+            // strategy hits the 30-bit bounds (0 and 2^30 - 1) deliberately instead of relying
+            // on flat sampling. prop_oneof exercises every discriminant, including the
+            // payload-less Dyn/Dyncall/External forms.
+            fn node_id() -> impl Strategy<Value = u32> {
+                prop_oneof![Just(0), Just((1 << 30) - 1), (0u32..(1 << 30)).boxed(),]
+            }
+
+            prop_oneof![
+                (node_id(), node_id())
+                    .prop_map(|(left, right)| Self::Join {
+                        left_child_id: left,
+                        right_child_id: right,
+                    })
+                    .boxed(),
+                (node_id(), node_id())
+                    .prop_map(|(if_branch, else_branch)| Self::Split {
+                        if_branch_id: if_branch,
+                        else_branch_id: else_branch,
+                    })
+                    .boxed(),
+                any::<u32>().prop_map(|body| Self::Loop { body_id: body }).boxed(),
+                any::<u32>().prop_map(|offset| Self::Block { ops_offset: offset }).boxed(),
+                any::<u32>().prop_map(|callee| Self::Call { callee_id: callee }).boxed(),
+                any::<u32>().prop_map(|callee| Self::SysCall { callee_id: callee }).boxed(),
+                Just(Self::Dyn),
+                Just(Self::Dyncall),
+                Just(Self::External),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for MastNodeInfo {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Entry and digest are independent on the wire; both components are valid for any
+            // value, so no construction invariant exists.
+            (any::<MastNodeEntry>(), any::<Word>())
+                .prop_map(|(entry, digest)| Self::from_entry(entry, digest))
+                .boxed()
+        }
     }
 }
 

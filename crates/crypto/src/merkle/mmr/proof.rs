@@ -44,7 +44,7 @@ impl MmrPath {
 
     /// Converts the leaf global position into a local position that can be used to verify the
     /// Merkle path.
-    pub fn relative_pos(&self) -> usize {
+    pub(crate) fn relative_pos(&self) -> usize {
         self.forest
             .leaf_relative_position(self.position)
             .expect("position must be part of the forest")

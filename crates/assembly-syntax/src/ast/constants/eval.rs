@@ -1,6 +1,3 @@
-// Allow unused assignments - required by miette::Diagnostic derive macro
-#![allow(unused_assignments)]
-
 use alloc::{sync::Arc, vec::Vec};
 
 use smallvec::SmallVec;
@@ -9,7 +6,7 @@ use crate::{
     Felt,
     ast::*,
     debuginfo::{SourceFile, SourceSpan, Span, Spanned},
-    diagnostics::{Diagnostic, RelatedLabel, miette},
+    diagnostics::{Diagnostic, RelatedLabel},
     parser::IntValue,
 };
 
@@ -37,7 +34,6 @@ pub enum ConstEvalError {
         source_file: Option<Arc<SourceFile>>,
     },
     #[error("invalid immediate: value is larger than expected range")]
-    #[diagnostic()]
     ImmediateOverflow {
         #[label]
         span: SourceSpan,
@@ -45,7 +41,6 @@ pub enum ConstEvalError {
         source_file: Option<Arc<SourceFile>>,
     },
     #[error("invalid constant expression: value is larger than expected range")]
-    #[diagnostic()]
     ConstExprOverflow {
         #[label]
         span: SourceSpan,
@@ -128,7 +123,7 @@ pub enum CachedConstantValue<'a> {
 }
 
 impl CachedConstantValue<'_> {
-    pub fn into_expr(self) -> ConstantExpr {
+    pub(crate) fn into_expr(self) -> ConstantExpr {
         match self {
             Self::Hit(value) => value.clone().into(),
             Self::Miss(expr) => expr.clone(),

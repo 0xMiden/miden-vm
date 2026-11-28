@@ -324,7 +324,7 @@ impl Module {
     }
 
     #[inline]
-    pub(crate) fn get_submodule_declaration(&self, name: &str) -> Option<&SubmoduleDecl> {
+    fn get_submodule_declaration(&self, name: &str) -> Option<&SubmoduleDecl> {
         self.submodules.iter().find(|decl| decl.name.as_str() == name)
     }
 
@@ -868,7 +868,7 @@ impl crate::prettier::PrettyPrint for Module {
         for submodule in self.submodules.iter() {
             doc += nl();
             if submodule.visibility.is_public() {
-                doc += const_text("pub mod");
+                doc += display(submodule.visibility) + const_text(" mod");
             } else {
                 doc += const_text("mod");
             }

@@ -1,6 +1,287 @@
 # Changelog
 
-## v0.34.0 (Unreleased)
+## v1.0.0-rc.2 (Unreleased)
+
+#### Features
+
+- Added `seal_and_commit` and `seal_preprocessed_and_commit` to encrypt with EcGFp5/Eidos and return the envelope commitment. Added `commit_envelope` to compute the same commitment from an envelope in memory. Rust callers use `Envelope::to_commitment` ([#4245](https://github.com/0xMiden/miden-vm/pull/4245)).
+- [BREAKING] Added sparse MAST extraction from local procedure roots with a predicate for known procedures. Dense conversion deduplicates local procedures by digest, represents unresolved digests as externals, and returns the source-to-dense node ID mapping. Exhaustive matches on `MastForestError` must handle the new `ExternalProcedureRoot` variant ([#4251](https://github.com/0xMiden/miden-vm/pull/4251)).
+- Added `Processor` for synchronous, asynchronous, and resumable VM execution. Record a witness for local or remote proving ([#4232](https://github.com/0xMiden/miden-vm/pull/4232)).
+
+#### Changes
+
+- [BREAKING] Replaced Miette with local diagnostic types in `miden-utils-diagnostics`. Use the existing Miden `Report` re-export, implement `Diagnostic` for custom error metadata, and use `diagnostic!` for messages with labels. The renderer emits plain text ([#4246](https://github.com/0xMiden/miden-vm/pull/4246)).
+- Consolidated Word conversion, Word ordering and String/Arc serialization tests using Proptest ([#4252](https://github.com/0xMiden/miden-vm/pull/4252)).
+
+- [BREAKING] Recreate serialized execution options in v1 format and re-record v4 debugger replay snapshots as v5. The readers reject unversioned execution options and v4 snapshots. The new encodings omit the overlap flag ([#4232](https://github.com/0xMiden/miden-vm/pull/4232)).
+- `run` reports core and chiplet sizes from the recording and an upper bound for Eidos compression rows. It warns when only the upper bound exceeds `--max-prover-memory`. Trace construction now runs entirely after execution and retains parallel replay ([#4232](https://github.com/0xMiden/miden-vm/pull/4232)).
+- [BREAKING] `TraceLenSummary::new` requires power-of-two padded heights. `padded_heights()` returns the array by value ([#4254](https://github.com/0xMiden/miden-vm/pull/4254)).
+- Applied the routine-logging changes from [#4238](https://github.com/0xMiden/miden-vm/pull/4238) to the current VM and STARK crates. Successful proving is silent at `INFO`; profiling remains available at `TRACE`.
+
+- [BREAKING] Changed `Host::get_mast_forest` and `SyncHost::get_mast_forest` to return `Result<Option<LoadedMastForest>, MastForestLoadError>`. Retrieval failures preserve their source in `ExecutionError::MastForestError`, while `Ok(None)` still reports a missing procedure ([#4237](https://github.com/0xMiden/miden-vm/pull/4237)).
+
+- Updated development and coverage to Rust 1.100 with Cargo dependency checks enforced in CI. Reduced dependencies in builds with fewer features while keeping MSRV at 1.96.1 ([#4234](https://github.com/0xMiden/miden-vm/pull/4234)).
+- [BREAKING] Restricted the visibility of public items that no workspace consumer or upstream user needs. Items used only within their defining crate are now `pub(crate)` or private, unused public re-exports were narrowed, and public helpers that only forwarded to another public entry point were removed. `DebugVarTracker` no longer replays recorded event maps: it tracks debug variables through the observed invocation only. The external API surface is smaller; downstream users must rely on the remaining public items ([#4236](https://github.com/0xMiden/miden-vm/pull/4236)).
+- [BREAKING] Use `Processor` for ordinary execution and witness recording. Set source context on the request and use `ExecutionPlan::prepare()` to initialize the machine early. The free `prove_sync` function and the `ProgramExecutor` trait were removed. Raw machine controls are available through `miden_vm::processor::FastProcessor` ([#4232](https://github.com/0xMiden/miden-vm/pull/4232)).
+- [BREAKING] Record an `ExecutionWitness` with `Processor::record_witness()` and pass it to `Prover::prove` or `Prover::prove_full`. Both build the trace internally. `prove` returns an `ExecutionProof`, and `prove_full` returns a `CompleteProof` with all precompile work settled. Use `CompleteProof::try_from(proof)` to check an imported `ExecutionProof` for deferred work, and `ExecutionProof::from(complete)` to recover the underlying proof. For diagnostics, use `VmWitness::build_trace(&prover.trace_budget())`. Import `VmWitness` from `miden_vm::processor` or `miden_processor`, and `VmTrace` from `miden_vm::trace` or `miden_processor::trace` ([#4232](https://github.com/0xMiden/miden-vm/pull/4232), [#4254](https://github.com/0xMiden/miden-vm/pull/4254)).
+- [BREAKING] Replaced `FastProcessor::execute_by_step*` and `execute_mut*` with owned execution sessions. Sessions can step one cycle at a time or run to halt by mutable borrow. They retain inspectable state after halt, failure, or cancellation, and completed sessions expose their state until `finish()` exports outputs and the deferred precompile witness ([#4232](https://github.com/0xMiden/miden-vm/pull/4232)).
+- Increased in-memory SMT insert benchmark batches to 4,096 and 16,384 entries and fixed the SMT CodSpeed job at eight Rayon threads ([#4220](https://github.com/0xMiden/miden-vm/pull/4220)).
+- Added workspace test coverage collection with `make coverage` and CI reports on `next`/`main` pushes and manual runs ([#4218](https://github.com/0xMiden/miden-vm/pull/4218)).
+
+#### Fixes
+
+- Fixed `miden-format` writing signature commas into a preceding item's trailing comment, which produced MASM that no longer parsed. A trailing comma before `)` no longer makes signature wrapping flip between runs ([#4116](https://github.com/0xMiden/miden-vm/issues/4116)).
+- Fixed `PartialMmr::untrack` panicking in debug builds on a leaf position invalid for the forest. The position is now validated against the forest before `InOrderIndex::from_leaf_pos` runs, so invalid positions return the documented empty vec ([#4257](https://github.com/0xMiden/miden-vm/pull/4257)).
+- Fixed `Forest::trees_larger_than(u32::MAX)` panicking in debug builds and returning the input forest unchanged in release builds. It now returns the empty forest, since no tree has an index larger than `u32::MAX` ([#4259](https://github.com/0xMiden/miden-vm/pull/4259)).
+- [BREAKING] Rejected unused opcode 47, required zero padding in LOOP, CALL and SYSCALL hash inputs, and required short operation batches to be final in the VM decoder AIR. The VM proof relation and recursive VM verifier root change ([#4239](https://github.com/0xMiden/miden-vm/pull/4239)).
+- Restored `no_std` builds for VM libraries by using `alloc` in the constraint compiler, building processor traces serially without `std`, and gating diagnostic rendering behind `std` ([#3934](https://github.com/0xMiden/miden-vm/pull/3934)).
+- Enabled `miden-test-utils` builds without `std` by keeping logging and test-only dependencies behind its `std` feature ([#3934](https://github.com/0xMiden/miden-vm/pull/3934)).
+- Fixed `miden-format` leaving struct and enum bodies over the line limit when they contained comments or line breaks, or nested struct field types. Each field now gets its own line and long fields wrap, keeping comments and blank lines. Type items no longer get a space before `;` or `:` when wrapped ([#4126](https://github.com/0xMiden/miden-vm/pull/4126)).
+- [BREAKING] Rejected struct and enum types larger than `u32::MAX` bytes with an error instead of panicking (debug builds) or computing a wrapped size (release builds). Standalone arrays larger than `u32::MAX` bytes are now rejected too. This affects the assembler, the recursive type builder, and `Type` deserialization; the new fallible `StructType::try_from_parts` reports the error as `InvalidStructTypeError::SizeOverflow`, and `EnumType::new` as `InvalidEnumTypeError::SizeOverflow`. Valid enum layouts can grow to fit every variant and satisfy alignment requirements. For example, a `u32`-tagged enum with `[u8; 5]` and `u32` payload variants grows from 8 to 12 bytes ([#3983](https://github.com/0xMiden/miden-vm/pull/3983)).
+- [BREAKING] Fixed `mul.0` and `exp.0` leaving an extra element on the operand stack when executed at the minimum stack depth. MAST roots of procedures that use `mul.0` or `exp.0` change ([#4256](https://github.com/0xMiden/miden-vm/pull/4256)).
+- Fixed `SourceContent` ordering to distinguish entries with the same URI and text in different languages ([#4265](https://github.com/0xMiden/miden-vm/pull/4265)).
+- Fixed `MerkleStore::add_merkle_path` to return the opening node as the root of an empty path. Updating at the root index with `MerkleStore::set_node` returns the replacement value as the new root ([#4144](https://github.com/0xMiden/miden-vm/issues/4144)).
+- Fixed `ExecutionOptions::new` to return `ExpectedCyclesTooBig` when rounding `expected_cycles` up to a power of two overflows ([#4151](https://github.com/0xMiden/miden-vm/issues/4151)).
+- Fixed `PartialMerkleTree::update_leaf` to leave an empty tree unchanged when the update fails ([#4221](https://github.com/0xMiden/miden-vm/issues/4221)).
+- Fixed `Alignable::prev_power_of_two` to round down inputs above the largest representable power of two ([#4265](https://github.com/0xMiden/miden-vm/pull/4265)).
+- Fixed `Smt::apply_mutations` and `Smt::apply_mutations_with_reversion` to handle a mutation set that replaces one key with another in a full leaf ([#4265](https://github.com/0xMiden/miden-vm/pull/4265)).
+- Fixed `Smt::compute_mutations` and `LargeSmt` batch updates to handle replacements in a full leaf. `Smt` leaves the tree unchanged if applying a mutation set returns an error ([#4266](https://github.com/0xMiden/miden-vm/pull/4266)).
+- [BREAKING] Removed `SourceManager::source` and `SourceManager::source_slice` because an update could invalidate the returned slices. Borrow text from the `Arc<SourceFile>` returned by `SourceManager::get` ([#4267](https://github.com/0xMiden/miden-vm/pull/4267)).
+
+## v1.0.0-rc.1 (2026-11-14)
+
+#### Features
+
+- Added async and sync `FastProcessor` methods that return final advice with an execution witness. Async proving with package debug information is available without the `testing` feature ([#4210](https://github.com/0xMiden/miden-vm/pull/4210)).
+- Added `miden-debug` to the VM workspace with its Git history. It now follows the VM release cycle along with `miden-debug-engine` and `miden-debug-dap`. VM releases also include debugger executable archives ([#4163](https://github.com/0xMiden/miden-vm/pull/4163)).
+- [BREAKING] EcGFp5/Eidos `seal` and `seal_preprocessed` require host event handlers, including when advice is preloaded. Added configurable `Ecgfp5SealHandler` for generating fresh key-agreement advice ([#4137](https://github.com/0xMiden/miden-vm/pull/4137)).
+- [BREAKING] Added binary serialization and deserialization for `ExecutionOptions` and `PrecompileLimits`, including arbitrary custom `WorkClass` names. `WorkClass` no longer implements `Copy`, and neither do `WorkItem` and `PrecompileLimitError` ([#4131](https://github.com/0xMiden/miden-vm/pull/4131)).
+- Added shared subset checks and mixed dense/sparse merges for `MastForest` and `SparseMastForest` ([#4107](https://github.com/0xMiden/miden-vm/pull/4107)).
+- Added Wasm-compiled custom event handlers: untrusted Wasm modules ship inside a `.masp` package (`event_handlers` section) and run under the wasmi interpreter on any host. New crates: `miden-event-handler-abi` (host/guest ABI contract), `miden-wasm-event-handlers` (host-side runner with fuel, memory, and mutation limits), `miden-event-handler-sdk` + `miden-event-handler-macros` (Rust guest SDK with manifest emission). Also added `ProcessorState::stack_depth` ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
+- [BREAKING] The package dependency commitment now binds the `event_handlers` section (next to the account-component metadata), and the semantic sections enter its preimage in a canonical order, so the dependency commitment of a package that carries handlers changes ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
+- [BREAKING] `DefaultHost::replace_handler` and `DefaultHost::replace_trace_handler` now return `Result<bool, ExecutionError>` instead of `bool`, because the event name is validated before the handler is registered ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
+- [BREAKING] Added the `EmptyEventName` variant to `HostError`. The enum is not `non_exhaustive`, so downstream exhaustive matches must handle it ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
+- [BREAKING] Handler registration now rejects empty event names and every name with the reserved `sys::` prefix ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
+- Added project-assembler support for Wasm event handlers: `miden-assembly` gains a generic package post-processor mechanism (`PackagePostProcessor`, `PostProcessContext`, `ProjectAssembler::with_package_post_processor`), and the new `miden-wasm-event-handlers-project` crate plugs into it. The plugin reads `[package.metadata.midenc.event-handlers]` from `miden-project.toml` (`crate =` builds a Rust guest crate, `module =` reads a prebuilt module), validates the module with the default `WasmHandlerLimits`, and embeds the `event_handlers` section into every package of the project under assembly (never into source dependencies) ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
+
+#### Changes
+
+- [BREAKING] Reduced recursive VM/PVM verification cycles and unified memory-layout, LogUp, and DEEP code generation. LogUp separator powers follow native message widths. Both recursive verifier roots change ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
+- [BREAKING] Replaced recursive-verifier address accessors and runtime public-input address helpers with direct constants: import shared protocol addresses from `stark::constants` and relation addresses from their layout/parameter modules. LogUp correction helpers return extension values on the stack, and `vm::aux_trace::push_canonical_log_heights` is removed. `set_up_auxiliary_inputs_ace` additionally requires a proof-order table pointer ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
+- [BREAKING] Derived FRI schedules and remainder sizes from native parameters independently of LDE blowup. Renamed `frie2f4::verify_query_{64,128}` to `verify_query_{half,max}` and replaced `helper::get_fri_remainder_poly_max_degree_plus_1_half` with `helper::REMAINDER_HALF_COEFFICIENTS` ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
+- [BREAKING] Repacked chiplet selector prefixes and localized chiplet payloads, changing the VM proof relation and recursive verifier root ([#4158](https://github.com/0xMiden/miden-vm/pull/4158)).
+- [BREAKING] Removed unsupported debugger DAP message types and profiler registration APIs. Simplified glob matching and field formatting ([#4164](https://github.com/0xMiden/miden-vm/pull/4164)).
+- [BREAKING] `PrecompileWork::class` and `PrecompileLimits::class` now take `&WorkClass` instead of `WorkClass`. Callers must pass `&WorkClass` ([#4131](https://github.com/0xMiden/miden-vm/pull/4131)).
+- [BREAKING] XChaCha AEAD now authenticates the encrypted-data type byte with a versioned domain separator, so flipping the type of a serialized ciphertext fails tag verification. Ciphertexts serialized by earlier versions no longer verify ([#4138](https://github.com/0xMiden/miden-vm/pull/4138)).
+- [BREAKING] `TraceLenSummary::new` now returns a `Result` and rejects padded AIR heights that are zero or smaller than the AIR's unpadded row count, so `TraceLenSummary::padding_percentage` can no longer panic. Added `TraceLenSummaryError` ([#4113](https://github.com/0xMiden/miden-vm/pull/4113)).
+- [BREAKING] Added `SparseMastForest::from_procedure_roots` for direct extraction of complete reachable subgraphs from a dense forest. It reports the new `MastForestError::NotAProcedureRoot` variant when a selected node is not exported by the source forest ([#4107](https://github.com/0xMiden/miden-vm/pull/4107)).
+- Allow core MASM package patch versions to differ from the `miden-core-lib` crate for stable releases with matching major/minor versions. Require full version equality when either version is a prerelease. Keep the changed core MASM package at 1.0.0-rc.1 ([#4099](https://github.com/0xMiden/miden-vm/pull/4099)).
+- [BREAKING] Added `adv.push_deferred_root` (`sys::adv::push_deferred_root`) to push the current deferred accumulator commitment onto the advice stack without changing it. Exhaustive matches on `SystemEvent` and `SystemEventNode` must handle `DeferredRootToStack` and `PushDeferredRoot`, respectively ([#4105](https://github.com/0xMiden/miden-vm/pull/4105)).
+- [BREAKING] Added VM opcode 6, `clear_deferred`, to reset the accumulator identified by the top stack word in root context, preserving the stack. This unsafe operation requires a trusted kernel epilogue that recursively verifies that exact root before clearing. The VM proof relation and recursive verifier root change ([#4105](https://github.com/0xMiden/miden-vm/pull/4105)).
+- [BREAKING] Mixed dense/sparse MAST merging now rejects procedure roots that have neither a full node nor a digest. It reports the new `MastForestError::MissingRootOnMerge` variant, which downstream exhaustive matches must handle ([#4107](https://github.com/0xMiden/miden-vm/pull/4107)).
+- [BREAKING] Default `SparseMastForest` and `ExecutionWitness` readers now reject incorrect full-node hashes. Sparse blocks must consume their declared data sections, and child references must point to preceding nodes. Explicit trusted readers skip hash recomputation. Digests of pruned children and external nodes remain unauthenticated ([#4107](https://github.com/0xMiden/miden-vm/pull/4107)).
+- [BREAKING] Reduced the PVM's aligned width from 912 to 768 columns. Verification uses precomputed table commitments to avoid rebuilding preprocessed tables. PVM proofs and recursive verifier roots change ([#4068](https://github.com/0xMiden/miden-vm/pull/4068)).
+- [BREAKING] Reduced the `miden-processor` public API. Chiplet implementations and trace wrappers are internal, as are execution-control types. Removed `MerkleRootUpdate` and unused constructors and accessors ([#4211](https://github.com/0xMiden/miden-vm/pull/4211)).
+- [BREAKING] Added `miden-vm-stark` for VM relation proving, verification, setup, security, and recursive advice. `miden-prover` still builds complete and deferred proofs, and `miden-verifier` still verifies execution proofs. Both crates no longer re-export the APIs that moved into the new STARK crates. Replaced `miden-precompiles-prover` and `miden-precompiles-verifier` with `miden-precompiles-stark`. Moved `VmTrace` to `miden_air_definitions::vm`. `miden_processor::trace::build_trace` now requires a `ProvingBudget`, and constraint checking moved to `miden_vm_stark::debug::check_constraints` ([#4079](https://github.com/0xMiden/miden-vm/pull/4079)).
+- [BREAKING] Replaced `miden-lifted-air` and `miden-lifted-stark` with `miden-stark`. The `miden-stark` crate also contains the transcript code from `miden-stark-transcript`. Replaced `miden-ace-codegen` with `miden-ace` for ACE runtime types and optional compilation. Moved `miden-stateful-hasher` into `miden_crypto::hash::stateful`. Use `miden_air_definitions::{vm, precompiles}` for authored AIRs and `miden_air::{vm, precompiles}` for production adapters ([#4078](https://github.com/0xMiden/miden-vm/pull/4078)).
+- [BREAKING] Moved optional compiler entry points under `miden_ace::compiler` and `miden_air_definitions::compiler::{vm, precompiles}` ([#4104](https://github.com/0xMiden/miden-vm/pull/4104)).
+- [BREAKING] Unified VM and precompile prover memory estimation in `miden_stark::memory`. Replaced the AIR `memory` modules and `TraceLenSummary::prover_memory_bytes` with a shared estimator taking a `MultiAir`, padded trace heights, and PCS parameters. Estimates charge preprocessing and hash scratch uniformly ([#4030](https://github.com/0xMiden/miden-vm/pull/4030)).
+- [BREAKING] Consolidated precompile AIR into `miden_air::precompiles` and authored definitions into `miden_air_definitions`. Import STARK APIs directly from `miden-lifted-stark` instead of `miden_crypto::stark`. AIR builds generate native evaluators, security metadata, and canonical ACE circuits from one capture without adding compiler tooling to runtime dependencies. The recursive-verifier parameter generators consume the same capture and check the pinned relation identities instead of rewriting them. Removed the `regenerate-evaluator` tool. Accepted proof identities are unchanged ([#4040](https://github.com/0xMiden/miden-vm/pull/4040)).
+- [BREAKING] Reduced the full aligned MVM and PVM widths from 280/768 to 272/760. Both proof relations and recursive verifier roots change ([#4122](https://github.com/0xMiden/miden-vm/pull/4122)).
+- Added per-AIR precomputation of challenge-only terms to native MVM and PVM constraint evaluation ([#4122](https://github.com/0xMiden/miden-vm/pull/4122)).
+- [BREAKING] Added AIR-owned `LiftedAir::EvalData` and `prepare(EvalInputs)`; `eval` requires the prepared data. Removed `precompute_challenge_terms` and `eval_with_challenge_terms` ([#4141](https://github.com/0xMiden/miden-vm/pull/4141)).
+- Improved native VM and PVM proving through interleaved LogUp batch inversion and quotient-buffer reuse. PVM STORE/MUL auxiliary traces are allocated at their final width to avoid copying lookup columns. Parallelized PVM integer and Keccak trace packing in concurrent builds ([#4095](https://github.com/0xMiden/miden-vm/pull/4095)).
+- Added a gRPC proving service and Rust client for serialized execution witnesses, with separate trusted and untrusted service types. Complete proofs are the default, and `--deferred` returns precompile witnesses for batch proving. Proving and health RPCs require exactly one request message and bound aggregate uploads by the configured message limit plus the five-byte gRPC header ([#4097](https://github.com/0xMiden/miden-vm/pull/4097)).
+- Removed the `provenance` requirement from synthetic benchmark snapshots ([#4084](https://github.com/0xMiden/miden-vm/pull/4084)).
+- Refactored VM/PVM recursive-verifier MASM to use generated parameter modules. PVM fixed-environment LogUp correction code is generated from native bus message records and MASM templates ([#4088](https://github.com/0xMiden/miden-vm/pull/4088)).
+- Added `Prover::with_hash_lde_blocks` to enable blockwise LDE hashing ([#4075](https://github.com/0xMiden/miden-vm/pull/4075)).
+- Added PVM benchmarks and updated synthetic transaction and recursive verification benchmarks for Eidos ([#4075](https://github.com/0xMiden/miden-vm/pull/4075)).
+- Specialized generated native evaluator arithmetic for faster MVM and PVM proving ([#4082](https://github.com/0xMiden/miden-vm/pull/4082)).
+- Added proven security bounds for verified MVM and PVM proofs. `ProofSecurityParameters::proven_security_report` and `proven_security_level` report the stronger of the unique- and list-decoding bounds, charging the lookup round the list-decoding list size. `miden verify` prints both conjectured and proven levels ([#4101](https://github.com/0xMiden/miden-vm/pull/4101)).
+- Added the recursive proven security estimator `stark::security::compute_proven_security_level` for descriptors returned by the MVM and PVM recursive verifiers, with its root exposed by `proven_security_estimator_root()` ([#4101](https://github.com/0xMiden/miden-vm/pull/4101)).
+
+#### Fixes
+
+- [BREAKING] Matched recursive VM/PVM out-of-domain sampling to Rust: reject zero, trace-subgroup points, and LDE-coset points, then resample from the transcript ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
+- Fixed recursive-verifier setup when a periodic-column cycle spans the entire trace ([#4130](https://github.com/0xMiden/miden-vm/pull/4130)).
+- Fixed `prove` writing the default outputs file next to the program instead of the proof, and refused an outputs path that names the proof file, so the proof is never replaced ([#3760](https://github.com/0xMiden/miden-vm/pull/3760)).
+- [BREAKING] Require preprocessed AIRs to declare `LiftedAir::log_preprocessed_height` and reject proofs whose per-AIR heights differ, preserving table ownership during verification and proof parsing ([#4157](https://github.com/0xMiden/miden-vm/pull/4157)).
+- [BREAKING] Both XChaCha IES schemes preserve plaintext types and reject byte/element mismatches when unsealing. Existing IES messages sealed as elements must be regenerated ([#4161](https://github.com/0xMiden/miden-vm/pull/4161)).
+- [BREAKING] Bind recipient public-key encodings into IES HKDF contexts for both K256 and X25519, separating recipient contexts even when their DH secrets agree. Existing ciphertexts for the four HKDF-based IES schemes must be regenerated ([#4162](https://github.com/0xMiden/miden-vm/pull/4162)).
+- [BREAKING] Align Rust Ed25519 verification with MASM by rejecting small-order public keys and signature points. Ed25519 public-key deserialization rejects noncanonical encodings, including keys used for X25519 key exchange and IES ([#4160](https://github.com/0xMiden/miden-vm/pull/4160)).
+- [BREAKING] Enforce curve scalar domains for MSM claims ([#4142](https://github.com/0xMiden/miden-vm/pull/4142)).
+- [BREAKING] Fixed PVM acceptance of PIN claims, uint domains, and curves rejected by native execution. Regenerate PVM proofs; the recursive verifier root changes ([#4143](https://github.com/0xMiden/miden-vm/pull/4143)).
+- Fixed `NodeIndex::move_up_to` panicking when moving a depth-64 index to the root by using `checked_shr` for the position shift ([#4114](https://github.com/0xMiden/miden-vm/pull/4114)).
+- Updated `crypto-bigint` to 0.7.6 and `ctutils` to 0.4.5 to address [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387) ([#4086](https://github.com/0xMiden/miden-vm/pull/4086)).
+- The precompile prover memory budget now also bounds witness preparation and Session import with conservative reservations taken before allocation. Oversized batches return `MemoryBudgetExceeded` before preparing or recording the work that would exceed the budget ([#4111](https://github.com/0xMiden/miden-vm/pull/4111)).
+- Fixed quadratic deduplication of files and error messages in `DebugInfoBuilder` during static linking. The builder now uses hash indexes for both tables ([#4124](https://github.com/0xMiden/miden-vm/pull/4124)).
+- [BREAKING] `SignaturePoly` now rejects coefficients whose Falcon compressed encoding exceeds the fixed 625-byte signature polynomial size, so serialization cannot panic on a `TryFrom`-accepted polynomial. The coefficient vector is private, and `From<Polynomial<FalconFelt>>` is replaced by a fallible `TryFrom`. Valid signature bytes and Falcon signing output are unchanged ([#4150](https://github.com/0xMiden/miden-vm/pull/4150)).
+- `build_trace` returns an error instead of panicking when a Merkle path request in an execution witness has an empty path or an index that does not fit in the path's depth ([#4159](https://github.com/0xMiden/miden-vm/pull/4159)).
+- Corrected the `StackInterface::get_word` documentation to show that the top of the stack is `Word[0]` when `start_idx=0` ([#4139](https://github.com/0xMiden/miden-vm/pull/4139)).
+
+## v1.0.0-rc.0 (2026-10-21)
+
+#### Features
+
+- Restored the standalone `miden_crypto::hash::poseidon2` API, including its original digest format, Plonky3 adapters, and SIMD implementations, for applications with existing Poseidon2 commitments.
+- [BREAKING] Added compact `SmtWitness` transport and CLI input support, including `MerkleData::SmtWitness` and stricter partial-SMT validation. Omit canonical empty nodes from `MerkleStore` serialization, saving 24,480 bytes ([#4043](https://github.com/0xMiden/miden-vm/pull/4043)).
+- Added `Arbitrary` implementations and property tests for serialization and VM operations. Expanded fuzz input checks and seed inputs ([#3976](https://github.com/0xMiden/miden-vm/pull/3976)).
+- [BREAKING] Added `adv.export_deferred_witness` to store a registered true assertion's portable witness in the advice map under its digest. Downstream exhaustive matches on `SystemEvent` and `SystemEventNode` must handle the new `DeferredExportWitness` variant ([#4003](https://github.com/0xMiden/miden-vm/pull/4003)).
+- Added independent precompile obligation roots through `_with_root` stdlib procedures and `precompiles::append_root`, including arithmetic, curves, hashes, ECDSA, and EdDSA. Each manual call takes ordinary inputs and returns its complete obligation root first. Callers compose roots explicitly without advancing the VM root. `append_root` hashes its children in stack order, and `append_root_ptr` updates a root in memory. Single-binding operations return bare assertions, and predicates bind their inputs even when false. Signature implementations keep obligation roots on the operand stack and delay composition while intermediate values are consumed. Native signature procedures log their complete obligation once. Root grouping changes their deferred commitment digests ([#4012](https://github.com/0xMiden/miden-vm/pull/4012)).
+- [BREAKING] Added separately configurable execution and per-witness verification limits for deferred precompile work. Custom precompiles must implement `Precompile::work`; consuming witness preparation validates and admits work before commitment hashing or evaluation. Proving consumes prepared witnesses, with a separate memory-budget check before trace generation. The shared root ceiling for proving, canonical decoding, and verification drops from 4,096 to 128, rejecting existing format-2 proofs with 129–4,096 roots without changing the encoding version. Portable witness decoding now checks transport syntax and bounds only. Callers must prepare the witness to validate graph integrity ([#3886](https://github.com/0xMiden/miden-vm/pull/3886)).
+- [BREAKING] Added EcGFp5 Diffie-Hellman support in Rust and MASM, plus the `Ecgfp5Eidos` IES scheme ([#4036](https://github.com/0xMiden/miden-vm/pull/4036)).
+- [BREAKING] Added associated-data support to MASM Eidos AEAD and replaced its low-level API with `encrypt`, `decrypt`, `encrypt_with_ad`, and `decrypt_with_ad` ([#4036](https://github.com/0xMiden/miden-vm/pull/4036)).
+- [BREAKING] Added four typed precompile work limits to the Miden VM CLI. `prove` creates complete proofs by default. `--deferred` explicitly opts into exporting a raw precompile witness that can reveal private advice inputs, with disclosure in help and output. `--complete` explicitly selects complete proving. `verify` accepts valid deferred proofs by default with explicit status and outstanding precompile obligation. Use `--require-complete` to require a fully STARK-backed proof. An explicit `prove --max-prover-memory` now sets both VM and precompile proving budgets, while omitting it preserves each stage's library default.
+- [BREAKING] Share one Lagrange basis across periodic columns of a period ([#3847](https://github.com/0xMiden/miden-vm/pull/3847)).
+- [BREAKING] Added proven SHA-512 hashing and Ed25519 signature verification to the precompile VM and core library ([#3867](https://github.com/0xMiden/miden-vm/pull/3867)).
+- [BREAKING] Added P-256 curve support, a deferred SHA-256 precompile chiplet, and ECDSA P-256/SHA-256 signature verification and public-key recovery to the core library ([#3896](https://github.com/0xMiden/miden-vm/pull/3896)).
+
+#### Changes
+
+- Updated the crypto test vectors to `wycheproof-ng` 0.4.0.
+- Release all workspace crates, including `midenc-hir-type`, as `1.0.0-rc.0` and inherit their versions from the workspace.
+- [BREAKING] Model public inputs per AIR in the lifted AIR/STARK crates and VM/PVM AIRs. `Statement::new` accepts indexed `(AIR instance index, values)` entries and rejects omitted AIRs with nonzero public-input counts; `Statement::air_inputs()` and `MultiAir` hooks expose per-AIR vectors. Removed `MultiAir::num_air_inputs()`. High-level processor, VM, prover, and verifier APIs are unchanged ([#4034](https://github.com/0xMiden/miden-vm/pull/4034)).
+- [BREAKING] Warn on unused private assembly constants. `AnalysisContext::new` takes a module path. Pass the parsed module to `AnalysisContext::set_module` and handle its `Result`. Add an `UnusedConstant` variant to `SemanticAnalysisError` ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
+
+- [BREAKING] Removed the crypto crate's `RandomCoin` alias and `FeltRng` trait, and the VM core crate's `crypto::random` reexport module ([#4041](https://github.com/0xMiden/miden-vm/pull/4041)).
+- [BREAKING] Removed RPO and RPX hashing APIs from the crypto crate and removed RPO, RPX, and Poseidon2 proof configurations from the VM and precompile VM. Eidos, BLAKE3, and Keccak remain supported for proofs. Proofs selecting the removed configurations are rejected ([#4032](https://github.com/0xMiden/miden-vm/pull/4032)).
+- Restored the standalone `miden_crypto::hash::poseidon2` API for applications with existing Poseidon2 commitments, preserving its original digest format, Plonky3 adapters, and SIMD implementations. The VM uses Eidos natively. Poseidon2 remains unsupported for VM and precompile proofs ([#4063](https://github.com/0xMiden/miden-vm/pull/4063)).
+
+- [BREAKING] Preserve the full IV words in Eidos initial chaining values. This changes Eidos hashes and derived commitments in the VM and crypto crates ([#4021](https://github.com/0xMiden/miden-vm/pull/4021)).
+- [BREAKING] Simplified Eidos hashing APIs: renamed `hmerge` to `hdword` and `hash_two_words*` to `hash_double_word*`. Use `hash_words` instead of `merge_many` or MASM `hash_double_words`, and `compress_double_word` for raw MASM compression. MASM domain helpers use `_in_domain` and take the domain first. Rebuild compiled MASM packages; the recursive VM verifier root changes ([#4018](https://github.com/0xMiden/miden-vm/pull/4018)).
+- [BREAKING] Reduced configurable deferred-precompile admission defaults for hash calls and bytes, arithmetic and curve operations, and MSM calls and terms, independently of hard supported-input ceilings.
+- Refreshed VM and crypto benchmark results for Eidos ([#3975](https://github.com/0xMiden/miden-vm/pull/3975)).
+- [BREAKING] Optimized Falcon512-Eidos verification with counter-mode hash-to-point and fused norm computation. Regenerate signatures and use `falcon512_eidos::encode_signature` for advice. `mod_12289` takes `u64` in `[lo, hi]` order instead of `[hi, lo]`. `Nonce` uses `{ lo, hi }`. Replaced `hash_to_point` and `compute_s1_norm_sq` with `hash_to_point_s1_norm_sq`. Removed `diff_mod_M` and `WideInteger` ([#3990](https://github.com/0xMiden/miden-vm/pull/3990)).
+- Added opt-in hashing of completed trace LDE blocks to the lifted STARK prover (`hash_lde_blocks`) ([#3866](https://github.com/0xMiden/miden-vm/pull/3866)).
+- [BREAKING] Adopted Eidos as the native hash for VM data, Falcon signatures, AEAD, deferred computation, and proof transcripts, changing digests, verifier roots, and proof layout. `crypto_stream` now derives Eidos XOF blocks and writes expanded u32 ciphertext. Replaced `HPERM`/`adv.insert_hperm` with `COMPRESS`/`adv.insert_compress`. Removed `adv.insert_hdword_d`, `sys::hdword_to_map_with_domain`, SMT `LEAF_DOMAIN`, and the Poseidon2-backed `RandomCoin`. Replaced the Poseidon2 core-library hash and AEAD modules with Eidos equivalents. Deferred nodes now use checked `EidosFrame` instead of `Tag`. `adv.evaluate_deferred_tag` is now `adv.evaluate_deferred_frame`. The name-derived IDs of `sys::adv::register_deferred` and `sys::adv::evaluate_deferred` were corrected. `adv.register_deferred` now uses `[CV, PAYLOAD_LO, PAYLOAD_HI]` and `adv.register_deferred_data` uses `[n_chunks, CV, ptr]`. `precompiles::digest_expr` and `precompiles::register_value` are replaced by `precompiles::register_fixed_expr`. Renamed core `merge_in_domain` to `merge_in_mast_domain` and crypto `merge_in_domain` to `hash_two_words_in_domain`. Removed the Poseidon2 IES schemes while preserving Eidos wire IDs 4 and 5. Bumped MAST serialization to 0.0.5 and Eidos execution witnesses to version 2 ([#3718](https://github.com/0xMiden/miden-vm/pull/3718)).
+- [BREAKING] Normalized every PVM AIR's committed LogUp sum by its trace length and reduced native and precompile VM trace widths using shared centered LogUp, compact byte-pair tables, and narrower decoder and chiplet layouts. Updated the native and recursive closures and verifier artifacts; this changes both proof relations ([#3756](https://github.com/0xMiden/miden-vm/pull/3756)).
+- [BREAKING] Replaced the per-proof-order ACE circuit registries with one order-invariant circuit per relation, changing circuit and relation digests, verifier roots, and recursive proof fixtures ([#3762](https://github.com/0xMiden/miden-vm/pull/3762)).
+- [BREAKING] Replaced repeated recursive-verifier proof-order ranking with one generated map pass, changing the VM and PVM recursive-verifier artifacts and roots; replaced `MasmConstraintsEvalConfig::stages_fold_coefficients: bool` with `fold_coefficients: Option<FoldCoefficientStaging>` ([#3879](https://github.com/0xMiden/miden-vm/pull/3879)).
+- [BREAKING] RocksDB SMT stores reject incompatible or unmarked nonempty databases. Rebuild these stores from key-value entries ([#3879](https://github.com/0xMiden/miden-vm/pull/3879)).
+- [BREAKING] Security-parameter builders take the proof-hash configuration instead of a collision-bit count; renamed the lossy Eidos packing helpers to `mask_and_pack_felt` and `mask_and_pack_word` ([#3879](https://github.com/0xMiden/miden-vm/pull/3879)).
+- [BREAKING] Added `Lmcs::batch_proof` and `Lmcs::lifted_batch_proof` to construct typed batch proofs directly from trees. Custom `Lmcs` implementations must implement `batch_proof` ([#3910](https://github.com/0xMiden/miden-vm/pull/3910)).
+- Reused the fixed And8 setup trace during VM proving and precomputed its commitments for all six proof-hash configurations ([#3910](https://github.com/0xMiden/miden-vm/pull/3910)).
+- Optimized Eidos Merkle tree construction ([#3898](https://github.com/0xMiden/miden-vm/pull/3898)).
+- Evaluated Eidos AEAD MACs without allocating a coefficient buffer and checked input lengths before byte conversion, associated-data copying, or ciphertext deserialization ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
+- [BREAKING] Renamed `auth_empty_ad_expanded_with_scratch` to `auth_empty_ad_expanded_exact` and removed its `scratch_ptr` parameter. Reduced cycle costs in the core library's Eidos AEAD encryption, authentication, and decryption procedures ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
+- [BREAKING] Optimized PVM by reducing AIR widths and lookup costs ([#4027](https://github.com/0xMiden/miden-vm/pull/4027)).
+- [BREAKING] Reduced emitted VM operations for immediate exponentiation, u32max, and comparisons against zero. Verifier roots change. ([#4049](https://github.com/0xMiden/miden-vm/pull/4049)).
+
+#### Fixes
+
+- `build_trace` returns an error for non-u32 AEAD replay lanes or ciphertext mismatches ([#4036](https://github.com/0xMiden/miden-vm/pull/4036)).
+- [BREAKING] Fixed a Keccak soundness issue that allowed a Keccak assertion to bind its input to the digest of another sponge invocation. Each Keccak node's sponge permutation count must now match its byte length. PVM proofs and verifier roots change ([#3974](https://github.com/0xMiden/miden-vm/pull/3974)).
+- [BREAKING] Fixed an MSM soundness issue that allowed distinct claims sharing one expression to redistribute its terms and bind to incorrect results. Each MSM expression now serves at most one claim, and the prover lays a copy of it for each further claim. PVM proofs and verifier roots change ([#3974](https://github.com/0xMiden/miden-vm/pull/3974)).
+- [BREAKING] Fixed canonical ordering of recursive types and bumped the package format to 8.0.0. Rebuild version 7 packages. Rejected reversed source spans and noncanonical partial-SMT payloads. Fixed RPX debug stack overflow ([#3976](https://github.com/0xMiden/miden-vm/pull/3976)).
+- [BREAKING] Bumped the portable precompile witness encoding to version 2; version-1 witnesses are rejected before decoding their payloads ([#3879](https://github.com/0xMiden/miden-vm/pull/3879)).
+- [BREAKING] Introduced serialization format version 1 for `MerkleStore` and `PartialMmr` as part of the Eidos migration. Unversioned encodings, including stores embedded in `AdviceInputs`, are rejected; rebuild cached Merkle state using Eidos ([#3879](https://github.com/0xMiden/miden-vm/pull/3879)).
+- [BREAKING] Fixed Eidos AEAD authentication to prevent key-independent tag adjustments. The AEAD key derivation domains use version 2; ciphertexts and tags produced under version 1 are incompatible ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
+- Hardened Eidos AEAD tag equality with constant-time comparison and cleared temporary secret-key buffers during serialization and deserialization ([#3960](https://github.com/0xMiden/miden-vm/pull/3960)).
+- Corrected native and recursive Eidos proof-security estimates to account for restricted Fiat-Shamir challenges. Eidos has a 126-bit generic collision-resistance ceiling and restricted field outputs; see the [security and usage guide](docs/src/design/eidos-security.md) ([#3879](https://github.com/0xMiden/miden-vm/pull/3879)).
+- Fixed lifted STARK proving for quotient domains smaller than the SIMD packing width ([#3910](https://github.com/0xMiden/miden-vm/pull/3910)).
+- Restored the VM chiplets diagram showing the hash controller and the Eidos compression and byte-lookup AIRs ([#3977](https://github.com/0xMiden/miden-vm/pull/3977)).
+- `smt::get` returns the empty word for an absent key whose leaf holds a single pair for a different key, instead of failing an assertion ([#3979](https://github.com/0xMiden/miden-vm/pull/3979)).
+- [BREAKING] Closed a constraint gap in `MRUPDATE` by requiring the old and new Merkle paths to use the same sibling at each level. Existing VM proofs are incompatible with the updated verifier ([#4002](https://github.com/0xMiden/miden-vm/pull/4002)).
+- [BREAKING] Closed a constraint gap in loop control flow by requiring `REPEAT`, like `LOOP`, to enter the body before the loop's `END`. Existing VM proofs are incompatible with the updated verifier ([#4002](https://github.com/0xMiden/miden-vm/pull/4002)).
+
+## v0.36.5 (2026-11-18)
+
+#### Changes
+
+- Moved routine VM execution, trace construction, and STARK proving instrumentation to `TRACE` under `miden::vm::{execute,trace,prove}`, keeping successful proving silent at `INFO` ([#4238](https://github.com/0xMiden/miden-vm/pull/4238)).
+
+## v0.36.4 (2026-11-06)
+
+#### Changes
+
+- Allow core MASM package patch versions to differ from the `miden-core-lib` crate for stable releases with matching major/minor versions. Require full version equality when either version is a prerelease. Keep the core MASM package at 0.36.3 ([#4100](https://github.com/0xMiden/miden-vm/pull/4100)).
+
+#### Fixes
+
+- [BREAKING] Made `PartialSmt::add_path` atomic so errors leave the tree unchanged. Paths shorter than 64 levels now return `MerkleError::InvalidPathLength(64)` ([#4123](https://github.com/0xMiden/miden-vm/pull/4123)).
+- Fixed `PartialMerkleTree::add_path` so an error leaves the tree unchanged. A rejected path no longer adds nodes or raises `max_depth` ([#4140](https://github.com/0xMiden/miden-vm/pull/4140)).
+- Added an explicit error message to `mem::pipe_preimage_to_memory` when the computed commitment does not match the supplied commitment ([#4127](https://github.com/0xMiden/miden-vm/pull/4127)).
+
+## v0.36.3 (2026-10-27)
+
+#### Fixes
+
+- Updated `zstd-sys` to 2.1.2 to address [RUSTSEC-2026-0410](https://rustsec.org/advisories/RUSTSEC-2026-0410).
+- Restored exact `Serializable::get_size_hint` implementations for `MastForest` and `AdviceMap`, and added `MastForest::hashless_size_hint` to size hashless payloads without allocation or serialization ([#4080](https://github.com/0xMiden/miden-vm/pull/4080)).
+
+## v0.36.2 (2026-10-20)
+
+#### Fixes
+
+- Fixed `MerkleStore::find_lone_leaf` returning `None` for a lone leaf in any tree whose `tree_depth` is not 64 ([#4062](https://github.com/0xMiden/miden-vm/pull/4062)).
+- Omit canonical empty nodes from `MerkleStore` serialization, saving 24,480 bytes per store while preserving compatibility with existing readers and payloads ([#4060](https://github.com/0xMiden/miden-vm/pull/4060)).
+- [BREAKING] Write CLI proofs and output JSON to sibling temporary files before replacing their destinations, preserving previous artifacts when writes fail. Replacements use the current user and normal file creation permissions instead of copying the previous file's access controls. Destination symlinks are replaced with artifact files ([#4058](https://github.com/0xMiden/miden-vm/pull/4058)).
+- [BREAKING] Limit package files to 512 MiB, input JSON to 64 MiB, and output JSON to 64 KiB before decoding. These readers require regular files and accept symlinks to regular files ([#4058](https://github.com/0xMiden/miden-vm/pull/4058)).
+- Fixed `miden-format` widening signature items on every run when the signature contains a comment, and dropping comments inside procedure attribute arguments ([#4029](https://github.com/0xMiden/miden-vm/pull/4029)).
+- Enforced the VM CLI advice-memory budget while constructing Merkle trees from input files, before the full trees are materialized ([#4022](https://github.com/0xMiden/miden-vm/pull/4022)).
+- Fixed debugger invocation recovery across re-batched padding and generated local-frame instructions, preserving suspended callers and invocation identities for nested `exec` calls ([#4037](https://github.com/0xMiden/miden-vm/pull/4037)).
+
+## v0.36.1 (2026-10-16)
+
+#### Changes
+
+- Documented the byte order of MAST root literals and added a regression test ([#3935](https://github.com/0xMiden/miden-vm/pull/3935)).
+
+#### Fixes
+
+- Fixed `DebugCallFrameResolver` to preserve inherited inline-call counts throughout operation ranges and distinguish caller contexts from inline frames entered or cleared within the callee ([#4023](https://github.com/0xMiden/miden-vm/pull/4023)).
+
+## v0.36.0 (2026-10-14)
+
+#### Fixes
+
+- Fixed release version comparisons to respect prerelease precedence and compare patch releases within their major/minor line. API compatibility checks use stable releases instead of release candidates ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
+- [BREAKING] `Package::strip_debug_info` strips an embedded kernel one level deep and rejects a kernel section that embeds another kernel with the new `PackageStripError::NestedEmbeddedKernel`, instead of recursing until the stack overflows ([#3981](https://github.com/0xMiden/miden-vm/pull/3981)).
+- [BREAKING] Reject assembler-produced debug sections that exceed the standard reader's payload, string, or type-table limits. These checks prevent packages that fail to load with debug information. Add `PackageDebugInfo::to_bytes_with_standard_limits` for checked encoding ([#4007](https://github.com/0xMiden/miden-vm/pull/4007), [#3982](https://github.com/0xMiden/miden-vm/pull/3982)).
+- Fixed linker module-capacity overflow so AST and pre-assembled module registration return a structured error instead of panicking ([#3933](https://github.com/0xMiden/miden-vm/pull/3933)).
+- [BREAKING] `MmrPeaks::verify` now takes the tree, peak and relative position from the peaks' forest instead of the proof's, and rejects positions outside that forest (`PositionNotFound`, previously a panic) and paths whose depth differs from the tree height (`InvalidMerklePath`) ([#3931](https://github.com/0xMiden/miden-vm/pull/3931)).
+- `build_trace` returns an error instead of panicking when a fragment continuation in an execution witness names a missing node, a node of the wrong kind, or a batch the basic block does not have ([#3978](https://github.com/0xMiden/miden-vm/pull/3978)).
+- Fixed assembler debug metadata losing procedure definitions and declared invocation targets for plain `exec`, including nested calls, re-exported procedures, and package linking, while preserving executable MAST roots. Raised the bounded debug-payload limit to 256 MiB and the debug string-table allowance to one million rows to accommodate merged dependency metadata; assembly now reports an error when emitted debug information exceeds the standard decoder limits ([#3982](https://github.com/0xMiden/miden-vm/pull/3982)).
+- Fixed cross-module calls through re-export aliases of private procedures by preserving the visibility granted through the alias ([#3986](https://github.com/0xMiden/miden-vm/pull/3986)).
+
+#### Features
+
+- Added `PublicKey::from_sec1_bytes` and `PublicKey::from_hex` to `ecdsa_k256_keccak` for parsing and validating compressed and uncompressed SEC1 public keys ([#3961](https://github.com/0xMiden/miden-vm/pull/3961)).
+- [BREAKING] Added MASM `pub(package)` visibility and `Visibility::Internal`, allowing declarations and re-exports to follow public access rules without being exported from the package ([#3986](https://github.com/0xMiden/miden-vm/pull/3986)).
+- Allowed re-exporting private items and import aliases visible at the re-export declaration site, including using re-exported private types in public signatures ([#3986](https://github.com/0xMiden/miden-vm/pull/3986)).
+
+#### Changes
+
+- Removed the duplicate MAST forest commitment stored in `Package` and moved package commitment calculations into a private helper, without changing any commitment values ([#3880](https://github.com/0xMiden/miden-vm/pull/3880)).
+- Added a cached `DebugCallFrameResolver` to recover debugger call frames from existing function and source metadata. Debuggers can distinguish frames identified by source metadata from inferred frames. The package debug-info format is unchanged ([#4007](https://github.com/0xMiden/miden-vm/pull/4007)).
+- Replaced the main-only release restriction. Stable releases can use `main`. Matching patch releases can also use `release/vVERSION` or `release-vVERSION` branches. Release candidates use `next`. Tags must match the VM version and source commit. Maintenance branches must descend from the base and latest earlier stable patch tags ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
+- Required release approval from a repository admin through the `release` environment. Admins can approve their own releases. Release candidates remain prereleases, and patch branches preserve GitHub's latest stable release ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
+- Required manual release dispatch and removed the `release.published` publication fallback. Removed the option to skip the package version gate ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
+- Moved builds and package verification into jobs without OIDC access. Cargo uploads use `--no-verify` after the selected packages pass verification, so compilation does not receive publication credentials. Added a remote tag check before publishing the GitHub release ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
+- Replaced custom release version comparisons with Rust `semver` and added Rust tests. Added release preparation and recovery instructions in `docs/RELEASING.md` ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
+- Separated synthetic CodSpeed compilation from measurement while retaining the optimized profile and benchmark coverage. The executable builds on an ARM64 8x runner using Ubuntu 22.04, and SMT benchmarks run independently ([#3992](https://github.com/0xMiden/miden-vm/pull/3992)).
+- [BREAKING] Store inline-call frames as operation ranges instead of per-operation rows. Package debug-info version 4 preserves inline chains across clears, control flow, and dynamic or external boundaries without expanding them during decoding ([#3956](https://github.com/0xMiden/miden-vm/pull/3956)).
+
+## v0.35.0 (2026-10-01)
+
+#### Changes
+
+- [BREAKING] Removed the accessor procedures from `miden::core::stark::constants`; import its constants instead ([#3925](https://github.com/0xMiden/miden-vm/pull/3925)).
+- [BREAKING] Removed unused procedures from the MASM recursive verifier ([#3937](https://github.com/0xMiden/miden-vm/pull/3937)).
+
+#### Fixes
+
+- [BREAKING] Fixed the `aead::decrypt` overlap check so it also covers the 4-element tag after the ciphertext; a destination placed at the tag address now fails the overlap assertion instead of overwriting the tag and failing with a tag mismatch. Layouts where the destination range only overlaps the tag are now rejected even when nothing would be written there, e.g. an empty message (`num_blocks = 0`) with `dst_ptr` at the tag address. Ranges that end at the last memory address are no longer rejected ([#3897](https://github.com/0xMiden/miden-vm/pull/3897)).
+- [BREAKING] Reject unsorted or repeated keys in `SmtLeaf::new_multiple` and when reading serialized leaves. Invalid keys return the new `SmtLeafError::UnsortedMultipleLeafKeys` error ([#3901](https://github.com/0xMiden/miden-vm/pull/3901)).
+- [BREAKING] Limited `eval_circuit` to 32,768 total READ and EVAL wires per call and witness collection to 32 invocations. Oversized circuits are rejected before allocation, and evaluations beyond the invocation limit are rejected before being recorded in the witness ([#3908](https://github.com/0xMiden/miden-vm/pull/3908)).
+- Fixed concurrent `Smt::with_entries` and `LargeSmt::with_entries` panicking on leaves with more than `MAX_LEAF_ENTRIES` entries and keeping empty values in leaves shared with other keys ([#3932](https://github.com/0xMiden/miden-vm/pull/3932)).
+- [BREAKING] Reject inactive EC add rows that provide a group addition, and require each Keccak node's chunk count to match its byte length. PVM proofs and verifier roots change ([#3942](https://github.com/0xMiden/miden-vm/pull/3942)).
+- [BREAKING] Require Keccak sponge rows carrying message bytes to consume chunk-tape lanes and unused input bytes to be zero. PVM proofs and verifier roots change ([#3943](https://github.com/0xMiden/miden-vm/pull/3943)).
+- [BREAKING] Enforce Poseidon2 permutations on cycles with consumed inputs, and require output and continuation cycles to consume inputs. PVM proofs and verifier roots change ([#3943](https://github.com/0xMiden/miden-vm/pull/3943)).
+- [BREAKING] Require minted MSM on-curve certificates to depend on older points. PVM proofs and verifier roots change ([#3943](https://github.com/0xMiden/miden-vm/pull/3943)).
+- [BREAKING] Reject nonzero certificates on UintAdd equality blocks. PVM proofs and verifier roots change ([#3943](https://github.com/0xMiden/miden-vm/pull/3943)).
+
+## v0.34.0 (2026-09-26)
 
 #### Features
 
@@ -8,41 +289,28 @@
 
 #### Changes
 
-- [BREAKING] Removed `Eq` and `PartialEq` from Falcon, ECDSA-k256, and EdDSA secret-key types in
-  non-test builds so production comparisons cannot materialize encoded private-key copies
-  ([0xMiden/crypto#1061](https://github.com/0xMiden/crypto/pull/1061), [#3456](https://github.com/0xMiden/miden-vm/pull/3456)).
-  Also removed the public `ZeroizeOnDrop` impl on `Polynomial<F>`; downstream `T: ZeroizeOnDrop`
-  bounds that relied on that impl will now fail to compile with E0277.
-- [BREAKING] Removed the custom `Randomizable` trait and random test wrappers. Use `rand` distributions instead. `Word` now implements `StandardUniform`, and `Felt`'s default Proptest strategy is shrinkable and covers canonical and non-canonical representations. Tests that require one representation can use `arb_felt_canonical()` or `arb_felt_noncanonical()` ([#3873](https://github.com/0xMiden/miden-vm/pull/3873)).
+- Reworked the `MastForest` `Arbitrary` impl. `GenerationMode::Executable` (the default) yields forests whose procedure roots run to completion on any operand stack: infallible, stack-balanced basic blocks, binary split and loop conditions, externals that resolve to local roots, and syscalls into a paired `KernelDescriptor` exposed through `forest_kernel_strategy`. `GenerationMode::StructureOnly` keeps the permissive behavior ([#3158](https://github.com/0xMiden/miden-vm/pull/3158)).
 - Improved lifted STARK prover performance: LogUp fractions are built and accumulated in row chunks with a parallel accumulator scan, and DEEP reduction avoids element-wise buffer swaps and per-height group buffers ([#3851](https://github.com/0xMiden/miden-vm/pull/3851)).
-- [BREAKING] Reduced prover peak memory by 13-20% by pruning Merkle layers ([#3872](https://github.com/0xMiden/miden-vm/pull/3872)).
+- [BREAKING] Made the public `ParsingError` enum `#[non_exhaustive]` and restored separate variants for protocol ABI conflicts ([#3859](https://github.com/0xMiden/miden-vm/pull/3859)).
+- - [BREAKING] Reduced prover peak memory by 13-20% by pruning Merkle layers ([#3872](https://github.com/0xMiden/miden-vm/pull/3872)).
+- [BREAKING] Removed the custom `Randomizable` trait and random test wrappers. Use `rand` distributions instead. `Word` now implements `StandardUniform`, and `Felt`'s default Proptest strategy is shrinkable and covers canonical and non-canonical representations. Tests that require one representation can use `arb_felt_canonical()` or `arb_felt_noncanonical()` ([#3873](https://github.com/0xMiden/miden-vm/pull/3873)).
 - Added Eidos wasm32 SIMD128 backend ([#3881](https://github.com/0xMiden/miden-vm/pull/3881)).
 - [BREAKING] Bumped Plonky3 related dependencies to v0.8.0, updating reported conjectured security levels with corrected conservative rounding and a DEEP composition bound that accounts for the LDE size ([#3888](https://github.com/0xMiden/miden-vm/pull/3888)).
+- Optimized Eidos native and wasm compression ([#3899](https://github.com/0xMiden/miden-vm/pull/3899)).
 
 #### Fixes
 
-- Wiped Falcon secret-polynomial and encoded-key temporaries during key generation,
-  deserialization, serialization, public-key derivation, and signing. ECDSA-k256 and EdDSA
-  serialization temporaries are also wiped
-  ([0xMiden/crypto#1061](https://github.com/0xMiden/crypto/pull/1061), [#3456](https://github.com/0xMiden/miden-vm/pull/3456)).
-- [BREAKING] Fixed missing decoder AIR constraints that allowed `in_span` to change without a
-  matching `SPAN`, `RESPAN`, or `END` operation. This changes Miden VM proofs and AIR relation
-  digests. The VM recursive-verifier MAST root also changes, so consumers that pin it must update
-  ([#3883](https://github.com/0xMiden/miden-vm/pull/3883)).
-- [BREAKING] Closed decoder AIR soundness gaps in caller-frame restoration, DYNCALL stack transitions, span and `REPEAT` adjacency, reserved opcode slots, and repeated-loop body authentication. This changes the block-stack and `END` APIs, AIR relation digest, and ACE registry roots, invalidating older proofs.
-- Fixed Falcon512 `ntru_gen` so oversized NTRU solution coefficients are rejected against the encoding bound before `i16` narrowing, instead of panicking in `try_into` ([#3857](https://github.com/0xMiden/miden-vm/pull/3857)).
-- Fixed `IntValue::Felt` Display so it prints canonical hex without byte-swapping ([#3808](https://github.com/0xMiden/miden-vm/pull/3808)).
 - [BREAKING] Fixed the MASM printer so a printed procedure parses again: signatures keep their parameter names in the new `FunctionType::arg_names` field, and `@locals` prints its count as an integer ([#3658](https://github.com/0xMiden/miden-vm/issues/3658)).
+- [BREAKING] Fixed stack overflows when parsing deeply nested constant and type expressions by rejecting nesting beyond 256 levels ([#3700](https://github.com/0xMiden/miden-vm/pull/3700)).
+- Fixed `IntValue::Felt` Display so it prints canonical hex without byte-swapping ([#3808](https://github.com/0xMiden/miden-vm/pull/3808)).
+- Fixed Falcon512 `ntru_gen` so oversized NTRU solution coefficients are rejected against the encoding bound before `i16` narrowing, instead of panicking in `try_into` ([#3857](https://github.com/0xMiden/miden-vm/pull/3857)).
 - [BREAKING] Changed `ProverInstance::new()` to take ownership of `ProverStatement`. `ProverInstance::prove()` now consumes the instance and returns its verifier statement with the proof. The prover can now release the main traces after their final use. This reduced measured peak memory by about 7 percent ([#3833](https://github.com/0xMiden/miden-vm/pull/3833)).
+- [BREAKING] Fixed missing decoder AIR constraints that allowed `in_span` to change without a matching `SPAN`, `RESPAN`, or `END` operation. This changes Miden VM proofs and AIR relation digests. The VM recursive-verifier MAST root also changes, so consumers that pin it must update ([#3883](https://github.com/0xMiden/miden-vm/pull/3883)).
+- Fixed `miden-format` moving an item's doc comment to the module when the file starts with a blank line ([#3884](https://github.com/0xMiden/miden-vm/issues/3884)).
 - [BREAKING] Require `CryptoRng` for `SecretKey::with_rng` and `SecretKey::sign_with_rng` in the Falcon DSA module ([#3889](https://github.com/0xMiden/miden-vm/pull/3889)).
-
-#### Changes
-
-- Reworked the `MastForest` `Arbitrary` impl. `GenerationMode::Executable` (the default) yields forests whose procedure roots run to completion on any operand stack: infallible, stack-balanced basic blocks, binary split and loop conditions, externals that resolve to local roots, and syscalls into a paired `KernelDescriptor` exposed through `forest_kernel_strategy`. `GenerationMode::StructureOnly` keeps the permissive behavior ([#3158](https://github.com/0xMiden/miden-vm/pull/3158)).
-
-#### Changes
-
-- [BREAKING] Made the public `ParsingError` enum `#[non_exhaustive]` and restored separate variants for protocol ABI conflicts ([#3859](https://github.com/0xMiden/miden-vm/pull/3859)).
+- Fixed `AdviceMap` deserialization accepting a repeated key and silently keeping the last value; it now returns an error, matching `MastForestWireView` ([#3900](https://github.com/0xMiden/miden-vm/pull/3900)).
+- [BREAKING] Limited core-library sorted-array lookups to 65,536 entries per call. Larger ranges are rejected before host memory is scanned, and the public `SortedArrayError` enum now includes `TooManyEntries`. This affects `find_word`, `find_key_value`, and `find_half_key_value` ([#3909](https://github.com/0xMiden/miden-vm/pull/3909)).
+- [BREAKING] Closed decoder AIR soundness gaps in caller-frame restoration, DYNCALL stack transitions, span and `REPEAT` adjacency, reserved opcode slots, and repeated-loop body authentication. This changes the block-stack and `END` APIs, AIR relation digest, and ACE registry roots, invalidating older proofs.
 
 ## v0.33.0 (2026-09-16)
 
@@ -88,8 +356,6 @@
 - Cached loaded MAST forests in `FastProcessor` so repeated external calls reuse the forest and merge its advice map once ([#3764](https://github.com/0xMiden/miden-vm/pull/3764)).
 - [BREAKING] Removed the trace bus debugger APIs from `miden-air` and the `bus-debugger` feature from `miden-processor` ([#3775](https://github.com/0xMiden/miden-vm/pull/3775)).
 - [BREAKING] Bumped Plonky3 related dependencies to v0.7.0 ([#3778](https://github.com/0xMiden/miden-vm/pull/3778)).
-
-#### Features
 
 #### Fixes
 - Fixed stack overflow in the precompile prover's `translate_truthy`, `translate_uint`, and `translate_ec` by converting them from recursive to iterative post-order traversals. Programs with many `LOGDEFERRED` calls no longer crash ([#3626](https://github.com/0xMiden/miden-vm/issues/3626)).
@@ -376,7 +642,7 @@
 
 ## miden-vm v0.25.2 (2026-07-11)
 
-- Support constructing initial `ResumeContext` for execution stepping from a `Package`, in order to ensure debug context is correctly initialized
+- Support constructing initial `ResumeContext` for execution stepping from a `Package` so debug context is correctly initialized
 
 ## miden-vm v0.25.1 (2026-07-10)
 
@@ -945,7 +1211,7 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 - [BREAKING] Removed `miden debug`, `miden analyze` and `miden repl` ([#2483](https://github.com/0xMiden/miden-vm/pull/2483)).
 - [BREAKING] Standardized operand-stack ordering around a unified little-endian (LE) convention (low limb/coeff closest to the top). This includes multi-limb integer ops, extension field elements, and streaming memory operations. Also remapped the sponge state and adjusts hperm/digest extraction plus advice hash-insert instructions for consistent LE semantics. ([#2547](https://github.com/0xMiden/miden-vm/pull/2547)).
 - [BREAKING] Renamed `u32overflowing_mul` to `u32widening_mul`, `u32overflowing_madd` to `u32widening_madd`, and `math::u64::overflowing_mul` to `math::u64::widening_mul` ([#2584](https://github.com/0xMiden/miden-vm/pull/2584)).
-- [BREAKING] Changed the VM’s native hash function from RPO to Poseidon2 ([#2599](https://github.com/0xMiden/miden-vm/pull/2599)).
+- [BREAKING] Changed the VM's native hash function from RPO to Poseidon2 ([#2599](https://github.com/0xMiden/miden-vm/pull/2599)).
 
 #### Enhancements
 
@@ -1497,7 +1763,7 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 
 #### Fixes
 
-- Fixed `SourceContent::update` splice logic to prevent panics on single-line edits and respect exclusive end semantics for multi-line edits ([#XXXX](https://github.com/0xMiden/miden-vm/pull/2146)).
+- Fixed `SourceContent::update` splice logic to prevent panics on single-line edits and respect exclusive end semantics for multi-line edits ([#2146](https://github.com/0xMiden/miden-vm/pull/2146)).
 - Truncated nprime.masm output stack to prevent overflow during benchmarks ([#1879](https://github.com/0xMiden/miden-vm/issues/1879)).
 - Modules can now be provided in any order to the `Assembler`, see #1669 (#1881).
 - Addressed bug which caused references to re-exported procedures whose definition internally referred to an aliased module import, to produce an "undefined module" error, see #1451 (#1892).

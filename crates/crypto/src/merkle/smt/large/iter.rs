@@ -3,7 +3,7 @@ use alloc::{boxed::Box, vec::Vec};
 use super::{IN_MEMORY_DEPTH, LargeSmtResult, StorageResult, is_empty_parent};
 use crate::{
     Word,
-    hash::poseidon2::Poseidon2,
+    hash::eidos::Eidos,
     merkle::{
         InnerNodeInfo,
         smt::{LargeSmt, SmtStorageReader, large::subtree::Subtree},
@@ -55,7 +55,7 @@ impl<S: SmtStorageReader> Iterator for LargeSmtInnerNodeIterator<'_, S> {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             match &mut self.state {
-                // Phase 1: Process in-memory nodes (depths 0-23)
+                // Phase 1: Process in-memory nodes above the storage boundary.
                 InnerNodeIteratorState::InMemory { current_index, large_smt_in_memory_nodes } => {
                     // Iterate through nodes at depths 0 to IN_MEMORY_DEPTH-1
                     // Start at index 1 (root), max node index is (1 << IN_MEMORY_DEPTH) - 1
@@ -79,7 +79,7 @@ impl<S: SmtStorageReader> Iterator for LargeSmtInnerNodeIterator<'_, S> {
 
                         if !is_empty_parent(left, right, child_depth) {
                             return Some(Ok(InnerNodeInfo {
-                                value: Poseidon2::merge(&[left, right]),
+                                value: Eidos::merge(&[left, right]),
                                 left,
                                 right,
                             }));
@@ -102,7 +102,7 @@ impl<S: SmtStorageReader> Iterator for LargeSmtInnerNodeIterator<'_, S> {
                         },
                     }
                 },
-                // Phase 2: Process storage subtrees (depths 25-64)
+                // Phase 2: Process storage subtrees from the boundary down to the leaves.
                 InnerNodeIteratorState::Subtree { subtree_iter, current_subtree_node_iter } => {
                     loop {
                         // First, try to get the next node from current subtree

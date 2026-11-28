@@ -274,7 +274,8 @@ impl LocalPackageRegistry {
     }
 
     /// Get the path in the artifact store for `package` at `version`
-    pub fn artifact_path(&self, package: &PackageId, version: &Version) -> Option<PathBuf> {
+    #[cfg(test)]
+    pub(crate) fn artifact_path(&self, package: &PackageId, version: &Version) -> Option<PathBuf> {
         self.artifact_path_for_summary(package, version)
     }
 

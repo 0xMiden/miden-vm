@@ -9,6 +9,8 @@ use alloc::vec::Vec;
 
 use assert_matches::assert_matches;
 use itertools::Itertools;
+use miden_field::Felt;
+use proptest::prelude::*;
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
@@ -20,6 +22,7 @@ use crate::{
             InMemoryBackend,
             backend::Result,
             root::{LineageId, TreeEntry, TreeWithRoot},
+            test_utils::arbitrary_word,
         },
     },
 };
@@ -780,4 +783,144 @@ fn update_forest() -> Result<()> {
     assert!(backend.trees()?.any(|e| e.root() == tree_2.root()));
 
     Ok(())
+}
+
+/// REGRESSION PIN for the empty-value SMT insertion divergence (found by
+/// backend_matches_reference_smt,'s property — minimal input shrunk
+/// by proptest; reported as the reported empty-value divergence in the property-testing session).
+///
+/// Previously, with the `concurrent` feature (DEFAULT), `Smt::with_entries`
+/// hashed an EMPTY-valued entry into the colliding leaf (SmtLeaf::Multiple),
+/// while the batch path treated the empty-valued insert as a removal — the
+/// same logical input, different roots. `LeafIndex::from` derives the leaf
+/// position from `key[3]`, so `EMPTY_WORD` collides with any key whose
+/// `key[3]` is zero. The sequential builder already filtered empty-valued
+/// entries like the batch path, so the divergence was concurrent-only.
+///
+/// Upstream PR #3932 ("handle empty values and over-full leaves in concurrent
+/// Smt::with_entries") fixed the concurrent builder to filter empty values,
+/// so all three insertion paths now agree. This pin asserts that agreement in
+/// EVERY configuration: it stands as the regression guard, and would break
+/// loudly if any insertion path reintroduced the divergent handling.
+#[test]
+fn empty_value_batch_insert_agrees_with_with_entries() -> Result<()> {
+    let ka: Word = Word::new([Felt::new_unchecked(1), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+    let va: Word = Word::new([Felt::new_unchecked(10), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+    let empty_root = Smt::with_entries([] as [(Word, Word); 0])?.root();
+
+    // Batch path: insert (ka, va) then (EMPTY, EMPTY) — the empty
+    // pair removes the EMPTY key (a no-op), so only (ka, va) remains.
+    let mut backend = InMemoryBackend::new();
+    let batch = SmtUpdateBatch::from([(ka, va), (EMPTY_WORD, EMPTY_WORD)].into_iter());
+    let root_batch = backend.add_lineage(LineageId::new([7u8; 32]), 5, batch)?;
+    let tree_ka_only = Smt::with_entries([(ka, va)])?;
+    assert_eq!(
+        root_batch.root(),
+        tree_ka_only.root(),
+        "batch semantics: the empty-valued insert is a no-op removal",
+    );
+
+    let tree_both = Smt::with_entries([(ka, va), (EMPTY_WORD, EMPTY_WORD)])?;
+
+    // All insertion paths now agree: the empty-valued entry is filtered like
+    // the batch path, in both the concurrent (default) and sequential builds.
+    assert_eq!(
+        tree_both.root(),
+        tree_ka_only.root(),
+        "with_entries must filter the empty-valued entry like the batch path",
+    );
+    assert_eq!(root_batch.root(), tree_both.root());
+    assert_ne!(tree_both.root(), empty_root);
+    Ok(())
+}
+
+// PROPERTY TESTS
+// ================================================================================================
+// The oracle relations of `open` / `get` / `version` generalized over
+// generated identities and key/value pairs: the backend's roots must equal
+// reference `Smt`s built from the same entries, its openings and value
+// lookups must match the reference tree's, and lineage metadata must be
+// preserved. Keys and values are independently generated words — a backend
+// that stored keys instead of the supplied values must fail.
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(32))]
+
+    #[test]
+    fn backend_matches_reference_smt(
+        (version, lineage_1, lineage_2, kvs_1, kvs_2, absent) in (
+            any::<u64>(),
+            any::<[u8; 32]>(),
+            any::<[u8; 32]>(),
+            (arbitrary_word(), arbitrary_word(), arbitrary_word(), arbitrary_word()),
+            (arbitrary_word(), arbitrary_word(), arbitrary_word(), arbitrary_word()),
+            arbitrary_word(),
+        )
+            // One combined filter (shallow strategy trees — see the
+            // run-#83 stack-overflow lesson): (a) duplicate lineage ids
+            // have untested backend semantics, so shrinking cannot collide
+            // the two lineages; (b) keys must differ within a lineage.
+            // EMPTY values are now deliberately NOT excluded: upstream
+            // #3932 unified the insertion paths so the batch and both
+            // with_entries builders filter empty-valued entries alike, and
+            // this property exercises that agreement (see the
+            // empty_value_batch_insert_agrees_with_with_entries pin).
+            .prop_filter(
+                "distinct ids/keys",
+                |(_, l1, l2, (k1a, _, k2a, _), (k1b, _, k2b, _), _)| {
+                    l1 != l2 && k1a != k2a && k1b != k2b
+                },
+            )
+            .prop_map(|(version, l1, l2, (k1a, v1a, k2a, v2a), (k1b, v1b, k2b, v2b), absent)| {
+                (
+                    version,
+                    LineageId::new(l1),
+                    LineageId::new(l2),
+                    [(k1a, v1a), (k2a, v2a)],
+                    [(k1b, v1b), (k2b, v2b)],
+                    absent,
+                )
+            })
+    ) {
+        let mut backend = InMemoryBackend::new();
+
+        let batch_1 = SmtUpdateBatch::from(kvs_1.into_iter());
+        let batch_2 = SmtUpdateBatch::from(kvs_2.into_iter());
+        let root_1 = backend.add_lineage(lineage_1, version, batch_1)?;
+        let root_2 = backend.add_lineage(lineage_2, version, batch_2)?;
+
+        // Roots must match reference SMTs built from the same entries.
+        let tree_1 = Smt::with_entries(kvs_1)?;
+        let tree_2 = Smt::with_entries(kvs_2)?;
+        prop_assert_eq!(root_1.root(), tree_1.root());
+        prop_assert_eq!(root_2.root(), tree_2.root());
+
+        // Lineage metadata is preserved.
+        prop_assert_eq!(backend.version(lineage_1)?, version);
+        prop_assert_eq!(backend.version(lineage_2)?, version);
+
+        // Open oracle: the backend must match the reference tree for
+        // absent and present keys alike.
+        prop_assert_eq!(backend.open(lineage_1, absent)?, tree_1.open(&absent));
+        for (k, _) in kvs_1 {
+            prop_assert_eq!(backend.open(lineage_1, k)?, tree_1.open(&k));
+        }
+        prop_assert_eq!(backend.open(lineage_2, absent)?, tree_2.open(&absent));
+        for (k, _) in kvs_2 {
+            prop_assert_eq!(backend.open(lineage_2, k)?, tree_2.open(&k));
+        }
+
+        // Value lookups must agree with the reference tree. The
+        // reference get_value returns Word (EMPTY_WORD for an absent
+        // key), while the backend returns Option<Word>: an EMPTY_WORD
+        // value makes the key absent on both sides (the Smt filters
+        // empty values, per the filter-before-dedup contract), so the
+        // expected Option is None exactly when the stored value is
+        // empty. A backend/Smt filtering disagreement surfaces here as
+        // a real failure, not a test panic.
+        let expected_1 = (kvs_1[0].1 != EMPTY_WORD).then(|| tree_1.get_value(&kvs_1[0].0));
+        prop_assert_eq!(backend.get(lineage_1, kvs_1[0].0)?, expected_1);
+        let expected_2 = (kvs_2[1].1 != EMPTY_WORD).then(|| tree_2.get_value(&kvs_2[1].0));
+        prop_assert_eq!(backend.get(lineage_2, kvs_2[1].0)?, expected_2);
+    }
 }

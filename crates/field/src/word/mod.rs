@@ -790,7 +790,19 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            prop::array::uniform4(any::<Felt>()).prop_map(Word::new).boxed()
+            prop_oneof![
+                8 => prop::array::uniform4(any::<Felt>()).prop_map(Word::new),
+                2 => any::<Felt>().prop_map(|element| Word::new([element; Word::NUM_ELEMENTS])),
+                1 => Just(Word::empty()),
+                1 => Just(Word::new([Felt::ONE; Word::NUM_ELEMENTS])),
+                1 => Just(Word::new([Felt::MAX; Word::NUM_ELEMENTS])),
+                2 => (0..Word::NUM_ELEMENTS, any::<Felt>()).prop_map(|(index, element)| {
+                    let mut elements = [Felt::ZERO; Word::NUM_ELEMENTS];
+                    elements[index] = element;
+                    Word::new(elements)
+                }),
+            ]
+            .boxed()
         }
     }
 }

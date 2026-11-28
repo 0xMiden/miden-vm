@@ -1,8 +1,7 @@
-use miden_core::{
-    Felt, advice::AdviceStack, chiplets::hasher::apply_permutation, utils::ToElements,
-};
+use miden_core::{Felt, advice::AdviceStack, chiplets::hasher::compress_state, utils::ToElements};
+use miden_core_lib::CoreLibrary;
 use miden_processor::{ExecutionError, advice::AdviceError};
-use miden_utils_testing::expect_exec_error_matches;
+use miden_utils_testing::{build_expected_hash, expect_exec_error_matches};
 
 use super::{TRUNCATE_STACK_PROC, build_op_test, build_test};
 
@@ -118,14 +117,14 @@ fn adv_pipe() {
 }
 
 #[test]
-fn adv_pipe_with_hperm() {
+fn adv_pipe_with_compress() {
     let source = format!(
         "
         {TRUNCATE_STACK_PROC}
 
         begin
             push.12.11.10.9.8.7.6.5.4.3.2.1
-            adv_pipe hperm
+            adv_pipe compress
 
             exec.truncate_stack
         end"
@@ -137,8 +136,8 @@ fn adv_pipe_with_hperm() {
     let mut state: [Felt; 12] =
         [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].to_elements().try_into().unwrap();
 
-    // apply a hash permutation to the state
-    apply_permutation(&mut state);
+    // Apply one Eidos compression to the state.
+    compress_state(&mut state);
 
     // to get the final state of the stack, reverse the hasher state and push the expected address
     // to the end (the address will be 2 since 0 + 2 = 2).
@@ -147,4 +146,21 @@ fn adv_pipe_with_hperm() {
 
     let test = build_test!(source, &[], &advice_stack);
     test.expect_stack(&final_stack);
+}
+
+#[test]
+fn unhashing_example_matches_canonical_eidos_hash() {
+    let source = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/masm-examples/hashing/unhashing/unhashing.masm"
+    ));
+    let advice_stack: Vec<u64> = (0..400).collect();
+    let expected: Vec<u64> = build_expected_hash(&advice_stack)
+        .into_iter()
+        .map(|felt| felt.as_canonical_u64())
+        .collect();
+
+    build_test!(source, &[], &advice_stack)
+        .with_library(CoreLibrary::default().package())
+        .expect_stack(&expected);
 }

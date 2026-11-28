@@ -1,11 +1,8 @@
-// Allow unused assignments - required by miette::Diagnostic derive macro
-#![allow(unused_assignments)]
-
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::fmt;
 
 use miden_debug_types::{SourceFile, SourceSpan};
-use miden_utils_diagnostics::{Diagnostic, miette};
+use miden_utils_diagnostics::Diagnostic;
 
 use crate::{
     Path,
@@ -36,7 +33,7 @@ pub struct SyntaxError {
 ///
 /// Like [SyntaxError], this rolls up all such notices into a single batch, and emits them all
 /// at once. The difference is that we never return this as an error from any API, it simply
-/// exists to leverage the diagnostic infrastructure of `miette`.
+/// exists to leverage the diagnostic renderer.
 #[derive(Debug, thiserror::Error, Diagnostic)]
 #[error("one or more warnings were emitted")]
 #[diagnostic(help("see below for details"))]
@@ -128,20 +125,17 @@ pub enum SemanticAnalysisError {
         span: SourceSpan,
     },
     #[error("invalid enum type representation: underlying type must be an integral or felt type")]
-    #[diagnostic()]
     InvalidEnumRepr {
         #[label]
         span: SourceSpan,
     },
     #[error("invalid enum discriminant: value is not a valid instance of the {repr} type")]
-    #[diagnostic()]
     InvalidEnumDiscriminant {
         #[label]
         span: SourceSpan,
         repr: crate::ast::types::Type,
     },
     #[error("invalid enum discriminant: value conflicts with another variant of the same enum")]
-    #[diagnostic()]
     EnumDiscriminantConflict {
         #[label("this discriminant value conflicts with a previous variant")]
         span: SourceSpan,
@@ -149,7 +143,6 @@ pub enum SemanticAnalysisError {
         prev: SourceSpan,
     },
     #[error("symbol conflict: found duplicate definitions of the same name")]
-    #[diagnostic()]
     SymbolConflict {
         #[label("conflict occurs here")]
         span: SourceSpan,
@@ -157,7 +150,6 @@ pub enum SemanticAnalysisError {
         prev_span: SourceSpan,
     },
     #[error("dependency conflict: found duplicate 'extern package' declarations")]
-    #[diagnostic()]
     ExternPackageConflict {
         #[label("conflict occurs here")]
         span: SourceSpan,
@@ -190,8 +182,13 @@ pub enum SemanticAnalysisError {
         #[label]
         span: SourceSpan,
     },
+    #[error("unused constant")]
+    #[diagnostic(severity(Warning), help("this constant is never used and can be safely removed"))]
+    UnusedConstant {
+        #[label]
+        span: SourceSpan,
+    },
     #[error("missing import: the referenced module has not been imported")]
-    #[diagnostic()]
     MissingImport {
         #[label("this reference is invalid without a corresponding import")]
         span: SourceSpan,
@@ -208,13 +205,11 @@ pub enum SemanticAnalysisError {
         prev_span: SourceSpan,
     },
     #[error("invalid re-exported module: you may only re-export items")]
-    #[diagnostic()]
     ReexportedModule {
         #[label]
         span: SourceSpan,
     },
     #[error("invalid re-export target: kernel procedures may not be re-exported")]
-    #[diagnostic()]
     ReexportedKernelProcedure {
         #[label]
         span: SourceSpan,
@@ -222,19 +217,16 @@ pub enum SemanticAnalysisError {
     #[error(
         "invalid re-exported procedure: kernel modules may not re-export procedures from other modules"
     )]
-    #[diagnostic()]
     ReexportFromKernel {
         #[label]
         span: SourceSpan,
     },
     #[error("invalid syscall: callee must be resolvable to kernel module")]
-    #[diagnostic()]
     InvalidSyscallTarget {
         #[label]
         span: SourceSpan,
     },
     #[error("invalid procedure path: not an item")]
-    #[diagnostic()]
     InvalidInvokeTargetViaImport {
         #[label("call occurs here")]
         span: SourceSpan,
@@ -264,7 +256,6 @@ pub enum SemanticAnalysisError {
         max: u32,
     },
     #[error("invalid immediate: value is larger than expected range")]
-    #[diagnostic()]
     ImmediateOverflow {
         #[label]
         span: SourceSpan,
@@ -306,7 +297,6 @@ pub enum SemanticAnalysisError {
         span: SourceSpan,
     },
     #[error("advmap key already defined")]
-    #[diagnostic()]
     AdvMapKeyAlreadyDefined {
         #[label]
         span: SourceSpan,

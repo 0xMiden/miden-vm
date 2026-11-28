@@ -8,28 +8,31 @@ execution proofs transport portable singleton witnesses; the [deferred-proof sem
 define batch proving, completion, and verification.
 
 Concrete proof-bound implementations live in the `miden-precompiles` crate. Their MASM support
-modules are currently internal implementation detail used by core-library facades and tests.
+modules are internal implementation details used by core-library facades and tests.
 
-## Current data model
+## Data model
 
-- **`Tag`** — A 4-felt node constructor. Framework ids `0`, `1`, and `2` are reserved for `TRUE`,
-  semantic `AND`, and opaque framework `CHUNKS`. Precompile ids are derived from precompile names
-  and interpret the remaining three `args` felts locally.
-- **`Node`** — A content-addressed `(tag, payload)` term in the deferred DAG. Payloads are data
+- **`EidosFrame`** — A 4-felt node constructor `(domain_tag, param0, param1, param2)`. The
+  registered domain defines the meaning of all three parameters. The framework defines frames for
+  semantic `AND` and opaque `CHUNKS`; `TRUE` is a zero-digest sentinel with no frame.
+- **`Node`** — A content-addressed `(frame, payload)` term in the deferred DAG. Payloads are data
   chunks, join child digests, pair lists of `lhs_digest || rhs_digest` chunks, or the framework
   `TRUE` sentinel.
-- **`Precompile`** — A host implementation that owns one precompile id and decodes the structural
-  shape for its tags. It evaluates nodes to canonical form and optionally contributes constants
-  through `init()`.
+- **`Precompile`** — A host implementation that owns one registered domain and decodes the
+  structural shape for its frames. It evaluates nodes to canonical form and optionally contributes
+  constants through `init()`.
 - **`PrecompileRegistry`** — The host/framework dispatcher for trusted precompile implementations.
   The type remains in `miden-core` so the framework does not depend on concrete implementations.
 - **`DeferredState`** — Execution state that tracks registered nodes, evaluates them under the
   registry, and maintains the rolling deferred root. Completion consumes and releases this state.
 - **`PrecompileWitness`** — One portable canonical root opening carried by execution outputs and
-  deferred proofs. Decoding checks its structure. `Prover::prove_precompiles` imports an owned batch
-  directly into one Session to validate and prove the assertions.
+  deferred proofs. Decoding checks bounded canonical transport syntax; preparation validates its
+  child-first graph, charges configured per-witness work limits, and computes commitments before
+  native evaluation or recording import. `Prover::prove_precompiles` imports an owned batch directly
+  into one Session to validate and prove the assertions.
 - **Deferred root** — A single digest public value. Each logged statement appends
-  `Node::AND(previous_root, statement_digest)` and advances the root to that node digest.
+  `Node::AND(previous_root, statement_digest)` and advances the root to that node digest. The
+  unsafe `clear_deferred` operation resets it to `TRUE_DIGEST` (the zero word).
 
 ## Lifecycle overview
 
@@ -40,21 +43,81 @@ modules are currently internal implementation detail used by core-library facade
 2. **Wrapper binds digests inside the VM** – Registration arguments are visible in the VM
    execution trace, but the event does not constrain the host-side `DeferredState` update.
    Memory-backed registration also performs direct host reads without adding AIR accesses. The
-   wrapper computes each proof-relevant digest with VM instructions from the exact same tag and
-   stack payload or ordered memory chunk sequence.
+   wrapper computes each proof-relevant digest with VM instructions from the exact same initial
+   chaining word and stack payload or ordered memory chunk sequence.
 3. **Wrapper evaluates only through explicit predicates** – When a wrapper uses
    `adv.evaluate_deferred*` to obtain host-computed canonical data, it must use VM instructions to
    relate that advice to values established independently of it, then log a statement digest that
    precompile proving checks against the committed operands.
-4. **`log_deferred` folds a statement** – The opcode expects `STMNT` at stack offsets `4..8`.
-   `STMNT` must already be registered in `DeferredState` and evaluate to `TRUE`. The constrained
-   Poseidon2 permutation computes `ROOT_NEW = rate0(Poseidon2([ROOT_PREV, STMNT, Tag::AND]))`, and
-   host-side deferred state records the corresponding `AND` node.
+4. **`log_deferred` folds a statement** – The opcode expects `STMNT` at the top of the stack.
+   `STMNT` must already be registered in `DeferredState` and evaluate to `TRUE`. One constrained
+   Eidos compression computes
+   `ROOT_NEW = Eidos::compress(DEFERRED_AND_INIT_CV, ROOT_PREV || STMNT)`, and host-side
+   deferred state records the corresponding `AND` node.
+
+## Clearing the accumulator in a kernel epilogue
+
+`clear_deferred` reads `ROOT` from the top word of the operand stack and resets the rolling
+deferred root to `[0, 0, 0, 0]` (`TRUE_DIGEST`) in one cycle. Native execution requires `ROOT` to
+equal the current accumulator. The instruction fails outside the root execution context
+(`ctx == 0`). Its stack effect is `[ROOT, ...] -> [ROOT, ...]`: the entire operand stack is
+preserved.
+
+**Unsafe: use this instruction only inside a trusted kernel's epilogue, after a recursive verifier
+has proved the exact `ROOT` supplied on the stack.** The epilogue must bind the verifier's
+statement to the same `ROOT` word passed to `clear_deferred` and must not log unverified
+statements between verification and clearing. Clearing removes the claims committed by its supplied
+root from the final outstanding precompile obligation; host-side evaluation is not a substitute
+for proving them. The instruction itself performs no proof verification.
+
+### What the VM proof guarantees
+
+The AIR accounts for deferred-root transitions through a multiset lookup. Each log consumes its
+previous root and produces the hash-constrained next root; each clear consumes the exact `ROOT`
+on its stack and produces zero. Boundary contributions supply the initial zero root and consume
+the public final root. The lookup does not track an addition count, index, or execution order.
+The AIR does not enforce native execution's chronological check against the current accumulator.
+
+Under the hash and lookup soundness assumptions, every logged obligation is covered by a root
+consumed by a clear or remains committed by the public final root. Trusted code must recursively
+prove every root it clears. Clearing may discharge all logged obligations or only a subset; a
+malicious prover cannot omit the remaining obligations from both the cleared roots and the final
+root. Any obligations remaining in the final root still require an external precompile proof to
+complete the execution proof. To establish that all obligations were settled inside the execution,
+the accepting verifier must require the authenticated final root to equal `TRUE_DIGEST`. Tracking
+the number or index of additions is unnecessary for this guarantee. See the
+[lookup accounting](./crypto_ops.md#deferred-root-state) for an ordering example.
+
+### Rules for safe clearing
+
+The root-context restriction on `clear_deferred` admits both top-level program code and kernel
+procedures entered by `syscall`. To ensure every clear follows successful settlement, the
+application must enforce these rules:
+
+1. **Authenticate the clearing code.** The accepting verifier uses the application's expected
+   program and kernel (`ProgramInfo`, or the corresponding `ExecutionClaim`). This prevents a
+   prover from substituting a program or kernel that clears without verification.
+2. **Prevent direct clearing by untrusted code.** Run untrusted scripts through `call` or `dyncall`
+   in non-root contexts (`ctx != 0`), where `clear_deferred` is rejected.
+3. **Protect indirect routes to clearing.** Kernel entry points and root-context dynamic dispatch
+   must not let an untrusted caller bypass settlement and reach `clear_deferred` unchecked.
+   Authenticate any dispatch tables used by these paths. The VM's
+   [kernel ROM constraints](../chiplets/kernel_rom.md#chiplets-bus-constraints) already restrict
+   syscall targets to the committed kernel; that kernel must enforce the settlement checks.
+4. **Verify the exact root before each clear.** Trusted settlement code must verify a proof for
+   the same `ROOT` word passed to `clear_deferred`, whether returned by `log_deferred` or supplied
+   through advice. It must use the intended recursive PVM verifier and enforce the application's
+   proof acceptance policy, including the required security level, before executing the instruction.
+
+### Host state after clearing
+
+Only the accumulator is reset: registered nodes, evaluation caches, and consumed execution work
+remain in host state. Later logging starts from `TRUE_DIGEST`.
 
 ## Responsibilities
 
-- **VM** — Executes deferred advice events and `log_deferred`, maintains the rolling deferred
-  root, and exposes the final root as a public value.
+- **VM** — Executes deferred advice events, `log_deferred`, and `clear_deferred`, maintains the
+  rolling deferred root, and exposes the final root as a public value.
 - **Host / advice provider** — Maintains `DeferredState`, runs trusted precompile implementations,
   and supplies evaluation advice when wrappers request it.
 - **MASM wrapper** — Registers concrete deferred nodes and computes node and statement digests
@@ -65,21 +128,20 @@ Proving, verification, transport, and resource policy are specified in the
 
 ## Conventions
 
-- Tag layout: `TAG = [precompile_id, arg0, arg1, arg2]`.
-  - `precompile_id` selects the framework or owning precompile.
-  - `arg0..arg2` are interpreted by the selected precompile.
-  - Framework id `0` is `Tag::TRUE`; framework id `1` is `Tag::AND`; framework id `2` is
-    `Tag::CHUNKS`.
-- Payload shapes are declared by the selected precompile's `decode(args)`, but semantic lengths are
-  tag-specific and validated by the owning precompile:
+- Frame layout: `FRAME = [domain_tag, param0, param1, param2]`. Every value is a canonical `u32`.
+  The registered domain defines the parameters; none has a framework-wide meaning.
+- Payload shapes are declared by the selected precompile's `decode(params)`. Parameter and payload
+  semantics are validated by the owning precompile:
   - `NodeType::Data` accepts one or more opaque 8-felt chunks. For memory-backed registration,
     the stack-supplied `n_chunks` determines how many chunks are read.
   - `NodeType::Join` reads `lhs_digest || rhs_digest`.
-  - `NodeType::PairList` accepts one or more `lhs_digest || rhs_digest` chunks. Precompiles that
-    encode a pair count in tag arguments must check the actual payload length during evaluation.
-- `log_deferred` stack effect: `[_, STMNT, _, ...] -> [ROOT_NEW, OUT_RATE1, OUT_CAP, ...]` where
-  `STMNT` occupies stack offsets `4..8`. Wrappers usually drop the three output words after the root
-  transition has been constrained.
+  - `NodeType::PairList` accepts one or more `lhs_digest || rhs_digest` chunks. A domain that
+    encodes a pair count in its parameters must check that count in `validate_payload`, before
+    insertion.
+- `log_deferred` stack effect: `[STMNT, ...] -> [ROOT_NEW, ...]`. The precompile wrapper drops
+  `ROOT_NEW` after the root transition has been constrained.
+- `clear_deferred` stack effect: `[ROOT, ...] -> [ROOT, ...]`; native execution requires `ROOT` to
+  match the current accumulator.
 - Input and memory layouts are precompile-specific. Core-library wrappers define the native formats
   for hash facades and for arithmetic/curve support used by signature verification.
 
@@ -94,6 +156,6 @@ Proving, verification, transport, and resource policy are specified in the
 ## Related reading
 
 - [Deferred computation](../deferred/index.md) – deferred DAG, wire, and proof lifecycle.
-- [`log_deferred` instruction](../../user_docs/assembly/instruction_reference.md) – stack
-  behaviour and opcode semantics.
+- [Precompile accumulator instructions](../../user_docs/assembly/instruction_reference.md#precompile-accumulator) –
+  `log_deferred`, `clear_deferred`, and the clearing safety contract.
 - `PrecompileWitness` implementation (`core/src/deferred/wire.rs`) – portable canonical opening.

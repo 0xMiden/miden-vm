@@ -94,6 +94,11 @@ pub use byte_reader::{BudgetedReader, ByteReader, ReadManyIter, SliceReader};
 mod byte_writer;
 pub use byte_writer::ByteWriter;
 
+#[cfg(feature = "std")]
+mod file;
+#[cfg(feature = "std")]
+pub use file::read_file_bounded;
+
 // BOUNDED LENGTH HELPERS
 // ================================================================================================
 
@@ -956,23 +961,23 @@ mod tests {
 
     use p3_field::extension::BinomialExtensionField;
     use p3_goldilocks::Goldilocks;
+    use proptest::prelude::*;
 
     use super::*;
 
-    #[test]
-    fn arc_str_roundtrip() {
-        let original: Arc<str> = Arc::from("hello world");
-        let bytes = original.to_bytes();
-        let deserialized = Arc::<str>::read_from_bytes(&bytes).unwrap();
-        assert_eq!(original, deserialized);
-    }
-
-    #[test]
-    fn string_roundtrip() {
-        let original = String::from("hello world");
-        let bytes = original.to_bytes();
-        let deserialized = String::read_from_bytes(&bytes).unwrap();
-        assert_eq!(original, deserialized);
+    proptest! {
+        #[test]
+        fn string_and_arc_str_share_encoding(random in any::<String>()) {
+            for text in ["", "hello world", "héllo 🌍", random.as_str()] {
+                let bytes = [String::from(text).to_bytes(), Arc::<str>::from(text).to_bytes()];
+                prop_assert_eq!(&bytes[0], &bytes[1]);
+                for bytes in bytes {
+                    prop_assert_eq!(String::read_from_bytes(&bytes).unwrap(), text);
+                    let decoded = Arc::<str>::read_from_bytes(&bytes).unwrap();
+                    prop_assert_eq!(&*decoded, text);
+                }
+            }
+        }
     }
 
     #[test]
@@ -999,56 +1004,6 @@ mod tests {
             BinomialExtensionField::<Goldilocks, 2>::read_from_bytes(&bytes).unwrap(),
             original
         );
-    }
-
-    #[test]
-    fn empty_string_roundtrip() {
-        let arc: Arc<str> = Arc::from("");
-        let bytes = arc.to_bytes();
-        let deserialized = Arc::<str>::read_from_bytes(&bytes).unwrap();
-        assert_eq!(deserialized, Arc::from(""));
-
-        let string = String::from("");
-        let bytes = string.to_bytes();
-        let deserialized = String::read_from_bytes(&bytes).unwrap();
-        assert_eq!(deserialized, "");
-    }
-
-    #[test]
-    fn multibyte_utf8_roundtrip() {
-        let text = "héllo 🌍";
-
-        let arc: Arc<str> = Arc::from(text);
-        let bytes = arc.to_bytes();
-        let deserialized = Arc::<str>::read_from_bytes(&bytes).unwrap();
-        assert_eq!(&*deserialized, text);
-
-        let string = String::from(text);
-        let bytes = string.to_bytes();
-        let deserialized = String::read_from_bytes(&bytes).unwrap();
-        assert_eq!(deserialized, text);
-
-        // Cross-compat: Arc<str> bytes can be read as String and vice versa
-        let arc_bytes = Arc::<str>::from(text).to_bytes();
-        let string_bytes = String::from(text).to_bytes();
-        assert_eq!(arc_bytes, string_bytes);
-        assert_eq!(String::read_from_bytes(&arc_bytes).unwrap(), text);
-        assert_eq!(&*Arc::<str>::read_from_bytes(&string_bytes).unwrap(), text);
-    }
-
-    #[test]
-    fn arc_str_string_cross_compat() {
-        // Arc<str> -> bytes -> String
-        let arc: Arc<str> = Arc::from("cross type");
-        let bytes = arc.to_bytes();
-        let as_string = String::read_from_bytes(&bytes).unwrap();
-        assert_eq!(as_string, "cross type");
-
-        // String -> bytes -> Arc<str>
-        let string = String::from("other direction");
-        let bytes = string.to_bytes();
-        let as_arc = Arc::<str>::read_from_bytes(&bytes).unwrap();
-        assert_eq!(&*as_arc, "other direction");
     }
 
     #[test]

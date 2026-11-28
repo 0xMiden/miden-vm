@@ -192,7 +192,7 @@ fn forward_declared_import_used_by_constant_ref_is_not_reported_unused_when_warn
     let module = r#"
         namespace m
 
-        const LOCAL = foo::BAR
+        pub const LOCAL = foo::BAR
         use external::module as foo
     "#;
 
@@ -248,7 +248,7 @@ fn invoking_local_type_alias_is_rejected_during_semantic_analysis() {
     let masm = source_file!(&context, "type foo = u32\nbegin\n    exec.foo\nend\n");
 
     let err = context
-        .parse_program(masm)
+        .parse_module(masm)
         .expect_err("semantic analysis unexpectedly accepted invoking a local type alias");
     assert_diagnostic!(&err, "invalid symbol reference: wrong type");
     assert_diagnostic!(&err, "expected this symbol to reference a procedure item");

@@ -1,3 +1,8 @@
+#![allow(
+    clippy::empty_enums,
+    reason = "zerocopy derives generate uninhabited helper types"
+)]
+
 use alloc::{
     boxed::Box,
     string::{String, ToString},
@@ -67,40 +72,6 @@ pub struct SourceFile {
         serde(deserialize_with = "SourceContent::deserialize_and_recompute_line_starts")
     )]
     content: SourceContent,
-}
-
-impl miette::SourceCode for SourceFile {
-    fn read_span<'a>(
-        &'a self,
-        span: &miette::SourceSpan,
-        context_lines_before: usize,
-        context_lines_after: usize,
-    ) -> Result<Box<dyn miette::SpanContents<'a> + 'a>, miette::MietteError> {
-        let mut start =
-            u32::try_from(span.offset()).map_err(|_| miette::MietteError::OutOfBounds)?;
-        let len = u32::try_from(span.len()).map_err(|_| miette::MietteError::OutOfBounds)?;
-        let mut end = start.checked_add(len).ok_or(miette::MietteError::OutOfBounds)?;
-        if context_lines_before > 0 {
-            let line_index = self.content.line_index(start.into());
-            let start_line_index = line_index.saturating_sub(context_lines_before as u32);
-            start = self.content.line_start(start_line_index).map(ByteIndex::to_u32).unwrap_or(0);
-        }
-        if context_lines_after > 0 {
-            let line_index = self.content.line_index(end.into());
-            let end_line_index = line_index
-                .checked_add(context_lines_after as u32)
-                .ok_or(miette::MietteError::OutOfBounds)?;
-            end = self
-                .content
-                .line_range(end_line_index)
-                .map(|range| range.end.to_u32())
-                .unwrap_or_else(|| self.content.source_range().end.to_u32());
-        }
-        Ok(Box::new(ScopedSourceFileRef {
-            file: self,
-            span: miette::SourceSpan::new((start as usize).into(), end.abs_diff(start) as usize),
-        }))
-    }
 }
 
 impl SourceFile {
@@ -242,7 +213,7 @@ impl AsRef<[u8]> for SourceFile {
 /// A reference to a specific spanned region of a [SourceFile], that provides access to the actual
 /// [SourceFile], but scoped to the span it was created with.
 ///
-/// This is useful in error types that implement [miette::Diagnostic], as it contains all of the
+/// This is useful in diagnostics, as it contains all of the
 /// data necessary to render the source code being referenced, without a [super::SourceManager] on
 /// hand.
 #[derive(Debug, Clone)]
@@ -254,12 +225,13 @@ pub struct SourceFileRef {
 impl SourceFileRef {
     /// Create a [SourceFileRef] from a [SourceFile] and desired span (in bytes)
     ///
-    /// The given span will be constrained to the bytes of `file`, so a span that reaches out of
-    /// bounds will have its end bound set to the last byte of the file.
+    /// The given span must have ordered bounds, which are clamped to the length of `file`.
     pub fn new(file: Arc<SourceFile>, span: impl Into<Range<u32>>) -> Self {
-        let span = span.into();
-        let end = core::cmp::min(span.end, file.len() as u32);
-        let span = SourceSpan::new(file.id(), span.start..end);
+        let span = SourceSpan::new(file.id(), span.into());
+        let len = file.len() as u32;
+        let start = span.start().to_u32().min(len);
+        let end = span.end().to_u32().min(len);
+        let span = SourceSpan::new(file.id(), start..end);
         Self { file, span }
     }
 
@@ -342,72 +314,6 @@ impl AsRef<[u8]> for SourceFileRef {
     }
 }
 
-impl From<&SourceFileRef> for miette::SourceSpan {
-    fn from(source: &SourceFileRef) -> Self {
-        source.span.into()
-    }
-}
-
-/// Used to implement [miette::SpanContents] for [SourceFile] and [SourceFileRef]
-struct ScopedSourceFileRef<'a> {
-    file: &'a SourceFile,
-    span: miette::SourceSpan,
-}
-
-impl<'a> miette::SpanContents<'a> for ScopedSourceFileRef<'a> {
-    #[inline]
-    fn data(&self) -> &'a [u8] {
-        let start = self.span.offset();
-        let end = start + self.span.len();
-        &self.file.as_bytes()[start..end]
-    }
-
-    #[inline]
-    fn span(&self) -> &miette::SourceSpan {
-        &self.span
-    }
-
-    fn line(&self) -> usize {
-        let offset = self.span.offset() as u32;
-        self.file.content.line_index(offset.into()).to_usize()
-    }
-
-    fn column(&self) -> usize {
-        let start = self.span.offset() as u32;
-        let end = start + self.span.len() as u32;
-        let span = SourceSpan::new(self.file.id(), start..end);
-        let loc = self.file.location(span);
-        loc.column.to_index().to_usize()
-    }
-
-    #[inline]
-    fn line_count(&self) -> usize {
-        self.file.line_count()
-    }
-
-    #[inline]
-    fn name(&self) -> Option<&str> {
-        Some(self.file.uri().as_ref())
-    }
-
-    #[inline]
-    fn language(&self) -> Option<&str> {
-        None
-    }
-}
-
-impl miette::SourceCode for SourceFileRef {
-    #[inline]
-    fn read_span<'a>(
-        &'a self,
-        span: &miette::SourceSpan,
-        context_lines_before: usize,
-        context_lines_after: usize,
-    ) -> Result<Box<dyn miette::SpanContents<'a> + 'a>, miette::MietteError> {
-        self.file.read_span(span, context_lines_before, context_lines_after)
-    }
-}
-
 // SOURCE CONTENT
 // ================================================================================================
 
@@ -453,19 +359,30 @@ impl fmt::Debug for SourceContent {
     }
 }
 
+impl SourceContent {
+    /// Shared key for equality, ordering, and hashing.
+    ///
+    /// Line starts are derived from the text. Sources with the same URI, text, and language compare
+    /// equal across document versions.
+    #[inline]
+    fn key(&self) -> (&Uri, &str, &str) {
+        (&self.uri, &self.content, &self.language)
+    }
+}
+
 impl Eq for SourceContent {}
 
 impl PartialEq for SourceContent {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        self.language == other.language && self.uri == other.uri && self.content == other.content
+        self.key() == other.key()
     }
 }
 
 impl Ord for SourceContent {
     #[inline]
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.uri.cmp(&other.uri).then_with(|| self.content.cmp(&other.content))
+        self.key().cmp(&other.key())
     }
 }
 
@@ -478,9 +395,7 @@ impl PartialOrd for SourceContent {
 
 impl core::hash::Hash for SourceContent {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.language.hash(state);
-        self.uri.hash(state);
-        self.content.hash(state);
+        self.key().hash(state);
     }
 }
 
@@ -567,7 +482,7 @@ impl SourceContent {
 
     /// Returns the range of valid byte indices for this file
     #[inline]
-    pub fn source_range(&self) -> Range<ByteIndex> {
+    pub(crate) fn source_range(&self) -> Range<ByteIndex> {
         ByteIndex(0)..ByteIndex(self.content.len() as u32)
     }
 
@@ -586,7 +501,8 @@ impl SourceContent {
     ///
     /// Returns `None` if the given span is out of bounds
     #[inline(always)]
-    pub fn byte_slice(&self, span: impl Into<Range<ByteIndex>>) -> Option<&[u8]> {
+    #[cfg(test)]
+    pub(crate) fn byte_slice(&self, span: impl Into<Range<ByteIndex>>) -> Option<&[u8]> {
         let Range { start, end } = span.into();
         self.as_bytes().get(start.to_usize()..end.to_usize())
     }
@@ -1629,5 +1545,14 @@ end
              {result:?}"
         );
         assert_eq!(content.line_count(), 2);
+    }
+
+    #[test]
+    fn source_content_ordering_distinguishes_languages() {
+        let masm = SourceContent::new("masm", "foo.masm", "begin end");
+        let text = SourceContent::new("text", "foo.masm", "begin end");
+
+        assert_ne!(masm, text);
+        assert_ne!(masm.cmp(&text), core::cmp::Ordering::Equal);
     }
 }

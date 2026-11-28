@@ -5,16 +5,16 @@ use assert_matches::assert_matches;
 use super::{EMPTY_WORD, LeafIndex, NodeIndex, SMT_DEPTH, Smt, SmtLeaf};
 use crate::{
     Felt, ONE, Word,
-    hash::poseidon2::Poseidon2,
+    hash::eidos::{Eidos, domains::SMT_BUCKET_LEAF},
     merkle::{
-        EmptySubtreeRoots,
+        EmptySubtreeRoots, MerkleError,
         smt::{
-            LEAF_DOMAIN, Map, MutationSet, NodeMutation, SmtLeafError, SmtProofError,
-            SparseMerkleTree, SparseMerkleTreeReader, full::MAX_LEAF_ENTRIES,
+            Map, MutationSet, NodeMutation, SmtLeafError, SmtProofError, SparseMerkleTree,
+            SparseMerkleTreeReader, full::MAX_LEAF_ENTRIES,
         },
         store::MerkleStore,
     },
-    utils::{Deserializable, Serializable},
+    utils::{Deserializable, DeserializationError, Serializable},
 };
 
 // SMT
@@ -596,6 +596,124 @@ fn test_mutations_revert() {
     assert_eq!(smt, original, "SMT with applied revert mutations did not match original SMT");
 }
 
+fn shared_leaf_key(i: usize) -> Word {
+    Word::new([ONE, ONE, Felt::new_unchecked(i as u64), ONE])
+}
+
+#[test]
+fn test_apply_mutations_replaces_entry_in_full_leaf() {
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
+
+    // Assign edit roles so plain map iteration encounters the insertion first.
+    let mut pairs = Map::from([(shared_leaf_key(0), EMPTY_WORD), (shared_leaf_key(1), EMPTY_WORD)]);
+    let mut keys = pairs.keys().copied();
+    let inserted = keys.next().unwrap();
+    let removed = keys.next().unwrap();
+    *pairs.get_mut(&inserted).unwrap() = value;
+    assert_eq!(pairs.iter().next(), Some((&inserted, &value)));
+
+    let entries = (2..=MAX_LEAF_ENTRIES)
+        .map(|i| (shared_leaf_key(i), value))
+        .chain([(removed, value)]);
+    let original = Smt::with_entries(entries).unwrap();
+    let mut expected = original.clone();
+    expected.insert(removed, EMPTY_WORD).unwrap();
+    expected.insert(inserted, value).unwrap();
+
+    // Compute the node changes in removal-first order, then install the insertion-first map.
+    let mut mutations = original
+        .compute_mutations_sequential([(removed, EMPTY_WORD), (inserted, value)])
+        .unwrap();
+    assert_eq!(mutations.new_pairs(), &pairs);
+    mutations.new_pairs = pairs;
+
+    let mut smt = original.clone();
+    let reverse = apply_mutations(&mut smt, mutations);
+    assert_eq!(smt, expected);
+
+    apply_mutations(&mut smt, reverse);
+    assert_eq!(smt, original);
+}
+
+#[test]
+fn test_compute_mutations_replaces_entry_in_full_leaf_in_any_order() {
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
+    // The leaf holds the keys 1 to `MAX_LEAF_ENTRIES`, so the inserted key 0 sorts before the
+    // removed key.
+    let entries = (1..=MAX_LEAF_ENTRIES).map(|i| (shared_leaf_key(i), value));
+    let original = Smt::with_entries(entries).unwrap();
+    let insertion = (shared_leaf_key(0), value);
+    let removal = (shared_leaf_key(5), EMPTY_WORD);
+
+    let mut expected = original.clone();
+    expected.insert(removal.0, removal.1).unwrap();
+    expected.insert(insertion.0, insertion.1).unwrap();
+
+    for batch in [[insertion, removal], [removal, insertion]] {
+        let mutations = original.compute_mutations(batch).unwrap();
+        assert_eq!(mutations, original.compute_mutations_sequential(batch).unwrap());
+
+        let mut smt = original.clone();
+        let reverse = apply_mutations(&mut smt, mutations);
+        assert_eq!(smt, expected);
+
+        apply_mutations(&mut smt, reverse);
+        assert_eq!(smt, original);
+    }
+}
+
+#[test]
+fn test_compute_mutations_sequential_replaces_many_entries_in_full_leaf() {
+    const REPLACED: usize = 32;
+
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let entries = (REPLACED..REPLACED + MAX_LEAF_ENTRIES).map(|i| (shared_leaf_key(i), value));
+    let original = Smt::with_entries(entries).unwrap();
+
+    // The inserted keys sort before the removed keys in a BTreeMap. Several batches exercise
+    // different HashMap iteration orders.
+    for start in (REPLACED..=4 * REPLACED).step_by(REPLACED) {
+        let removals = (start..start + REPLACED).map(|i| (shared_leaf_key(i), EMPTY_WORD));
+        let insertions = (0..REPLACED).map(|i| (shared_leaf_key(i), value));
+        let batch = removals.chain(insertions);
+
+        let mut expected = original.clone();
+        for (key, value) in batch.clone() {
+            expected.insert(key, value).unwrap();
+        }
+
+        let mutations = original.compute_mutations_sequential(batch).unwrap();
+        let mut smt = original.clone();
+        smt.apply_mutations(mutations).unwrap();
+        assert_eq!(smt, expected);
+    }
+}
+
+#[test]
+fn test_apply_mutations_leaves_tree_unchanged_on_error() {
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let entries = (1..=MAX_LEAF_ENTRIES).map(|i| (shared_leaf_key(i), value));
+    let original = Smt::with_entries(entries).unwrap();
+
+    // Rollback must undo the successful insertion before it can restore the removed entry.
+    let replacement = [(shared_leaf_key(1), EMPTY_WORD), (shared_leaf_key(0), value)];
+    let mut overflowing = original.compute_mutations(replacement).unwrap();
+    overflowing.new_pairs.insert(shared_leaf_key(MAX_LEAF_ENTRIES + 1), value);
+
+    let mut smt = original.clone();
+    assert_matches!(
+        smt.apply_mutations(overflowing.clone()),
+        Err(MerkleError::TooManyLeafEntries { actual }) if actual == MAX_LEAF_ENTRIES + 1
+    );
+    assert_eq!(smt, original);
+
+    assert_matches!(
+        smt.apply_mutations_with_reversion(overflowing),
+        Err(MerkleError::TooManyLeafEntries { actual }) if actual == MAX_LEAF_ENTRIES + 1
+    );
+    assert_eq!(smt, original);
+}
+
 #[test]
 fn test_mutation_set_serialization() {
     let mut smt = Smt::default();
@@ -833,6 +951,54 @@ fn test_max_leaf_entries_validation() {
         SmtLeafError::TooManyLeafEntries { .. },
         "should reject more than MAX_LEAF_ENTRIES entries"
     );
+}
+
+/// Tests that `new_multiple()` rejects a repeated key.
+#[test]
+fn test_smt_leaf_new_multiple_rejects_repeated_key() {
+    let key = Word::from([10_u32, 11_u32, 12_u32, 13_u32]);
+    let entries = vec![
+        (key, Word::from([1_u32, 2_u32, 3_u32, 4_u32])),
+        (key, Word::from([5_u32, 6_u32, 7_u32, 8_u32])),
+    ];
+
+    let error = SmtLeaf::new_multiple(entries).unwrap_err();
+    assert_matches!(
+        error,
+        SmtLeafError::UnsortedMultipleLeafKeys { previous, next } if previous == key && next == key
+    );
+}
+
+/// Tests that `new_multiple()` rejects keys that are not in strictly increasing order.
+#[test]
+fn test_smt_leaf_new_multiple_rejects_unsorted_keys() {
+    let key_1 = Word::from([10_u32, 11_u32, 12_u32, 13_u32]);
+    let key_2 = Word::from([100_u32, 101_u32, 102_u32, 13_u32]);
+    let value = Word::from([1_u32, 2_u32, 3_u32, 4_u32]);
+
+    assert!(SmtLeaf::new_multiple(vec![(key_1, value), (key_2, value)]).is_ok());
+
+    let error = SmtLeaf::new_multiple(vec![(key_2, value), (key_1, value)]).unwrap_err();
+    assert_matches!(
+        error,
+        SmtLeafError::UnsortedMultipleLeafKeys { previous, next } if previous == key_2 && next == key_1
+    );
+}
+
+/// Tests that a serialized multiple leaf with a repeated key is rejected on deserialization.
+#[test]
+fn test_smt_leaf_deserialization_rejects_repeated_key() {
+    let key = Word::from([10_u32, 11_u32, 12_u32, 13_u32]);
+    let leaf_index: LeafIndex<SMT_DEPTH> = key.into();
+
+    let mut serialized = Vec::new();
+    2_usize.write_into(&mut serialized);
+    leaf_index.position().write_into(&mut serialized);
+    (key, Word::from([1_u32, 2_u32, 3_u32, 4_u32])).write_into(&mut serialized);
+    (key, Word::from([5_u32, 6_u32, 7_u32, 8_u32])).write_into(&mut serialized);
+
+    let error = SmtLeaf::read_from_bytes(&serialized).unwrap_err();
+    assert_matches!(error, DeserializationError::InvalidValue(_));
 }
 
 /// Tests that verify_presence returns InvalidKeyForProof when key maps to different leaf index
@@ -1257,17 +1423,17 @@ fn build_empty_or_single_leaf_node(key: Word, value: Word) -> Word {
 }
 
 fn build_multiple_leaf_node(kv_pairs: &[(Word, Word)]) -> Word {
-    let elements: Vec<Felt> = kv_pairs
-        .iter()
-        .flat_map(|(key, value)| {
-            let key_elements = key.into_iter();
-            let value_elements = (*value).into_iter();
-
-            key_elements.chain(value_elements)
-        })
-        .collect();
-
-    Poseidon2::hash_elements_in_domain(&elements, LEAF_DOMAIN)
+    let mut cv = Eidos::init_chaining_word(
+        SMT_BUCKET_LEAF,
+        u32::try_from(kv_pairs.len()).expect("test leaf entry count must fit in a u32"),
+    );
+    for &(key, value) in kv_pairs {
+        cv = Eidos::compress(
+            cv,
+            core::array::from_fn(|i| if i < 4 { key[i] } else { value[i - 4] }),
+        );
+    }
+    cv
 }
 
 /// Applies mutations with and without reversion to the given SMT, comparing resulting SMTs,
@@ -1284,4 +1450,51 @@ fn apply_mutations(
     assert_eq!(&smt2, smt);
 
     reversion
+}
+
+/// The arbitrary-module tree builder must retain a non-empty anchor entry even when the input
+/// contains duplicate keys and empty values (BTreeMap keeps the last value per key, and
+/// `with_entries` drops empty values). This is the shrinking invariant the SMT serialization
+/// strategies rely on: a positive-length input with an anchor never builds an empty tree.
+#[test]
+fn smt_from_pairs_retains_anchor_under_duplicates_and_empty_values() {
+    use crate::merkle::smt::full::arbitrary::smt_from_pairs;
+
+    let key = Word::new([Felt::new(7).unwrap(), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+    let anchor_value = Word::new([Felt::new(1).unwrap(), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+
+    // Anchor first, then a duplicate of its key with an empty value (the keep-last ordering
+    // hazard): the surviving value must still be non-empty.
+    let smt = smt_from_pairs(vec![(key, anchor_value), (key, EMPTY_WORD)]);
+    assert_eq!(smt.entries().count(), 1);
+    assert_ne!(smt.root(), Smt::default().root());
+
+    // Duplicate anchor key with a different non-empty value: the tree stays non-empty.
+    let other = Word::new([Felt::new(2).unwrap(), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+    let smt = smt_from_pairs(vec![(key, anchor_value), (key, other)]);
+    assert_eq!(smt.entries().count(), 1);
+}
+
+/// Generator-level invariant : every SMT generator must produce a populated tree
+/// even for shrunken inputs (values collapsed to EMPTY_WORD, duplicate keys). This pins the
+/// anchor guarantee the serialization strategies' explicit expects rely on.
+use proptest::prelude::*;
+
+proptest! {
+    #![proptest_config(proptest::test_runner::Config::with_cases(64))]
+
+    #[test]
+    fn smt_generators_always_produce_populated_trees(
+        random in super::arbitrary::random_pairs(1usize..=6),
+        colliding in crate::merkle::smt::test_gen::colliding_leaf_entries(),
+        sibling in crate::merkle::smt::test_gen::sibling_leaf_entries(),
+    ) {
+        for pairs in [random, colliding, sibling] {
+            let smt = super::arbitrary::smt_from_pairs(pairs);
+            prop_assert!(
+                smt.entries().next().is_some(),
+                "anchor entry must keep the tree populated under shrinking"
+            );
+        }
+    }
 }

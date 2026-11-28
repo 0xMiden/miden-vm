@@ -16,6 +16,7 @@ deferred root.
 | `sys::pvm::request_proof` | `[D, ...]` | `[D, ...]` |
 | `sys::pvm::verify_proof` | `[D, ...]` | `[security_descriptor(12), ...]` |
 | `stark::security::compute_conjectured_security_level` | `[security_descriptor(12), ...]` | `[level, ...]` |
+| `stark::security::compute_proven_security_level` | `[security_descriptor(12), ...]` | `[level, ...]` |
 
 Both verifiers consume their proof data from the advice stack.
 
@@ -33,9 +34,16 @@ Both verifiers return the same twelve-field descriptor, in this stack order:
  log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
 ```
 
-These fields give our security estimator the parameters it needs to compute the proof's
-conjectured security level.
-Pass the descriptor unchanged to `compute_conjectured_security_level` and check the returned bit count against your required minimum security target for each MVM and PVM proof.
+Pass the descriptor unchanged to `compute_conjectured_security_level` or
+`compute_proven_security_level` and check the returned bit count against your required minimum
+security target for each MVM and PVM proof. The proven estimator selects the stronger complete
+unique- or list-decoding bound, rounded conservatively to whole bits. It retains the hash and
+Fiat-Shamir assumptions, including Eidos pseudorandomness. Because the descriptor omits the
+quotient-chunk count, the MASM estimate conservatively uses the verifier's maximum of eight
+chunks and constraint degree nine. Its arithmetic bounds can also make it slightly lower than
+the native proven estimate. Estimation is optional and does not change either verifier's
+root. Hosts can identify the proven estimator with
+`miden_core_lib::proven_security_estimator_root()`.
 Remember that the weakest proof limits the security of the whole.
 
 ## Example: settle a deferred execution
@@ -46,7 +54,7 @@ Remember that the weakest proof limits the security of the whole.
 ```rust
 use miden_core_lib::CoreLibrary;
 use miden_processor::StackInputs;
-use miden_verifier::recursive::RecursiveVerifierInputs;
+use miden_vm_stark::recursive::RecursiveVerifierInputs;
 
 let core_lib = CoreLibrary::default();
 let inputs = RecursiveVerifierInputs::for_request(
@@ -62,6 +70,10 @@ The adapter stores the MVM proof under `proof_request_key(verifier_root, claim_c
 supplies the claim preimage, kernel procedure list, and advice data. MASM derives the same key
 with `procref.vm::verify_proof` and takes `claim_commitment` as public input. If `proof` includes
 a PVM proof, supply it through the separate PVM request described below.
+
+This example enforces 96 bits of conjectured security. To enforce proven security, call
+`compute_proven_security_level` at both estimation sites and choose the application's required
+proven threshold; the same proof generally has a lower proven bound.
 
 ```masm title="settle_deferred.masm"
 use miden::core::sys
@@ -108,7 +120,7 @@ Package `pvm_proof` with `PvmRecursiveVerifierInputs::for_request`, which uses
 `[D]`. Return the advice map and Merkle nodes from the event handler:
 
 ```rust
-use miden_precompiles_verifier::masm_verifier::PvmRecursiveVerifierInputs;
+use miden_precompiles_stark::recursive::PvmRecursiveVerifierInputs;
 use miden_processor::advice::AdviceMutation;
 
 let package = PvmRecursiveVerifierInputs::for_request(verifier_root, &pvm_proof)?;
@@ -147,32 +159,43 @@ using AND nodes. For `[A, TRUE, B, A]`, the folded root is:
 D = digest(AND(digest(AND(A, B)), A))
 ```
 
-Order and repeated nonzero roots are preserved. Each AND node uses one Poseidon2 permutation
-with `AND_TAG = [1, 0, 0, 0]`, matching `miden_core::deferred::fold_deferred_root`.
+Order and repeated nonzero roots are preserved. Each AND node compresses its two child digests
+with Eidos under `DEFERRED_AND_FRAME`, matching `miden_core::deferred::fold_deferred_root`.
 
 ### Proving the combined work
 
-Reconstruct each `DeferredState` from `PrecompileStatus::Deferred` with `DeferredState::from_wire`.
-Here, `deferred_states` contains states with nonzero roots in claim order, including repeats:
+Before executing the batcher, collect the singleton witnesses carried by
+`PrecompileStatus::Deferred` in claim order, including repeats. Prove this nonempty vector and
+merge its packaged verifier advice into the batch inputs:
 
 ```rust
-use miden_core::deferred::PrecompileWitness;
-
-let witnesses = deferred_states
-    .into_iter()
-    .map(PrecompileWitness::new)
-    .collect::<Result<Vec<_>, _>>()?;
-let merged = PrecompileWitness::merge(witnesses)?;
+let pvm_proof = prover.prove_precompiles(witnesses)?;
+let package = PvmRecursiveVerifierInputs::for_request(
+    core_lib.pvm_recursive_verifier_root(),
+    &pvm_proof,
+)?;
+let (pvm_advice, _) = package.into_parts();
+batch_advice.extend(pvm_advice);
 ```
 
-Merging computes `D` and combines the witness data. On the request for `D`, prove the merged
-witness with `Prover::prove_precompile` and return the packaged advice.
+The prover imports and evaluates the witnesses, folds their roots into `D`, and proves the
+combined work. The batcher independently computes `D` from the verified MVM proofs and fetches
+the prepared proof through its request key:
+
+```masm
+# => [D, ...]
+dupw procref.pvm::verify_proof exec.sys::build_proof_request_key
+adv.push_mapval dropw
+# => [D, ...]; the proof stream is staged for pvm::verify_proof.
+```
+
+Batch execution uses a regular host; it does not request proof generation through an event.
 
 The resulting `PrecompileProof` contains one STARK proof for `roots = [A, B, A]`. Its `aggregate_root()`
 recomputes `D` from the metadata. The batcher verifies the PVM proof against `D`, which it computed
 from the deferred roots returned by the MVM verifiers, and checks the proof's security level.
 
-If all roots are TRUE, skip merging witnesses and requesting a PVM proof.
+If all roots are TRUE, skip precompile proving and loading a PVM proof.
 
 ### Proving the batcher
 

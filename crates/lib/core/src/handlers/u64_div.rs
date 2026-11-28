@@ -26,7 +26,7 @@ pub const U64_DIV_EVENT_NAME: EventName = EventName::new("miden::core::math::u64
 ///   Advice stack: [...]
 ///
 /// Outputs:
-///   Advice stack: [q_lo, q_hi, r_lo, r_hi, ...]
+///   Advice stack: [q_hi, q_lo, r_hi, r_lo, ...]
 ///
 /// Where (a_lo, a_hi) and (b_lo, b_hi) are the 32-bit limbs of the dividend and the divisor
 /// respectively (with lo representing the 32 least significant bits and hi representing the
@@ -93,8 +93,8 @@ pub fn handle_u64_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, E
     let quotient = dividend / divisor;
     let remainder = dividend - quotient * divisor;
 
-    let (q_hi, q_lo) = u64_to_u32_elements(quotient);
-    let (r_hi, r_lo) = u64_to_u32_elements(remainder);
+    let (q_lo, q_hi) = u64_to_u32_elements(quotient);
+    let (r_lo, r_hi) = u64_to_u32_elements(remainder);
 
     // MASM reads quotient first with `adv_push adv_push`, so q_lo lands above q_hi.
     // It reads remainder next with the same pattern, so r_lo lands above r_hi.

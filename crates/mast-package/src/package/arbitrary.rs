@@ -136,3 +136,34 @@ impl proptest::arbitrary::Arbitrary for Package {
 
     type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }
+
+impl proptest::arbitrary::Arbitrary for PackageSubmodule {
+    type Parameters = ();
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        // Ident is any-valid on the wire (assembly-syntax provides its Arbitrary under the
+        // arbitrary feature chain).
+        any::<ast::Ident>().prop_map(Self::new).boxed()
+    }
+}
+
+impl proptest::arbitrary::Arbitrary for PackageModule {
+    type Parameters = ();
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        // Sound by construction: the path is built from valid ident components joined by the
+        // MAST path separator, so PathBuf::new validation always succeeds.
+        (
+            any::<ast::PathBuf>(),
+            proptest::collection::vec(any::<PackageSubmodule>(), 0..=4),
+        )
+            .prop_map(|(path, submodules)| Self::new(Arc::from(path.into_boxed_path()), submodules))
+            .boxed()
+    }
+}

@@ -1,7 +1,8 @@
 use alloc::vec::Vec;
 use core::borrow::BorrowMut;
 
-use miden_air::{
+use miden_ace::instruction::{Op, decode_instruction};
+use miden_air_definitions::vm::{
     AceCols, QuadFeltExpr,
     trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS},
 };
@@ -11,15 +12,16 @@ use miden_core::{
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
-use super::{
-    MAX_NUM_ACE_WIRES,
-    instruction::{Op, decode_instruction},
-};
+use super::MAX_NUM_ACE_WIRES;
 use crate::{ContextId, errors::AceError};
 
 /// One row of the ACE chiplet trace in `READ` mode: two memory-loaded wires per row, plus the
 /// pointer of the word that was loaded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 struct ReadNode {
     ptr: Felt,
     id_0: Felt,
@@ -32,6 +34,10 @@ struct ReadNode {
 /// two inputs `(id_1, v_1)` (left) and `(id_2, v_2)` (right), the instruction pointer that
 /// produced it, and the gate's `eval_op` selector.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 struct EvalNode {
     ptr: Felt,
     eval_op: Felt,
@@ -48,7 +54,11 @@ struct EvalNode {
 ///
 /// The set of nodes is used to fill the ACE chiplet trace.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CircuitEvaluation {
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
+pub(crate) struct CircuitEvaluation {
     ctx: ContextId,
     clk: RowIndex,
     wire_bus: WireBus,
@@ -61,9 +71,10 @@ impl CircuitEvaluation {
     /// located in a contiguous memory region.
     ///
     /// # Panics:
-    /// This function panics if the number of rows for each section leads to more than
-    /// [`MAX_NUM_ACE_WIRES`] wires.
+    /// This function panics if `num_eval_rows` is zero or if the number of rows for each section
+    /// leads to more than [`MAX_NUM_ACE_WIRES`] wires.
     pub fn new(ctx: ContextId, clk: RowIndex, num_read_rows: u32, num_eval_rows: u32) -> Self {
+        assert!(num_eval_rows > 0, "ACE circuit evaluation must contain at least one eval row");
         let num_wires = 2 * (num_read_rows as u64) + (num_eval_rows as u64);
         assert!(num_wires <= MAX_NUM_ACE_WIRES as u64, "too many wires");
 
@@ -82,18 +93,6 @@ impl CircuitEvaluation {
 
     pub fn clk(&self) -> u32 {
         self.clk.into()
-    }
-
-    pub fn ctx(&self) -> u32 {
-        self.ctx.into()
-    }
-
-    pub fn num_read_rows(&self) -> u32 {
-        self.read_nodes.len() as u32
-    }
-
-    pub fn num_eval_rows(&self) -> u32 {
-        self.eval_nodes.len() as u32
     }
 
     /// Reads the word from memory at `ptr`, interpreting it as `[v_00, v_01, v_10, v_11]`, and
@@ -155,7 +154,14 @@ impl CircuitEvaluation {
     /// Writes this circuit evaluation's rows into the row-major buffer `out`
     /// (`ACE_CHIPLET_NUM_COLS` contiguous cells per row), starting at row `offset`. `out`
     /// is assumed zero-initialized, so columns that are zero on a row are left untouched.
+    ///
+    /// # Panics
+    /// Panics if no evaluation nodes have been recorded.
     pub fn fill(&self, offset: usize, out: &mut [Felt]) {
+        assert!(
+            !self.eval_nodes.is_empty(),
+            "ACE circuit evaluation must contain at least one eval node"
+        );
         const W: usize = ACE_CHIPLET_NUM_COLS;
         let (out_rows, _) = out.as_chunks_mut::<W>();
         let num_read_rows = self.read_nodes.len();
@@ -249,6 +255,10 @@ fn quad_to_expr(v: QuadFelt) -> QuadFeltExpr<Felt> {
 /// the value of the output wire back with multiplicity equal to the fan-out of the respective gate.
 /// Note that the messages include extra data in order to avoid collisions.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 struct WireBus {
     // Circuit ID as Felt of the next wire to be inserted
     id_next: Felt,
@@ -531,5 +541,123 @@ mod serialization_tests {
             panic!("expected invalid ACE eval section error");
         };
         assert!(message.contains("at least one eval node"));
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::{CircuitEvaluation, ContextId, EvalNode, Felt, QuadFelt, ReadNode, WireBus};
+    use crate::RowIndex;
+
+    fn quad() -> impl Strategy<Value = QuadFelt> {
+        (any::<Felt>(), any::<Felt>()).prop_map(|(a, b)| QuadFelt::new([a, b]))
+    }
+
+    impl Arbitrary for ReadNode {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // All fields are any-valid on the wire (ids and values are unvalidated Felts).
+            (any::<Felt>(), any::<Felt>(), quad(), any::<Felt>(), quad())
+                .prop_map(|(ptr, id_0, v_0, id_1, v_1)| Self { ptr, id_0, v_0, id_1, v_1 })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for EvalNode {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                any::<Felt>(),
+                any::<Felt>(),
+                any::<Felt>(),
+                quad(),
+                any::<Felt>(),
+                quad(),
+                any::<Felt>(),
+                quad(),
+            )
+                .prop_map(|(ptr, eval_op, id_0, v_0, id_1, v_1, id_2, v_2)| Self {
+                    ptr,
+                    eval_op,
+                    id_0,
+                    v_0,
+                    id_1,
+                    v_1,
+                    id_2,
+                    v_2,
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for WireBus {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader enforces num_wires == wires.len() and 1 <= num_wires <=
+            // MAX_NUM_ACE_WIRES; bound the length by construction (well under the maximum) and
+            // let id_next pass through verbatim. Multiplicities are any-valid u32s on the wire.
+            proptest::collection::vec((quad(), any::<u32>()), 1..=8)
+                .prop_map(|wires| {
+                    let num_wires = wires.len() as u32;
+                    Self {
+                        id_next: Felt::from_u32(num_wires - 1),
+                        wires,
+                        num_wires,
+                    }
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for CircuitEvaluation {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader enforces eval_nodes non-empty and wire_bus.num_wires ==
+            // 2 * read_nodes.len() + eval_nodes.len(); construct with matching counts (bounded
+            // well under MAX_NUM_ACE_WIRES).
+            (any::<ContextId>(), any::<RowIndex>(), 0usize..=4, 1usize..=4)
+                .prop_flat_map(|(ctx, clk, read_count, eval_count)| {
+                    (
+                        Just(ctx),
+                        Just(clk),
+                        Just(read_count),
+                        Just(eval_count),
+                        proptest::collection::vec(any::<ReadNode>(), read_count),
+                        proptest::collection::vec(any::<EvalNode>(), eval_count),
+                    )
+                })
+                .prop_map(|(ctx, clk, read_count, eval_count, read_nodes, eval_nodes)| {
+                    let num_wires = (2 * read_count + eval_count) as u32;
+                    let mut wire_bus = WireBus::new(num_wires);
+                    for node in &read_nodes {
+                        wire_bus.insert(node.v_0);
+                        wire_bus.insert(node.v_1);
+                    }
+                    for node in &eval_nodes {
+                        wire_bus.insert(node.v_0);
+                    }
+                    Self {
+                        ctx,
+                        clk,
+                        wire_bus,
+                        read_nodes,
+                        eval_nodes,
+                    }
+                })
+                .boxed()
+        }
     }
 }

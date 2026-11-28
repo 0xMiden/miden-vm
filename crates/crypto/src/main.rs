@@ -7,7 +7,7 @@ use clap::{Parser, ValueEnum};
 use miden_crypto::merkle::smt::{RocksDbConfig, RocksDbStorage};
 use miden_crypto::{
     EMPTY_WORD, Felt, ONE, Word,
-    hash::poseidon2::Poseidon2,
+    hash::eidos::Eidos,
     merkle::smt::{LargeSmt, LargeSmtError, MemoryStorage, StorageError},
 };
 use rand::{RngExt, prelude::IteratorRandom, rng};
@@ -58,7 +58,7 @@ fn main() -> Result<(), LargeSmtError> {
 }
 
 /// Run a benchmark for [`Smt`].
-pub fn benchmark_smt() -> Result<(), LargeSmtError> {
+pub(crate) fn benchmark_smt() -> Result<(), LargeSmtError> {
     let args = BenchmarkCmd::parse();
     let tree_size = args.size;
     let insertions = args.insertions;
@@ -117,7 +117,7 @@ pub fn construction(
     Ok(tree)
 }
 
-pub fn open_existing(
+pub(crate) fn open_existing(
     storage_path: Option<PathBuf>,
     storage: StorageKind,
 ) -> Result<LargeSmt<Storage>, LargeSmtError> {
@@ -137,7 +137,7 @@ pub fn insertion(tree: &mut LargeSmt<Storage>, insertions: usize) -> Result<(), 
     let mut insertion_times = Vec::new();
 
     for i in 0..insertions {
-        let test_key = Poseidon2::hash(&rand::random::<u64>().to_be_bytes());
+        let test_key = Eidos::hash(&rand::random::<u64>().to_be_bytes());
         let test_value = Word::new([ONE, ONE, ONE, Felt::new_unchecked((size + i) as u64)]);
 
         let now = Instant::now();
@@ -155,7 +155,7 @@ pub fn insertion(tree: &mut LargeSmt<Storage>, insertions: usize) -> Result<(), 
     Ok(())
 }
 
-pub fn batched_insertion(
+pub(crate) fn batched_insertion(
     tree: &mut LargeSmt<Storage>,
     insertions: usize,
 ) -> Result<(), LargeSmtError> {
@@ -165,7 +165,7 @@ pub fn batched_insertion(
 
     let new_pairs: Vec<(Word, Word)> = (0..insertions)
         .map(|i| {
-            let key = Poseidon2::hash(&rand::random::<u64>().to_be_bytes());
+            let key = Eidos::hash(&rand::random::<u64>().to_be_bytes());
             let value = Word::new([ONE, ONE, ONE, Felt::new_unchecked((size + i) as u64)]);
             (key, value)
         })
@@ -256,7 +256,7 @@ pub fn batched_update(
 }
 
 /// Runs the proof generation benchmark for the [`Smt`].
-pub fn proof_generation(tree: &mut LargeSmt<Storage>) -> Result<(), LargeSmtError> {
+pub(crate) fn proof_generation(tree: &mut LargeSmt<Storage>) -> Result<(), LargeSmtError> {
     const NUM_PROOFS: usize = 100;
 
     println!("Running a proof generation benchmark:");

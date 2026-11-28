@@ -49,10 +49,10 @@ impl<'a> LoweringContext<'a> {
 
     /// Lowers optional CST visibility into the AST visibility enum.
     pub(super) fn lower_visibility(&self, visibility: Option<CstVisibility>) -> ast::Visibility {
-        if visibility.is_some() {
-            ast::Visibility::Public
-        } else {
-            ast::Visibility::Private
+        match visibility {
+            Some(visibility) if visibility.is_internal() => ast::Visibility::Internal,
+            Some(_) => ast::Visibility::Public,
+            None => ast::Visibility::Private,
         }
     }
 
@@ -148,7 +148,7 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// Validates and interns raw identifier text at the given span.
-    pub(super) fn lower_ident_text(
+    fn lower_ident_text(
         &mut self,
         span: SourceSpan,
         text: &str,

@@ -1,5 +1,6 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
+    string::ToString,
     vec::Vec,
 };
 
@@ -13,8 +14,8 @@ use super::{PartialSmt, SMT_DEPTH, serialization::property_tests::arbitrary_vali
 use crate::{
     EMPTY_WORD, Felt, ONE, Word, ZERO,
     merkle::{
-        EmptySubtreeRoots, MerkleError, NodeIndex,
-        smt::{Smt, SmtLeaf},
+        EmptySubtreeRoots, MerkleError, NodeIndex, SparseMerklePath,
+        smt::{LeafIndex, Smt, SmtLeaf},
     },
     utils::{Deserializable, Serializable},
 };
@@ -257,6 +258,63 @@ fn partial_smt_root_mismatch_on_non_empty_values() {
     // Adding the stale proof should fail as its root is different.
     let err = partial.add_proof(stale_proof).unwrap_err();
     assert_matches!(err, MerkleError::ConflictingRoots { .. });
+}
+
+/// Tests that a path with a conflicting root leaves the partial SMT unchanged.
+#[test]
+fn partial_smt_add_path_conflicting_root_is_atomic() {
+    let mut rng = ChaCha20Rng::from_seed([20u8; 32]);
+    let key0 = rng.random::<Word>();
+    let key1 = rng.random::<Word>();
+    let key2 = rng.random::<Word>();
+    let value0 = Word::from([ONE, ZERO, ZERO, ZERO]);
+    let value1 = Word::from([ZERO, ONE, ZERO, ZERO]);
+    let value2 = Word::from([ZERO, ZERO, ONE, ZERO]);
+
+    let mut full = Smt::with_entries([(key0, value0), (key1, value1)]).unwrap();
+    let mut partial = PartialSmt::from_proofs([full.open(&key0)]).unwrap();
+    let before = partial.clone();
+
+    // Change the tree so the proof for key1 resolves to a different root.
+    full.insert(key2, value2).unwrap();
+    let stale_proof = full.open(&key1);
+    assert_ne!(stale_proof.compute_root(), partial.root());
+
+    let err = partial.add_proof(stale_proof).unwrap_err();
+    assert_matches!(err, MerkleError::ConflictingRoots { .. });
+    assert_eq!(partial, before);
+}
+
+/// Tests that paths whose depth is not `SMT_DEPTH` are rejected before mutating the tree.
+#[test]
+fn partial_smt_add_path_invalid_depth_is_atomic() {
+    let mut rng = ChaCha20Rng::from_seed([21u8; 32]);
+    let key = rng.random::<Word>();
+    let value = Word::from([ONE, ONE, ZERO, ZERO]);
+    let leaf = SmtLeaf::new_single(key, value);
+
+    // A zero-length path computes the leaf hash as its root, so the root check alone would accept
+    // it when the partial tree has that root.
+    let mut partial = PartialSmt::new(leaf.hash());
+    let before = partial.clone();
+    let err = partial.add_path(leaf, SparseMerklePath::default()).unwrap_err();
+    assert_eq!(err.to_string(), "provided node list should have a minimum length of 64");
+    assert_matches!(err, MerkleError::InvalidPathLength(len) if len == SMT_DEPTH as usize);
+    assert_eq!(partial, before);
+
+    // A path that stops one level below the root must also be rejected before mutation.
+    let full = Smt::with_entries([(key, value)]).unwrap();
+    let proof = full.open(&key);
+    let short_nodes = proof.path().iter().take(SMT_DEPTH as usize - 1).collect::<Vec<_>>();
+    let short_path = SparseMerklePath::from_sized_iter(short_nodes).unwrap();
+    assert_eq!(short_path.depth(), SMT_DEPTH - 1);
+
+    let mut partial = PartialSmt::new(full.root());
+    let before = partial.clone();
+    let err = partial.add_path(proof.leaf().clone(), short_path).unwrap_err();
+    assert_eq!(err.to_string(), "provided node list should have a minimum length of 64");
+    assert_matches!(err, MerkleError::InvalidPathLength(len) if len == SMT_DEPTH as usize);
+    assert_eq!(partial, before);
 }
 
 /// Tests that from_proofs fails when the proofs roots do not match.
@@ -926,5 +984,110 @@ proptest! {
         let bytes = partial_smt.to_bytes();
         let decoded = PartialSmt::read_from_bytes(&bytes).unwrap();
         prop_assert_eq!(partial_smt, decoded);
+    }
+
+    /// Property test: the full insert/update/remove relation chain between a full SMT and a
+    /// partial SMT built from a subset of its proofs (generalizing the seeded
+    /// `partial_smt_insert_and_remove` fixture): root equivalence at every step, exact
+    /// value lookups, the UntrackedKey policy for untracked keys (reads and both insert
+    /// kinds), open equivalence for removed and present keys, and the empty-value
+    /// lifecycle (tracked-empty key updated to non-empty; a tracked key removed back to
+    /// EMPTY). Keys and values are independently generated, per the generator-soundness rule.
+    #[test]
+    fn prop_partial_smt_insert_remove_relations(
+        (keys, values) in (
+            prop::collection::vec(arbitrary_valid_word(), 6),
+            prop::collection::vec(arbitrary_valid_word(), 9),
+        )
+            .prop_filter("distinct keys", |(keys, _)| {
+                keys.iter().collect::<BTreeSet<_>>().len() == keys.len()
+            })
+            // Leaves are keyed by `LeafIndex::from(key).position()` (derived
+            // from key[3]), so distinct keys CAN collide into one leaf. The
+            // fixture's per-key assumptions (key_empty's exclusion proof is
+            // an EMPTY leaf; key1's read is UntrackedKey because its leaf is
+            // unproven) only hold when all six keys sit in pairwise-distinct
+            // leaves — the Multiple-leaf collision class is covered by the
+            // seeded `partial_smt_multiple_leaf_success` fixture.
+            .prop_filter("pairwise-distinct leaves", |(keys, _)| {
+                let pos = |k: &Word| LeafIndex::<SMT_DEPTH>::from(*k).position();
+                let positions: BTreeSet<_> = keys.iter().map(pos).collect();
+                positions.len() == keys.len()
+            }),
+        untracked_value in arbitrary_valid_word(),
+    ) {
+        prop_assume!(values[0] != EMPTY_WORD);
+        prop_assume!(values[1] != EMPTY_WORD);
+        prop_assume!(values[2] != EMPTY_WORD);
+        prop_assume!(values[3] != EMPTY_WORD);
+        prop_assume!(values[4] != EMPTY_WORD);
+        prop_assume!(values[5] != EMPTY_WORD);
+        prop_assume!(values[6] != EMPTY_WORD);
+        prop_assume!(values[7] != EMPTY_WORD);
+        prop_assume!(values[8] != EMPTY_WORD);
+        prop_assume!(untracked_value != EMPTY_WORD);
+
+        let (key0, key1, key2, key_empty) =
+            (keys[0], keys[1], keys[2], keys[3]);
+        // key_empty (keys[3]) deliberately carries NO initial entry — it is
+        // the untracked-then-proven key (mirroring the seeded fixture); the
+        // remaining five keys take their paired values.
+        let kv_pairs = [
+            (keys[0], values[0]),
+            (keys[1], values[1]),
+            (keys[2], values[2]),
+            (keys[4], values[4]),
+            (keys[5], values[5]),
+        ];
+        let mut full = Smt::with_entries(kv_pairs).unwrap();
+
+        // A partial SMT from proofs for a subset of keys plus one untracked key.
+        let proof0 = full.open(&key0);
+        let proof2 = full.open(&key2);
+        let proof_empty = full.open(&key_empty);
+        prop_assert!(proof_empty.leaf().is_empty());
+
+        let mut partial = PartialSmt::from_proofs([proof0, proof2, proof_empty]).unwrap();
+
+        prop_assert_eq!(full.root(), partial.root());
+        prop_assert_eq!(partial.get_value(&key0).unwrap(), values[0]);
+        assert_matches!(partial.get_value(&key1).unwrap_err(), MerkleError::UntrackedKey(_));
+        prop_assert_eq!(partial.get_value(&key2).unwrap(), values[2]);
+
+        // Update tracked keys (one of them from EMPTY to non-empty) in both
+        // trees; the last three generated values are the updates. Root
+        // equivalence is asserted after EACH update so a wrong intermediate
+        // root cannot be masked by a later one.
+        for (key, value) in [(key0, values[6]), (key2, values[7]), (key_empty, values[8])] {
+            full.insert(key, value).unwrap();
+            partial.insert(key, value).unwrap();
+
+            prop_assert_eq!(full.root(), partial.root(), "after an update");
+            prop_assert_eq!(partial.get_value(&key).unwrap(), value);
+        }
+
+        // Each key's updated value must SURVIVE the subsequent insertions
+        // (root equality alone does not guarantee lookup correctness).
+        prop_assert_eq!(partial.get_value(&key0).unwrap(), values[6]);
+        prop_assert_eq!(partial.get_value(&key2).unwrap(), values[7]);
+        prop_assert_eq!(partial.get_value(&key_empty).unwrap(), values[8]);
+
+        // Remove key0 back to EMPTY in both trees.
+        full.insert(key0, EMPTY_WORD).unwrap();
+        partial.insert(key0, EMPTY_WORD).unwrap();
+
+        prop_assert_eq!(full.root(), partial.root(), "after removing key0");
+        prop_assert_eq!(partial.get_value(&key0).unwrap(), EMPTY_WORD);
+
+        // Open equivalence for a removed and a present key.
+        prop_assert_eq!(full.open(&key0), partial.open(&key0).unwrap());
+        prop_assert_eq!(full.open(&key2), partial.open(&key2).unwrap());
+
+        // Untracked keys are rejected for reads and both insert kinds.
+        assert_matches!(
+            partial.insert(key1, untracked_value).unwrap_err(),
+            MerkleError::UntrackedKey(_)
+        );
+        assert_matches!(partial.insert(key1, EMPTY_WORD).unwrap_err(), MerkleError::UntrackedKey(_));
     }
 }

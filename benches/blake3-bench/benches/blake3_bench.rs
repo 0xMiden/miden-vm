@@ -4,8 +4,8 @@ use codspeed_criterion_compat as criterion;
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
 use miden_vm_blake3_bench::{
     BENCH_GROUP, Blake3Fixture, EXECUTE_FOR_PROVING_METRIC, build_trace, execute_for_proving,
-    execute_program, normalize_axis_name, prove_and_verify_once, prove_span_duration, prove_trace,
-    repo_root_from_manifest,
+    execute_program, normalize_axis_name, prove_and_verify_once, prove_span_duration,
+    prove_witness, repo_root_from_manifest,
 };
 
 const ALL_AXES: [&str; 5] = [
@@ -120,7 +120,7 @@ fn blake3_bench(c: &mut Criterion) {
                     || execute_for_proving(&fixture),
                     |execution_witness| {
                         let execution_witness = black_box(execution_witness);
-                        black_box(prove_trace(execution_witness))
+                        black_box(prove_witness(execution_witness))
                     },
                     BatchSize::SmallInput,
                 );

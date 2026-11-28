@@ -1,6 +1,9 @@
 extern crate alloc;
 
-use std::ffi::{OsStr, OsString};
+use std::{
+    ffi::{OsStr, OsString},
+    process::ExitCode,
+};
 
 use clap::{FromArgMatches, Parser, Subcommand};
 use miden_assembly::diagnostics::Report;
@@ -31,7 +34,7 @@ impl TryFrom<MidenVmCli> for Cli {
 
     fn try_from(value: MidenVmCli) -> Result<Self, Self::Error> {
         match value.behavior {
-            Behavior::MidenVm { cli } => Ok(cli),
+            Behavior::MidenVm { cli } => Ok(*cli),
             Behavior::External(args) => {
                 let used_alias = args.first();
                 let is_known_alias = used_alias
@@ -67,7 +70,7 @@ enum Behavior {
     /// The Miden VM CLI.
     MidenVm {
         #[command(flatten)]
-        cli: Cli,
+        cli: Box<Cli>,
     },
 
     /// This variant will be matched when the CLI is called under an alias, like
@@ -120,14 +123,22 @@ impl Cli {
 }
 
 /// Executable entry point
-pub fn main() -> Result<(), Report> {
+pub fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprint!("{error:?}");
+            ExitCode::FAILURE
+        },
+    }
+}
+
+fn run() -> Result<(), Report> {
     // read command-line args
     let cli = <MidenVmCli as clap::CommandFactory>::command();
     let matches = cli.get_matches();
     let parsed = MidenVmCli::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
     let cli: Cli = parsed.try_into()?;
-
-    initialize_diagnostics();
 
     // configure logging
     // if logging level is not specified, set level to "warn"
@@ -157,23 +168,6 @@ pub fn main() -> Result<(), Report> {
     cli.execute()
 }
 
-fn initialize_diagnostics() {
-    use miden_assembly::diagnostics::reporting::{self, ReportHandlerOpts};
-
-    #[cfg(feature = "std")]
-    {
-        let result = reporting::set_hook(Box::new(|_| Box::new(ReportHandlerOpts::new().build())));
-        if result.is_ok() {
-            reporting::set_panic_hook();
-        }
-    }
-
-    #[cfg(not(feature = "std"))]
-    {
-        let _ = reporting::set_hook(Box::new(|_| Box::new(ReportHandlerOpts::new().build())));
-    }
-}
-
 // TESTS
 // ================================================================================================
 #[cfg(test)]
@@ -189,7 +183,7 @@ mod test {
 
         assert!(matches!(
             miden_vm_command.behavior,
-            Behavior::MidenVm { cli: Cli { external: false, .. } }
+            Behavior::MidenVm { ref cli } if !cli.external
         ));
 
         let cli: Cli = miden_vm_command.try_into().expect("Failed to turn MidenVmCli into Cli.");

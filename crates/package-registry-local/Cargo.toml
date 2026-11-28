@@ -1,6 +1,6 @@
 [package]
 name = "miden-package-registry-local"
-version = "0.34.0"
+version.workspace = true
 description = "Filesystem-backed local package registry for Miden packages"
 documentation = "https://docs.rs/miden-package-registry-local"
 readme = "README.md"
@@ -34,3 +34,6 @@ windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 [dev-dependencies]
 miden-mast-package = { workspace = true, features = ["arbitrary"] }
 tempfile = { workspace = true, features = ["getrandom"] }
+
+[lints]
+workspace = true

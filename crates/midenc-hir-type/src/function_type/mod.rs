@@ -2,17 +2,23 @@ mod abi;
 
 use core::fmt;
 
+#[cfg(all(feature = "arbitrary", test))]
+use miden_serde_utils::{Deserializable, Serializable};
 use smallvec::SmallVec;
 
 pub use self::abi::CallConv;
 use super::Type;
 
-/// This represents the type of a function, i.e. it's parameters and results, and expected calling
-/// convention.
+/// This represents the type of a function, i.e. its parameters and results, and expected
+/// calling convention.
 ///
 /// Function types are reference types, i.e. they are always implicitly a handle/pointer to a
 /// function, not a function value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct FunctionType {
     /// The calling convention/ABI of the function represented by this type
     pub abi: CallConv,

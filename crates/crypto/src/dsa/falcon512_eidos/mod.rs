@@ -11,9 +11,7 @@
 //!
 //! [1]: <https://github.com/algorand/falcon/blob/main/falcon-det.pdf>
 
-use super::falcon512_common::{
-    self, FalconVariant, MODULUS, N, PREVERSIONED_NONCE_LEN, Polynomial,
-};
+use super::falcon512_common::{self, FalconVariant, MODULUS, N, PREVERSIONED_NONCE_LEN};
 #[cfg(test)]
 use super::falcon512_common::{
     FalconFelt, LOG_N, SIG_NONCE_LEN, SIG_POLY_BYTE_LEN, SIG_SERIALIZED_LEN,
@@ -25,6 +23,8 @@ mod hash_to_point;
 #[cfg(test)]
 mod tests;
 
+pub use super::falcon512_common::{PK_LEN, Polynomial, SK_LEN, SignatureHeader, SignaturePoly};
+
 /// Nonce used by deterministic Falcon512-Eidos signatures.
 pub type Nonce = falcon512_common::Nonce<variant::Variant>;
 
@@ -33,6 +33,9 @@ pub type PublicKey = falcon512_common::PublicKey<variant::Variant>;
 
 /// Secret key for Falcon512-Eidos signatures.
 pub type SecretKey = falcon512_common::SecretKey<variant::Variant>;
+
+/// Deterministic Falcon512-Eidos signature.
+pub type Signature = falcon512_common::Signature<variant::Variant>;
 
 pub(super) mod variant {
     use super::{FalconVariant, Felt, Nonce, Polynomial, Word, hash_to_point};

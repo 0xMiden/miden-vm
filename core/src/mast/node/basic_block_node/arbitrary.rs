@@ -10,7 +10,8 @@ use proptest::{arbitrary::Arbitrary, prelude::*};
 use super::*;
 use crate::{
     Felt, ONE, Word,
-    advice::AdviceMap,
+    advice::{AdviceInputs, AdviceMap, AdviceStack},
+    crypto::merkle::MerkleStore,
     mast::{
         CallNodeBuilder, DenseMastForestBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, SplitNodeBuilder,
@@ -92,7 +93,7 @@ const OPS_NO_IMM: &[Operation] = &[
     Operation::Emit,
     Operation::Ext2Mul,
     Operation::Expacc,
-    Operation::HPerm,
+    Operation::Compress,
 ];
 
 /// Operations that cannot fail whatever the stack, advice provider, or memory hold. Their stack
@@ -149,22 +150,22 @@ const INFALLIBLE_OPS: &[Operation] = &[
 ];
 
 /// Strategy for operations without immediate values (non-control flow).
-pub fn op_no_imm_strategy() -> impl Strategy<Value = Operation> {
+pub(crate) fn op_no_imm_strategy() -> impl Strategy<Value = Operation> {
     prop::sample::select(OPS_NO_IMM)
 }
 
 /// Strategy for operations with immediate values.
-pub fn op_with_imm_strategy() -> impl Strategy<Value = Operation> {
+pub(crate) fn op_with_imm_strategy() -> impl Strategy<Value = Operation> {
     any::<u64>().prop_map(Felt::new_unchecked).prop_map(Operation::Push)
 }
 
 /// Strategy for all non-control flow operations.
-pub fn op_non_control_strategy() -> impl Strategy<Value = Operation> {
+pub(crate) fn op_non_control_strategy() -> impl Strategy<Value = Operation> {
     prop_oneof![op_no_imm_strategy(), op_with_imm_strategy()]
 }
 
 /// Strategy for sequences of non-control flow operations.
-pub fn op_non_control_sequence_strategy(
+pub(crate) fn op_non_control_sequence_strategy(
     max_length: usize,
 ) -> impl Strategy<Value = Vec<Operation>> {
     prop::collection::vec(op_non_control_strategy(), 1..=max_length)
@@ -216,7 +217,7 @@ fn balance_ops(ops: Vec<Operation>, max_len: usize) -> Vec<Operation> {
 #[derive(Clone, Debug)]
 pub struct BasicBlockNodeParams {
     /// Maximum number of operations in a generated basic block.
-    pub max_ops_len: usize,
+    pub(crate) max_ops_len: usize,
     /// Restricts blocks to infallible operations that leave the stack depth unchanged, so a block
     /// runs on any operand stack.
     pub executable: bool,
@@ -770,6 +771,16 @@ impl Arbitrary for MastForest {
 // OTHER ARBITRARY IMPLEMENTATIONS
 // ================================================================================================
 
+impl Arbitrary for AdviceStack {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        // Any field elements are valid advice stack entries.
+        prop::collection::vec(any::<Felt>(), 0..=32).prop_map(AdviceStack::from).boxed()
+    }
+}
+
 impl Arbitrary for AdviceMap {
     type Parameters = ();
     type Strategy = BoxedStrategy<Self>;
@@ -820,6 +831,20 @@ impl Arbitrary for KernelDescriptor {
                 KernelDescriptor::from_hashes(words.into_iter().collect())
                     .expect("Generated kernel should be valid")
             })
+            .boxed()
+    }
+}
+
+impl Arbitrary for AdviceInputs {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        // Each component has its own strategy producing structurally valid values:
+        // arbitrary felts for the stack, key-mapped element lists for the map, and
+        // hash-consistent nodes for the store.
+        (any::<AdviceStack>(), any::<AdviceMap>(), any::<MerkleStore>())
+            .prop_map(|(stack, map, store)| AdviceInputs::new(stack, map, store))
             .boxed()
     }
 }

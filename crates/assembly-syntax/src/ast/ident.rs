@@ -128,7 +128,7 @@ impl Ident {
     }
 
     /// Returns true if this identifier is a valid constant identifier
-    pub fn is_constant_ident(&self) -> bool {
+    pub(crate) fn is_constant_ident(&self) -> bool {
         self.name
             .chars()
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
@@ -240,12 +240,6 @@ impl FromStr for Ident {
         Self::validate(s)?;
         let name = Arc::from(s.to_string().into_boxed_str());
         Ok(Self { span: SourceSpan::default(), name })
-    }
-}
-
-impl From<Ident> for miden_utils_diagnostics::miette::SourceSpan {
-    fn from(value: Ident) -> Self {
-        value.span.into()
     }
 }
 

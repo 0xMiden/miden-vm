@@ -1,9 +1,9 @@
-use alloc::{borrow::Cow, boxed::Box, sync::Arc, vec::Vec};
-use core::fmt;
+use alloc::{borrow::Cow, sync::Arc, vec::Vec};
+use core::{error::Error, fmt};
 
 use miden_debug_types::{SourceFile, SourceSpan};
 
-use super::{Diagnostic, Label, LabeledSpan, Report, Severity, SourceCode};
+use crate::{Diagnostic, DiagnosticDetails, Label, Report, Severity};
 
 // RELATED LABEL
 // ================================================================================================
@@ -34,19 +34,7 @@ impl fmt::Display for RelatedLabel {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for RelatedLabel {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
-}
-
-#[cfg(not(feature = "std"))]
-impl miette::StdError for RelatedLabel {
-    fn source(&self) -> Option<&(dyn miette::StdError + 'static)> {
-        None
-    }
-}
+impl Error for RelatedLabel {}
 
 impl RelatedLabel {
     pub fn new<S>(severity: Severity, message: S) -> Self
@@ -57,7 +45,7 @@ impl RelatedLabel {
             severity,
             message: Cow::from(message),
             help: None,
-            labels: vec![],
+            labels: Vec::new(),
             file: None,
         }
     }
@@ -92,11 +80,10 @@ impl RelatedLabel {
     where
         Cow<'static, str>: From<S>,
     {
-        let range = span.into_range();
-        self.with_label(Label::new((range.start as usize)..(range.end as usize), message))
+        self.with_label(Label::new(span, message))
     }
 
-    pub fn with_label(mut self, label: Label) -> Self {
+    pub(crate) fn with_label(mut self, label: Label) -> Self {
         self.labels.push(label);
         self
     }
@@ -119,33 +106,17 @@ impl RelatedLabel {
 }
 
 impl Diagnostic for RelatedLabel {
-    fn code<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
-        None
+    fn severity(&self) -> Severity {
+        self.severity
     }
-    fn severity(&self) -> Option<Severity> {
-        Some(self.severity)
-    }
-    fn help<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
-        self.help.as_deref().map(|help| Box::new(help) as Box<_>)
-    }
-    fn url<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
-        None
-    }
-    fn source_code(&self) -> Option<&dyn SourceCode> {
-        self.file.as_ref().map(|f| f as &dyn SourceCode)
-    }
-    fn labels(&self) -> Option<Box<dyn Iterator<Item = LabeledSpan> + '_>> {
-        if self.labels.is_empty() {
-            None
-        } else {
-            Some(Box::new(self.labels.iter().cloned().map(Into::into)))
+
+    fn details(&self) -> DiagnosticDetails<'_> {
+        DiagnosticDetails {
+            help: self.help.as_deref().map(Cow::Borrowed),
+            source: self.file.as_deref(),
+            labels: Cow::Borrowed(&self.labels),
+            ..Default::default()
         }
-    }
-    fn related<'a>(&'a self) -> Option<Box<dyn Iterator<Item = &'a dyn Diagnostic> + 'a>> {
-        None
-    }
-    fn diagnostic_source(&self) -> Option<&dyn Diagnostic> {
-        None
     }
 }
 
@@ -162,37 +133,15 @@ impl RelatedError {
     pub fn into_report(self) -> Report {
         self.0
     }
-
-    #[inline(always)]
-    pub fn as_diagnostic(&self) -> &dyn Diagnostic {
-        self.0.as_ref()
-    }
 }
 
 impl Diagnostic for RelatedError {
-    fn code<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
-        self.as_diagnostic().code()
+    fn severity(&self) -> Severity {
+        self.0.severity()
     }
-    fn severity(&self) -> Option<Severity> {
-        self.as_diagnostic().severity()
-    }
-    fn help<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
-        self.as_diagnostic().help()
-    }
-    fn url<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
-        self.as_diagnostic().url()
-    }
-    fn source_code(&self) -> Option<&dyn SourceCode> {
-        self.as_diagnostic().source_code()
-    }
-    fn labels(&self) -> Option<Box<dyn Iterator<Item = LabeledSpan> + '_>> {
-        self.as_diagnostic().labels()
-    }
-    fn related<'a>(&'a self) -> Option<Box<dyn Iterator<Item = &'a dyn Diagnostic> + 'a>> {
-        self.as_diagnostic().related()
-    }
-    fn diagnostic_source(&self) -> Option<&dyn Diagnostic> {
-        self.as_diagnostic().diagnostic_source()
+
+    fn details(&self) -> DiagnosticDetails<'_> {
+        self.0.details()
     }
 }
 
@@ -202,17 +151,9 @@ impl fmt::Display for RelatedError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for RelatedError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        AsRef::<dyn std::error::Error>::as_ref(&self.0).source()
-    }
-}
-
-#[cfg(not(feature = "std"))]
-impl miette::StdError for RelatedError {
-    fn source(&self) -> Option<&(dyn miette::StdError + 'static)> {
-        AsRef::<dyn miette::StdError>::as_ref(&self.0).source()
+impl Error for RelatedError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.0.source()
     }
 }
 
@@ -231,6 +172,6 @@ impl RelatedError {
     where
         E: Diagnostic + Send + Sync + 'static,
     {
-        Self(Report::new_boxed(Box::new(error)))
+        Self(Report::new(error))
     }
 }

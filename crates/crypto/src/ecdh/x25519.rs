@@ -117,8 +117,37 @@ impl EphemeralSecretKey {
 
 /// Ephemeral public key for X25519 agreement.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct EphemeralPublicKey {
     pub(crate) inner: x25519_dalek::PublicKey,
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod ephemeral_key_arbitrary {
+    use proptest::prelude::*;
+    use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
+
+    use super::EphemeralPublicKey;
+    use crate::ecdh::x25519::EphemeralSecretKey;
+
+    impl Arbitrary for EphemeralPublicKey {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader rejects twist and small-order points; derive the public key from a
+            // deterministically seeded ephemeral secret - valid by construction.
+            any::<[u8; 32]>()
+                .prop_map(|seed| {
+                    let mut rng = ChaCha20Rng::from_seed(seed);
+                    EphemeralSecretKey::with_rng(&mut rng).public_key()
+                })
+                .boxed()
+        }
+    }
 }
 
 impl Serializable for EphemeralPublicKey {
@@ -160,6 +189,10 @@ impl KeyAgreementScheme for X25519 {
     type PublicKey = PublicKey;
 
     type SharedSecret = SharedSecret;
+
+    fn public_key(static_sk: &Self::SecretKey) -> Self::PublicKey {
+        static_sk.public_key()
+    }
 
     fn generate_ephemeral_keypair<R: CryptoRng>(
         rng: &mut R,

@@ -1,10 +1,8 @@
 use miden_assembly::Assembler;
-use miden_core::Felt;
-use miden_processor::{
-    ExecutionOptions, FastProcessor, StackInputs, TestHost, advice::AdviceInputs,
-};
-use miden_prover::Word;
+use miden_core::{Felt, Word};
+use miden_processor::{TestHost, advice::AdviceError};
 use miden_utils_testing::{build_test, crypto::MerkleStore};
+use miden_vm::{ExecutionError, ExecutionOptions, Processor};
 
 // ADVICE INJECTION
 // ================================================================================================
@@ -336,8 +334,8 @@ fn advice_insert_hdword() {
         adv.insert_hdword
 
         # manually compute the hash of the two words
-        # hmerge computes hash(W0 || W1), matching adv.insert_hdword
-        hmerge
+        # hdword computes hash(W0 || W1), matching adv.insert_hdword
+        hdword
         # => [KEY, ...]
 
         # load the advice stack with values from the advice map and drop the key
@@ -354,39 +352,32 @@ fn advice_insert_hdword() {
     // Values are stored as [W0, W1] in advice map.
     // Retrieval: adv_loadw swapw adv_loadw swapw produces [W0, W1].
     test.expect_stack(&[1, 2, 3, 4, 5, 6, 7, 8]);
+}
 
-    // --- test hashing with domain -------------------------------------------
+#[test]
+fn advice_insert_compress() {
     let source: &str = "
     begin
-        # stack: [1, 2, 3, 4, 5, 6, 7, 8, 9, ...]
-        # W0 = [1,2,3,4], W1 = [5,6,7,8], domain = 9
+        # stack: [BLOCK_LO, BLOCK_HI, CV]
 
-        # hash and insert top two words into the advice map
-        adv.insert_hdword_d
+        # Store the two block words under the raw compression output CV.
+        adv.insert_compress
 
-        # manually compute the hash of the two words with domain
-        # Set up state for hperm: [W0, W1, CAP] where CAP = [0, domain, 0, 0]
-        # (domain goes in state[9], not state[8])
-        push.0 push.0 movup.10 push.0 movdnw.2
-        # => [W0, W1, [0, domain, 0, 0], ...]
-        hperm
-        # Extract hash from R0 (state[0..4]) after permutation
-        swapw.2 dropw dropw
-        # => [KEY, ...]
+        # Recompute that key from the unchanged input state.
+        compress
+        swapw.2
+        # => [CV', BLOCK_HI, BLOCK_LO]
 
-        # load the advice stack with values from the advice map and drop the key
+        # Load the inserted block words and remove the compression state.
         adv.push_mapval
-        dropw
+        dropw dropw dropw
 
-        # move the values from the advice stack to the operand stack
-        # Values stored as [W0, W1], advice stack top is W0
-        # adv_loadw gets W0, swapw moves it, adv_loadw gets W1, swapw produces [W0, W1]
+        # Reconstruct [BLOCK_LO, BLOCK_HI] from the advice stack.
         adv_loadw swapw adv_loadw swapw
     end";
-    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8, 9];
-    let test = build_test!(source, &stack_inputs);
-    // Values stored as [W0, W1], retrieval produces [W0, W1] on operand stack
-    test.expect_stack(&[1, 2, 3, 4, 5, 6, 7, 8]);
+    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+    build_test!(source, &stack_inputs).expect_stack(&[1, 2, 3, 4, 5, 6, 7, 8]);
 }
 
 #[test]
@@ -398,27 +389,14 @@ fn advice_insert_hqword() {
         # hash and insert top four words into the advice map
         adv.insert_hqword
 
-        # manually compute the hash of the four words
-        # hash_elements([A || B || C || D]) absorbs in two rounds:
-        # Round 1: absorb A, B with zero capacity
-        # Round 2: absorb C, D with capacity from round 1
-
-        # First absorption: [A, B, cap=0]
-        # Stack: [A, B, C, D, ...]
-        padw movdnw.2
-
-        hperm
-        # => [RATE1', RATE2', CAP', C, D, ...]
-
-        # Second absorption: use CAP' as new capacity, absorb C, D
-        dropw dropw
-        # => [CAP', C, D, ...]
+        # Hash the four words with Eidos length binding for 16 input felts.
+        push.6620516959492505600.11170449401267093504.11912009168875159568.13503953893947607553
         movdnw.2
-        hperm
-        # => [RATE1'', RATE2'', CAP'', ...]
-
-        # Extract hash
-        swapw.2 dropw dropw
+        compress
+        dropw dropw
+        movdnw.2
+        compress
+        dropw dropw
         # => [KEY]
 
         # load the advice stack with values from the advice map and drop the key
@@ -441,14 +419,16 @@ fn advice_insert_hqword() {
 #[test]
 fn test_adv_insert_mem_at_boundary() {
     let max_size = 8;
-    run_insert_mem_with_max_value_elements(max_size as u32, max_size).unwrap();
+    run_insert_mem_with_max_value_elements_and_repeats(max_size as u32, max_size, 1).unwrap();
 }
 
 /// Inserting one element over the combined advice-provider boundary must be rejected.
 #[test]
 fn test_adv_insert_mem_over_boundary() {
     let max_size = 8;
-    let err = run_insert_mem_with_max_value_elements((max_size + 1) as u32, max_size).unwrap_err();
+    let err =
+        run_insert_mem_with_max_value_elements_and_repeats((max_size + 1) as u32, max_size, 1)
+            .unwrap_err();
     let msg = format!("{err:?}");
     assert!(msg.contains("SizeBudgetExceeded"), "expected size-exceeded error, got: {msg}");
 }
@@ -457,32 +437,79 @@ fn test_adv_insert_mem_over_boundary() {
 #[test]
 fn test_adv_insert_mem_reinsert_at_boundary() {
     let max_size = 8;
-    run_insert_mem_twice_with_max_value_elements(max_size as u32, max_size).unwrap();
+    run_insert_mem_with_max_value_elements_and_repeats(max_size as u32, max_size, 2).unwrap();
+}
+
+/// An existing map key must not bypass the advice budget for a larger memory range.
+#[test]
+fn test_adv_insert_mem_existing_key_respects_advice_size_budget() {
+    const RANGE_LEN: u32 = 8_192;
+
+    let err = run_insert_mem_after_empty_insertion(RANGE_LEN).unwrap_err();
+    assert!(matches!(
+        err,
+        ExecutionError::AdviceError {
+            err: AdviceError::SizeBudgetExceeded { .. },
+            ..
+        }
+    ));
+}
+
+/// A conflicting value at the budget boundary must be rejected before it is collected.
+#[test]
+fn test_adv_insert_mem_conflict_at_budget_is_rejected_before_allocation() {
+    const RANGE_LEN: usize = 2;
+
+    let base_store_bytes = MerkleStore::default().num_internal_nodes() * 3 * Word::SERIALIZED_SIZE;
+    let felt_bytes = Word::SERIALIZED_SIZE / Word::NUM_ELEMENTS;
+    let entry_bytes = Word::SERIALIZED_SIZE + RANGE_LEN * felt_bytes;
+    let max = base_store_bytes + entry_bytes;
+
+    let err = run_conflicting_insert(max).unwrap_err();
+    assert!(matches!(
+        err,
+        ExecutionError::AdviceError {
+            err: AdviceError::SizeBudgetExceeded {
+                current,
+                added,
+                max: actual_max,
+            },
+            ..
+        } if current == max && added == entry_bytes && actual_max == max
+    ));
+}
+
+/// A conflicting value is reported when the budget permits collecting the candidate.
+#[test]
+fn test_adv_insert_mem_conflict_with_spare_budget_reports_values() {
+    const RANGE_LEN: usize = 2;
+
+    let base_store_bytes = MerkleStore::default().num_internal_nodes() * 3 * Word::SERIALIZED_SIZE;
+    let felt_bytes = Word::SERIALIZED_SIZE / Word::NUM_ELEMENTS;
+    let entry_bytes = Word::SERIALIZED_SIZE + RANGE_LEN * felt_bytes;
+    let max = base_store_bytes + 2 * entry_bytes;
+
+    let err = run_conflicting_insert(max).unwrap_err();
+    let ExecutionError::AdviceError {
+        err: AdviceError::MapKeyAlreadyPresent { prev_values, new_values, .. },
+        ..
+    } = err
+    else {
+        panic!("expected conflicting advice map value, got: {err:?}");
+    };
+    assert_eq!(prev_values, vec![Felt::new_unchecked(1); RANGE_LEN]);
+    assert_eq!(new_values, vec![Felt::new_unchecked(1), Felt::new_unchecked(2)]);
 }
 
 // HELPERS
 // ================================================================================================
 
 /// Runs `adv.insert_mem` with a budget sized for a map value of `max_value_elements`.
-fn run_insert_mem_with_max_value_elements(
-    range_len: u32,
-    max_value_elements: usize,
-) -> Result<(), miden_processor::ExecutionError> {
-    run_insert_mem_with_max_value_elements_and_repeats(range_len, max_value_elements, 1)
-}
-
-fn run_insert_mem_twice_with_max_value_elements(
-    range_len: u32,
-    max_value_elements: usize,
-) -> Result<(), miden_processor::ExecutionError> {
-    run_insert_mem_with_max_value_elements_and_repeats(range_len, max_value_elements, 2)
-}
-
 fn run_insert_mem_with_max_value_elements_and_repeats(
     range_len: u32,
     max_value_elements: usize,
     repeats: usize,
-) -> Result<(), miden_processor::ExecutionError> {
+) -> Result<(), ExecutionError> {
     let start_addr: u32 = 0;
     let end_addr = start_addr + range_len;
 
@@ -517,8 +544,60 @@ fn run_insert_mem_with_max_value_elements_and_repeats(
     let options =
         ExecutionOptions::default().with_max_advice_size_bytes(base_store_bytes + map_entry_bytes);
 
-    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
-        .map_err(miden_processor::ExecutionError::advice_error_no_context)?
-        .execute_sync(&program, &mut host)?;
+    Processor::new(&program).with_options(options).execute().run_sync(&mut host)?;
+    Ok(())
+}
+
+fn run_insert_mem_after_empty_insertion(range_len: u32) -> Result<(), ExecutionError> {
+    let source = format!(
+        r#"begin
+            push.0 push.0
+            push.1.2.3.4
+            adv.insert_mem
+            dropw drop drop
+
+            push.{range_len} push.0
+            push.1.2.3.4
+            adv.insert_mem
+            dropw drop drop
+        end"#,
+    );
+    let program = Assembler::default()
+        .assemble_program("program", &source)
+        .unwrap()
+        .unwrap_program();
+    let mut host = TestHost::default();
+    let base_store_bytes = MerkleStore::default().num_internal_nodes() * 3 * Word::SERIALIZED_SIZE;
+    let options = ExecutionOptions::default()
+        .with_max_advice_size_bytes(base_store_bytes + Word::SERIALIZED_SIZE);
+
+    Processor::new(&program).with_options(options).execute().run_sync(&mut host)?;
+    Ok(())
+}
+
+fn run_conflicting_insert(max_advice_size_bytes: usize) -> Result<(), ExecutionError> {
+    let source = "begin
+        push.1 push.0 mem_store
+        push.1 push.1 mem_store
+
+        push.2 push.0
+        push.1.2.3.4
+        adv.insert_mem
+        dropw drop drop
+
+        push.2 push.1 mem_store
+        push.2 push.0
+        push.1.2.3.4
+        adv.insert_mem
+        dropw drop drop
+    end";
+    let program = Assembler::default()
+        .assemble_program("program", source)
+        .unwrap()
+        .unwrap_program();
+    let mut host = TestHost::default();
+    let options = ExecutionOptions::default().with_max_advice_size_bytes(max_advice_size_bytes);
+
+    Processor::new(&program).with_options(options).execute().run_sync(&mut host)?;
     Ok(())
 }

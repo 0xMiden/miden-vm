@@ -1,11 +1,8 @@
-// Allow unused assignments - required by miette::Diagnostic derive macro
-#![allow(unused_assignments)]
-
 use alloc::{string::String, sync::Arc, vec::Vec};
 use core::{fmt, ops::Range};
 
 use miden_debug_types::SourceSpan;
-use miden_utils_diagnostics::{Diagnostic, miette};
+use miden_utils_diagnostics::Diagnostic;
 
 // LITERAL ERROR KIND
 // ================================================================================================
@@ -97,10 +94,8 @@ impl fmt::Display for BinErrorKind {
 pub enum ParsingError {
     #[default]
     #[error("parsing failed due to unexpected input")]
-    #[diagnostic()]
     Failed = 0,
     #[error("expected input to be valid utf8, but invalid byte sequences were found")]
-    #[diagnostic()]
     InvalidUtf8 {
         #[label("invalid byte sequence starts here")]
         span: SourceSpan,
@@ -108,19 +103,16 @@ pub enum ParsingError {
     #[error(
         "expected input to be valid utf8, but end-of-file was reached before final codepoint was read"
     )]
-    #[diagnostic()]
     IncompleteUtf8 {
         #[label("the codepoint starting here is incomplete")]
         span: SourceSpan,
     },
     #[error("invalid syntax")]
-    #[diagnostic()]
     InvalidToken {
         #[label("occurs here")]
         span: SourceSpan,
     },
     #[error("invalid syntax: {message}")]
-    #[diagnostic()]
     InvalidSyntax {
         #[label("{message}")]
         span: SourceSpan,
@@ -135,7 +127,6 @@ pub enum ParsingError {
         expected: Vec<String>,
     },
     #[error("unexpected trailing tokens")]
-    #[diagnostic()]
     ExtraToken {
         #[label("{token} was found here, but was not expected")]
         span: SourceSpan,
@@ -154,19 +145,16 @@ pub enum ParsingError {
     ))]
     InvalidIdentifier {
         #[source]
-        #[diagnostic(source)]
         error: crate::ast::IdentError,
         #[label]
         span: SourceSpan,
     },
     #[error("unclosed quoted identifier")]
-    #[diagnostic()]
     UnclosedQuote {
         #[label("no match for quotation mark starting here")]
         start: SourceSpan,
     },
     #[error("too many instructions in a single code block")]
-    #[diagnostic()]
     CodeBlockTooBig {
         #[label]
         span: SourceSpan,
@@ -175,6 +163,20 @@ pub enum ParsingError {
     #[diagnostic(help("control-flow nesting exceeded the maximum depth of {max_depth}"))]
     ControlFlowNestingDepthExceeded {
         #[label("control-flow nesting exceeded the configured depth limit here")]
+        span: SourceSpan,
+        max_depth: usize,
+    },
+    #[error("constant expression nesting depth exceeded")]
+    #[diagnostic(help("constant expression nesting exceeded the maximum depth of {max_depth}"))]
+    ConstantExpressionNestingDepthExceeded {
+        #[label("constant expression nesting exceeded the configured depth limit here")]
+        span: SourceSpan,
+        max_depth: usize,
+    },
+    #[error("type expression nesting depth exceeded")]
+    #[diagnostic(help("type expression nesting exceeded the maximum depth of {max_depth}"))]
+    TypeExpressionNestingDepthExceeded {
+        #[label("type expression nesting exceeded the configured depth limit here")]
         span: SourceSpan,
         max_depth: usize,
     },
@@ -190,21 +192,18 @@ pub enum ParsingError {
         span: SourceSpan,
     },
     #[error("invalid literal: {}", kind)]
-    #[diagnostic()]
     InvalidLiteral {
         #[label]
         span: SourceSpan,
         kind: LiteralErrorKind,
     },
     #[error("invalid literal: {}", kind)]
-    #[diagnostic()]
     InvalidHexLiteral {
         #[label]
         span: SourceSpan,
         kind: HexErrorKind,
     },
     #[error("invalid literal: {}", kind)]
-    #[diagnostic()]
     InvalidBinaryLiteral {
         #[label]
         span: SourceSpan,
@@ -228,13 +227,11 @@ pub enum ParsingError {
         range: Range<usize>,
     },
     #[error("too many procedures in this module")]
-    #[diagnostic()]
     ModuleTooLarge {
         #[label]
         span: SourceSpan,
     },
     #[error("too many re-exported procedures in this module")]
-    #[diagnostic()]
     ModuleTooManyReexports {
         #[label]
         span: SourceSpan,
@@ -243,7 +240,6 @@ pub enum ParsingError {
         "too many operands for `push`: tried to push {} elements, but only 16 can be pushed at one time",
         count
     )]
-    #[diagnostic()]
     PushOverflow {
         #[label]
         span: SourceSpan,
@@ -262,7 +258,6 @@ pub enum ParsingError {
         span: SourceSpan,
     },
     #[error("conflicting attributes for procedure definition")]
-    #[diagnostic()]
     AttributeConflict {
         #[label(
             "conflict occurs because an attribute with the same name has already been defined"
@@ -272,7 +267,6 @@ pub enum ParsingError {
         prev: SourceSpan,
     },
     #[error("conflicting key-value attributes for procedure definition")]
-    #[diagnostic()]
     AttributeKeyValueConflict {
         #[label(
             "conflict occurs because a key with the same name has already been set in a previous declaration"
@@ -282,7 +276,6 @@ pub enum ParsingError {
         prev: SourceSpan,
     },
     #[error("invalid Advice Map key")]
-    #[diagnostic()]
     InvalidAdvMapKey {
         #[label(
             "an Advice Map key must be a word, either in 64-character hex format or in array-like format `[f0,f1,f2,f3]`"
@@ -290,20 +283,17 @@ pub enum ParsingError {
         span: SourceSpan,
     },
     #[error("invalid slice constant")]
-    #[diagnostic()]
     InvalidSliceConstant {
         #[label("slices are only supported over word-sized constants")]
         span: SourceSpan,
     },
     #[error("invalid slice: expected valid range")]
-    #[diagnostic()]
     InvalidRange {
         #[label("range used for the word constant slice is malformed: `{range:?}`")]
         span: SourceSpan,
         range: Range<usize>,
     },
     #[error("invalid slice: expected non-empty range")]
-    #[diagnostic()]
     EmptySlice {
         #[label("range used for the word constant slice is empty: `{range:?}`")]
         span: SourceSpan,
@@ -322,7 +312,6 @@ pub enum ParsingError {
         span: SourceSpan,
     },
     #[error("invalid struct representation")]
-    #[diagnostic()]
     InvalidStructRepr {
         #[label("{message}")]
         span: SourceSpan,
@@ -337,7 +326,6 @@ pub enum ParsingError {
         replacement: String,
     },
     #[error("invalid procedure @locals attribute")]
-    #[diagnostic()]
     InvalidLocalsAttr {
         #[label("{message}")]
         span: SourceSpan,
@@ -401,7 +389,6 @@ pub enum ParsingError {
         source_file: Option<Arc<miden_debug_types::SourceFile>>,
     },
     #[error("conflicting attributes for procedure definition")]
-    #[diagnostic()]
     CallConvAttributeConflict {
         #[label(
             "conflict occurs because @callconv conflicts with convention implied by other attribute"
@@ -411,7 +398,6 @@ pub enum ParsingError {
         attr_span: SourceSpan,
     },
     #[error("conflicting attributes for procedure definition")]
-    #[diagnostic()]
     ConflictingProtocolAbiAttribute {
         #[label(
             "this attribute specifies the protocol ABI of this procedure, but a different ABI was previously specified"

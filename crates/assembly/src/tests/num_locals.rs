@@ -69,7 +69,7 @@ fn test_num_locals_one_above_max_is_rejected() {
 fn test_entrypoint_with_locals_via_setter_panics() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.1 drop end");
-    let mut program = context.parse_program(source).expect("failed to parse executable module");
+    let mut program = context.parse_module(source).expect("failed to parse executable module");
 
     for proc in program.procedures_mut() {
         proc.set_num_locals(4);

@@ -1,5 +1,12 @@
-use miden_air::trace::MIN_TRACE_LEN;
-use miden_core::program::MIN_STACK_DEPTH;
+use miden_air_definitions::vm::trace::MIN_TRACE_LEN;
+use miden_core::{
+    deferred::PrecompileLimits,
+    program::MIN_STACK_DEPTH,
+    serde::{
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader,
+    },
+};
 
 // EXECUTION OPTIONS
 // ================================================================================================
@@ -8,16 +15,19 @@ use miden_core::program::MIN_STACK_DEPTH;
 ///
 /// - `max_cycles` specifies the maximum number of cycles a program is allowed to execute.
 /// - `expected_cycles` specifies the number of cycles a program is expected to execute.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// # Binary encoding
+///
+/// Version 1 starts with four `0xff` bytes followed by the version byte. Variable-length
+/// integers use the shortest vint64 encoding. The reader rejects invalid field values, truncated
+/// data, and trailing bytes in the byte-slice entrypoints.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionOptions {
     max_cycles: u32,
     expected_cycles: u32,
     core_trace_fragment_size: usize,
     /// Maximum combined logical size, in bytes, of the advice stack, map, and Merkle store.
     max_advice_size_bytes: usize,
-    /// Whether the synchronous prover may overlap hasher-chiplet trace building with program
-    /// execution (std-only; the sequential path is used on no_std regardless).
-    overlapped_trace_build: bool,
     /// Maximum number of input bytes allowed for a single hash precompile invocation.
     max_hash_len_bytes: usize,
     /// Maximum number of continuations allowed on the continuation stack at any point during
@@ -35,6 +45,10 @@ pub struct ExecutionOptions {
     /// Maximum number of field elements allowed in the processor's memory at any point during
     /// execution, rounded up to the nearest multiple of 4.
     max_memory_elements: usize,
+    /// Policy limiting guest-induced deferred precompile work.
+    execution_precompile_limits: PrecompileLimits,
+    /// Policy limiting the final root-reachable deferred witness exported after execution.
+    verification_precompile_limits: PrecompileLimits,
 }
 
 impl Default for ExecutionOptions {
@@ -48,7 +62,9 @@ impl Default for ExecutionOptions {
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
-            overlapped_trace_build: true,
+            execution_precompile_limits: miden_precompiles::default_execution_precompile_limits(),
+            verification_precompile_limits:
+                miden_precompiles::default_verification_precompile_limits(),
         }
     }
 }
@@ -94,13 +110,17 @@ impl ExecutionOptions {
 
     /// Creates a new instance of [ExecutionOptions] from the specified parameters.
     ///
-    /// If the `max_cycles` is `None` the maximum number of cycles will be set to 2^29.
+    /// If `max_cycles` is `None`, the limit is [`Self::MAX_CYCLES`]. The expected cycle count is
+    /// rounded up to a power of two and raised to [`MIN_TRACE_LEN`] if needed.
     ///
     /// # Errors
     /// Returns an error if:
-    /// - `max_cycles` is outside the valid range
-    /// - after rounding up to the next power of two, `expected_cycles` exceeds `max_cycles`
+    /// - the limit is outside the range from [`MIN_TRACE_LEN`] through [`Self::MAX_CYCLES`]
+    /// - rounding `expected_cycles` overflows or the adjusted count exceeds the cycle limit
     /// - `core_trace_fragment_size` is zero
+    ///
+    /// [`ExecutionOptionsError::ExpectedCyclesTooBig`] reports the adjusted cycle count when it
+    /// fits in `u32` and the original input when rounding overflows.
     pub fn new(
         max_cycles: Option<u32>,
         expected_cycles: u32,
@@ -124,10 +144,14 @@ impl ExecutionOptions {
         } else {
             Self::MAX_CYCLES
         };
-        // Round up the expected number of cycles to the next power of two. If it is smaller than
-        // MIN_TRACE_LEN -- pad expected number to it.
-        let expected_cycles = expected_cycles.next_power_of_two().max(MIN_TRACE_LEN as u32);
-        // Validate expected cycles (after rounding) against max_cycles.
+        // If rounding overflows, the input already exceeds every valid cycle limit.
+        let Some(rounded_cycles) = expected_cycles.checked_next_power_of_two() else {
+            return Err(ExecutionOptionsError::ExpectedCyclesTooBig {
+                max_cycles,
+                expected_cycles,
+            });
+        };
+        let expected_cycles = rounded_cycles.max(MIN_TRACE_LEN as u32);
         if max_cycles < expected_cycles {
             return Err(ExecutionOptionsError::ExpectedCyclesTooBig {
                 max_cycles,
@@ -149,7 +173,9 @@ impl ExecutionOptions {
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
-            overlapped_trace_build: true,
+            execution_precompile_limits: miden_precompiles::default_execution_precompile_limits(),
+            verification_precompile_limits:
+                miden_precompiles::default_verification_precompile_limits(),
         })
     }
 
@@ -200,20 +226,6 @@ impl ExecutionOptions {
     #[inline]
     pub fn max_hash_len_bytes(&self) -> usize {
         self.max_hash_len_bytes
-    }
-
-    /// Sets whether the synchronous prover may overlap hasher-chiplet trace building with program
-    /// execution (defaults to `true`; ignored on no_std, which always uses the sequential path).
-    /// When enabled, overlap is opportunistic. A caller with no separate Rayon worker uses compact
-    /// buffered replay.
-    pub fn with_overlapped_trace_build(mut self, overlapped: bool) -> Self {
-        self.overlapped_trace_build = overlapped;
-        self
-    }
-
-    /// Returns whether the synchronous prover may overlap trace building with execution.
-    pub fn overlapped_trace_build(&self) -> bool {
-        self.overlapped_trace_build
     }
 
     /// Sets the maximum combined logical size, in bytes, of the advice provider.
@@ -277,6 +289,187 @@ impl ExecutionOptions {
         self.max_memory_elements = max_memory_elements;
         self
     }
+
+    /// Returns the policy limiting guest-induced deferred precompile work.
+    pub const fn execution_precompile_limits(&self) -> &PrecompileLimits {
+        &self.execution_precompile_limits
+    }
+
+    /// Sets the policy limiting guest-induced deferred precompile work.
+    pub fn with_execution_precompile_limits(mut self, limits: PrecompileLimits) -> Self {
+        self.execution_precompile_limits = limits;
+        self
+    }
+
+    /// Returns the policy limiting the final root-reachable deferred witness.
+    pub const fn verification_precompile_limits(&self) -> &PrecompileLimits {
+        &self.verification_precompile_limits
+    }
+
+    /// Sets the policy limiting the final root-reachable deferred witness.
+    pub fn with_verification_precompile_limits(mut self, limits: PrecompileLimits) -> Self {
+        self.verification_precompile_limits = limits;
+        self
+    }
+}
+
+// SERIALIZATION
+// ================================================================================================
+
+const OPTIONS_VERSION_MARKER: u32 = u32::MAX;
+const OPTIONS_VERSION: u8 = 1;
+
+fn read_shortest_usize<R: ByteReader>(
+    source: &mut R,
+    label: &str,
+) -> Result<usize, DeserializationError> {
+    let encoded_len = source.peek_u8()?.trailing_zeros() as usize + 1;
+    let value = source.read_usize()?;
+    if encoded_len != value.get_size_hint() {
+        return Err(DeserializationError::InvalidValue(format!("noncanonical {label} length")));
+    }
+    Ok(value)
+}
+
+fn validate_decoded_options(
+    max_cycles: u32,
+    expected_cycles: u32,
+    core_trace_fragment_size: usize,
+    max_stack_depth: usize,
+) -> Result<(), DeserializationError> {
+    let min_cycles = MIN_TRACE_LEN as u32;
+    if max_cycles < min_cycles || max_cycles > ExecutionOptions::MAX_CYCLES {
+        return Err(DeserializationError::InvalidValue(format!(
+            "max_cycles {max_cycles} is outside [{min_cycles}, {}]",
+            ExecutionOptions::MAX_CYCLES
+        )));
+    }
+    if !expected_cycles.is_power_of_two() || expected_cycles < min_cycles {
+        return Err(DeserializationError::InvalidValue(format!(
+            "expected_cycles {expected_cycles} must be a power of two at least {min_cycles}"
+        )));
+    }
+    if expected_cycles > max_cycles {
+        return Err(DeserializationError::InvalidValue(format!(
+            "expected_cycles {expected_cycles} exceeds max_cycles {max_cycles}"
+        )));
+    }
+    if core_trace_fragment_size == 0 {
+        return Err(DeserializationError::InvalidValue(
+            "core_trace_fragment_size must be greater than 0".into(),
+        ));
+    }
+    if max_stack_depth < MIN_STACK_DEPTH {
+        return Err(DeserializationError::InvalidValue(format!(
+            "max_stack_depth {max_stack_depth} must be at least {MIN_STACK_DEPTH}"
+        )));
+    }
+    Ok(())
+}
+
+impl Serializable for ExecutionOptions {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_u32(OPTIONS_VERSION_MARKER);
+        target.write_u8(OPTIONS_VERSION);
+        self.max_cycles.write_into(target);
+        self.expected_cycles.write_into(target);
+        self.core_trace_fragment_size.write_into(target);
+        self.max_advice_size_bytes.write_into(target);
+        self.max_hash_len_bytes.write_into(target);
+        self.max_num_continuations.write_into(target);
+        self.max_stack_depth.write_into(target);
+        self.max_memory_elements.write_into(target);
+        self.execution_precompile_limits.write_into(target);
+        self.verification_precompile_limits.write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        OPTIONS_VERSION_MARKER.get_size_hint()
+            + OPTIONS_VERSION.get_size_hint()
+            + self.max_cycles.get_size_hint()
+            + self.expected_cycles.get_size_hint()
+            + self.core_trace_fragment_size.get_size_hint()
+            + self.max_advice_size_bytes.get_size_hint()
+            + self.max_hash_len_bytes.get_size_hint()
+            + self.max_num_continuations.get_size_hint()
+            + self.max_stack_depth.get_size_hint()
+            + self.max_memory_elements.get_size_hint()
+            + self.execution_precompile_limits.get_size_hint()
+            + self.verification_precompile_limits.get_size_hint()
+    }
+}
+
+impl Deserializable for ExecutionOptions {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        if source.read_u32()? != OPTIONS_VERSION_MARKER {
+            return Err(DeserializationError::InvalidValue(
+                "invalid execution options magic".into(),
+            ));
+        }
+        let version = source.read_u8()?;
+        if version != OPTIONS_VERSION {
+            return Err(DeserializationError::InvalidValue(format!(
+                "unsupported execution options version {version} (expected {OPTIONS_VERSION})"
+            )));
+        }
+        let max_cycles = source.read_u32()?;
+        let expected_cycles = source.read_u32()?;
+        let core_trace_fragment_size = read_shortest_usize(source, "core_trace_fragment_size")?;
+        let max_advice_size_bytes = read_shortest_usize(source, "max_advice_size_bytes")?;
+        let max_hash_len_bytes = read_shortest_usize(source, "max_hash_len_bytes")?;
+        let max_num_continuations = read_shortest_usize(source, "max_num_continuations")?;
+        let max_stack_depth = read_shortest_usize(source, "max_stack_depth")?;
+        let max_memory_elements = read_shortest_usize(source, "max_memory_elements")?;
+        let execution_precompile_limits = PrecompileLimits::read_from(source)?;
+        let verification_precompile_limits = PrecompileLimits::read_from(source)?;
+
+        validate_decoded_options(
+            max_cycles,
+            expected_cycles,
+            core_trace_fragment_size,
+            max_stack_depth,
+        )?;
+
+        Ok(Self {
+            max_cycles,
+            expected_cycles,
+            core_trace_fragment_size,
+            max_advice_size_bytes,
+            max_hash_len_bytes,
+            max_num_continuations,
+            max_stack_depth,
+            max_memory_elements,
+            execution_precompile_limits,
+            verification_precompile_limits,
+        })
+    }
+
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        Self::read_from_bytes_with_budget(bytes, bytes.len())
+    }
+
+    fn read_from_bytes_with_budget(
+        bytes: &[u8],
+        budget: usize,
+    ) -> Result<Self, DeserializationError> {
+        let budget = budget.min(bytes.len());
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
+        let options = Self::read_from(&mut reader)?;
+        let consumed = budget.saturating_sub(reader.remaining());
+        if consumed != bytes.len() {
+            return Err(DeserializationError::InvalidValue(
+                "trailing bytes after execution options".into(),
+            ));
+        }
+        Ok(options)
+    }
+
+    fn min_serialized_size() -> usize {
+        3 * u32::min_serialized_size()
+            + u8::min_serialized_size()
+            + 6 * usize::min_serialized_size()
+            + 2 * PrecompileLimits::min_serialized_size()
+    }
 }
 
 // EXECUTION OPTIONS ERROR
@@ -284,9 +477,7 @@ impl ExecutionOptions {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExecutionOptionsError {
-    #[error(
-        "expected number of cycles {expected_cycles} must be smaller than the maximum number of cycles {max_cycles}"
-    )]
+    #[error("expected number of cycles {expected_cycles} exceeds the maximum of {max_cycles}")]
     ExpectedCyclesTooBig { max_cycles: u32, expected_cycles: u32 },
     #[error("maximum number of cycles {max_cycles} must be greater than {min_cycles_limit}")]
     MaxCycleNumTooSmall { max_cycles: u32, min_cycles_limit: usize },
@@ -306,7 +497,58 @@ pub enum ExecutionOptionsError {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{
+        string::{String, ToString},
+        vec::Vec,
+    };
+
+    use miden_core::{
+        deferred::{WorkClass, WorkLimit},
+        serde::{ByteWriter, Deserializable, Serializable},
+    };
+
     use super::*;
+
+    fn write_option_header(bytes: &mut Vec<u8>) {
+        bytes.write_u32(OPTIONS_VERSION_MARKER);
+        bytes.write_u8(OPTIONS_VERSION);
+        (MIN_TRACE_LEN as u32).write_into(bytes);
+        (MIN_TRACE_LEN as u32).write_into(bytes);
+        1usize.write_into(bytes);
+        0usize.write_into(bytes);
+        0usize.write_into(bytes);
+        0usize.write_into(bytes);
+        MIN_STACK_DEPTH.write_into(bytes);
+        0usize.write_into(bytes);
+    }
+
+    fn encode_options(
+        max_cycles: u32,
+        expected_cycles: u32,
+        core_trace_fragment_size: usize,
+        max_advice_size_bytes: usize,
+        max_hash_len_bytes: usize,
+        max_num_continuations: usize,
+        max_stack_depth: usize,
+        max_memory_elements: usize,
+        execution: &PrecompileLimits,
+        verification: &PrecompileLimits,
+    ) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.write_u32(OPTIONS_VERSION_MARKER);
+        bytes.write_u8(OPTIONS_VERSION);
+        max_cycles.write_into(&mut bytes);
+        expected_cycles.write_into(&mut bytes);
+        core_trace_fragment_size.write_into(&mut bytes);
+        max_advice_size_bytes.write_into(&mut bytes);
+        max_hash_len_bytes.write_into(&mut bytes);
+        max_num_continuations.write_into(&mut bytes);
+        max_stack_depth.write_into(&mut bytes);
+        max_memory_elements.write_into(&mut bytes);
+        execution.write_into(&mut bytes);
+        verification.write_into(&mut bytes);
+        bytes
+    }
 
     #[test]
     fn valid_fragment_size() {
@@ -341,6 +583,20 @@ mod tests {
     }
 
     #[test]
+    fn expected_cycles_that_overflow_rounding_are_rejected() {
+        for expected_cycles in [(1 << 31) + 1, u32::MAX] {
+            let opts = ExecutionOptions::new(None, expected_cycles, 1024);
+            assert!(matches!(
+                opts,
+                Err(ExecutionOptionsError::ExpectedCyclesTooBig {
+                    max_cycles: ExecutionOptions::MAX_CYCLES,
+                    expected_cycles: reported,
+                }) if reported == expected_cycles
+            ));
+        }
+    }
+
+    #[test]
     fn expected_cycles_validated_after_rounding() {
         // expected_cycles=65 rounds to 128; max_cycles=100 -> must fail (128 > 100).
         let opts = ExecutionOptions::new(Some(100), 65, 1024);
@@ -372,5 +628,329 @@ mod tests {
         let result = ExecutionOptions::default().with_max_stack_depth(MIN_STACK_DEPTH);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().max_stack_depth(), MIN_STACK_DEPTH);
+    }
+
+    #[test]
+    fn default_execution_options_roundtrip() {
+        let options = ExecutionOptions::default();
+        let bytes = options.to_bytes();
+        let decoded = ExecutionOptions::read_from_bytes(&bytes).unwrap();
+        assert_eq!(decoded, options);
+        assert_eq!(decoded.to_bytes(), bytes);
+        assert_eq!(decoded.execution_precompile_limits(), options.execution_precompile_limits());
+        assert_eq!(
+            decoded.verification_precompile_limits(),
+            options.verification_precompile_limits()
+        );
+    }
+
+    #[test]
+    fn non_default_execution_options_roundtrip() {
+        let execution_class = WorkClass::from_string(String::from("execution-custom"));
+        let verification_class = WorkClass::from_string(String::from("verification-custom"));
+        let execution_limit = WorkLimit {
+            max_count: 3,
+            max_total_size: 5,
+            max_size: 2,
+        };
+        let verification_limit = WorkLimit {
+            max_count: 7,
+            max_total_size: 11,
+            max_size: 4,
+        };
+        let options = ExecutionOptions::default()
+            .with_core_trace_fragment_size(1)
+            .unwrap()
+            .with_max_advice_size_bytes(17)
+            .with_max_hash_len_bytes(19)
+            .with_max_num_continuations(23)
+            .with_max_stack_depth(MIN_STACK_DEPTH)
+            .unwrap()
+            .with_max_memory_elements(29)
+            .with_execution_precompile_limits(
+                PrecompileLimits::new(31).with_class(execution_class.clone(), execution_limit),
+            )
+            .with_verification_precompile_limits(
+                PrecompileLimits::new(37)
+                    .with_class(verification_class.clone(), verification_limit),
+            );
+
+        let bytes = options.to_bytes();
+        let decoded = ExecutionOptions::read_from_bytes(&bytes).unwrap();
+        assert_eq!(decoded, options);
+        assert_eq!(decoded.to_bytes(), bytes);
+        assert_eq!(decoded.execution_precompile_limits().max_elements(), 31);
+        assert_eq!(decoded.verification_precompile_limits().max_elements(), 37);
+        assert_eq!(
+            decoded.execution_precompile_limits().class(&execution_class),
+            Some(execution_limit)
+        );
+        assert_eq!(
+            decoded.verification_precompile_limits().class(&verification_class),
+            Some(verification_limit)
+        );
+        assert_ne!(decoded.execution_precompile_limits(), decoded.verification_precompile_limits());
+    }
+
+    #[test]
+    fn execution_options_fixed_vector_roundtrip() {
+        let expected = vec![
+            0xff, 0xff, 0xff, 0xff, 1, // version header
+            128, 0, 0, 0, // max_cycles
+            64, 0, 0, 0, // expected_cycles
+            5, // core_trace_fragment_size = 2
+            7, // max_advice_size_bytes = 3
+            2, 2,  // max_hash_len_bytes = 128
+            11, // max_num_continuations = 5
+            35, // max_stack_depth = 17
+            13, // max_memory_elements = 6
+            7, 0, 0, 0, 0, 0, 0, 0, 1, // execution policy ceiling 7
+            8, 0, 0, 0, 0, 0, 0, 0, 1, // verification policy ceiling 8
+        ];
+        let options = ExecutionOptions::new(Some(128), 64, 2)
+            .unwrap()
+            .with_max_advice_size_bytes(3)
+            .with_max_hash_len_bytes(128)
+            .with_max_num_continuations(5)
+            .with_max_stack_depth(17)
+            .unwrap()
+            .with_max_memory_elements(6)
+            .with_execution_precompile_limits(PrecompileLimits::new(7))
+            .with_verification_precompile_limits(PrecompileLimits::new(8));
+
+        assert_eq!(options.to_bytes(), expected);
+        let decoded = ExecutionOptions::read_from_bytes(&expected).unwrap();
+        assert_eq!(decoded, options);
+
+        let stream = expected.repeat(2);
+        let mut reader = SliceReader::new(&stream);
+        assert_eq!(ExecutionOptions::read_from(&mut reader).unwrap(), options);
+        assert_eq!(ExecutionOptions::read_from(&mut reader).unwrap(), options);
+        assert!(!reader.has_more_bytes());
+    }
+
+    #[test]
+    fn execution_and_verification_zero_policies_stay_distinct() {
+        for execution_zero in [true, false] {
+            let options = if execution_zero {
+                ExecutionOptions::default()
+                    .with_execution_precompile_limits(PrecompileLimits::new(0))
+            } else {
+                ExecutionOptions::default()
+                    .with_verification_precompile_limits(PrecompileLimits::new(0))
+            };
+            let decoded = ExecutionOptions::read_from_bytes(&options.to_bytes()).unwrap();
+            assert_eq!(decoded, options);
+            if execution_zero {
+                assert_eq!(decoded.execution_precompile_limits(), &PrecompileLimits::new(0));
+                assert_eq!(
+                    decoded.verification_precompile_limits(),
+                    options.verification_precompile_limits()
+                );
+            } else {
+                assert_eq!(decoded.verification_precompile_limits(), &PrecompileLimits::new(0));
+                assert_eq!(
+                    decoded.execution_precompile_limits(),
+                    options.execution_precompile_limits()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn execution_options_reject_invalid_invariants() {
+        let valid = encode_options(
+            MIN_TRACE_LEN as u32,
+            MIN_TRACE_LEN as u32,
+            1,
+            0,
+            0,
+            0,
+            MIN_STACK_DEPTH,
+            0,
+            &PrecompileLimits::new(0),
+            &PrecompileLimits::new(0),
+        );
+        assert!(ExecutionOptions::read_from_bytes(&valid).is_ok());
+
+        let mut bytes = valid.clone();
+        bytes[5..9].copy_from_slice(&((MIN_TRACE_LEN as u32) - 1).to_le_bytes());
+        assert!(ExecutionOptions::read_from_bytes(&bytes).is_err());
+
+        let mut bytes = valid.clone();
+        bytes[5..9].copy_from_slice(&(ExecutionOptions::MAX_CYCLES + 1).to_le_bytes());
+        assert!(ExecutionOptions::read_from_bytes(&bytes).is_err());
+
+        let mut bytes = valid.clone();
+        bytes[9..13].copy_from_slice(&((MIN_TRACE_LEN as u32) + 1).to_le_bytes());
+        assert!(ExecutionOptions::read_from_bytes(&bytes).is_err());
+
+        let mut bytes = valid.clone();
+        bytes[9..13].copy_from_slice(&((MIN_TRACE_LEN as u32) - 1).to_le_bytes());
+        assert!(ExecutionOptions::read_from_bytes(&bytes).is_err());
+
+        let mut bytes = valid;
+        bytes[9..13].copy_from_slice(&((MIN_TRACE_LEN as u32) * 2).to_le_bytes());
+        assert!(ExecutionOptions::read_from_bytes(&bytes).is_err());
+
+        let zero_fragment = encode_options(
+            MIN_TRACE_LEN as u32,
+            MIN_TRACE_LEN as u32,
+            0,
+            0,
+            0,
+            0,
+            MIN_STACK_DEPTH,
+            0,
+            &PrecompileLimits::new(0),
+            &PrecompileLimits::new(0),
+        );
+        assert!(ExecutionOptions::read_from_bytes(&zero_fragment).is_err());
+
+        let shallow_stack = encode_options(
+            MIN_TRACE_LEN as u32,
+            MIN_TRACE_LEN as u32,
+            1,
+            0,
+            0,
+            0,
+            MIN_STACK_DEPTH - 1,
+            0,
+            &PrecompileLimits::new(0),
+            &PrecompileLimits::new(0),
+        );
+        assert!(ExecutionOptions::read_from_bytes(&shallow_stack).is_err());
+    }
+
+    #[test]
+    fn execution_options_reject_invalid_header_and_bad_bytes() {
+        let valid = encode_options(
+            MIN_TRACE_LEN as u32,
+            MIN_TRACE_LEN as u32,
+            1,
+            0,
+            0,
+            0,
+            MIN_STACK_DEPTH,
+            0,
+            &PrecompileLimits::new(0),
+            &PrecompileLimits::new(0),
+        );
+
+        let mut bad_magic = valid.clone();
+        bad_magic[0] = 0;
+        let err = ExecutionOptions::read_from_bytes(&bad_magic).unwrap_err();
+        assert!(err.to_string().contains("invalid execution options magic"));
+
+        let mut unknown_version = valid.clone();
+        unknown_version[4] = OPTIONS_VERSION + 1;
+        let err = ExecutionOptions::read_from_bytes(&unknown_version).unwrap_err();
+        assert!(err.to_string().contains("unsupported execution options version"));
+
+        for len in 0..valid.len() {
+            assert!(ExecutionOptions::read_from_bytes(&valid[..len]).is_err());
+        }
+
+        let mut trailing = valid.clone();
+        trailing.push(0);
+        assert!(ExecutionOptions::read_from_bytes(&trailing).is_err());
+        assert!(ExecutionOptions::read_from_bytes_with_budget(&trailing, trailing.len()).is_err());
+        assert!(ExecutionOptions::read_from_bytes_with_budget(&trailing, valid.len()).is_err());
+        assert!(ExecutionOptions::read_from_bytes_with_budget(&valid, valid.len()).is_ok());
+        assert!(ExecutionOptions::read_from_bytes_with_budget(&valid, valid.len() + 1).is_ok());
+        assert!(ExecutionOptions::read_from_bytes_with_budget(&valid, valid.len() - 1).is_err());
+    }
+
+    #[test]
+    fn execution_options_reject_overlong_scalar_usize() {
+        let mut bytes = Vec::new();
+        bytes.write_u32(OPTIONS_VERSION_MARKER);
+        bytes.write_u8(OPTIONS_VERSION);
+        (MIN_TRACE_LEN as u32).write_into(&mut bytes);
+        (MIN_TRACE_LEN as u32).write_into(&mut bytes);
+        bytes.extend_from_slice(&[0x06, 0x00]);
+        0usize.write_into(&mut bytes);
+        0usize.write_into(&mut bytes);
+        0usize.write_into(&mut bytes);
+        MIN_STACK_DEPTH.write_into(&mut bytes);
+        0usize.write_into(&mut bytes);
+        PrecompileLimits::new(0).write_into(&mut bytes);
+        PrecompileLimits::new(0).write_into(&mut bytes);
+        assert!(ExecutionOptions::read_from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn execution_options_reject_overlong_nested_policy_count() {
+        let mut valid = Vec::new();
+        write_option_header(&mut valid);
+        PrecompileLimits::new(0).write_into(&mut valid);
+        PrecompileLimits::new(0).write_into(&mut valid);
+        assert!(ExecutionOptions::read_from_bytes(&valid).is_ok());
+
+        let mut bytes = Vec::new();
+        write_option_header(&mut bytes);
+        0u64.write_into(&mut bytes);
+        bytes.extend_from_slice(&[0x02, 0x00]);
+        PrecompileLimits::new(0).write_into(&mut bytes);
+        assert!(ExecutionOptions::read_from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn execution_options_reject_duplicate_policy_keys() {
+        let custom = WorkClass::from_string(String::from("custom"));
+        let limit = WorkLimit {
+            max_count: 1,
+            max_total_size: 2,
+            max_size: 1,
+        };
+        let mut bytes = Vec::new();
+        write_option_header(&mut bytes);
+        42u64.write_into(&mut bytes);
+        2usize.write_into(&mut bytes);
+        custom.write_into(&mut bytes);
+        limit.write_into(&mut bytes);
+        custom.write_into(&mut bytes);
+        limit.write_into(&mut bytes);
+        0u64.write_into(&mut bytes);
+        0usize.write_into(&mut bytes);
+        assert!(ExecutionOptions::read_from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn execution_options_reject_oversized_policy_count() {
+        let mut bytes = Vec::new();
+        write_option_header(&mut bytes);
+        0u64.write_into(&mut bytes);
+        usize::MAX.write_into(&mut bytes);
+        assert!(ExecutionOptions::read_from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn execution_options_reject_invalid_utf8_class_name() {
+        let limit = WorkLimit {
+            max_count: 1,
+            max_total_size: 2,
+            max_size: 1,
+        };
+
+        let mut valid = Vec::new();
+        write_option_header(&mut valid);
+        0u64.write_into(&mut valid);
+        1usize.write_into(&mut valid);
+        2usize.write_into(&mut valid);
+        valid.extend_from_slice(b"ab");
+        limit.write_into(&mut valid);
+        PrecompileLimits::new(0).write_into(&mut valid);
+        assert!(ExecutionOptions::read_from_bytes(&valid).is_ok());
+
+        let mut bytes = Vec::new();
+        write_option_header(&mut bytes);
+        0u64.write_into(&mut bytes);
+        1usize.write_into(&mut bytes);
+        2usize.write_into(&mut bytes);
+        bytes.extend_from_slice(&[0xff, 0xfe]);
+        limit.write_into(&mut bytes);
+        PrecompileLimits::new(0).write_into(&mut bytes);
+        assert!(ExecutionOptions::read_from_bytes(&bytes).is_err());
     }
 }

@@ -63,7 +63,7 @@ Address space of every context is the same: the smallest accessible address is $
 - The first $2^{31}$ addresses are assumed to be global memory, freely usable by programs.
 - All addresses including and above $2^{31}$ are reserved for procedure locals (i.e., via the `exec` instruction).
 
-> Note that the highest accessible address ($2^{32} - 1$) is reserved by the VM to store the frame memory pointer.
+> Note that address $2^{32} - 2$ is reserved by the VM to store the frame memory pointer.
 
 ![memory layout](../../img/user_docs/assembly/execution_contexts/mem_layout.png)
 

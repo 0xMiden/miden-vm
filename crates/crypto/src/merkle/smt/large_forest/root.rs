@@ -31,6 +31,10 @@ pub type VersionId = u64;
 /// This is an arbitrary, user-provided identifier that is used to disambiguate cases where trees in
 /// distinct lineages are otherwise identical and have the same root.
 #[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct LineageId([u8; 32]);
 
 impl LineageId {
@@ -51,8 +55,7 @@ impl LineageId {
 impl core::fmt::Display for LineageId {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "[")?;
-        for i in 0..4 {
-            let byte = self.0[i];
+        for byte in &self.0[..4] {
             write!(f, "{byte:x}, ")?;
         }
         write!(f, "...]")
@@ -226,5 +229,26 @@ pub struct TreeEntry {
 impl TreeEntry {
     pub fn index(&self) -> LeafIndex<SMT_DEPTH> {
         LeafIndex::from(self.key)
+    }
+}
+
+// ARBITRARY (proptest)
+// ================================================================================================
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::LineageId;
+
+    impl Arbitrary for LineageId {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Any 32-byte pattern is structurally valid (the type performs no self-validation);
+            // semantic validity (referencing a real lineage) is contextual, not a value invariant.
+            any::<[u8; 32]>().prop_map(LineageId::new).boxed()
+        }
     }
 }

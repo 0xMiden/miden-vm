@@ -8,15 +8,19 @@ use std::println;
 use crate::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
-    deferred::{PrecompileWitness, PrecompileWitnessEntry, TRUE_DIGEST, Tag},
-    mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest},
+    deferred::{DEFERRED_AND_FRAME, Node, PrecompileWitness, PrecompileWitnessEntry, TRUE_DIGEST},
+    mast::{
+        BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
+        JoinNodeBuilder, LoopNodeBuilder, MastForest, MastNodeId, SparseMastForestBuilder,
+        SplitNodeBuilder, VisitKind,
+    },
     operations::Operation,
     program::{KernelDescriptor, Program, StackInputs, StackOutputs},
     proof::{
         ExecutionProof, ExecutionProofCompatibility, HashFunction, PrecompileProof,
         PrecompileStatus, StarkProof, VmProof,
     },
-    serde::{ByteWriter, Serializable},
+    serde::{ByteWriter, Deserializable, Serializable},
 };
 
 /// Generates seed corpus files for fuzzing.
@@ -28,6 +32,24 @@ fn generate_fuzz_seeds() {
         for target in targets {
             write_seed(target, name, bytes);
         }
+        if let Ok(forest) = MastForest::read_from_bytes(bytes) {
+            write_sparse_seed(name, forest, None);
+        }
+    }
+
+    fn write_sparse_seed(name: &str, forest: MastForest, pruned: Option<MastNodeId>) {
+        let source = Arc::new(forest);
+        let mut builder = SparseMastForestBuilder::new(Arc::clone(&source));
+        for index in 0..source.num_nodes() {
+            let id = MastNodeId::new_unchecked(index);
+            let kind = if Some(id) == pruned {
+                VisitKind::DigestOnly
+            } else {
+                VisitKind::FullVisit
+            };
+            builder.record_visit(id, kind);
+        }
+        write_seed("sparse_mast_forest_deserialize", name, &builder.finalize().to_bytes());
     }
 
     fn write_seed(target: &str, name: &str, bytes: &[u8]) {
@@ -35,6 +57,30 @@ fn generate_fuzz_seeds() {
         std::fs::create_dir_all(&corpus_dir).expect("Failed to create corpus directory");
         std::fs::write(corpus_dir.join(name), bytes).unwrap();
         println!("Generated {}/{} ({} bytes)", target, name, bytes.len());
+    }
+
+    write_sparse_seed("empty.bin", MastForest::new(), None);
+    {
+        let mut forest = MastForest::new();
+        let first = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        let second = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        let join = JoinNodeBuilder::new([first, second]).add_to_forest(&mut forest).unwrap();
+        let split = SplitNodeBuilder::new([join, second]).add_to_forest(&mut forest).unwrap();
+        let body = LoopNodeBuilder::new(split).add_to_forest(&mut forest).unwrap();
+        let call = CallNodeBuilder::new(body).add_to_forest(&mut forest).unwrap();
+        let syscall = CallNodeBuilder::new_syscall(first).add_to_forest(&mut forest).unwrap();
+        let dynexec = DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
+        let dyncall = DynNodeBuilder::new_dyncall().add_to_forest(&mut forest).unwrap();
+        let external =
+            ExternalNodeBuilder::new(Word::default()).add_to_forest(&mut forest).unwrap();
+        for root in [call, syscall, dynexec, dyncall, external] {
+            forest.make_root(root);
+        }
+        write_sparse_seed("all_kinds_pruned.bin", forest, Some(second));
     }
 
     // Seed 1: Minimal valid forest (single basic block)
@@ -254,10 +300,10 @@ fn generate_fuzz_seeds() {
         write_seed("operation_deserialize", "op_add.bin", &op.to_bytes());
     }
 
-    // Portable singleton precompile witnesses, including rejected empty and oversized payloads.
+    // Portable singleton precompile witnesses, including empty and oversized transport cases.
     let singleton_witness = || {
         PrecompileWitness::from_entries(vec![PrecompileWitnessEntry::Join {
-            tag: Tag::AND,
+            frame: DEFERRED_AND_FRAME,
             lhs: 0,
             rhs: 0,
         }])
@@ -281,7 +327,7 @@ fn generate_fuzz_seeds() {
 
     // Execution proof seed (minimal complete proof with no precompile obligation).
     {
-        let stark = StarkProof::new(Vec::new(), HashFunction::Rpo256);
+        let stark = StarkProof::new(Vec::new(), HashFunction::Eidos);
         let vm = VmProof {
             proof: stark,
             precompile_root: TRUE_DIGEST,
@@ -298,9 +344,10 @@ fn generate_fuzz_seeds() {
     // Execution proof seed with deferred precompile work.
     {
         let wire = singleton_witness();
+        let precompile_root = Node::and(TRUE_DIGEST, TRUE_DIGEST).digest();
         let vm = VmProof {
-            proof: StarkProof::new(Vec::new(), HashFunction::Rpo256),
-            precompile_root: wire.root_unchecked(),
+            proof: StarkProof::new(Vec::new(), HashFunction::Eidos),
+            precompile_root,
         };
         let proof = ExecutionProof::from_parts(
             ExecutionProofCompatibility::new(Vec::new(), Vec::new()).unwrap(),
@@ -314,11 +361,11 @@ fn generate_fuzz_seeds() {
     // Execution proof seed with a completed precompile proof.
     {
         let vm = VmProof {
-            proof: StarkProof::new(Vec::new(), HashFunction::Rpo256),
+            proof: StarkProof::new(Vec::new(), HashFunction::Eidos),
             precompile_root: TRUE_DIGEST,
         };
         let precompile = PrecompileProof {
-            proof: StarkProof::new(Vec::new(), HashFunction::Rpo256),
+            proof: StarkProof::new(Vec::new(), HashFunction::Eidos),
             roots: vec![TRUE_DIGEST],
         };
         let proof = ExecutionProof::from_parts(

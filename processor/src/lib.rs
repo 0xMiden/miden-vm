@@ -21,7 +21,7 @@ mod continuation_stack;
 mod errors;
 mod execution;
 mod execution_options;
-mod executor;
+mod execution_plan;
 mod fast;
 mod host;
 mod processor;
@@ -37,7 +37,7 @@ use crate::{
     advice::{AdviceInputs, AdviceProvider},
     continuation_stack::ContinuationStack,
     errors::MapExecErr,
-    processor::{Processor, SystemInterface},
+    processor::{Processor as _, SystemInterface},
     trace::RowIndex,
 };
 
@@ -59,11 +59,18 @@ pub use errors::{
     procedure_not_found_with_package_source_context,
 };
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
-pub use executor::ProgramExecutor;
-pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
+pub use execution_plan::{
+    Execute, ExecutionPlan, ExecutionSession, HaltedExecution, Processor, RecordWitness,
+    StepStatus, WitnessOutput,
+};
+pub(crate) use fast::BreakReason;
+pub use fast::{
+    DebugCallFrame, DebugCallFrameResolver, DebugFrameOrigin, ExecutionOutput, FastProcessor,
+    Memory, ResumeContext,
+};
 pub use host::{
-    BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestStore, MemMastForestStore,
-    SyncHost,
+    BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestLoadError, MastForestStore,
+    MemMastForestStore, SyncHost,
     debug::{StdoutWriter, format_value, write_interval, write_stack},
     default::{DefaultHost, HostLibrary},
 };
@@ -128,6 +135,12 @@ impl<'a> ProcessorState<'a> {
         self.processor.execution_options()
     }
 
+    /// Returns the live root of the execution's authenticated precompile obligation.
+    #[inline(always)]
+    pub fn precompile_root(&self) -> Digest {
+        self.processor.deferred_state().root()
+    }
+
     /// Returns the current clock cycle of a process.
     #[inline(always)]
     pub fn clock(&self) -> RowIndex {
@@ -169,6 +182,12 @@ impl<'a> ProcessorState<'a> {
     #[inline(always)]
     pub fn get_stack_state(&self) -> Vec<Felt> {
         self.processor.stack().iter().rev().copied().collect()
+    }
+
+    /// Returns the current depth of the stack, including overflow entries.
+    #[inline(always)]
+    pub fn stack_depth(&self) -> u32 {
+        self.processor.stack_depth()
     }
 
     /// Returns the element located at the specified context/address, or None if the address hasn't
@@ -265,7 +284,7 @@ impl<'a> ProcessorState<'a> {
 /// through execution (see [`crate::FastProcessor::step`]) or limiting execution to a certain number
 /// of clock cycles (used in parallel trace generation to fill the trace for a predetermined trace
 /// fragment).
-pub trait Stopper {
+pub(crate) trait Stopper {
     type Processor;
 
     /// The forest representation used by the executor this stopper is paired with.
@@ -303,6 +322,10 @@ pub trait Stopper {
 
 /// Represents the ID of an execution context
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct ContextId(u32);
 
 impl ContextId {
@@ -344,6 +367,23 @@ impl From<ContextId> for u64 {
 impl From<ContextId> for Felt {
     fn from(context_id: ContextId) -> Self {
         Felt::from_u32(context_id.0)
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod context_id_arbitrary {
+    use proptest::prelude::*;
+
+    use super::ContextId;
+
+    impl Arbitrary for ContextId {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Plain u32 newtype; edge-biased to the 0 and u32::MAX bounds.
+            prop_oneof![Just(0u32), Just(u32::MAX), any::<u32>()].prop_map(Self).boxed()
+        }
     }
 }
 

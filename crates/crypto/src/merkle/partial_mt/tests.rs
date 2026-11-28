@@ -73,6 +73,25 @@ fn with_leaves() {
     assert_eq!(expected_root, pmt.root())
 }
 
+/// Checks that dense leaves produce the same root when supplied in reverse position order.
+#[test]
+fn with_leaves_dense_reverse_order() {
+    const DEPTH: u8 = 8;
+    const NUM_LEAVES: usize = 1 << DEPTH;
+
+    let values: Vec<Word> = (0..NUM_LEAVES).map(|value| int_to_node(value as u64)).collect();
+    let expected_root = MerkleTree::new(values.clone()).unwrap().root();
+    let entries = (0..NUM_LEAVES).rev().map(|position| {
+        let index = NodeIndex::new(DEPTH, position as u64).unwrap();
+        (index, values[position])
+    });
+
+    let tree = PartialMerkleTree::with_leaves(entries).unwrap();
+
+    assert_eq!(tree.root(), expected_root);
+    assert_eq!(tree.max_depth(), DEPTH);
+}
+
 /// Checks that `with_leaves()` function returns an error when using incomplete set of nodes.
 #[test]
 fn err_with_leaves() {
@@ -86,7 +105,10 @@ fn err_with_leaves() {
 
     let leaf_nodes: BTreeMap<NodeIndex, Word> = leaf_nodes_vec.into_iter().collect();
 
-    assert!(PartialMerkleTree::with_leaves(leaf_nodes).is_err());
+    match PartialMerkleTree::with_leaves(leaf_nodes) {
+        Err(MerkleError::NodeIndexNotFoundInTree(node)) => assert_eq!(node, NODE22),
+        other => panic!("expected missing node {NODE22}, got {other:?}"),
+    }
 }
 
 /// Checks that `with_leaves()` accepts an empty input and returns an empty tree.
@@ -242,6 +264,19 @@ fn update_leaf() {
     let actual_root = pmt.root();
 
     assert_eq!(expected_root, actual_root);
+}
+
+#[test]
+fn update_leaf_on_an_empty_tree_leaves_it_unchanged() {
+    let mut pmt = PartialMerkleTree::new();
+    let before = pmt.clone();
+
+    let result = pmt.update_leaf(0, int_to_node(7));
+    assert!(matches!(
+        result,
+        Err(MerkleError::NodeIndexNotFoundInTree(index)) if index == NodeIndex::root()
+    ));
+    assert_eq!(pmt, before);
 }
 
 /// Checks that paths of the PMT returned by `paths()` function are equal to the expected ones.
@@ -524,4 +559,130 @@ fn err_update_leaf() {
     let mut pmt = PartialMerkleTree::with_paths([(3, path33.value, path33.path)]).unwrap();
 
     assert!(pmt.update_leaf(8, int_to_node(38)).is_err());
+}
+
+/// Checks that a rejected path leaves the tree unchanged and the tree remains usable.
+#[test]
+fn add_path_conflict_is_atomic() {
+    let tree_a =
+        MerkleTree::new([int_to_node(1), int_to_node(2), int_to_node(3), int_to_node(4)]).unwrap();
+    let tree_b =
+        MerkleTree::new([int_to_node(9), int_to_node(8), int_to_node(7), int_to_node(6)]).unwrap();
+
+    let value_a20 = tree_a.get_node(NODE20).unwrap();
+    let path_a20 = tree_a.get_path(NODE20).unwrap();
+    let mut pmt = PartialMerkleTree::with_paths([(0, value_a20, path_a20.clone())]).unwrap();
+    let snapshot = pmt.clone();
+
+    let value_b21 = tree_b.get_node(NODE21).unwrap();
+    let path_b21 = tree_b.get_path(NODE21).unwrap();
+    let err = pmt.add_path(1, value_b21, path_b21.clone()).unwrap_err();
+    match err {
+        MerkleError::ConflictingRoots { expected_root, actual_root } => {
+            assert_eq!(expected_root, tree_a.root());
+            assert_eq!(actual_root, tree_b.root());
+        },
+        other => panic!("expected conflicting roots, got {other:?}"),
+    }
+
+    assert_eq!(pmt, snapshot, "a rejected path must not change the tree");
+    assert_eq!(pmt.max_depth(), 2);
+    assert_eq!(pmt.get_node(NODE21).unwrap(), int_to_node(2));
+    assert_eq!(pmt.root(), tree_a.root());
+
+    // Retrying the rejected path must still leave the tree unchanged.
+    assert!(pmt.add_path(1, value_b21, path_b21).is_err());
+    assert_eq!(pmt, snapshot);
+
+    // A legitimate path from tree_a can still be added.
+    let value_a21 = tree_a.get_node(NODE21).unwrap();
+    let path_a21 = tree_a.get_path(NODE21).unwrap();
+    pmt.add_path(1, value_a21, path_a21.clone()).unwrap();
+    let mut expected =
+        PartialMerkleTree::with_paths([(0, value_a20, path_a20), (1, value_a21, path_a21)])
+            .unwrap();
+    assert_eq!(pmt, expected);
+    assert_eq!(pmt.root(), tree_a.root());
+
+    // update_leaf must update the existing sibling rather than a rejected leaf.
+    let old_value = pmt.update_leaf(1, int_to_node(99)).unwrap();
+    assert_eq!(old_value, int_to_node(2));
+    expected.update_leaf(1, int_to_node(99)).unwrap();
+    assert_eq!(pmt, expected);
+
+    let updated_tree =
+        MerkleTree::new([int_to_node(1), int_to_node(99), int_to_node(3), int_to_node(4)]).unwrap();
+    assert_eq!(pmt.root(), updated_tree.root());
+}
+
+/// Checks that a rejected deeper path does not change a mixed-depth tree.
+#[test]
+fn add_path_conflict_preserves_mixed_depth_tree() {
+    let tree_a = MerkleTree::new(VALUES8).unwrap();
+    let tree_b = MerkleTree::new([
+        int_to_node(90),
+        int_to_node(91),
+        int_to_node(92),
+        int_to_node(93),
+        int_to_node(94),
+        int_to_node(95),
+        int_to_node(96),
+        int_to_node(97),
+    ])
+    .unwrap();
+
+    let value_a22 = tree_a.get_node(NODE22).unwrap();
+    let path_a22 = tree_a.get_path(NODE22).unwrap();
+    let mut pmt = PartialMerkleTree::with_paths([(2, value_a22, path_a22.clone())]).unwrap();
+    assert_eq!(pmt.max_depth(), 2);
+    let snapshot = pmt.clone();
+
+    let value_b33 = tree_b.get_node(NODE33).unwrap();
+    let path_b33 = tree_b.get_path(NODE33).unwrap();
+    let err = pmt.add_path(3, value_b33, path_b33.clone()).unwrap_err();
+    match err {
+        MerkleError::ConflictingRoots { expected_root, actual_root } => {
+            assert_eq!(expected_root, tree_a.root());
+            assert_eq!(actual_root, tree_b.root());
+        },
+        other => panic!("expected conflicting roots, got {other:?}"),
+    }
+
+    assert_eq!(pmt, snapshot, "a rejected deeper path must not change the tree");
+    assert_eq!(pmt.max_depth(), 2);
+    assert_eq!(pmt.root(), tree_a.root());
+
+    // Retrying the rejected path must still leave the tree unchanged.
+    assert!(pmt.add_path(3, value_b33, path_b33).is_err());
+    assert_eq!(pmt, snapshot);
+
+    // A legitimate deeper path from tree_a can still be added.
+    let value_a33 = tree_a.get_node(NODE33).unwrap();
+    let path_a33 = tree_a.get_path(NODE33).unwrap();
+    pmt.add_path(3, value_a33, path_a33.clone()).unwrap();
+    let mut expected =
+        PartialMerkleTree::with_paths([(2, value_a22, path_a22), (3, value_a33, path_a33)])
+            .unwrap();
+    assert_eq!(pmt, expected);
+    assert_eq!(pmt.max_depth(), 3);
+    assert_eq!(pmt.root(), tree_a.root());
+
+    // update_leaf must update the deepest leaf in the mixed-depth tree.
+    let old_value = pmt.update_leaf(2, int_to_node(132)).unwrap();
+    assert_eq!(old_value, int_to_node(32));
+    expected.update_leaf(2, int_to_node(132)).unwrap();
+    assert_eq!(pmt, expected);
+
+    let updated_tree = MerkleTree::new([
+        int_to_node(30),
+        int_to_node(31),
+        int_to_node(132),
+        int_to_node(33),
+        int_to_node(34),
+        int_to_node(35),
+        int_to_node(36),
+        int_to_node(37),
+    ])
+    .unwrap();
+    assert_eq!(pmt.root(), updated_tree.root());
 }

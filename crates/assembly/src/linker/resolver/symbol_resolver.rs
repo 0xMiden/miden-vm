@@ -38,7 +38,7 @@ pub struct SymbolResolutionContext {
 
 impl SymbolResolutionContext {
     #[inline]
-    pub fn in_syscall(&self) -> bool {
+    pub(crate) fn in_syscall(&self) -> bool {
         matches!(self.kind, Some(InvokeKind::SysCall))
     }
 }
@@ -51,6 +51,10 @@ impl SymbolResolutionContext {
 /// Because modules can re-export/alias the procedures of modules they import, resolving the name of
 /// a procedure can require multiple steps to reach the original concrete definition of the
 /// procedure.
+///
+/// A resolution identifies the concrete definition without changing the invocation's access path.
+/// Callers retain that path for subsequent resolution, since replacing a re-export alias with the
+/// definition's path could discard the visibility granted by the alias.
 ///
 /// The [SymbolResolver] encapsulates the tricky details of doing this, so that users of the
 /// resolver need only provide a reference to the [Linker], a name they wish to resolve, and some
@@ -94,7 +98,7 @@ impl<'a> SymbolResolver<'a> {
                 id,
                 path: Span::new(span, Arc::from(self.module_path(id))),
             },
-            ResolvedUse::Item(gid) => SymbolResolution::Exact {
+            ResolvedUse::Item { id: gid, .. } => SymbolResolution::Exact {
                 gid,
                 path: Span::new(span, self.item_path(gid)),
             },
@@ -204,7 +208,7 @@ impl<'a> SymbolResolver<'a> {
     }
 
     #[inline(always)]
-    pub fn source_manager_arc(&self) -> Arc<dyn SourceManager> {
+    pub(crate) fn source_manager_arc(&self) -> Arc<dyn SourceManager> {
         self.graph.source_manager.clone()
     }
 
@@ -396,27 +400,26 @@ impl<'a> SymbolResolver<'a> {
         context: &SymbolResolutionContext,
         path: Span<&Path>,
     ) -> Result<SymbolResolution, LinkerError> {
+        let resolved = self.resolve_reference(context, path)?;
+        Ok(self.to_symbol_resolution(path.span(), resolved))
+    }
+
+    /// Resolves a reference while preserving visibility granted through re-export aliases.
+    pub(crate) fn resolve_reference(
+        &self,
+        context: &SymbolResolutionContext,
+        path: Span<&Path>,
+    ) -> Result<ResolvedUse, LinkerError> {
         match (self.namespaces, self.imports) {
             (Some(namespaces), Some(imports)) => {
-                self.resolve_path_with_namespaces(namespaces, imports, context, path)
+                namespaces.resolve_code_path(context.module, path, imports, self.graph)
             },
             _ => {
                 let namespaces = NamespaceGraph::build(self.graph)?;
                 let imports = namespaces.resolve_imports(self.graph)?;
-                self.resolve_path_with_namespaces(&namespaces, &imports, context, path)
+                namespaces.resolve_code_path(context.module, path, &imports, self.graph)
             },
         }
-    }
-
-    fn resolve_path_with_namespaces(
-        &self,
-        namespaces: &NamespaceGraph,
-        imports: &ResolvedImports,
-        context: &SymbolResolutionContext,
-        path: Span<&Path>,
-    ) -> Result<SymbolResolution, LinkerError> {
-        let resolved = namespaces.resolve_code_path(context.module, path, imports, self.graph)?;
-        Ok(self.to_symbol_resolution(path.span(), resolved))
     }
 
     pub fn resolve_local(

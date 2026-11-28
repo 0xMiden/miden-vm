@@ -1,6 +1,6 @@
 [package]
 name = "miden-test-serialization-macros"
-version = "0.34.0"
+version.workspace = true
 description = "Proc macros for serialization round-trip testing in Miden VM"
 readme = "README.md"
 categories = ["development-tools::testing", "no-std"]
@@ -24,3 +24,6 @@ syn = { workspace = true, features = ["derive", "extra-traits", "full"] }
 [dev-dependencies]
 proptest = { workspace = true }
 proptest-derive = { workspace = true }
+
+[lints]
+workspace = true

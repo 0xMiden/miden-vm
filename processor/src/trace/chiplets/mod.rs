@@ -1,35 +1,53 @@
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
-use miden_air::trace::{
+use miden_air_definitions::vm::trace::{
     CHIPLETS_WIDTH,
+    and8_lookup::{BYTE_LOOKUP_COUNT_LEN, BytePairRelation, byte_pair_count_index},
     chiplets::{
-        KERNEL_ROM_TRACE_WIDTH,
+        KERNEL_ROM_TRACE_WIDTH, NUM_BITWISE_SELECTORS,
         ace::ACE_CHIPLET_NUM_COLS,
         bitwise::TRACE_WIDTH as BITWISE_WIDTH,
-        hasher::{HasherState, TRACE_WIDTH as HASHER_WIDTH},
+        hasher::{CONTROLLER_TRACE_ALIGNMENT, HasherState, TRACE_WIDTH as HASHER_WIDTH},
         memory::TRACE_WIDTH as MEMORY_WIDTH,
     },
-    poseidon2_permutation::NUM_POSEIDON2_PERMUTATION_COLS,
+    eidos_compression::NUM_EIDOS_COMPRESSION_COLS,
 };
-use miden_core::{field::PrimeCharacteristicRing, program::KernelDescriptor};
+use miden_core::{field::PrimeCharacteristicRing, mast::OpBatch};
 
 use crate::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
+    operation::OperationError,
     trace::{ChipletTraceFragment, RowIndex, range::RangeChecker},
 };
+
+mod aead_stream;
+pub(crate) use aead_stream::{AEAD_STREAM_CYCLE_LEN, AeadStream};
+
+mod and8_trace;
+pub(crate) use and8_trace::build_and8_lookup_trace;
 
 mod bitwise;
 pub(crate) use bitwise::Bitwise;
 
+const AEAD_PREFIX: [Felt; NUM_BITWISE_SELECTORS] = [ONE, ZERO, ZERO];
+const BITWISE_PREFIX: [Felt; NUM_BITWISE_SELECTORS] = [ONE, ZERO, ONE];
+const _: () = assert!(BITWISE_PREFIX.len() + BITWISE_WIDTH < CHIPLETS_WIDTH);
+const _: () = assert!(AEAD_PREFIX.len() + aead_stream::TRACE_WIDTH == CHIPLETS_WIDTH - 1);
+const _: () = assert!(CONTROLLER_TRACE_ALIGNMENT.is_multiple_of(AEAD_STREAM_CYCLE_LEN));
+
 mod hasher;
 pub(crate) use hasher::Hasher;
+pub use hasher::{
+    build_external_eidos_compression_traces, build_ordered_external_eidos_compression_traces,
+};
 
 mod memory;
 pub(crate) use memory::Memory;
 
 mod ace;
-pub use ace::{Ace, CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD};
+pub(crate) use ace::{Ace, CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD};
+pub use ace::{MAX_EVAL_CIRCUIT_INVOCATIONS, MAX_EVAL_CIRCUIT_WIRES};
 
 mod kernel_rom;
 pub(crate) use kernel_rom::KernelRom;
@@ -40,74 +58,39 @@ mod tests;
 // TRACE
 // ================================================================================================
 
-pub struct ChipletsTrace {
+pub(crate) struct ChipletsTrace {
     pub(crate) trace: Vec<Felt>,
 }
 
-pub struct Poseidon2PermutationTrace {
+pub(crate) struct EidosCompressionTrace {
     pub(crate) trace: Vec<Felt>,
 }
 
-// CHIPLETS MODULE OF HASHER, BITWISE, MEMORY, ACE, AND KERNEL ROM CHIPLETS
+// CHIPLET TRACE PACKING
 // ================================================================================================
 
-/// This module manages the VM's hasher, bitwise, memory, arithmetic circuit evaluation (ACE)
-/// and kernel ROM chiplets and is responsible for building a final execution trace from their
-/// stacked execution traces and chiplet selectors.
+/// Packs the hasher controller, AEAD stream, bitwise, memory, ACE, and kernel ROM into the shared
+/// chiplets trace.
 ///
-/// The chiplets trace is five stacked chiplet segments followed by padding.
+/// Sections appear in the order below. Each selector prefix starts at column 0, and payload
+/// ranges are half-open. Cells outside the prefix and payload stay zero.
 ///
-/// The chiplets trace has 22 columns. Columns 0-4 (`s0..s4`) form a selector prefix chain.
-/// The hasher controller is selected by `s0=0`; the remaining regions are selected by the first
-/// zero after an active prefix. Column 21 holds `chip_clk`, the chiplet-trace row counter.
+/// | Section          | Selector prefix | Payload columns |
+/// |------------------|-----------------|-----------------|
+/// | Controller       | `0`             | `1..24`         |
+/// | AEAD stream      | `100`           | `3..23`         |
+/// | Ordinary bitwise | `101`           | `3..16`         |
+/// | Memory           | `110`           | `3..20`         |
+/// | ACE              | `1110`          | `4..20`         |
+/// | Kernel ROM       | `11110`         | `5..10`         |
+/// | Padding          | `11111`         |                 |
 ///
-/// ```text
-/// column:   0..20                                      21
-///          selector prefix / chiplet payload          chip_clk
-///          ----------------------------------------    --------
-/// hasher   s0=0, controller payload in columns 1..20   clk
-/// bitwise  s0=1, s1=0, payload in columns 2..14        clk
-/// memory   s0=s1=1, s2=0, payload in columns 3..19     clk
-/// ACE      s0=s1=s2=1, s3=0, payload in columns 4..19  clk
-/// kernel   s0=s1=s2=s3=1, s4=0, payload in columns 5..9 clk
-/// padding  s0=s1=s2=s3=s4=1, zero payload              clk
-/// ```
-///
-/// * Hasher segment: fills the first rows of the trace up to the hasher `trace_len`.
-///   - column 0 (s0): ZERO
-///   - columns 1-20: execution trace of the hasher controller
-///
-/// * Bitwise segment: begins at the end of the hasher segment.
-///   - column 0 (s0): ONE
-///   - column 1 (s1): ZERO
-///   - columns 2-14: execution trace of bitwise chiplet
-///   - columns 15-20: unused columns padded with ZERO
-///
-/// * Memory segment: begins at the end of the bitwise segment.
-///   - column 0 (s0): ONE
-///   - column 1 (s1): ONE
-///   - column 2 (s2): ZERO
-///   - columns 3-19: execution trace of memory chiplet
-///   - column 20: unused, padded with ZERO
-///
-/// * ACE segment: begins at the end of the memory segment.
-///   - columns 0-2 (s0, s1, s2): ONE
-///   - column 3 (s3): ZERO
-///   - columns 4-19: execution trace of ACE chiplet
-///   - column 20: unused, padded with ZERO
-///
-/// * Kernel ROM segment: begins at the end of the ACE segment.
-///   - columns 0-3 (s0, s1, s2, s3): ONE
-///   - column 4 (s4): ZERO
-///   - columns 5-9: execution trace of kernel ROM chiplet
-///   - columns 10-20: unused columns padded with ZERO
-///
-/// * Padding segment: fills the rest of the trace.
-///   - columns 0-4 (s0..s4): ONE
-///   - columns 5-20: unused columns padded with ZERO
+/// The controller ends on an eight-row boundary so AEAD starts at phase zero. Controller
+/// columns 22 and 23 hold the Merkle/padding flag and row address, respectively.
 #[derive(Debug)]
-pub struct Chiplets {
+pub(crate) struct Chiplets {
     pub hasher: Hasher,
+    pub(crate) aead_stream: AeadStream,
     pub bitwise: Bitwise,
     pub memory: Memory,
     pub ace: Ace,
@@ -122,6 +105,7 @@ impl Chiplets {
     /// connector columns that read the memory chiplet.
     pub fn trace_len(&self) -> usize {
         self.hasher.trace_len()
+            + self.aead_stream.trace_len()
             + self.bitwise.trace_len()
             + self.memory.trace_len()
             + self.ace.trace_len()
@@ -129,14 +113,19 @@ impl Chiplets {
             + 1
     }
 
-    /// Returns the unpadded trace length of the Poseidon2 permutation AIR.
-    pub fn poseidon2_permutation_trace_len(&self) -> usize {
-        self.hasher.poseidon2_permutation_trace_len()
+    /// Returns the unpadded trace length of the standalone Eidos compression AIR.
+    pub fn eidos_compression_trace_len(&self) -> usize {
+        self.hasher.eidos_compression_trace_len()
     }
 
-    /// Returns the index of the first row of `Bitwise` execution trace.
-    pub fn bitwise_start(&self) -> RowIndex {
+    /// Returns the start of the AEAD stream section, at the end of the controller.
+    pub fn aead_stream_start(&self) -> RowIndex {
         self.hasher.trace_len().into()
+    }
+
+    /// Returns the start of the ordinary bitwise section.
+    pub fn bitwise_start(&self) -> RowIndex {
+        self.aead_stream_start() + self.aead_stream.trace_len()
     }
 
     /// Returns the index of the first row of the `Memory` execution trace.
@@ -144,7 +133,7 @@ impl Chiplets {
         self.bitwise_start() + self.bitwise.trace_len()
     }
 
-    /// Returns the index of the first row of the `ACE` execution trace.
+    /// Returns the index of the first row of `ACE` execution trace.
     pub fn ace_start(&self) -> RowIndex {
         self.memory_start() + self.memory.trace_len()
     }
@@ -162,113 +151,124 @@ impl Chiplets {
     // EXECUTION TRACE
     // --------------------------------------------------------------------------------------------
 
-    /// Adds all range checks required by the hasher and memory chiplets to the provided
-    /// `RangeChecker` instance.
+    /// Adds all range checks required by the memory chiplet to the provided `RangeChecker`
+    /// instance.
     pub fn append_range_checks(&self, range_checker: &mut RangeChecker) {
-        self.hasher.append_range_checks(range_checker);
-        self.memory.append_range_checks(self.memory_start(), range_checker);
+        self.memory.append_range_checks(range_checker);
     }
 
-    /// Returns execution traces for `ChipletsAir` and `Poseidon2PermutationAir`.
+    /// Adds range checks emitted by the standalone Eidos compression AIR.
+    pub fn append_eidos_compression_range_checks(
+        &self,
+        eidos_compression_height: usize,
+        range_checker: &mut RangeChecker,
+    ) {
+        self.hasher
+            .append_eidos_compression_range_checks(eidos_compression_height, range_checker);
+    }
+
+    /// Returns execution traces for `ChipletsAir` and `EidosCompressionAir`.
     pub fn into_traces(
         self,
         trace_len: usize,
-        poseidon2_trace_len: usize,
-    ) -> (ChipletsTrace, Poseidon2PermutationTrace) {
+        eidos_compression_trace_len: usize,
+    ) -> (ChipletsTrace, EidosCompressionTrace, Vec<u64>) {
         assert!(self.trace_len() <= trace_len, "target trace length too small");
         assert!(
-            self.poseidon2_permutation_trace_len() <= poseidon2_trace_len,
-            "target Poseidon2 trace length too small"
+            self.eidos_compression_trace_len() <= eidos_compression_trace_len,
+            "target Eidos compression trace length too small"
         );
 
-        let mut trace = vec![Felt::ZERO; CHIPLETS_WIDTH * trace_len];
-        let mut poseidon2_trace =
-            Felt::zero_vec(NUM_POSEIDON2_PERMUTATION_COLS * poseidon2_trace_len);
-        self.fill_trace(&mut trace, trace_len, &mut poseidon2_trace);
+        let mut trace = Felt::zero_vec(CHIPLETS_WIDTH * trace_len);
+        let mut eidos_compression_trace =
+            Felt::zero_vec(NUM_EIDOS_COMPRESSION_COLS * eidos_compression_trace_len);
+        let and8_counts = self.fill_trace(&mut trace, trace_len, &mut eidos_compression_trace);
 
-        (ChipletsTrace { trace }, Poseidon2PermutationTrace { trace: poseidon2_trace })
+        (
+            ChipletsTrace { trace },
+            EidosCompressionTrace { trace: eidos_compression_trace },
+            and8_counts,
+        )
     }
 
     // HELPER METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Fills the chiplets trace with the stacked hasher-controller, bitwise, memory, ACE, and
-    /// kernel ROM regions.
-    ///
-    /// Selector columns and `chip_clk` are written by each `ChipletTraceFragment`; the padding
-    /// region is filled directly below. Poseidon2 permutation rows are materialized into
-    /// `poseidon2_trace`.
-    fn fill_trace(self, trace: &mut [Felt], trace_len: usize, poseidon2_trace: &mut [Felt]) {
+    /// Fills the shared trace with each chiplet's payload, selectors, and trailing padding.
+    fn fill_trace(
+        self,
+        trace: &mut [Felt],
+        trace_len: usize,
+        eidos_compression_trace: &mut [Felt],
+    ) -> Vec<u64> {
         const W: usize = CHIPLETS_WIDTH;
         debug_assert_eq!(trace.len(), W * trace_len);
 
-        let memory_start: usize = self.memory_start().into();
-        let ace_start: usize = self.ace_start().into();
-        let kernel_rom_start: usize = self.kernel_rom_start().into();
-        let padding_start: usize = self.padding_start().into();
+        let Chiplets {
+            hasher,
+            aead_stream,
+            bitwise,
+            memory,
+            ace,
+            kernel_rom,
+        } = self;
 
-        let Chiplets { hasher, bitwise, memory, ace, kernel_rom } = self;
-
-        // Per-chiplet row counts. Chiplets are stacked vertically, so each one's region is a
-        // contiguous band of rows: hasher [0, h), bitwise [h, h+b), and so on.
         let hasher_len = hasher.trace_len();
+        let aead_stream_len = aead_stream.trace_len();
         let bitwise_len = bitwise.trace_len();
         let memory_len = memory.trace_len();
         let ace_len = ace.trace_len();
         let kernel_rom_len = kernel_rom.trace_len();
 
-        // Chiplets are stacked as hasher, bitwise, memory, ACE, then kernel ROM. Each region writes
-        // its payload after the selector prefix that identifies it.
-        const _: () = assert!(1 + HASHER_WIDTH == CHIPLETS_WIDTH - 1);
-
         // Carve `trace` into the per-chiplet contiguous row bands.
         let (hasher_band, rest) = trace.split_at_mut(hasher_len * W);
+        let (aead_stream_band, rest) = rest.split_at_mut(aead_stream_len * W);
         let (bitwise_band, rest) = rest.split_at_mut(bitwise_len * W);
         let (memory_band, rest) = rest.split_at_mut(memory_len * W);
         let (ace_band, rest) = rest.split_at_mut(ace_len * W);
         let (kernel_band, padding_band) = rest.split_at_mut(kernel_rom_len * W);
 
         let mut hasher_fragment =
-            ChipletTraceFragment::with_overheads(hasher_band, W, 1, HASHER_WIDTH, 0, &[]);
-        let mut bitwise_fragment = ChipletTraceFragment::with_overheads(
-            bitwise_band,
+            ChipletTraceFragment::with_prefix(hasher_band, W, HASHER_WIDTH, &[ZERO]);
+        let mut aead_stream_fragment = ChipletTraceFragment::with_prefix(
+            aead_stream_band,
             W,
-            2,
-            BITWISE_WIDTH,
-            hasher_len,
-            &[0],
+            aead_stream::TRACE_WIDTH,
+            &AEAD_PREFIX,
         );
-        let mut memory_fragment = ChipletTraceFragment::with_overheads(
-            memory_band,
-            W,
-            3,
-            MEMORY_WIDTH,
-            memory_start,
-            &[0, 1],
-        );
-        let mut ace_fragment = ChipletTraceFragment::with_overheads(
+        let mut bitwise_fragment =
+            ChipletTraceFragment::with_prefix(bitwise_band, W, BITWISE_WIDTH, &BITWISE_PREFIX);
+        let mut memory_fragment =
+            ChipletTraceFragment::with_prefix(memory_band, W, MEMORY_WIDTH, &[ONE, ONE, ZERO]);
+        let mut ace_fragment = ChipletTraceFragment::with_prefix(
             ace_band,
             W,
-            4,
             ACE_CHIPLET_NUM_COLS,
-            ace_start,
-            &[0, 1, 2],
+            &[ONE, ONE, ONE, ZERO],
         );
-        let mut kernel_rom_fragment = ChipletTraceFragment::with_overheads(
+        let mut kernel_rom_fragment = ChipletTraceFragment::with_prefix(
             kernel_band,
             W,
-            5,
             KERNEL_ROM_TRACE_WIDTH,
-            kernel_rom_start,
-            &[0, 1, 2, 3],
+            &[ONE, ONE, ONE, ONE, ZERO],
         );
 
+        #[cfg(feature = "std")]
+        let mut and8_counts = Vec::new();
+        #[cfg(feature = "std")]
+        let mut bitwise_region_and8_counts = Vec::new();
+        #[cfg(feature = "std")]
         rayon::scope(|s| {
+            let and8_counts = &mut and8_counts;
             s.spawn(move |_| {
-                hasher.fill_trace(&mut hasher_fragment, poseidon2_trace);
+                *and8_counts = hasher.fill_trace(&mut hasher_fragment, eidos_compression_trace);
             });
+            let bitwise_region_and8_counts = &mut bitwise_region_and8_counts;
             s.spawn(move |_| {
-                bitwise.fill_trace(&mut bitwise_fragment);
+                let mut counts = vec![0; BYTE_LOOKUP_COUNT_LEN];
+                aead_stream.fill_trace(&mut aead_stream_fragment, &mut counts);
+                bitwise.fill_trace(&mut bitwise_fragment, &mut counts);
+                *bitwise_region_and8_counts = counts;
             });
             s.spawn(move |_| {
                 memory.fill_trace(&mut memory_fragment);
@@ -280,43 +280,46 @@ impl Chiplets {
                 kernel_rom.fill_trace(&mut kernel_rom_fragment);
             });
             s.spawn(move |_| {
-                fill_padding_rows(padding_band, padding_start);
+                fill_padding_rows(padding_band);
             });
         });
+
+        #[cfg(not(feature = "std"))]
+        let (mut and8_counts, bitwise_region_and8_counts) = {
+            let and8_counts = hasher.fill_trace(&mut hasher_fragment, eidos_compression_trace);
+            let mut counts = vec![0; BYTE_LOOKUP_COUNT_LEN];
+            aead_stream.fill_trace(&mut aead_stream_fragment, &mut counts);
+            bitwise.fill_trace(&mut bitwise_fragment, &mut counts);
+            memory.fill_trace(&mut memory_fragment);
+            ace.fill_trace(&mut ace_fragment);
+            kernel_rom.fill_trace(&mut kernel_rom_fragment);
+            fill_padding_rows(padding_band);
+            (and8_counts, counts)
+        };
+
+        for (count, bitwise_count) in and8_counts.iter_mut().zip(bitwise_region_and8_counts) {
+            *count += bitwise_count;
+        }
+
+        and8_counts
     }
 }
 
-/// Fills padding rows after the kernel ROM region: cols 0..=4 = ONE, chip_clk = row + 1.
-fn fill_padding_rows(band: &mut [Felt], row_offset: usize) {
+fn assert_u32(value: Felt) -> Result<u32, OperationError> {
+    u32::try_from(value.as_canonical_u64())
+        .map_err(|_| OperationError::NotU32Values { values: vec![value] })
+}
+
+fn count_and8(counts: &mut [u64], a: u8, b: u8) {
+    let count_index = byte_pair_count_index(BytePairRelation::CanonicalXor, a, b);
+    counts[count_index] += 1;
+}
+
+/// Sets the `11111` selector prefix on trailing padding rows.
+fn fill_padding_rows(band: &mut [Felt]) {
     const W: usize = CHIPLETS_WIDTH;
     let (rows, _) = band.as_chunks_mut::<W>();
-    for (i, row) in rows.iter_mut().enumerate() {
+    for row in rows {
         row[..5].fill(ONE);
-        row[W - 1] = Felt::from_u32((row_offset + i + 1) as u32);
-    }
-}
-
-// HELPER STRUCTS
-// ================================================================================================
-
-/// Result of a Merkle tree node update.
-///
-/// Contains the old root, the new root, and the trace row where the computation started.
-#[derive(Debug, Copy, Clone)]
-pub struct MerkleRootUpdate {
-    address: Felt,
-    old_root: Word,
-    new_root: Word,
-}
-
-impl MerkleRootUpdate {
-    pub fn get_address(&self) -> Felt {
-        self.address
-    }
-    pub fn get_old_root(&self) -> Word {
-        self.old_root
-    }
-    pub fn get_new_root(&self) -> Word {
-        self.new_root
     }
 }

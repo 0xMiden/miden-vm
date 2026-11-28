@@ -262,46 +262,48 @@ fn write_blind_key(
     in_group: &BTreeSet<Arc<str>>,
     completed: &BTreeMap<Arc<str>, Type>,
     out: &mut String,
-) {
+) -> Result<(), RecursiveTypeError> {
     use core::fmt::Write;
+
+    // The decoder expands closed composite types into templates. Normalize closed subterms
+    // before ranking so they have the same key as materialized types and completed references.
+    let mut references = BTreeSet::new();
+    collect_references(template, &mut references);
+    if references.is_disjoint(in_group) {
+        let ty = close_template_inner(template, &|name| completed.get(&name).cloned())?;
+        let _ = write!(out, "t[{ty:?}]");
+        return Ok(());
+    }
 
     match template {
         TypeTemplate::Type(ty) => {
             let _ = write!(out, "t[{ty:?}]");
         },
-        TypeTemplate::Rec(name) if in_group.contains(name) => out.push_str("v[]"),
-        TypeTemplate::Rec(name) => match completed.get(name) {
-            Some(ty) => {
-                let _ = write!(out, "t[{ty:?}]");
-            },
-            // Unresolvable here means the reference is dangling, which the caller rejects.
-            None => {
-                let _ = write!(out, "x[{name:?}]");
-            },
-        },
+        TypeTemplate::Rec(_) => out.push_str("v[]"),
         TypeTemplate::Ptr(addrspace, pointee) => {
             let _ = write!(out, "p[{addrspace:?}]");
-            write_blind_key(pointee, in_group, completed, out);
+            write_blind_key(pointee, in_group, completed, out)?;
         },
         TypeTemplate::Array(element, len) => {
             let _ = write!(out, "a[{len}]");
-            write_blind_key(element, in_group, completed, out);
+            write_blind_key(element, in_group, completed, out)?;
         },
         TypeTemplate::List(element) => {
             out.push_str("l[]");
-            write_blind_key(element, in_group, completed, out);
+            write_blind_key(element, in_group, completed, out)?;
         },
         TypeTemplate::Function(ty) => {
             // The list lengths matter: `fn(T)` and `fn() -> T` are otherwise the same tags in
             // the same order.
             let _ = write!(out, "f[{:?},{},{}]", ty.abi, ty.params.len(), ty.results.len());
             for t in ty.params.iter().chain(ty.results.iter()) {
-                write_blind_key(t, in_group, completed, out);
+                write_blind_key(t, in_group, completed, out)?;
             }
         },
-        TypeTemplate::Struct(ty) => write_blind_struct_key(ty, in_group, completed, out),
-        TypeTemplate::Enum(ty) => write_blind_enum_key(ty, in_group, completed, out),
+        TypeTemplate::Struct(ty) => write_blind_struct_key(ty, in_group, completed, out)?,
+        TypeTemplate::Enum(ty) => write_blind_enum_key(ty, in_group, completed, out)?,
     }
+    Ok(())
 }
 
 fn write_blind_struct_key(
@@ -309,14 +311,15 @@ fn write_blind_struct_key(
     in_group: &BTreeSet<Arc<str>>,
     completed: &BTreeMap<Arc<str>, Type>,
     out: &mut String,
-) {
+) -> Result<(), RecursiveTypeError> {
     use core::fmt::Write;
 
     let _ = write!(out, "s[{:?},{:?},{}]", ty.name, ty.repr, ty.fields.len());
     for field in &ty.fields {
         let _ = write!(out, "n[{:?}]", field.name);
-        write_blind_key(&field.ty, in_group, completed, out);
+        write_blind_key(&field.ty, in_group, completed, out)?;
     }
+    Ok(())
 }
 
 fn write_blind_enum_key(
@@ -324,17 +327,18 @@ fn write_blind_enum_key(
     in_group: &BTreeSet<Arc<str>>,
     completed: &BTreeMap<Arc<str>, Type>,
     out: &mut String,
-) {
+) -> Result<(), RecursiveTypeError> {
     use core::fmt::Write;
 
     let _ = write!(out, "e[{:?},{:?},{}]", ty.name, ty.discriminant, ty.variants.len());
     for variant in &ty.variants {
         let _ = write!(out, "w[{:?},{:?}]", variant.name, variant.discriminant_value);
         match variant.value.as_ref() {
-            Some(value) => write_blind_key(value, in_group, completed, out),
+            Some(value) => write_blind_key(value, in_group, completed, out)?,
             None => out.push_str("z[]"),
         }
     }
+    Ok(())
 }
 
 /// A small, dependency-free FNV-1a hasher. Its values never leave the crate.
@@ -367,8 +371,8 @@ fn structural_order_key(
     def: &TemplateDef,
     in_group: &BTreeSet<Arc<str>>,
     completed: &BTreeMap<Arc<str>, Type>,
-) -> (Option<Arc<str>>, AggregateKind, String) {
-    (def.body.declared_name(), def.kind, def.body.blind_key(in_group, completed))
+) -> Result<(Option<Arc<str>>, AggregateKind, String), RecursiveTypeError> {
+    Ok((def.body.declared_name(), def.kind, def.body.blind_key(in_group, completed)?))
 }
 
 fn hash_defs(defs: &[RecDef]) -> u64 {
@@ -963,7 +967,7 @@ fn build_group(
     // rather than break such ties arbitrarily, indistinguishable definitions are merged: they
     // denote the same type, exactly as two identically named and shaped non-recursive structs
     // already do. What comes back is one definition per equivalence class, canonically ordered.
-    let class_of = merge_isomorphic_definitions(defs, &component, completed);
+    let class_of = merge_isomorphic_definitions(defs, &component, completed)?;
     let class_count = class_of.iter().copied().max().map_or(0, |max| max as usize + 1);
 
     // Every member of a class resolves to that class's definition, so a reference to any of them
@@ -1009,7 +1013,7 @@ fn build_group(
             Some(other) => Some(probe_stand_in(layouts[*other as usize])),
             None => completed.get(&name).cloned(),
         })?;
-        layouts[slot] = Some(layout_of(&probe));
+        layouts[slot] = Some(layout_of(&probe)?);
     }
 
     // Materialize the open bodies, taking layout metadata from each definition's probe.
@@ -1051,7 +1055,7 @@ fn merge_isomorphic_definitions(
     defs: &[TemplateDef],
     component: &[usize],
     completed: &BTreeMap<Arc<str>, Type>,
-) -> Vec<u16> {
+) -> Result<Vec<u16>, RecursiveTypeError> {
     let position_of = component
         .iter()
         .enumerate()
@@ -1076,7 +1080,7 @@ fn merge_isomorphic_definitions(
     let keys = component
         .iter()
         .map(|member| structural_order_key(&defs[*member], &in_group, completed))
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()?;
     let mut classes = rank(&keys);
 
     loop {
@@ -1090,7 +1094,7 @@ fn merge_isomorphic_definitions(
             .collect::<Vec<_>>();
         let refined = rank(&signatures);
         if refined == classes {
-            return classes;
+            return Ok(classes);
         }
         classes = refined;
     }
@@ -1123,16 +1127,20 @@ fn probe_stand_in(layout: Option<TypeLayout>) -> Type {
     Type::from(StructType::new_with_repr(TypeRepr::Align(layout.min_alignment), [element]))
 }
 
-fn layout_of(ty: &Type) -> TypeLayout {
-    TypeLayout {
-        size_in_bytes: u32::try_from(ty.size_in_bytes())
-            .expect("invalid type: size is larger than 2^32 bytes"),
+fn layout_of(ty: &Type) -> Result<TypeLayout, RecursiveTypeError> {
+    Ok(TypeLayout {
+        size_in_bytes: ty
+            .checked_size_in_bytes()
+            .and_then(|size| u32::try_from(size).ok())
+            .ok_or_else(|| {
+                RecursiveTypeError::InvalidDefinition("type size exceeds u32::MAX bytes".into())
+            })?,
         min_alignment: NonZeroU16::new(
             u16::try_from(ty.min_alignment()).expect("invalid type: alignment is out of range"),
         )
         .expect("invalid type: alignment must be non-zero"),
         is_zst: ty.is_zst(),
-    }
+    })
 }
 
 /// Order the slots so that every slot appears after the slots it unguardedly depends on, or
@@ -1195,13 +1203,13 @@ impl AggregateTemplate {
         &self,
         in_group: &BTreeSet<Arc<str>>,
         completed: &BTreeMap<Arc<str>, Type>,
-    ) -> String {
+    ) -> Result<String, RecursiveTypeError> {
         let mut key = String::new();
         match self {
             Self::Struct(ty) => write_blind_struct_key(ty, in_group, completed, &mut key),
             Self::Enum(ty) => write_blind_enum_key(ty, in_group, completed, &mut key),
-        }
-        key
+        }?;
+        Ok(key)
     }
 
     /// Every reference this definition makes, in the order it makes them.
@@ -1381,7 +1389,11 @@ impl AggregateTemplate {
                         ty: close_template_inner(&field.ty, resolve)?,
                     });
                 }
-                Ok(Type::from(StructType::from_parts(ty.name.clone(), ty.repr, fields)))
+                StructType::try_from_parts(ty.name.clone(), ty.repr, fields)
+                    .map(Type::from)
+                    .map_err(|err| {
+                        RecursiveTypeError::InvalidDefinition(alloc::format!("{err}").into())
+                    })
             },
             Self::Enum(ty) => {
                 let mut variants = SmallVec::<[Variant; 4]>::new();
@@ -1418,7 +1430,13 @@ fn close_template_inner(
             pointee: close_template_inner(pointee, resolve)?,
         })),
         TypeTemplate::Array(element, len) => {
-            Type::from(ArrayType::new(close_template_inner(element, resolve)?, *len))
+            let element = close_template_inner(element, resolve)?;
+            if !ArrayType::fits_in_u32_bytes(&element, *len) {
+                return Err(RecursiveTypeError::InvalidDefinition(
+                    "invalid array: size exceeds u32::MAX bytes".into(),
+                ));
+            }
+            Type::from(ArrayType::new(element, *len))
         },
         TypeTemplate::List(element) => {
             Type::List(Arc::new(close_template_inner(element, resolve)?))
@@ -1442,7 +1460,11 @@ fn close_template_inner(
                     ty: close_template_inner(&field.ty, resolve)?,
                 });
             }
-            Type::from(StructType::from_parts(ty.name.clone(), ty.repr, fields))
+            StructType::try_from_parts(ty.name.clone(), ty.repr, fields)
+                .map(Type::from)
+                .map_err(|err| {
+                    RecursiveTypeError::InvalidDefinition(alloc::format!("{err}").into())
+                })?
         },
         TypeTemplate::Enum(ty) => {
             let mut variants = SmallVec::<[Variant; 4]>::new();
@@ -2477,5 +2499,102 @@ mod tests {
         let built = builder.build().expect("a group at the cap should build");
         assert_eq!(built.len(), count);
         assert_eq!(built.get("T000").unwrap().size_in_bytes(), 4);
+    }
+
+    /// `[felt; 2^29]` is exactly 2^31 bytes, so two of them sum to 2^32 -- one past `u32::MAX`.
+    fn half_of_u32_range() -> TypeTemplate {
+        TypeTemplate::array(TypeTemplate::from(Type::Felt), 1 << 29)
+    }
+
+    /// `[felt; 2^30]` is 2^32 bytes on its own, which no struct size can hold.
+    fn past_u32_range() -> TypeTemplate {
+        TypeTemplate::array(TypeTemplate::from(Type::Felt), 1 << 30)
+    }
+
+    #[test]
+    fn layout_of_sizes_a_large_type_in_bytes() {
+        // 2^29 bytes is 2^32 bits: sizing through bits overflows a 32-bit `usize` (such as on
+        // wasm32), although the type fits in u32::MAX bytes.
+        let ty = Type::from(ArrayType::new(Type::U8, 1 << 29));
+        assert_eq!(layout_of(&ty).unwrap().size_in_bytes(), 1 << 29);
+    }
+
+    #[test]
+    fn closing_an_array_larger_than_u32_max_is_an_error() {
+        // A procedure signature closes its parameter types directly, so a bare array has to be
+        // checked here, not only as a struct field.
+        for template in [past_u32_range(), TypeTemplate::ptr(past_u32_range())] {
+            assert!(matches!(
+                close_template(&template, |_| None),
+                Err(RecursiveTypeError::InvalidDefinition(_))
+            ));
+        }
+
+        // One element fewer is 2^32 - 4 bytes, which fits.
+        let largest = TypeTemplate::array(TypeTemplate::from(Type::Felt), (1 << 30) - 1);
+        assert!(close_template(&largest, |_| None).is_ok());
+    }
+
+    #[test]
+    fn closing_a_struct_with_a_field_larger_than_u32_max_is_an_error() {
+        let template = TypeTemplate::struct_type(
+            TypeRepr::Default,
+            [FieldTemplate::from(("a", past_u32_range()))],
+        );
+
+        assert!(matches!(
+            close_template(&template, |_| None),
+            Err(RecursiveTypeError::InvalidDefinition(_))
+        ));
+    }
+
+    #[test]
+    fn closing_a_struct_whose_fields_sum_past_u32_max_is_an_error() {
+        let template = TypeTemplate::struct_type(
+            TypeRepr::Default,
+            [
+                FieldTemplate::from(("a", half_of_u32_range())),
+                FieldTemplate::from(("b", half_of_u32_range())),
+            ],
+        );
+
+        assert!(matches!(
+            close_template(&template, |_| None),
+            Err(RecursiveTypeError::InvalidDefinition(_))
+        ));
+    }
+
+    #[test]
+    fn building_a_struct_whose_fields_sum_past_u32_max_is_an_error() {
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "T",
+            StructTemplate::new(
+                TypeRepr::Default,
+                [("a", half_of_u32_range()), ("b", half_of_u32_range())],
+            ),
+        );
+
+        assert!(matches!(builder.build(), Err(RecursiveTypeError::InvalidDefinition(_))));
+    }
+
+    #[test]
+    fn building_a_recursive_struct_whose_fields_sum_past_u32_max_is_an_error() {
+        // The recursion goes through a pointer, so this takes the recursive-group layout path
+        // rather than closing a plain struct template.
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "Node",
+            StructTemplate::new(
+                TypeRepr::Default,
+                [
+                    ("a", half_of_u32_range()),
+                    ("b", half_of_u32_range()),
+                    ("next", TypeTemplate::ptr(TypeTemplate::rec("Node"))),
+                ],
+            ),
+        );
+
+        assert!(matches!(builder.build(), Err(RecursiveTypeError::InvalidDefinition(_))));
     }
 }

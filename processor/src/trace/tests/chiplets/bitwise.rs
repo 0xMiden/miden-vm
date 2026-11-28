@@ -2,14 +2,14 @@
 //!
 //! Runs a program with `U32and` + `U32xor` operations and verifies that every bitwise request
 //! row emits the expected `BitwiseMsg` on the chiplet-requests side AND that every bitwise
-//! chiplet cycle-end row emits the matching response on the chiplet-responses side.
+//! chiplet row emits the matching response on the chiplet-responses side.
 //!
 //! Column-blind by design: the subset matcher in `lookup_harness` compares `(mult, denom)`
 //! pairs regardless of which aux column the framework routes them onto.
 
 use alloc::vec::Vec;
 
-use miden_air::logup::BitwiseMsg;
+use miden_air_definitions::vm::logup::BitwiseMsg;
 use miden_core::{
     Felt,
     operations::{Operation, opcodes},
@@ -20,9 +20,6 @@ use super::super::{
     lookup_harness::{Expectations, InteractionLog},
 };
 use crate::RowIndex;
-
-/// Period of the bitwise chiplet cycle. The response fires on the last row of each cycle.
-const BITWISE_CYCLE_LEN: usize = 8;
 
 #[test]
 fn bitwise_chiplet_bus_emits_per_request_row() {
@@ -101,51 +98,59 @@ fn bitwise_chiplet_bus_emits_per_request_row() {
         exp.remove(usize::from(row), &msg);
     }
 
-    // ---- Response side: each bitwise-chiplet cycle-end row emits `+1 × BitwiseMsg`.
-    //
-    // Cycle-end = `row % BITWISE_CYCLE_LEN == BITWISE_CYCLE_LEN - 1` (the periodic `k_transition`
-    // column is `0` on the last row of every 8-row cycle, starting from trace row 0). The bitwise
-    // chiplet segment starts at a multiple of `HASH_CYCLE_LEN = 16`, which is a multiple of 8,
-    // so this alignment condition holds across the whole trace.
+    // ---- Response side: each normal bitwise row emits one `BitwiseMsg` with multiplicity +1.
     let mut response_rows_seen = 0usize;
     for row in 0..main.chiplets_height() {
         let idx = RowIndex::from(row);
         if !main.is_bitwise_row(idx) {
             continue;
         }
-        if row % BITWISE_CYCLE_LEN != BITWISE_CYCLE_LEN - 1 {
-            continue;
-        }
         response_rows_seen += 1;
 
-        let op = main.chiplet_cols(idx).bitwise().op_flag;
-        let a = main.chiplet_bitwise_a(idx);
-        let b = main.chiplet_bitwise_b(idx);
-        let z = main.chiplet_bitwise_z(idx);
-        exp.add(row, &BitwiseMsg { op, a, b, result: z });
+        let cols = main.chiplet_cols(idx).bitwise_cols();
+        let op = cols.op_flag;
+        let a = u32_from_bitwise_bytes(cols.a_bytes);
+        let b = u32_from_bitwise_bytes(cols.b_bytes);
+        let and = u32_from_bitwise_bytes(cols.and_bytes);
+        let xor = a + b - and.double();
+        let result = and + op * (xor - and);
+        exp.add(row, &BitwiseMsg { op, a, b, result });
     }
     let expected_responses = and_expected.len() + xor_expected.len();
     assert_eq!(
         response_rows_seen, expected_responses,
-        "response cardinality guardrail: expected {expected_responses} cycle-end bitwise rows, \
-         found {response_rows_seen}",
+        "response cardinality guardrail: expected {expected_responses} bitwise rows, found \
+         {response_rows_seen}",
     );
 
     log.assert_contains(&exp);
 }
 
-/// The bitwise classifier must return `false` past the chiplets-AIR height. The bitwise active
-/// pattern is an all-zero selector prefix, so the height check is part of the classifier contract.
+fn u32_from_bitwise_bytes(bytes: [Felt; 4]) -> Felt {
+    let bytes = bytes.map(|byte| {
+        u8::try_from(byte.as_canonical_u64()).expect("bitwise byte witness should fit in u8")
+    });
+    Felt::from_u32(u32::from_le_bytes(bytes))
+}
+
+/// Regression test for split-trace projection: every chiplet classifier must return `false` past
+/// the chiplets-AIR height, including the ordinary bitwise and AEAD stream classifiers.
 #[test]
-fn rows_past_chiplets_height_are_not_classified_as_bitwise() {
+fn rows_past_chiplets_height_are_not_classified_as_chiplets() {
     let trace = build_trace_from_ops(vec![Operation::Noop; 128], &[]);
     let main = trace.main_trace();
 
     for row in main.chiplets_height()..main.num_rows() {
         let idx = RowIndex::from(row);
-        assert!(
-            !main.is_bitwise_row(idx),
-            "row {row} (past chiplets height) classified as bitwise",
-        );
+        for (chiplet, is_active) in [
+            ("controller", main.is_controller_row(idx)),
+            ("bitwise", main.is_bitwise_row(idx)),
+            ("AEAD stream", main.is_aead_stream_row(idx)),
+            ("memory", main.is_memory_row(idx)),
+            ("ACE", main.is_ace_row(idx)),
+            ("kernel ROM", main.is_kernel_row(idx)),
+        ] {
+            assert!(!is_active, "row {row} (past chiplets height) classified as {chiplet}");
+        }
     }
 }

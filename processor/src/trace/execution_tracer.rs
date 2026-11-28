@@ -1,10 +1,11 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
-use miden_air::trace::chiplets::hasher::{
-    CONTROLLER_ROWS_PER_PERM_FELT, CONTROLLER_ROWS_PER_PERMUTATION, STATE_WIDTH,
+use miden_air_definitions::vm::trace::chiplets::hasher::{
+    CONTROLLER_ROWS_PER_HASHER_OP, CONTROLLER_ROWS_PER_HASHER_OP_FELT, STATE_WIDTH,
 };
 use miden_core::{
     FMP_ADDR, FMP_INIT_VALUE,
+    field::PrimeCharacteristicRing,
     operations::Operation,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
@@ -22,8 +23,8 @@ use super::{
     utils::split_u32_into_u16,
 };
 use crate::{
-    ContextId, EMPTY_WORD, ExecutionError, FastProcessor, Felt, MIN_STACK_DEPTH, ONE, RowIndex,
-    Word, ZERO,
+    AceError, ContextId, EMPTY_WORD, ExecutionError, FastProcessor, Felt, MIN_STACK_DEPTH, ONE,
+    RowIndex, Word, ZERO,
     continuation_stack::{Continuation, ContinuationStack},
     crypto::merkle::MerklePath,
     mast::{
@@ -70,8 +71,8 @@ pub(crate) struct TraceReplay {
     /// <https://github.com/0xMiden/miden-vm/issues/3303>.
     pub(crate) mast_forest_store: Vec<Arc<SparseMastForest>>,
 
-    // Replays that contain additional data needed to generate the range checker and chiplets
-    // columns.
+    // Replays that contain additional data needed to generate u32 range-lookup multiplicities and
+    // chiplets columns.
     pub(crate) range_checker_replay: RangeCheckerReplay,
     pub(crate) memory_writes: MemoryWritesReplay,
     pub(crate) bitwise_replay: BitwiseReplay,
@@ -118,7 +119,8 @@ impl Deserializable for TraceReplay {
 
         let mut mast_forest_store = Vec::with_capacity(store_len);
         for _ in 0..store_len {
-            mast_forest_store.push(Arc::new(SparseMastForest::read_from(source)?));
+            // The witness reader applies hash validation unless its trusted path is selected.
+            mast_forest_store.push(Arc::new(SparseMastForest::read_from_trusted(source)?));
         }
 
         let context = Self {
@@ -253,8 +255,8 @@ pub struct ExecutionTracer {
     advice: AdviceReplay,
     external: MastForestResolutionReplay,
 
-    // Replays that contain additional data needed to generate the range checker and chiplets
-    // columns.
+    // Replays that contain additional data needed to generate u32 range-lookup multiplicities and
+    // chiplets columns.
     range_checker: RangeCheckerReplay,
     memory_writes: MemoryWritesReplay,
     bitwise: BitwiseReplay,
@@ -272,14 +274,14 @@ pub struct ExecutionTracer {
     /// [`Self::into_trace_replay`].
     mast_forest_builders: Vec<SparseMastForestBuilder>,
 
-    /// Maps a source forest's `Arc::as_ptr` identity to its [`MastForestId`] in
+    /// Maps a source forest's allocation address to its [`MastForestId`] in
     /// `mast_forest_builders` (and, by construction, the eventual id in
     /// `TraceReplay::mast_forest_store`).
     ///
-    /// Pointer identity is sound here because the trace-generation flow never crosses a process
-    /// boundary: the tracer builds the store and the replay processor consumes it in the same
-    /// run.
-    mast_forest_ids: BTreeMap<*const MastForest, MastForestId>,
+    /// Every sparse builder retains its source `Arc`, keeping allocation addresses distinct and
+    /// stable until recording finishes. The keys are only identities, never dereferenced; storing
+    /// addresses also lets a suspended recording future move between threads.
+    mast_forest_ids: BTreeMap<usize, MastForestId>,
 
     /// The number of rows per core trace fragment.
     fragment_size: usize,
@@ -300,20 +302,6 @@ pub struct ExecutionTracer {
 }
 
 impl ExecutionTracer {
-    /// Creates a tracer whose hasher-chiplet requests stream to `hasher_sender` as they are
-    /// recorded, instead of buffering for post-execution replay. Everything else records as in
-    /// [`Self::new`].
-    #[cfg(feature = "std")]
-    pub(crate) fn new_with_streamed_hasher(
-        fragment_size: usize,
-        max_stack_depth: usize,
-        hasher_sender: std::sync::mpsc::Sender<crate::trace::ResolvedHasherOp<'static>>,
-    ) -> Self {
-        let mut tracer = Self::new(fragment_size, max_stack_depth);
-        tracer.hasher_for_chiplet = HasherRequestReplay::streamed(hasher_sender);
-        tracer
-    }
-
     /// Creates a new `ExecutionTracer` with the given fragment size.
     #[inline(always)]
     pub fn new(fragment_size: usize, max_stack_depth: usize) -> Self {
@@ -345,10 +333,10 @@ impl ExecutionTracer {
     }
 
     /// Returns the [`MastForestId`] of `forest` in [`Self::mast_forest_builders`], creating a new
-    /// builder for it on first encounter. Forests are identified by `Arc::as_ptr`.
+    /// builder for it on first encounter. Forests are identified by their `Arc` allocation address.
     #[inline]
     fn forest_id(&mut self, forest: &Arc<MastForest>) -> MastForestId {
-        let key = Arc::as_ptr(forest);
+        let key = Arc::as_ptr(forest).addr();
         if let Some(&id) = self.mast_forest_ids.get(&key) {
             return id;
         }
@@ -419,6 +407,54 @@ impl ExecutionTracer {
             translated.push_continuation(translated_cont);
         }
         translated
+    }
+
+    pub(crate) fn trace_len_upper_bound(
+        &self,
+        clock: RowIndex,
+        kernel: &crate::KernelDescriptor,
+    ) -> Option<super::TraceLenSummary> {
+        use miden_air_definitions::vm::trace::{
+            MIN_TRACE_LEN, and8_lookup::AND8_LOOKUP_TRACE_HEIGHT,
+            chiplets::hasher::CONTROLLER_TRACE_ALIGNMENT,
+            eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN,
+        };
+
+        let core_rows = clock.as_usize().checked_add(1)?; // final HALT row
+        // Controller addresses start at one. The shim has already charged every basic-block
+        // batch and every Merkle path level (both paths for an update).
+        let controller_rows = usize::try_from(self.hasher_chiplet_shim.addr - 1).ok()?;
+        let chiplets = super::parallel::recorded_chiplet_lengths(
+            controller_rows.checked_next_multiple_of(CONTROLLER_TRACE_ALIGNMENT)?,
+            kernel,
+            self.fragment_contexts
+                .iter()
+                .map(|ctx| &ctx.replay.memory_reads)
+                .chain(core::iter::once(&self.memory_reads)),
+            &self.memory_writes,
+            &self.bitwise,
+            &self.ace,
+        )?;
+        // One compression per controller request, plus XOF requests which bypass the
+        // controller. The Eidos AIR coalesces repeated requests when building the trace.
+        let eidos_rows = (controller_rows / CONTROLLER_ROWS_PER_HASHER_OP)
+            .checked_add(self.hasher_for_chiplet.aead_xof_count())?
+            .checked_mul(EIDOS_COMPRESSION_CYCLE_LEN)?;
+        let padded = |rows: usize| Some(rows.checked_next_power_of_two()?.max(MIN_TRACE_LEN));
+        let heights = [
+            padded(core_rows)?,
+            padded(chiplets.checked_trace_len()?)?,
+            padded(eidos_rows)?,
+            AND8_LOOKUP_TRACE_HEIGHT,
+        ];
+        super::TraceLenSummary::new(
+            core_rows,
+            chiplets,
+            eidos_rows,
+            AND8_LOOKUP_TRACE_HEIGHT,
+            heights,
+        )
+        .ok()
     }
 
     /// Converts the `ExecutionTracer` into a [`TraceReplay`] using the data accumulated during
@@ -823,7 +859,7 @@ impl Tracer for ExecutionTracer {
                     self.hasher_for_chiplet.record_hash_basic_block(
                         forest_id,
                         mast_node_id,
-                        basic_block_node,
+                        basic_block_node.digest(),
                     );
                     let block_addr =
                         self.hasher_chiplet_shim.record_hash_basic_block(basic_block_node);
@@ -835,7 +871,7 @@ impl Tracer for ExecutionTracer {
                 ),
             },
             Continuation::Respan { node_id: _, batch_index: _ } => {
-                self.block_stack.peek_mut().addr += CONTROLLER_ROWS_PER_PERM_FELT;
+                self.block_stack.peek_mut().addr += CONTROLLER_ROWS_PER_HASHER_OP_FELT;
             },
             Continuation::FinishLoop(_) if processor.stack_get(0) == ONE => {
                 // This is a REPEAT operation, which drops the condition (top element) off the stack
@@ -894,13 +930,23 @@ impl Tracer for ExecutionTracer {
     }
 
     #[inline(always)]
-    fn record_hasher_permute(
+    fn record_hasher_compress(
         &mut self,
         input_state: [Felt; STATE_WIDTH],
         output_state: [Felt; STATE_WIDTH],
     ) {
-        self.hasher_for_chiplet.record_permute_input(input_state);
-        self.hasher_chiplet_shim.record_permute_output(output_state);
+        self.hasher_for_chiplet.record_compress_input(input_state);
+        self.hasher_chiplet_shim.record_compression_output(output_state);
+    }
+
+    #[inline(always)]
+    fn record_hasher_aead_xof(
+        &mut self,
+        ctx: ContextId,
+        clk: RowIndex,
+        input_state: [Felt; STATE_WIDTH],
+    ) {
+        self.hasher_for_chiplet.record_aead_xof_input(ctx, clk, input_state);
     }
 
     #[inline(always)]
@@ -916,6 +962,7 @@ impl Tracer for ExecutionTracer {
         self.hasher_chiplet_shim.record_build_merkle_root(path, output_root);
         self.hasher_for_chiplet.record_build_merkle_root(node, path.clone(), index);
         self.range_checker.record_merkle_depth(depth);
+        self.range_checker.record_merkle_index(index);
     }
 
     #[inline(always)]
@@ -938,6 +985,7 @@ impl Tracer for ExecutionTracer {
             index,
         );
         self.range_checker.record_merkle_depth(depth);
+        self.range_checker.record_merkle_index(index);
     }
 
     #[inline(always)]
@@ -998,21 +1046,64 @@ impl Tracer for ExecutionTracer {
     }
 
     #[inline(always)]
-    fn record_crypto_stream(
+    fn record_aead_stream(
         &mut self,
         plaintext: [Word; 2],
         src_addr: Felt,
-        ciphertext: [Word; 2],
+        keystream: [Felt; 16],
+        ciphertext: [Felt; 16],
         dst_addr: Felt,
         ctx: ContextId,
         clk: RowIndex,
     ) {
+        let ciphertext_words = [
+            [ciphertext[0], ciphertext[1], ciphertext[2], ciphertext[3]].into(),
+            [ciphertext[4], ciphertext[5], ciphertext[6], ciphertext[7]].into(),
+            [ciphertext[8], ciphertext[9], ciphertext[10], ciphertext[11]].into(),
+            [ciphertext[12], ciphertext[13], ciphertext[14], ciphertext[15]].into(),
+        ];
+
+        // Each 4-row stream half emits a read interaction, so mirror the executor's duplicate
+        // source-word reads in the replay consumed by parallel trace generation.
+        self.memory_reads.record_read_word(plaintext[0], src_addr, ctx, clk);
         self.memory_reads.record_read_word(plaintext[0], src_addr, ctx, clk);
         self.memory_reads
             .record_read_word(plaintext[1], src_addr + PTR_OFFSET_WORD, ctx, clk);
-        self.memory_writes.record_write_word(ciphertext[0], dst_addr, ctx, clk);
-        self.memory_writes
-            .record_write_word(ciphertext[1], dst_addr + PTR_OFFSET_WORD, ctx, clk);
+        self.memory_reads
+            .record_read_word(plaintext[1], src_addr + PTR_OFFSET_WORD, ctx, clk);
+        for (i, word) in ciphertext_words.into_iter().enumerate() {
+            self.memory_writes.record_write_word(
+                word,
+                dst_addr + Felt::new_unchecked((i * 4) as u64),
+                ctx,
+                clk,
+            );
+        }
+
+        let trace_ctx = Felt::new_unchecked(u32::from(ctx) as u64);
+        let trace_clk = Felt::from(clk);
+        self.bitwise
+            .record_aead_stream(crate::trace::trace_state::AeadStreamReplayEntry {
+                ctx: trace_ctx,
+                clk: trace_clk,
+                src_ptr: src_addr,
+                dst_ptr: dst_addr,
+                lane_base: ZERO,
+                plaintext: plaintext[0].into(),
+                keystream: keystream[..8].try_into().expect("low keystream chunk has 8 lanes"),
+                ciphertext: ciphertext[..8].try_into().expect("low ciphertext chunk has 8 lanes"),
+            });
+        self.bitwise
+            .record_aead_stream(crate::trace::trace_state::AeadStreamReplayEntry {
+                ctx: trace_ctx,
+                clk: trace_clk,
+                src_ptr: src_addr + PTR_OFFSET_WORD,
+                dst_ptr: dst_addr + Felt::new_unchecked(8),
+                lane_base: Felt::new_unchecked(8),
+                plaintext: plaintext[1].into(),
+                keystream: keystream[8..].try_into().expect("high keystream chunk has 8 lanes"),
+                ciphertext: ciphertext[8..].try_into().expect("high ciphertext chunk has 8 lanes"),
+            });
     }
 
     #[inline(always)]
@@ -1068,8 +1159,11 @@ impl Tracer for ExecutionTracer {
     }
 
     #[inline(always)]
-    fn record_circuit_evaluation(&mut self, circuit_evaluation: CircuitEvaluation) {
-        self.ace.record_circuit_evaluation(circuit_evaluation);
+    fn record_circuit_evaluation(
+        &mut self,
+        circuit_evaluation: CircuitEvaluation,
+    ) -> Result<(), AceError> {
+        self.ace.record_circuit_evaluation(circuit_evaluation)
     }
 
     #[inline(always)]
@@ -1160,8 +1254,7 @@ fn node_id_for_visit<F>(continuation: &Continuation<F>) -> Option<MastNodeId> {
 // HASHER CHIPLET SHIM
 // ================================================================================================
 
-/// The number of controller rows per permutation request (input + output = 2), as u32.
-const NUM_HASHER_ROWS_PER_PERMUTATION: u32 = CONTROLLER_ROWS_PER_PERMUTATION as u32;
+const NUM_HASHER_ROWS_PER_OP: u64 = CONTROLLER_ROWS_PER_HASHER_OP as u64;
 
 /// Implements a shim for the hasher chiplet, where the responses of the hasher chiplet are emulated
 /// and recorded for later replay.
@@ -1173,8 +1266,10 @@ const NUM_HASHER_ROWS_PER_PERMUTATION: u32 = CONTROLLER_ROWS_PER_PERMUTATION as 
 pub struct HasherChipletShim {
     /// The address of the next MAST node encountered during execution. This field is used to keep
     /// track of the number of rows in the hasher chiplet, from which the address of the next MAST
-    /// node is derived.
-    addr: u32,
+    /// node is derived. A Merkle update can consume 128 controller rows in one VM cycle, so the
+    /// cycle limit alone does not keep this counter within 32 bits. Trace construction enforces
+    /// its own row limit during replay.
+    addr: u64,
     /// Replay for the hasher chiplet responses, recording only the hasher chiplet responses.
     hasher_replay: HasherResponseReplay,
     block_addr_replay: BlockAddressReplay,
@@ -1192,43 +1287,43 @@ impl HasherChipletShim {
 
     /// Records the address returned from a call to `Hasher::hash_control_block()`.
     pub fn record_hash_control_block(&mut self) -> Felt {
-        let block_addr = Felt::from_u32(self.addr);
+        let block_addr = Felt::from_u64(self.addr);
 
         self.block_addr_replay.record_block_address(block_addr);
-        self.addr += NUM_HASHER_ROWS_PER_PERMUTATION;
+        self.addr += NUM_HASHER_ROWS_PER_OP;
 
         block_addr
     }
 
     /// Records the address returned from a call to `Hasher::hash_basic_block()`.
     pub fn record_hash_basic_block(&mut self, basic_block_node: &BasicBlockNode) -> Felt {
-        let block_addr = Felt::from_u32(self.addr);
+        let block_addr = Felt::from_u64(self.addr);
 
         self.block_addr_replay.record_block_address(block_addr);
-        self.addr += NUM_HASHER_ROWS_PER_PERMUTATION * basic_block_node.num_op_batches() as u32;
+        self.addr += NUM_HASHER_ROWS_PER_OP * basic_block_node.num_op_batches() as u64;
 
         block_addr
     }
-    /// Records the result of a call to `Hasher::permute()`.
-    pub fn record_permute_output(&mut self, hashed_state: [Felt; 12]) {
-        self.hasher_replay.record_permute(Felt::from_u32(self.addr), hashed_state);
-        self.addr += NUM_HASHER_ROWS_PER_PERMUTATION;
+    /// Records the output of one Eidos compression request.
+    pub fn record_compression_output(&mut self, hashed_state: [Felt; 12]) {
+        self.hasher_replay.record_compression(Felt::from_u64(self.addr), hashed_state);
+        self.addr += NUM_HASHER_ROWS_PER_OP;
     }
 
     /// Records the result of a call to `Hasher::build_merkle_root()`.
     pub fn record_build_merkle_root(&mut self, path: &MerklePath, computed_root: Word) {
         self.hasher_replay
-            .record_build_merkle_root(Felt::from_u32(self.addr), computed_root);
-        self.addr += NUM_HASHER_ROWS_PER_PERMUTATION * path.depth() as u32;
+            .record_build_merkle_root(Felt::from_u64(self.addr), computed_root);
+        self.addr += NUM_HASHER_ROWS_PER_OP * u64::from(path.depth());
     }
 
     /// Records the result of a call to `Hasher::update_merkle_root()`.
     pub fn record_update_merkle_root(&mut self, path: &MerklePath, old_root: Word, new_root: Word) {
         self.hasher_replay
-            .record_update_merkle_root(Felt::from_u32(self.addr), old_root, new_root);
+            .record_update_merkle_root(Felt::from_u64(self.addr), old_root, new_root);
 
         // The Merkle path is verified twice: once for the old root and once for the new root.
-        self.addr += 2 * NUM_HASHER_ROWS_PER_PERMUTATION * path.depth() as u32;
+        self.addr += 2 * NUM_HASHER_ROWS_PER_OP * u64::from(path.depth());
     }
 
     pub fn extract_replay(&mut self) -> (HasherResponseReplay, BlockAddressReplay) {
@@ -1387,7 +1482,7 @@ mod serialization_tests {
         context.hasher_for_chiplet.record_hash_basic_block(
             MastForestId::from(1u32),
             MastNodeId::from(0),
-            &basic_block,
+            basic_block.digest(),
         );
 
         assert_context_read_rejects_bad_forest_id(context, "hasher HashBasicBlock replay");

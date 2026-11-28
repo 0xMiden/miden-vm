@@ -101,6 +101,10 @@ MIDEN_LOG=trace ./target/optimized/miden-vm [subcommand] [parameters]
 
 If the level is not specified, `warn` level is set as default.
 
+Routine VM execution and proving spans use `TRACE`. Set
+`MIDEN_LOG=info,miden::vm=trace` to enable them, or
+`MIDEN_LOG=info,miden::vm::prove=trace` for STARK proving only.
+
 #### Debugging procedures
 
 You can inspect VM state by importing the [`miden::core::debug`](./user_docs/assembly/debugging.md) module and calling its print procedures from a MASM program.
@@ -109,7 +113,103 @@ You can inspect VM state by importing the [`miden::core::debug`](./user_docs/ass
 ./target/optimized/miden-vm run [path_to.masm]
 ```
 
-If trace building would exceed the VM trace row limit, `run` returns a trace length error instead of trying to build a larger trace.
+After execution, `run` prints the stack outputs and the unpadded and padded sizes of the VM trace components.
+
+### Precompile policies
+
+`run`, `prove`, and `verify` accept four optional limits:
+
+| Option | Ceiling | Type/unit |
+| --- | --- | --- |
+| `--max-precompile-elements` | Structural elements in each accounting scope | `u64` field elements |
+| `--max-precompile-hash-bytes` | Total hash input size in each scope | `u64` bytes |
+| `--max-precompile-msm-terms` | Terms in one MSM | `u32` terms |
+| `--max-precompile-total-msm-terms` | Total MSM terms in each scope | `u64` terms |
+
+Each supplied value overrides the corresponding field in both execution and verification
+policies. Their accounting remains independent: execution counts all guest-induced deferred
+work, including repeated registration attempts; verification counts the final root-reachable
+witness. Verification limits apply during export, prover admission, and native deferred
+verification. Standalone `verify` applies only the verification policy. Complete precompile
+STARKs contain no portable witness to admit.
+
+Unspecified fields retain each scope's library defaults, supplied by
+`miden_vm::default_execution_precompile_limits()` and
+`miden_vm::default_verification_precompile_limits()`. The CLI defines no separate policy defaults.
+The per-MSM and total-MSM term ceilings are independent: changing one preserves the other.
+Class counts, per-hash item sizes, and uint/curve-specific limits keep their library defaults;
+advanced callers can configure these through the Rust interfaces.
+
+Hash byte sizes accept bare integers or case-sensitive `K/M/G` (powers of 1000) and `Ki/Mi/Gi`
+(powers of 1024) suffixes. Elements and term counts use unsigned decimal integers within the
+listed types' ranges. Zero is a real ceiling, never an unlimited sentinel. Each option may be
+supplied once. For example:
+
+```shell
+miden-vm prove program.masm \
+    --max-precompile-hash-bytes 16Mi \
+    --max-precompile-msm-terms 8192 \
+    --max-precompile-total-msm-terms 131072
+```
+
+Raising these logical ceilings does not change hard transport, allocation, or root-count safety
+ceilings, or combine different work classes into an aggregate budget.
+
+### Prover memory budgets
+
+For `prove`, `--max-prover-memory SIZE` sets the modelled peak-memory budget for each enabled
+proving stage. Default proving includes the VM and any precompile STARK; `--deferred` runs only
+the VM proving stage and exports the precompile witness.
+The explicit option sets the same budget for both stages. When omitted, each stage uses its own
+library default (`Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES` and
+`Prover::DEFAULT_MAX_PRECOMPILE_PROVER_MEMORY_BYTES`). The option uses the byte suffixes
+described above. Independent stage budgets remain configurable through the Rust interfaces.
+
+These are separate modelled proving-stage budgets rather than a combined allocation cap or a
+bound on total process memory. Precompile witness preparation/Session import and concurrent
+proofs are outside the proving budgets. Logical work limits remain independent.
+
+`run` reads stack outputs from the execution claim and reports trace sizes from the recording.
+Core rows include HALT. Chiplet rows include aligned hash controller rows, expanded AEAD and ACE
+work, and the mandatory padding row. Eidos compression rows and their padded height are upper
+bounds because the prover combines repeated compression requests. The byte-pair lookup table has
+a fixed height. If the exact heights already require more than `--max-prover-memory` at the
+minimum Eidos height, `run` fails. If only the upper bound exceeds the limit, `run` warns and
+returns the outputs. The prover enforces its budget using the actual padded heights.
+
+### Complete and deferred proofs
+
+`prove` follows the library's `Prover::prove_full` workflow by default: it generates the VM STARK
+and any required precompile STARK, without exporting a raw precompile witness. `prove --complete`
+explicitly selects the same behavior.
+
+Use `prove --deferred` to opt into the library's `Prover::prove` workflow: generate only the VM
+STARK and include the raw precompile witness in the `.proof` file for later proving. That witness
+includes raw precompile inputs and can reveal inputs taken from private advice. Only use this
+option when that disclosure is intended; keep the default complete proof for publication without
+the raw witness. The two proving options cannot be combined.
+
+Without precompile work, the VM STARK alone is already complete in either mode. Deferral applies
+to the precompile STARK; normal execution still checks precompile predicates natively. Proving
+reports the resulting proof status and, for a deferred proof, the witness-export disclosure, its
+missing precompile STARK and outstanding root.
+
+`verify` accepts valid complete and deferred proofs by default. For a deferred proof, the
+verifier authenticates the VM STARK, checks the witness limits, binds its reconstructed root to
+the VM-authenticated root, and evaluates it natively. Only after these checks succeed does it
+exit with status 0 and print `Proof status: deferred`, the VM STARK conjectured and proven
+security levels, the natively validated witness, missing precompile STARK, and outstanding root.
+Native validation does not establish a cryptographically complete precompile proof.
+
+Use `verify --require-complete` to require a fully STARK-backed proof. A serialized deferred
+artifact then exits with status 1 before STARK verification or native witness evaluation. This
+is a policy rejection based on unauthenticated proof metadata; it does not establish whether the
+proof is valid.
+
+Complete results exit with status 0 with or without `--require-complete`. They print
+`Proof status: complete` and the minimum conjectured and proven security levels of the verified
+STARKs (the VM levels alone if there is no precompile work). Invalid STARKs, malformed or false
+witnesses, root mismatches, and admission failures always fail verification.
 
 ### Inputs
 

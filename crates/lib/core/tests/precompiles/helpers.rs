@@ -1,9 +1,8 @@
 use miden_assembly::{Assembler, Linkage};
-use miden_core::Felt;
+use miden_core::{Felt, deferred::TRUE_DIGEST, program::MIN_STACK_DEPTH};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    ContextId, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
-    StackInputs, advice::AdviceInputs,
+    ContextId, DefaultHost, ExecutionError, ExecutionOutput, Processor, StackInputs,
 };
 
 pub use crate::helpers::assert_precompile_witness_round_trips;
@@ -46,13 +45,12 @@ pub fn run_precompile_program_with_stack(
         .with_library(&core_lib)
         .expect("failed to load CoreLibrary into the host");
 
-    let output = FastProcessor::new_with_options(
-        stack_inputs,
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    )
-    .expect("processor construction")
-    .execute_sync(&program, &mut host);
+    let output = Processor::new(&program)
+        .with_stack_inputs(stack_inputs)
+        .execute()
+        .prepare()
+        .expect("processor construction")
+        .run_sync(&mut host);
 
     if let Ok(output) = &output {
         assert!(output.advice.stack().is_empty(), "precompile wrappers must consume advice");
@@ -61,8 +59,61 @@ pub fn run_precompile_program_with_stack(
     output
 }
 
+#[test]
+fn log_deferred_wrapper_consumes_digest_and_preserves_tail() {
+    let tail = [
+        Felt::new_unchecked(9),
+        Felt::new_unchecked(10),
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(12),
+        Felt::new_unchecked(13),
+        Felt::new_unchecked(14),
+        Felt::new_unchecked(15),
+        Felt::new_unchecked(16),
+        Felt::new_unchecked(17),
+        Felt::new_unchecked(18),
+        Felt::new_unchecked(19),
+        Felt::new_unchecked(20),
+    ];
+    let stack = TRUE_DIGEST.as_elements().iter().copied().chain(tail).collect::<Vec<_>>();
+    let source = "begin exec.::miden::core::precompiles::log_deferred end";
+
+    let output = run_precompile_program_with_stack(source, &stack)
+        .expect("log_deferred wrapper should accept TRUE_DIGEST");
+
+    assert_eq!(read_stack_felts(&output, tail.len()), tail);
+    assert!(output.precompile_witness.is_some(), "log_deferred leaves a precompile witness");
+    assert_ne!(output.precompile_root(), TRUE_DIGEST);
+    assert_precompile_witness_round_trips(&output);
+}
+
 pub fn expect_precompile_trap(source: &str) -> ExecutionError {
     run_precompile_program(source).expect_err("expected precompile program to trap")
+}
+
+pub fn expect_precompile_trap_with_stack(
+    source: &str,
+) -> (ExecutionError, [Felt; MIN_STACK_DEPTH]) {
+    let core_lib = CoreLibrary::default();
+    let mut assembler = Assembler::default();
+    assembler
+        .link_package(core_lib.package(), Linkage::Dynamic)
+        .expect("failed to link core library package");
+    let program = assembler
+        .assemble_program("precompile_test", source)
+        .expect("failed to assemble precompile test program")
+        .unwrap_program();
+
+    let mut host = DefaultHost::default()
+        .with_library(&core_lib)
+        .expect("failed to load CoreLibrary into the host");
+    let mut session =
+        Processor::new(&program).execute().start().expect("precompile session starts");
+    let error = session
+        .run_until_halt_sync(&mut host)
+        .expect_err("expected precompile program to trap");
+    let stack = core::array::from_fn(|index| session.state().get_stack_item(index));
+    (error, stack)
 }
 
 pub fn read_stack_felts(output: &ExecutionOutput, len: usize) -> Vec<Felt> {

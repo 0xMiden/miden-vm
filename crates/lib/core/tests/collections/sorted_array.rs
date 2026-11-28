@@ -3,7 +3,7 @@ use miden_core_lib::{
     handlers::sorted_array::{LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME},
 };
 use miden_processor::{
-    ProcessorState,
+    ExecutionError, ProcessorState,
     advice::{AdviceMutation, AdviceStack},
     event::EventError,
 };
@@ -68,6 +68,82 @@ fn test_empty_sorted_array_find_word() {
 
     let program = build_test!(source, &[]);
     program.expect_stack(&[0, 100, 100, 100, 0]);
+}
+
+#[test]
+fn test_sorted_array_lookups_reject_oversized_ranges() {
+    const MAX_ENTRIES: u32 = 1 << 16;
+
+    let tests = [
+        ("find_word", (MAX_ENTRIES + 1) * 4, "push.[1,0,0,0]"),
+        ("find_key_value", (MAX_ENTRIES + 1) * 8, "push.[1,0,0,0]"),
+        ("find_half_key_value", (MAX_ENTRIES + 1) * 8, "push.1 push.1"),
+    ];
+
+    for (procedure, end_ptr, key) in tests {
+        let source = format!(
+            "
+            use miden::core::collections::sorted_array
+
+            {TRUNCATE_STACK_PROC}
+
+            begin
+                push.{end_ptr} push.0 {key}
+                exec.sorted_array::{procedure}
+                exec.truncate_stack
+            end
+            "
+        );
+
+        let err = build_test!(source, &[])
+            .execute()
+            .expect_err("oversized sorted-array range should fail");
+
+        match err {
+            ExecutionError::EventError { error, .. } => assert_eq!(
+                error.to_string(),
+                "sorted array entry count 65537 exceeds maximum of 65536"
+            ),
+            err => panic!("unexpected error type: {err:?}"),
+        }
+    }
+}
+
+#[test]
+fn test_sorted_array_lookups_accept_maximum_range() {
+    const MAX_ENTRIES: u32 = 1 << 16;
+    const START_PTR: u32 = 4;
+
+    let tests = [
+        ("find_word", 4, "push.[1,0,0,0]"),
+        ("find_key_value", 8, "push.[1,0,0,0]"),
+        ("find_half_key_value", 8, "push.1 push.1"),
+    ];
+
+    for (procedure, stride, key) in tests {
+        let end_ptr = START_PTR + MAX_ENTRIES * stride;
+        let source = format!(
+            "
+            use miden::core::collections::sorted_array
+
+            {TRUNCATE_STACK_PROC}
+
+            begin
+                push.{end_ptr} push.{START_PTR} {key}
+                exec.sorted_array::{procedure}
+                exec.truncate_stack
+            end
+            "
+        );
+
+        build_test!(source, &[]).expect_stack(&[
+            0,
+            u64::from(end_ptr),
+            u64::from(START_PTR),
+            u64::from(end_ptr),
+            0,
+        ]);
+    }
 }
 
 #[test]

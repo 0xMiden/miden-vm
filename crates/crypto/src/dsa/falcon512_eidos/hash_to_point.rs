@@ -12,6 +12,10 @@ use crate::{
 /// Returns a polynomial in `Z_q[x]/(phi)` representing the hash of the provided message and
 /// nonce using Eidos.
 ///
+/// Absorbing the nonce and zero-padded message derives a fixed seed. For counters `0..128`,
+/// compressing `[counter, 0, 0, 0, 0, 0, 0, 0]` under that seed emits four 63-bit samples,
+/// in word order, which are reduced modulo 12289.
+///
 /// This construction reduces wide samples directly instead of using rejection sampling. Falcon
 /// Section 3.7 [1] describes the analogous check-free reduction for 64-bit samples. The calculation
 /// below applies Prest's distribution-replacement argument [2, Section 3.3] to Eidos's 63-bit
@@ -49,14 +53,14 @@ pub fn hash_to_point_eidos(message: Word, nonce: &Nonce) -> Polynomial<FalconFel
 
     let mut block = [ZERO; 8];
     block[..Word::NUM_ELEMENTS].copy_from_slice(message.as_slice());
-    cv = Eidos::compress(cv, block);
+    let seed = Eidos::compress(cv, block);
 
-    // Derive the coefficients of the polynomial.
-    let block = [ZERO; 8];
+    let mut block = [ZERO; 8];
     let mut coefficients: Vec<FalconFelt> = Vec::with_capacity(N);
-    for _ in 0..128 {
-        cv = Eidos::compress(cv, block);
-        cv.iter().for_each(|value| coefficients.push(felt_to_falcon_felt(*value)));
+    for counter in 0..128 {
+        block[0] = Felt::from_u32(counter);
+        let samples = Eidos::compress(seed, block);
+        samples.iter().for_each(|value| coefficients.push(felt_to_falcon_felt(*value)));
     }
 
     Polynomial::new(coefficients)

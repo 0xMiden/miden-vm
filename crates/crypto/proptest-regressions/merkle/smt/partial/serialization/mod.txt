@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 726c4b8a7913dfdff91dce6ee74a8b611387c4d7b3fbf19824273df1d40c2294 # shrinks to obj = UniqueNodes { root: Word([0, 0, 0, 0]), nodes: {}, leaves: {0: Single((Word([6626504802299993936, 9516741505939061372, 3036121333400424722, 627908818]), Word([15441402060307941440, 15509974215499937567, 6738583402332728640, 11566259479980680596])))}, value_only_leaves: {616334716563707445: Word([5281994907730713857, 6253467795422322038, 2186628119, 10102859546892758412]), 3070515042517658186: Word([14515856556367210129, 10248351857771045208, 1228563081, 1547717079])} }

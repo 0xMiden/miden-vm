@@ -25,9 +25,12 @@ fn test_nonce() -> Nonce {
 
 #[test]
 fn key_and_nonce_serialization_roundtrip() {
-    let key = test_key();
+    let key_values = [0_u64, 1, 1 << 63, Felt::ORDER - 1];
+    let key = SecretKey::from_elements(key_values.map(Felt::new_unchecked));
     let nonce = test_nonce();
 
+    let expected_key_bytes = key_values.into_iter().flat_map(u64::to_le_bytes).collect::<Vec<_>>();
+    assert_eq!(key.to_bytes(), expected_key_bytes);
     assert_eq!(SecretKey::read_from_bytes(&key.to_bytes()).unwrap(), key);
     assert_eq!(Nonce::read_from_bytes(&nonce.to_bytes()).unwrap(), nonce);
 }
@@ -37,10 +40,14 @@ fn key_from_bytes_rejects_invalid_input() {
     let short = [0_u8; SK_SIZE_BYTES - 1];
     assert!(AeadEidos::key_from_bytes(&short).is_err());
 
-    // Felt::ORDER + 1 is the smallest non-canonical u64 after the modulus itself.
-    let mut noncanonical = [0_u8; SK_SIZE_BYTES];
-    noncanonical[..8].copy_from_slice(&(Felt::ORDER + 1).to_le_bytes());
-    assert!(AeadEidos::key_from_bytes(&noncanonical).is_err());
+    // Reject non-canonical elements even after other key elements have been decoded.
+    for index in 0..SECRET_KEY_SIZE {
+        for value in [Felt::ORDER, u64::MAX] {
+            let mut noncanonical = test_key().to_bytes();
+            noncanonical[index * 8..(index + 1) * 8].copy_from_slice(&value.to_le_bytes());
+            assert!(AeadEidos::key_from_bytes(&noncanonical).is_err());
+        }
+    }
 }
 
 #[test]
@@ -123,12 +130,16 @@ fn authentication_covers_every_input() {
         Err(EncryptionError::InvalidAuthTag)
     ));
 
-    let mut forged_tag = encrypted.clone();
-    forged_tag.auth_tag.0[1] += ONE;
-    assert!(matches!(
-        key.decrypt_elements_with_associated_data(&forged_tag, &associated_data),
-        Err(EncryptionError::InvalidAuthTag)
-    ));
+    for index in 0..AUTH_TAG_SIZE {
+        let mut forged_tag = encrypted.clone();
+        forged_tag.auth_tag.0[index] += ONE;
+        assert_ne!(forged_tag.auth_tag, encrypted.auth_tag);
+        assert!(!bool::from(forged_tag.auth_tag.ct_eq(&encrypted.auth_tag)));
+        assert!(matches!(
+            key.decrypt_elements_with_associated_data(&forged_tag, &associated_data),
+            Err(EncryptionError::InvalidAuthTag)
+        ));
+    }
 
     let mut forged_nonce = encrypted.clone();
     forged_nonce.nonce.0[0] += ONE;
@@ -183,7 +194,27 @@ fn malformed_ciphertext_is_rejected_at_public_boundaries() {
 }
 
 #[test]
+fn deserialization_rejects_invalid_ciphertext_lengths_before_reading_elements() {
+    for (length, error) in [
+        (1, EncryptionError::MalformedCiphertext),
+        (MAX_AUTHENTICATED_INPUT_FELTS, EncryptionError::InputTooLong),
+    ] {
+        // Only the header is present. The ciphertext length must be rejected before a payload read.
+        let mut encoded = Vec::new();
+        encoded.write_u8(DataType::Elements as u8);
+        encoded.write_usize(length);
+        let expected = format!("malformed Eidos ciphertext: {error}");
+        assert!(matches!(
+            EncryptedData::read_from_bytes(&encoded),
+            Err(DeserializationError::InvalidValue(message)) if message == expected
+        ));
+    }
+}
+
+#[test]
 fn authenticated_input_limit_accounts_for_expansion_and_type_marker() {
+    // Nonce(4), type marker(1), and length fields(2) use seven Felts. Each plaintext Felt produces
+    // two ciphertext limbs, leaving one padding Felt at the largest supported plaintext length.
     let largest_plaintext = (MAX_AUTHENTICATED_INPUT_FELTS - 8) / 2;
     assert!(validate_encryption_lengths(largest_plaintext, 0).is_ok());
     assert!(matches!(
@@ -191,12 +222,20 @@ fn authenticated_input_limit_accounts_for_expansion_and_type_marker() {
         Err(EncryptionError::InputTooLong)
     ));
 
+    // With empty plaintext, AD can use every Felt left after those seven fixed Felts.
     let largest_associated_data = MAX_AUTHENTICATED_INPUT_FELTS - 7;
     assert!(validate_encryption_lengths(0, largest_associated_data).is_ok());
     assert!(matches!(
         validate_encryption_lengths(0, largest_associated_data + 1),
         Err(EncryptionError::InputTooLong)
     ));
+
+    for (plaintext_len, ad_len) in [(usize::MAX, 0), (0, usize::MAX)] {
+        assert!(matches!(
+            validate_encryption_lengths(plaintext_len, ad_len),
+            Err(EncryptionError::InputTooLong)
+        ));
+    }
 }
 
 #[test]

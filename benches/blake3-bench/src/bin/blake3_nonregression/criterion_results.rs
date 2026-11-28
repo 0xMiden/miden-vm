@@ -145,14 +145,15 @@ pub(crate) fn selected_criterion_axes(bench_axes: &str) -> Option<BTreeSet<Strin
 
 fn report_span_metric_name(name: &str) -> Option<String> {
     match name {
-        "execute_for_proving_with_package_debug_info_sync"
+        "record_witness_sync"
+        | "execute_for_proving_with_package_debug_info_sync"
         | "execute_for_proving_with_package_debug_info_at_source_node_sync" => {
             Some(EXECUTE_FOR_PROVING_METRIC.to_string())
         },
         "build aux traces" => Some("build_aux_trace".to_string()),
         "to_core_chiplets_matrices" => Some("to_row_major_matrix".to_string()),
-        "build_trace"
-        | "commit to main traces"
+        "build_vm_trace" | "build_trace" => Some("build_trace".to_string()),
+        "commit to main traces"
         | "commit to aux traces"
         | "evaluate constraints"
         | "commit to quotient poly chunks"

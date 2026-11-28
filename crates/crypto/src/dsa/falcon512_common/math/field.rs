@@ -178,6 +178,7 @@ impl CyclotomicFourier for FalconFelt {
     /// # Panics
     ///
     /// Panics if `n` is not a power of two in `1..=4096`.
+    #[cfg(test)]
     fn primitive_root_of_unity(n: usize) -> Self {
         assert!(
             n.is_power_of_two() && n <= 1 << 12,

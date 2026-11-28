@@ -34,7 +34,7 @@ Currently, there are 3 ways to get values onto the stack:
 
 The stack is provided to Miden VM via `StackInputs` struct. These are public inputs of the execution, and should also be provided to the verifier. The secret inputs for the program are provided via the `Host` interface. The default implementation of the host relies on in-memory advice provider (`AdviceProvider`) that can be commonly used for operations that won't require persistence.
 
-Values remaining on the stack after a program is executed can be returned as stack outputs. You can specify exactly how many values (from the top of the stack) should be returned. Notice, that, similar to stack inputs, at most 16 values can be returned via the stack. Attempts to return more than 16 values will cause an error.
+Execution returns the top 16 stack elements in `StackOutputs`. Use `get_num_elements(n)` to inspect a prefix of these outputs; it returns at most 16 elements.
 
 Having a small number elements to describe public inputs and outputs of a program may seem limiting, however, just 4 elements are sufficient to represent a root of a Merkle tree or a sequential hash of elements. Both of these can be expanded into an arbitrary number of values by supplying the actual values non-deterministically via the host interface.
 
@@ -44,127 +44,87 @@ Miden crate exposes types and functions for executing programs, generating proof
 
 ### Executing programs
 
-For ordinary execution, construct `FastProcessor` and call `execute()` or `execute_sync()`.
-Generic code can use the `ProgramExecutor` trait, whose default implementation is
-`FastProcessor`. These interfaces take the following inputs:
+Create a `Processor` for the program and configure its public stack inputs, private advice,
+execution options, and optional package source context. The selected execution validates the advice
+against the final options when the machine is initialized. Run it with `run_sync()` for a
+`SyncHost` or `run().await` for an asynchronous `Host`.
 
-- `program: &Program` is a reference to the Miden program.
-- `stack_inputs: StackInputs` contains the public inputs.
-- `advice_inputs: AdviceInputs` contains the private inputs used to build the advice provider. Use `AdviceInputs::default()` when no private inputs are needed.
-- `host` is a `Host` for `execute()` or a `SyncHost` for `execute_sync()`. It supplies nondeterministic inputs to the VM and receives messages from it.
-- `options: ExecutionOptions` controls execution settings such as the maximum cycle count.
-
-Ordinary execution returns a `Result<ExecutionOutput, ExecutionError>` containing the final stack
-state and other execution outputs, or an error if execution failed. `ProgramExecutor` represents
-this ordinary execution path; it does not capture a proving witness.
-
-An `ExecutionOutput` cannot be converted into an `ExecutionWitness` after execution. The ordinary
-path selects `NoopTracer` before the program runs, so it does not retain the replay data needed to
-materialize the VM trace. If the execution will be proved, select tracing up front with
-`FastProcessor::execute_for_proving()` / `FastProcessor::execute_for_proving_sync()`, then pass the
-returned `ExecutionWitness` to `Prover::prove()`. To materialize only the VM trace, split the
-witness with `ExecutionWitness::into_parts()` and pass the resulting `VmWitness` to
-`trace::build_trace()`.
-
-For example:
+`execute()` returns an `ExecutionOutput` with the final stack, advice, and memory. Select
+`record_witness()` before running if you need the replay data for proving.
 
 ```rust
-use miden_vm::{
-    advice::AdviceInputs,
-    Assembler, DefaultHost, ExecutionOptions, FastProcessor, StackInputs
-};
+use miden_vm::{Assembler, DefaultHost, Processor};
 
-// instantiate the assembler
-let assembler = Assembler::default();
-
-// compile Miden assembly source code into a program
-let program = assembler.assemble_program(
-    "prg",
-    "begin push.3 push.5 add swap drop end",
-).unwrap();
-
-// use an empty list as initial stack
-let stack_inputs = StackInputs::default();
-
-// do not include any initial advice data
-let advice_inputs = AdviceInputs::default();
-
-// instantiate a default host (with an empty advice provider)
-let mut host = DefaultHost::default();
-
-// instantiate default execution options
-let exec_options = ExecutionOptions::default();
-
-// execute the program with no inputs
-let output = FastProcessor::new_with_options(
-    stack_inputs,
-    advice_inputs.clone(),
-    exec_options,
-)
-.unwrap()
-.execute_sync(&program.unwrap_program(), &mut host)
-.unwrap();
+let program = Assembler::default()
+    .assemble_program("prg", "begin push.3 push.5 add swap drop end")
+    .unwrap()
+    .unwrap_program();
+let output = Processor::new(&program)
+    .execute()
+    .run_sync(&mut DefaultHost::default())
+    .unwrap();
 ```
 
 ### Proving program execution
 
-Execute with `FastProcessor` to produce an `ExecutionWitness`, and read its public claim before
-proving consumes it. `Prover::prove` proves the VM portion. The returned `ExecutionProof` has an
-empty precompile status when no deferred work exists, or a deferred status carrying one portable
-`PrecompileWitness`. Use `Prover::prove_full` to complete all proof work in the local process.
-
-For delegated precompile proving, transport the proof with `ExecutionProof::to_bytes`, then decode
-it with `ExecutionProof::read_from_bytes`. Pass the carried witnesses to
-`Prover::prove_precompiles(Vec<PrecompileWitness>)`. One batch produces one proof, preserving input
-root order and repeated roots. After precompile proving, call `complete` and then `Verifier::verify`.
-Completion preserves the compatibility declaration.
-
-`ExecutionOptions` configure execution, while `Prover::with_hash_fn` selects the proof hash
-function. The FastProcessor-backed `prove_sync(&Prover, ...)` function executes and fully proves in
-one synchronous call while preserving optimized overlapped execution and trace construction.
-
-`prove_sync()` overlaps execution with hasher-chiplet trace construction when a Rayon worker is
-available. A caller with no separate Rayon worker uses compact buffered replay, including on
-targets such as `wasm32-unknown-unknown`.
-
-#### Proof generation example
-
-Here is a simple example of executing a program which pushes two numbers onto the stack and computes their sum:
+Record a witness, then pass it to `Prover::prove_full` to obtain a `CompleteProof` locally. The
+recording also returns the public claim and final advice. To use a
+[proving service](../crates/prover-service/README.md), send the serialized witness and retain the
+claim and final advice locally. To require a completed proof from the service, decode its bytes
+as an `ExecutionProof` and check the precompile status with `CompleteProof::try_from(proof)`.
 
 ```rust
 use miden_vm::{
-    advice::AdviceInputs,
-    field::PrimeField64,
-    Assembler, DefaultHost, ExecutionOptions, FastProcessor, Prover, StackInputs,
+    Assembler, DefaultHost, Processor, Prover, Verifier, WitnessOutput, field::PrimeField64,
 };
 
-// instantiate the assembler
-let assembler = Assembler::default();
-
-// this is our program, we compile it from assembly code
-let program = assembler
+let program = Assembler::default()
     .assemble_program("prg", "begin push.3 push.5 add swap drop end")
     .unwrap()
     .unwrap_program();
+let WitnessOutput { claim, witness, .. } = Processor::new(&program)
+    .record_witness()
+    .run_sync(&mut DefaultHost::default())
+    .unwrap();
 
-// execute the program to produce a post-execution witness
-let mut host = DefaultHost::default();
-let witness = FastProcessor::new_with_options(
-    StackInputs::default(),
-    AdviceInputs::default(),
-    ExecutionOptions::default(),
-)
-.unwrap()
-.execute_for_proving_sync(&program, &mut host)
-.unwrap();
-let outputs = *witness.claim().stack_outputs();
-
-// this program has no precompile work, so the proof is ready for verification
-let proof = Prover::new().prove(witness).unwrap();
-
-// the output should be 8
-assert_eq!(8, outputs.first().unwrap().as_canonical_u64());
+assert_eq!(8, claim.stack_outputs().first().unwrap().as_canonical_u64());
+let proof = Prover::new().prove_full(witness).unwrap();
+assert!(Verifier::new().verify(&claim, &proof).unwrap().is_complete());
 ```
+
+Use `Prover::prove` to prove the VM portion. The resulting `ExecutionProof` carries a portable
+`PrecompileWitness` if any deferred work remains. For delegated precompile proving, transport the
+proof with `ExecutionProof::to_bytes` and decode it with `ExecutionProof::read_from_bytes`. Pass the
+carried witnesses to `Prover::prove_precompiles`. One batch proof preserves input root order and
+repeated roots. Attach it with `ExecutionProof::complete` and verify the completed proof.
+
+`ExecutionOptions::with_execution_precompile_limits` bounds guest-induced deferred work, while
+`ExecutionOptions::with_verification_precompile_limits` bounds the final root-reachable witness
+exported after execution. `Verifier::with_verification_precompile_limits` and
+`Prover::with_verification_precompile_limits` configure the per-singleton policy for transported
+witnesses. These logical limits apply separately from the prover's batch-wide peak-memory budget.
+
+Both proving methods build the trace from the recorded witness under the prover's VM memory
+budget. For AIR diagnostics, split the witness with `into_parts()` and materialize the VM
+component with `vm_witness.build_trace(&budget)`.
+
+#### Stepping a recording
+
+Start a session to inspect the machine as it executes. The recorder stays with the session, so you
+can finish recording after stepping and pass that witness to the prover.
+
+```rust,ignore
+let mut session = Processor::new(&program).record_witness().start()?;
+session.step_sync(&mut host)?;
+let clock = session.state().clock();
+let finished = session.run_to_completion_sync(&mut host)?;
+let WitnessOutput { claim, witness, .. } = finished.finish()?;
+let proof = prover.prove_full(witness)?;
+```
+
+Use the borrowed `run_until_halt_sync` or `run_until_halt` when you need to inspect the session
+after an execution error. A successful halt makes the final state available for inspection before
+`finish()` exports the selected output.
 
 ### Verifying program execution
 
@@ -173,48 +133,19 @@ To verify program execution, use `Verifier::new().verify(&claim, &proof)`. The v
 - `claim: &ExecutionClaim`. The program information and public stack inputs and outputs.
 - `proof: &ExecutionProof`. The deferred or complete execution proof artifacts.
 
-Stack inputs are expected to be ordered as if they would be pushed onto the stack one by one. Thus, their expected order on the stack will be the reverse of the order in which they are provided, and the last value in the `stack_inputs` is expected to be the value at the top of the stack.
-
-Stack outputs are expected to be ordered as if they would be popped off the stack one by one. Thus, the value at the top of the stack is expected to be in the first position of the `stack_outputs`, and the order of the rest of the output elements will also match the order on the stack. This is the reverse of the order of the `stack_inputs`.
+`StackInputs` and `StackOutputs` both use top-first ordering: the first supplied element is at the top of the stack, followed by the remaining elements in order. For example, `StackInputs::new(&[1_u32.into(), 0_u32.into()])` starts with `1` above `0`. Constructors pad inputs and outputs shorter than 16 elements with zeros.
 
 The verifier returns `Result<VerificationOutcome, VerificationError>`. A successful deferred outcome
 evaluates the carried witness and authenticates its outstanding VM root; a successful
 complete outcome verifies every applicable STARK. Canonical proof decoding checks portable graph
-structure without a registry. Precompile proving imports each witness directly into a shared Session. See the
-[deferred-proof semantics](../docs/src/design/deferred/semantics.md) for transport and limit
-details.
+encoding and allocation bounds without a registry. Preparation later validates and commits each
+graph under the configured per-witness limits. Precompile proving imports the prepared witnesses
+directly into a shared Session. See the
+[deferred-proof semantics](../docs/src/design/deferred/semantics.md) for transport and limit details.
 
 > If a program with the provided hash is executed against some secret inputs and the provided public inputs, it will produce the provided outputs.
 
 The verifier needs only the program hash. It does not need the program itself.
-
-#### Proof verification example
-
-Here is a simple example of verifying execution of the program from the previous example:
-
-```rust,ignore
-use miden_vm::{
-    ExecutionClaim, ProgramInfo, StackInputs, StackOutputs, Verifier, field::Felt,
-};
-
-let program =   /* value from previous example */;
-let proof =     /* value from previous example */;
-let expected_outputs = StackOutputs::new(&[Felt::new(8).unwrap()]).unwrap();
-let claim = ExecutionClaim::from_program_info(
-    ProgramInfo::from(program),
-    StackInputs::default(),
-    expected_outputs,
-);
-
-match Verifier::new().verify(&claim, &proof) {
-    Ok(outcome) if outcome.is_complete() => println!("Execution verified and complete!"),
-    Ok(outcome) => println!(
-        "Execution verified with outstanding root {:?}",
-        outcome.outstanding_precompile_root(),
-    ),
-    Err(err) => eprintln!("Verification failed: {err}"),
-}
-```
 
 ## Fibonacci calculator
 
@@ -240,9 +171,8 @@ Notice that except for the first 2 operations which initialize the stack, the se
 
 ```rust
 use miden_vm::{
-    advice::AdviceInputs,
     field::PrimeField64,
-    Assembler, DefaultHost, ExecutionOptions, FastProcessor, Prover, StackInputs,
+    Assembler, DefaultHost, Processor, StackInputs,
 };
 
 // set the number of terms to compute
@@ -270,20 +200,13 @@ let mut host = DefaultHost::default();
 // initialize the stack with values 0 and 1
 let stack_inputs = StackInputs::new(&[1_u32.into(), 0_u32.into()]).unwrap();
 
-// execute the program and prove its post-execution witness
-let witness = FastProcessor::new_with_options(
-    stack_inputs,
-    AdviceInputs::default(),
-    ExecutionOptions::default(),
-)
-.unwrap()
-.execute_for_proving_sync(&program, &mut host)
-.unwrap();
-let outputs = *witness.claim().stack_outputs();
-let proof = Prover::new().prove(witness).unwrap();
+let output = Processor::new(&program)
+    .with_stack_inputs(stack_inputs)
+    .execute()
+    .run_sync(&mut host)
+    .unwrap();
 
-// fetch the stack outputs, truncating to the first element
-let stack = outputs.get_num_elements(1);
+let stack = output.stack.get_num_elements(1);
 
 // the output should be the 50th Fibonacci number
 assert_eq!(12586269025, stack[0].as_canonical_u64());
@@ -295,9 +218,27 @@ Above, we used public inputs to initialize the stack. This keeps the program sim
 
 If you want to execute, prove, and verify programs on Miden VM, but don't want to write Rust code, you can use Miden CLI. It also contains a number of useful tools to help analyze and debug programs.
 
+The CLI limits package (`.masp`) files to 512 MiB, input (`.inputs`) JSON files to
+64 MiB, and output (`.outputs`) JSON files to 64 KiB. Files at the limit are accepted;
+larger files are rejected before decoding. These readers accept regular files and
+symlinks to regular files. Pipes, devices, and directories are rejected.
+
+The CLI writes each proof and output JSON artifact to a temporary file in the
+destination directory. It replaces the destination after writing and syncing the
+complete artifact, so a write failure leaves the previous file intact. Replacing
+a destination symlink replaces the link itself.
+
+New artifacts and replacements belong to the current user and use normal file
+creation permissions, including inherited ACLs. The CLI does not copy the previous
+file's ownership or access controls.
+
+On Unix, the CLI syncs the destination directory after replacement to persist the
+rename. A failure at this final step reports that the new artifact has already
+replaced the previous file.
+
 ### Compiling Miden VM
 
-First, make sure you have Rust [installed](https://www.rust-lang.org/tools/install). The current version of Miden VM requires Rust version **1.96** or later.
+First, make sure you have Rust [installed](https://www.rust-lang.org/tools/install). The current version of Miden VM requires Rust version **1.96.1** or later.
 
 Then, to compile Miden VM into a binary, run the following `make` command:
 
@@ -343,8 +284,7 @@ Currently, Miden VM can be executed with the following subcommands:
 - `prove` executes a Miden assembly program and generates a STARK proof.
 - `verify` verifies a previously generated proof for a given program.
 - `compile` compiles a Miden assembly program and reports compilation statistics.
-- `debug` starts a CLI debugger for the specified Miden assembly program and inputs.
-- `analyze` runs a Miden assembly program against specific inputs and reports execution statistics.
+- `bundle` combines Miden assembly modules into a `.masp` library or kernel package.
 
 All of the above subcommands require various parameters to be provided. To get more detailed help on what is needed for a given subcommand, you can run the following:
 
@@ -360,7 +300,7 @@ For example:
 
 ### Fibonacci example
 
-In the `miden-vm/masm-examples/fib` directory, we provide a very simple Fibonacci calculator example. This example computes the 1000th term of the Fibonacci sequence. You can execute this example on Miden VM like so:
+In the `miden-vm/masm-examples/fib` directory, we provide a very simple Fibonacci calculator example. This example computes the 1001st Fibonacci number modulo the VM field. You can execute this example on Miden VM like so:
 
 ```shell
 ./target/optimized/miden-vm run miden-vm/masm-examples/fib/fib.masm -n 1
@@ -375,11 +315,9 @@ Miden VM can be compiled with the following features:
 - `std` is enabled by default and relies on the Rust standard library.
 - `concurrent` implies `std` and enables multithreaded proof generation.
 - `executable` is required for building the Miden VM binary as described above. It implies `std`.
-- `metal` enables [Metal](<https://en.wikipedia.org/wiki/Metal_(API)>)-based acceleration of proof generation for recursive proofs on supported platforms such as Apple silicon.
-- `no_std` does not rely on the Rust standard library and enables compilation to WebAssembly.
-  - Only the `wasm32-unknown-unknown` and `wasm32-wasip1` targets are officially supported.
 
-To compile with `no_std`, disable default features via `--no-default-features` flag.
+For a `no_std` build, disable default features with `--no-default-features`. Only the
+`wasm32-unknown-unknown` and `wasm32-wasip1` targets are officially supported for this configuration.
 
 ### Concurrent proof generation
 

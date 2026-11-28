@@ -106,7 +106,7 @@ fn test_basic_block(
         vec![Operation::MStore],
         vec![Operation::MStream],
         // crypto ops
-        vec![Operation::HPerm],
+        vec![Operation::Compress],
         // Note: we have more specific tests for these below
         vec![Operation::FriE2F4],
         vec![Operation::HornerBase],
@@ -118,9 +118,11 @@ fn test_basic_block(
     let program = simple_program_with_ops(operations);
 
     let mut host = DefaultHost::default();
-    let fast_processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-    let fast_stack_outputs =
-        fast_processor.execute_sync(&program, &mut host).map(|output| output.stack);
+    let fast_stack_outputs = Processor::new(&program)
+        .with_stack_inputs(StackInputs::new(&stack_inputs).unwrap())
+        .execute()
+        .run_sync(&mut host)
+        .map(|output| output.stack);
 
     // Make sure that we're not getting an output stack overflow error, as it indicates that
     // the sequence of operations makes the stack end with a non-16 depth, and doesn't tell

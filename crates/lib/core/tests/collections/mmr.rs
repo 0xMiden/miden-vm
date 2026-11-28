@@ -1,13 +1,16 @@
 use miden_core::WORD_SIZE;
-use miden_crypto::merkle::mmr::PartialMmr;
+use miden_crypto::{
+    hash::eidos::{BLOCK_LEN, domains::MMR_PEAKS},
+    merkle::mmr::PartialMmr,
+};
 use miden_processor::advice::AdviceStack;
 use miden_utils_testing::{
     EMPTY_WORD, Felt, ONE, TRUNCATE_STACK_PROC, Word, ZERO,
     crypto::{
-        MerkleError, MerkleStore, MerkleTree, Mmr, NodeIndex, Poseidon2, init_merkle_leaf,
+        Eidos, MerkleError, MerkleStore, MerkleTree, Mmr, NodeIndex, init_merkle_leaf,
         init_merkle_leaves,
     },
-    felt_slice_to_ints, hash_elements,
+    felt_slice_to_ints,
 };
 
 // TESTS
@@ -702,7 +705,7 @@ fn test_mmr_add_then_mtree_get() {
     let tree_b = MerkleTree::new(leaves_b).unwrap();
     let root_a = tree_a.root();
     let root_b = tree_b.root();
-    let merged_root = Poseidon2::merge(&[root_a, root_b]);
+    let merged_root = Eidos::merge(&[root_a, root_b]);
 
     let mut store = MerkleStore::default();
     store.extend(tree_a.inner_nodes());
@@ -794,65 +797,6 @@ fn test_add_mmr_large() {
     build_test!(&source).expect_stack_and_memory(&expect_stack, mmr_ptr, &expected_memory);
 }
 
-// TEMPORARY: debug helper to compare Rust MMR peaks vs VM MMR memory layout
-#[test]
-fn debug_mmr_peaks_vs_vm_memory() {
-    let mmr_ptr = 1000;
-
-    // MASM side: build MMR in VM memory using stdlib's `mmr::add`.
-    let source = format!(
-        "
-        use miden::core::collections::mmr
-
-        begin
-            push.{mmr_ptr}.0.0.0.1 exec.mmr::add
-            push.{mmr_ptr}.0.0.0.2 exec.mmr::add
-            push.{mmr_ptr}.0.0.0.3 exec.mmr::add
-            push.{mmr_ptr}.0.0.0.4 exec.mmr::add
-            push.{mmr_ptr}.0.0.0.5 exec.mmr::add
-            push.{mmr_ptr}.0.0.0.6 exec.mmr::add
-            push.{mmr_ptr}.0.0.0.7 exec.mmr::add
-        end
-    "
-    );
-
-    let test = build_test!(&source);
-    let (execution_output, _) = test.execute_for_output().unwrap();
-
-    // Rust side: build the same MMR using miden-crypto.
-    let mut mmr = Mmr::new();
-    for i in 1u64..=7 {
-        // Use canonical leaf representation consistent with Merkle trees.
-        mmr.add(init_merkle_leaf(i)).unwrap();
-    }
-    let accumulator = mmr.peaks();
-    let rust_peaks = accumulator.peaks();
-
-    // Flatten Rust peaks into memory-like layout: [num_leaves, 0,0,0, peaks...]
-    let mut rust_mem = vec![accumulator.num_leaves() as u64, 0, 0, 0];
-    rust_mem.extend(digests_to_ints(rust_peaks));
-
-    // Read back the same region from VM memory: first num_leaves word + one word per peak.
-    use miden_processor::ContextId;
-    let mut vm_mem = Vec::new();
-    let words_to_read = 1 + rust_peaks.len();
-    for word_idx in 0..words_to_read {
-        for limb in 0..4 {
-            let addr = mmr_ptr + (word_idx as u32) * 4 + limb;
-            let v = execution_output
-                .memory
-                .read_element(ContextId::root(), Felt::new_unchecked(addr as u64))
-                .unwrap()
-                .as_canonical_u64();
-            vm_mem.push(v);
-        }
-    }
-
-    // This helper is for inspection only; keep it from failing so it doesn't
-    // interfere with the suite.
-    assert!(!rust_mem.is_empty() && !vm_mem.is_empty());
-}
-
 #[test]
 fn test_mmr_large_add_roundtrip() {
     let mmr_ptr = 1000_u32;
@@ -938,8 +882,14 @@ fn mmr_commitment(num_leaves: u64, padded_peaks: &[Word]) -> Word {
 }
 
 fn mmr_commitment_from_elements(num_leaves: u64, padded_peak_elements: &[Felt]) -> Word {
-    let mut elements = Vec::with_capacity(WORD_SIZE + padded_peak_elements.len());
-    elements.extend_from_slice(&[Felt::new_unchecked(num_leaves), ZERO, ZERO, ZERO]);
-    elements.extend_from_slice(padded_peak_elements);
-    hash_elements(&elements)
+    let mut cv = Eidos::init_chaining_word_with_params(
+        MMR_PEAKS,
+        [num_leaves as u32, (num_leaves >> 32) as u32, 0],
+    );
+
+    for &block in padded_peak_elements.as_chunks::<BLOCK_LEN>().0 {
+        cv = Eidos::compress(cv, block);
+    }
+
+    cv
 }

@@ -4,6 +4,7 @@
 //! the eight-Felt block width, and the total padded length is bound in the initial chaining value.
 //! Matrix metadata fixes the row boundaries and widths. Internal nodes use the reserved Merkle
 //! inner-node construction and remain separated from leaves.
+//! An empty leaf returns the initial CV without compression.
 
 use alloc::vec::Vec;
 
@@ -18,10 +19,7 @@ use super::{
 };
 use crate::{
     Felt,
-    stark::{
-        hasher::{Alignable, StatefulHasher},
-        lmcs::config::LmcsConfig,
-    },
+    hash::stateful::{Alignable, StatefulHasher},
 };
 
 const DIGEST_WIDTH: usize = super::DIGEST_WIDTH;
@@ -35,16 +33,6 @@ type Digest = [u64; DIGEST_WIDTH];
 type PackedDigest = [PackedU64; DIGEST_WIDTH];
 type State = Digest;
 type PackedState = PackedDigest;
-
-/// Eidos LMCS configuration.
-pub type EidosLmcs = LmcsConfig<
-    PackedFelt,
-    PackedU64,
-    EidosLmcsHasher,
-    EidosLmcsCompressor,
-    DIGEST_WIDTH,
-    DIGEST_WIDTH,
->;
 
 /// Stateful hasher used by the Eidos LMCS configuration.
 #[derive(Clone, Copy, Debug)]
@@ -96,6 +84,11 @@ impl StatefulHasher<Felt, Digest> for EidosLmcsHasher {
     }
 
     fn absorb_into(&self, state: &mut Self::State, input: impl IntoIterator<Item = Felt>) {
+        let mut input = input.into_iter().peekable();
+        // Without compression, output packing would clear the initial CV's high bits.
+        if input.peek().is_none() {
+            return;
+        }
         let cv = absorb_blocks(encoding::unpack_u64_cv(*state), input, Felt::ZERO, |cv, block| {
             compression::compress_cv(cv, encoding::encode_felt_block(&block))
         });
@@ -127,6 +120,10 @@ impl StatefulHasher<PackedFelt, PackedDigest> for EidosLmcsHasher {
     }
 
     fn absorb_into(&self, state: &mut Self::State, input: impl IntoIterator<Item = PackedFelt>) {
+        let mut input = input.into_iter().peekable();
+        if input.peek().is_none() {
+            return;
+        }
         let cv = absorb_blocks(
             encoding::unpack_packed_u64_cv(*state),
             input,
@@ -161,11 +158,6 @@ impl<Input, Target> Alignable<Input, Target> for EidosLmcsHasher {
     const ALIGNMENT: usize = BLOCK_LEN;
 }
 
-/// Creates the Eidos LMCS configuration used by the STARK proof config.
-pub const fn config() -> EidosLmcs {
-    LmcsConfig::new(EidosLmcsHasher, EidosLmcsCompressor)
-}
-
 fn absorb_blocks<T, D>(
     mut digest: D,
     input: impl IntoIterator<Item = T>,
@@ -198,8 +190,7 @@ where
 
 fn new_state(encoded_len: usize) -> State {
     let encoded_len = u32::try_from(encoded_len).expect("LMCS encoded length exceeds u32");
-    let cv = framing::init_cv(LmcsLeafDomain::TAG.as_u32(), [encoded_len, 0, 0]);
-    encoding::pack_cv_to_u64s(cv)
+    framing::init_u64_cv(LmcsLeafDomain::TAG.as_u32(), [encoded_len, 0, 0])
 }
 
 fn new_packed_state(encoded_len: usize) -> PackedState {
@@ -226,11 +217,8 @@ mod tests {
     use super::*;
     use crate::{
         Word,
-        hash::eidos::{Eidos, compression::compress_felt_block_for_test},
-        stark::{
-            hasher::{Alignable, StatefulHasher},
-            lmcs::{Lmcs, LmcsTree},
-            matrix::RowMajorMatrix,
+        hash::eidos::{
+            Eidos, compression::compress_felt_block_for_test, pack_digest_lanes, unpack_digest_lane,
         },
     };
 
@@ -252,6 +240,8 @@ mod tests {
             .into_elements()
             .map(|value| value.as_canonical_u64());
         assert_eq!(scalar, expected);
+        assert_eq!(scalar.map(|value| value >> 63), [1, 1, 1, 0]);
+        assert_eq!(hasher.hash_rows(core::iter::once(&[] as &[Felt])), expected);
 
         let packed_state = new_packed_state(0);
         let packed = <EidosLmcsHasher as StatefulHasher<PackedFelt, PackedDigest>>::squeeze(
@@ -260,6 +250,26 @@ mod tests {
         );
         for lane in 0..PACKED_LANES {
             assert_eq!(unpack_digest_lane(&packed, lane), expected);
+        }
+    }
+
+    #[test]
+    fn empty_rows_preserve_initial_and_intermediate_states() {
+        let hasher = EidosLmcsHasher;
+        let mut scalar = new_state(BLOCK_LEN);
+        let mut packed = new_packed_state(BLOCK_LEN);
+
+        for absorb_block in [false, true] {
+            if absorb_block {
+                hasher.absorb_into(&mut scalar, [Felt::ONE; BLOCK_LEN]);
+                hasher.absorb_into(&mut packed, [[Felt::ONE; PACKED_LANES]; BLOCK_LEN]);
+            }
+            let scalar_before = scalar;
+            let packed_before = packed;
+            hasher.absorb_into(&mut scalar, core::iter::empty::<Felt>());
+            hasher.absorb_into(&mut packed, core::iter::empty::<PackedFelt>());
+            assert_eq!(scalar, scalar_before);
+            assert_eq!(packed, packed_before);
         }
     }
 
@@ -315,24 +325,29 @@ mod tests {
 
         assert_eq!(
             left,
-            [7975491762537237790, 210725808216452534, 809262867721008121, 4612689512912990922,],
+            [
+                3918243956146598221,
+                897906922062776109,
+                3378367372491488114,
+                5692382823531614453,
+            ],
         );
         assert_eq!(
             right,
             [
-                3235890721826482854,
-                5501488662693794106,
-                7516676704806885018,
-                6369515668133163107,
+                9154573482336700562,
+                6545812582309301820,
+                5687666513979918889,
+                8387665454715395271,
             ],
         );
         assert_eq!(
             root,
             [
-                2202331962719226590,
-                2302273434923287409,
-                7081266703261990827,
-                2694702893234644687,
+                3435579172312273559,
+                4596428526797861920,
+                4255471116642818765,
+                3200963824415111372,
             ],
         );
     }
@@ -397,37 +412,6 @@ mod tests {
                 "LMCS digest changed field semantics at input length {len}",
             );
         }
-    }
-
-    #[test]
-    fn lmcs_paths_bind_the_sum_of_independently_padded_rows() {
-        let first = (1..=3).map(Felt::new_unchecked).collect::<Vec<_>>();
-        let second = (4..=12).map(Felt::new_unchecked).collect::<Vec<_>>();
-        let matrices = vec![
-            RowMajorMatrix::new(first.clone(), first.len()),
-            RowMajorMatrix::new(second.clone(), second.len()),
-        ];
-        let lmcs = config();
-
-        let hasher = EidosLmcsHasher;
-        let mut expected_state = new_state(24);
-        <EidosLmcsHasher as StatefulHasher<Felt, Digest>>::absorb_into(
-            &hasher,
-            &mut expected_state,
-            first.iter().copied(),
-        );
-        <EidosLmcsHasher as StatefulHasher<Felt, Digest>>::absorb_into(
-            &hasher,
-            &mut expected_state,
-            second.iter().copied(),
-        );
-
-        let leaf = lmcs.hash([first.as_slice(), second.as_slice()]);
-        assert_eq!(*leaf.as_ref(), expected_state);
-        let tree = lmcs.build_tree(matrices.clone());
-        let aligned_tree = lmcs.build_aligned_tree(matrices);
-        assert_eq!(tree.root(), leaf);
-        assert_eq!(aligned_tree.root(), leaf);
     }
 
     #[test]
@@ -516,13 +500,5 @@ mod tests {
         Eidos::merge(&[left, right])
             .into_elements()
             .map(|value| value.as_canonical_u64())
-    }
-
-    fn pack_digest_lanes(lanes: &[Digest; PACKED_LANES]) -> PackedDigest {
-        array::from_fn(|word| array::from_fn(|lane| lanes[lane][word]))
-    }
-
-    fn unpack_digest_lane(digest: &PackedDigest, lane: usize) -> Digest {
-        array::from_fn(|word| digest[word][lane])
     }
 }

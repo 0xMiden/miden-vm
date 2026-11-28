@@ -236,14 +236,10 @@ impl crate::prettier::PrettyPrint for ConstantExpr {
             ),
             Self::BinaryOp { op, lhs, rhs, .. } => {
                 let precedence = op.precedence();
-                let single_line = lhs.render_operand(precedence, false)
+                // A newline outside parentheses terminates a constant declaration.
+                lhs.render_operand(precedence, false)
                     + display(op)
-                    + rhs.render_operand(precedence, true);
-                let multi_line = lhs.render_operand(precedence, false)
-                    + nl()
-                    + display(op)
-                    + rhs.render_operand(precedence, true);
-                single_line | multi_line
+                    + rhs.render_operand(precedence, true)
             },
         }
     }

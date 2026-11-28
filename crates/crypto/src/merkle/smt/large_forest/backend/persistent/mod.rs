@@ -74,6 +74,7 @@ use crate::{
                     AppliedLineageMutation, LineageMutation, LineageMutationKind, MutationSet,
                 },
             },
+            persistent_hash::ensure_hash_scheme,
         },
     },
 };
@@ -548,7 +549,7 @@ impl PersistentBackend {
     /// - [`BackendError::Internal`] if the database cannot be accessed at any point.
     /// - [`BackendError::Merkle`] if an error occurs with the merkle tree semantics.
     /// - [`BackendError::UnknownLineage`] if the provided `lineage` is not known by this backend.
-    pub(crate) fn update_tree(
+    fn update_tree(
         &mut self,
         lineage: LineageId,
         new_version: VersionId,
@@ -688,13 +689,18 @@ impl PersistentBackend {
     /// Constructs an instance of the persistent backend, either opening or creating the data store
     /// at the location specified in the `config`.
     ///
+    /// Stored hashes must match the current native hash construction. Incompatible or unmarked
+    /// nonempty databases must be rebuilt from their key-value entries.
+    ///
     /// # Errors
     ///
     /// - [`BackendError::CorruptedData`] if data corruption is encountered when loading the forest
     ///   from disk.
-    /// - [`BackendError::Internal`] if the backend cannot be started up properly.
+    /// - [`BackendError::Internal`] if the database uses an incompatible hash construction or the
+    ///   backend cannot be started up properly.
     pub fn load(config: Config) -> Result<Self> {
         let db = Arc::new(Self::build_db_with_options(&config)?);
+        ensure_hash_scheme(&db).map_err(BackendError::internal_from)?;
         let lineages = Arc::new(Self::read_all_metadata(&db)?);
         let sync_writes = config.sync_writes;
 
@@ -702,7 +708,7 @@ impl PersistentBackend {
     }
 
     // Triggers copy-on-write: clones the shared lineages map only if other references exist.
-    pub(crate) fn lineages_mut(&mut self) -> &mut HashMap<LineageId, TreeMetadata> {
+    fn lineages_mut(&mut self) -> &mut HashMap<LineageId, TreeMetadata> {
         Arc::make_mut(&mut self.lineages)
     }
 

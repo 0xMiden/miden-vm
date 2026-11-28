@@ -14,8 +14,8 @@ use miden_utils_testing::crypto::{init_merkle_leaves, init_merkle_store};
 
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
 use crate::{
-    BaseHost, DefaultHost, FastProcessor, KernelDescriptor, LoadedMastForest, ONE, ProcessorState,
-    Program, StackInputs, SyncHost, Word, ZERO,
+    BaseHost, DefaultHost, KernelDescriptor, LoadedMastForest, MastForestLoadError, ONE, Processor,
+    ProcessorState, Program, SyncHost, Word, ZERO,
     advice::{AdviceInputs, AdviceMap, AdviceMutation},
     event::{EventError, EventHandler, EventName, TraceError, TraceHandler},
     operation::Operation,
@@ -120,8 +120,11 @@ impl BaseHost for MalformedMastForestHost {
 }
 
 impl SyncHost for MalformedMastForestHost {
-    fn get_mast_forest(&self, _node_digest: &Word) -> Option<LoadedMastForest> {
-        Some(LoadedMastForest::new(self.mast_forest.clone()))
+    fn get_mast_forest(
+        &self,
+        _node_digest: &Word,
+    ) -> Result<Option<LoadedMastForest>, MastForestLoadError> {
+        Ok(Some(LoadedMastForest::new(self.mast_forest.clone())))
     }
 
     fn on_event(&mut self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
@@ -187,13 +190,12 @@ fn test_diagnostic_advice_map_key_already_present() {
 
     let program = Program::new(mast_forest.into(), basic_block_id);
 
-    let processor = FastProcessor::new(StackInputs::default());
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = Processor::new(&program).execute().run_sync(&mut host).unwrap_err();
 
     assert_diagnostic_lines!(
         err,
         "advice provider error at clock cycle",
-        "x value for key 0x0000000000000000000000000000000000000000000000000000000000000000 already present in the advice map: previous values were '[0]', attempted replacement values were '[1]'"
+        "error: value for key 0x0000000000000000000000000000000000000000000000000000000000000000 already present in the advice map: previous values were '[0]', attempted replacement values were '[1]'"
     );
 }
 
@@ -212,12 +214,11 @@ fn test_diagnostic_advice_map_key_not_found_1() {
     assert_diagnostic_lines!(
         err,
         "value for key 0x0100000000000000020000000000000000000000000000000000000000000000 not present in the advice map",
-        regex!(r#",-\[test[\d]+:3:23\]"#),
+        regex!(r#"(?m)--> test[\d]+:3:23$"#),
         " 2 |         begin",
         " 3 |             swap swap adv.push_mapval",
         "   :                       ^^^^^^^^^^^^^^^",
-        "4 |         end",
-        "   `----"
+        "4 |         end"
     );
 }
 
@@ -233,12 +234,11 @@ fn test_diagnostic_advice_map_key_not_found_2() {
     assert_diagnostic_lines!(
         err,
         "value for key 0x0100000000000000020000000000000000000000000000000000000000000000 not present in the advice map",
-        regex!(r#",-\[test[\d]+:3:23\]"#),
+        regex!(r#"(?m)--> test[\d]+:3:23$"#),
         " 2 |         begin",
         " 3 |             swap swap adv.push_mapvaln",
         "   :                       ^^^^^^^^^^^^^^^^",
-        "4 |         end",
-        "   `----"
+        "4 |         end"
     );
 }
 
@@ -263,23 +263,24 @@ fn test_diagnostic_host_event_error_uses_emit_location() {
     let mut host = DefaultHost::default().with_source_manager(source_manager);
     host.register_handler(event.clone(), Arc::new(AlwaysFailEventHandler)).unwrap();
 
-    let processor = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits");
-    let err = processor
-        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+    let err = Processor::new(&program)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
+            &debug_info,
+            None,
+        )))
+        .execute()
+        .run_sync(&mut host)
         .expect_err("expected error");
     #[rustfmt::skip]
     assert_diagnostic_lines!(
         err,
-        format!("  x error during processing of event '{event}' (ID: {})", event.to_event_id()),
-        "  `-> dummy host event failure",
-        regex!(r#",-\[.*:3:20\]"#),
+        format!("error: error during processing of event '{event}' (ID: {})", event.to_event_id()),
+        "caused by: dummy host event failure",
+        regex!(r#"(?m)--> .*:3:20$"#),
         " 2 |         begin",
       r#" 3 |             push.1 emit.event("test::host_event_error")"#,
         "   :                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -304,23 +305,24 @@ fn test_diagnostic_host_trace_error_uses_trace_location() {
     host.register_trace_handler(trace.clone(), Arc::new(AlwaysFailTraceHandler))
         .unwrap();
 
-    let processor = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits");
-    let err = processor
-        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+    let err = Processor::new(&program)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
+            &debug_info,
+            None,
+        )))
+        .execute()
+        .run_sync(&mut host)
         .expect_err("expected error");
     #[rustfmt::skip]
     assert_diagnostic_lines!(
         err,
         // Name and id of the user defined trace event are shown
-        format!("  x error during processing of event '{trace}' (ID: {trace_id})"),
-        "  `-> dummy host trace failure",
-        regex!(r#",-\[.*:3:13\]"#),
+        format!("error: error during processing of event '{trace}' (ID: {trace_id})"),
+        "caused by: dummy host trace failure",
+        regex!(r#"(?m)--> .*:3:13$"#),
       r#" 3 |             trace.event("test::host_trace_error")"#,
         regex!(r#":\s+\^+"#),
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -342,22 +344,24 @@ fn test_diagnostic_host_event_advice_error_uses_emit_location() {
     let mut host = DefaultHost::default().with_source_manager(source_manager);
     host.register_handler(event, Arc::new(DuplicateMapMutationHandler)).unwrap();
 
-    let processor = FastProcessor::new(StackInputs::default())
+    let err = Processor::new(&program)
         .with_advice(AdviceInputs::default().with_map([(Word::default(), vec![ZERO])]))
-        .expect("advice inputs should fit advice map limits");
-    let err = processor
-        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
+            &debug_info,
+            None,
+        )))
+        .execute()
+        .run_sync(&mut host)
         .expect_err("expected error");
     #[rustfmt::skip]
     assert_diagnostic_lines!(
         err,
-        "  x value for key 0x0000000000000000000000000000000000000000000000000000000000000000 already present in the advice map: previous values were '[0]', attempted replacement values were '[1]'",
-        regex!(r#",-\[.*:3:20\]"#),
+        "error: value for key 0x0000000000000000000000000000000000000000000000000000000000000000 already present in the advice map: previous values were '[0]', attempted replacement values were '[1]'",
+        regex!(r#"(?m)--> .*:3:20$"#),
         " 2 |         begin",
       r#" 3 |             push.1 emit.event("test::host_event_advice_error")"#,
         "   :                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -375,13 +379,12 @@ fn test_diagnostic_advice_stack_read_failed() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x advice stack read failed",
-        regex!(r#",-\[test[\d]+:3:18\]"#),
+        "error: advice stack read failed",
+        regex!(r#"(?m)--> test[\d]+:3:18$"#),
         " 2 |         begin",
         " 3 |             swap adv_push",
         "   :                  ^^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -399,13 +402,12 @@ fn test_diagnostic_divide_by_zero_1() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x division by zero: divisor must be non-zero for division or modulo operations",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        "error: division by zero: divisor must be non-zero for division or modulo operations",
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             div",
         "   :             ^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -420,13 +422,12 @@ fn test_diagnostic_divide_by_zero_2() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x division by zero: divisor must be non-zero for division or modulo operations",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        "error: division by zero: divisor must be non-zero for division or modulo operations",
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             u32div",
         "   :             ^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -445,12 +446,11 @@ fn test_diagnostic_procedure_not_found_dynexec() {
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x0000000000000000000000000000000000000000000000000000000000000000 could not be found",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             dynexec",
         "   :             ^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -466,12 +466,11 @@ fn test_diagnostic_procedure_not_found_dyncall() {
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x0000000000000000000000000000000000000000000000000000000000000000 could not be found",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             dyncall",
         "   :             ^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -492,13 +491,12 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x assertion failed with error code: 0",
-        regex!(r#",-\[test[\d]+:4:13\]"#),
+        "error: assertion failed with error code: 0",
+        regex!(r#"(?m)--> test[\d]+:4:13$"#),
         " 3 |             push.1.2",
         " 4 |             assertz",
         "   :             ^^^^^^^",
-        " 5 |             push.3.4",
-        "   `----"
+        " 5 |             push.3.4"
     );
 
     // With error message
@@ -521,13 +519,12 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x assertion failed with error message: some error message",
-        regex!(r#",-\[test[\d]+:4:13\]"#),
+        "error: assertion failed with error message: some error message",
+        regex!(r#"(?m)--> test[\d]+:4:13$"#),
         " 3 |             push.1.2",
         r#" 4 |             assertz.err="some error message""#,
         "   :             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
-        " 5 |             push.3.4",
-        "   `----"
+        " 5 |             push.3.4"
     );
 
     // With error message as constant
@@ -543,13 +540,12 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x assertion failed with error message: some error message",
-        regex!(r#",-\[test[\d]+:5:13\]"#),
+        "error: assertion failed with error message: some error message",
+        regex!(r#"(?m)--> test[\d]+:5:13$"#),
         " 4 |             push.1.2",
         " 5 |             assertz.err=ERR_MSG",
         "   :             ^^^^^^^^^^^^^^^^^^^",
-        " 6 |             push.3.4",
-        "   `----"
+        " 6 |             push.3.4"
     );
 }
 
@@ -581,17 +577,15 @@ fn test_diagnostic_merkle_path_verification_failed() {
 
     let build_test = build_test_by_mode!(true, source, &stack_inputs, &[], store);
     let err = build_test.execute().expect_err("expected error");
-    // With LE sponge, the root hash changes and lookup fails at root level instead of path
-    // verification
+    // The deliberately wrong index changes the derived root key, so the Merkle-store lookup fails.
     assert_diagnostic_lines!(
         err,
         "failed to lookup value in Merkle store",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             mtree_verify",
         "   :             ^^^^^^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 
     // With message - same error format change applies
@@ -631,12 +625,11 @@ fn test_diagnostic_merkle_path_verification_failed() {
     assert_diagnostic_lines!(
         err,
         "failed to lookup value in Merkle store",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             mtree_verify.err=\"some error message\"",
         "   :             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 
     // With a node-first stack, the advice lookup succeeds and Merkle verification fails.
@@ -660,12 +653,11 @@ fn test_diagnostic_merkle_path_verification_failed() {
         err,
         "merkle path verification failed",
         "error message: some error message",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             mtree_verify.err=\"some error message\"",
         "   :             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -686,13 +678,12 @@ fn test_diagnostic_invalid_merkle_tree_node_index() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x provided node index 16 is out of bounds for a merkle tree node at depth 4",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        "error: provided node index 16 is out of bounds for a merkle tree node at depth 4",
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             mtree_get",
         "   :             ^^^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -717,13 +708,12 @@ fn test_diagnostic_invalid_stack_depth_on_return_call() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x when returning from a call, stack depth must be 16, but was 17",
-        regex!(r#",-\[test[\d]+:7:13\]"#),
+        "error: when returning from a call, stack depth must be 16, but was 17",
+        regex!(r#"(?m)--> test[\d]+:7:13$"#),
         " 6 |         begin",
         " 7 |             call.foo",
         "   :             ^^^^^^^^",
-        " 8 |         end",
-        "   `----"
+        " 8 |         end"
     );
 }
 
@@ -746,13 +736,12 @@ fn test_diagnostic_invalid_stack_depth_on_return_dyncall() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x when returning from a call, stack depth must be 16, but was 17",
-        regex!(r#",-\[test[\d]+:8:13\]"#),
+        "error: when returning from a call, stack depth must be 16, but was 17",
+        regex!(r#"(?m)--> test[\d]+:8:13$"#),
         " 7 |             procref.foo mem_storew_le.100 dropw push.100",
         " 8 |             dyncall",
         "   :             ^^^^^^^",
-        " 9 |         end",
-        "   `----"
+        " 9 |         end"
     );
 }
 
@@ -771,13 +760,12 @@ fn test_diagnostic_log_argument_zero() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x ilog2 requires a non-zero argument",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        "error: ilog2 requires a non-zero argument",
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             ilog2",
         "   :             ^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -799,12 +787,11 @@ fn test_diagnostic_unaligned_word_access() {
     assert_diagnostic_lines!(
         err,
         "word access at memory address 3 in context 0 is unaligned: word accesses require addresses that are multiples of 4",
-        regex!(r#",-\[test[\d]+:4:22\]"#),
+        regex!(r#"(?m)--> test[\d]+:4:22$"#),
         " 3 |         begin",
         " 4 |             exec.foo mem_storew_be.3",
         "   :                      ^^^^^^^^^^^^^^^",
-        " 5 |         end",
-        "   `----"
+        " 5 |         end"
     );
 
     // mem_loadw_be
@@ -819,12 +806,11 @@ fn test_diagnostic_unaligned_word_access() {
     assert_diagnostic_lines!(
         err,
         "word access at memory address 3 in context 0 is unaligned: word accesses require addresses that are multiples of 4",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             mem_loadw_be.3",
         "   :             ^^^^^^^^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -842,12 +828,11 @@ fn test_diagnostic_address_out_of_bounds() {
     assert_diagnostic_lines!(
         err,
         "memory address cannot exceed 2^32 but was 4294967296",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             mem_store",
         "   :             ^^^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 
     // mem_storew_be
@@ -862,12 +847,11 @@ fn test_diagnostic_address_out_of_bounds() {
     assert_diagnostic_lines!(
         err,
         "memory address cannot exceed 2^32 but was 4294967296",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             mem_storew_be",
         "   :             ^^^^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 
     // mem_load
@@ -882,12 +866,11 @@ fn test_diagnostic_address_out_of_bounds() {
     assert_diagnostic_lines!(
         err,
         "memory address cannot exceed 2^32 but was 4294967296",
-        regex!(r#",-\[test[\d]+:3:23\]"#),
+        regex!(r#"(?m)--> test[\d]+:3:23$"#),
         " 2 |         begin",
         " 3 |             swap swap mem_load push.1 drop",
         "   :                       ^^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 
     // mem_loadw_be
@@ -902,12 +885,11 @@ fn test_diagnostic_address_out_of_bounds() {
     assert_diagnostic_lines!(
         err,
         "memory address cannot exceed 2^32 but was 4294967296",
-        regex!(r#",-\[test[\d]+:3:23\]"#),
+        regex!(r#"(?m)--> test[\d]+:3:23$"#),
         " 2 |         begin",
         " 3 |             swap swap mem_loadw_be push.1 drop",
         "   :                       ^^^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -947,12 +929,11 @@ fn test_diagnostic_merkle_store_lookup_failed() {
     assert_diagnostic_lines!(
         err,
         "failed to lookup value in Merkle store",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             mtree_set",
         "   :             ^^^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -984,6 +965,11 @@ fn test_diagnostic_procedure_not_found_call() {
     let library = Assembler::new(source_manager.clone())
         .assemble_library("lib", lib_module, None::<Box<Module>>)
         .unwrap();
+    let missing_root = library
+        .mast_forest()
+        .procedure_digests()
+        .next()
+        .expect("library must contain dummy_proc");
 
     let package = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
@@ -995,21 +981,22 @@ fn test_diagnostic_procedure_not_found_call() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits");
-    let err = processor
-        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+    let err = Processor::new(&program)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
+            &debug_info,
+            None,
+        )))
+        .execute()
+        .run_sync(&mut host)
         .unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
-        regex!(r#",-\[.*:5:13\]"#),
+        format!("procedure with root digest {missing_root} could not be found"),
+        regex!(r#"(?m)--> .*:5:13$"#),
         " 4 |         begin",
         " 5 |             call.bar::dummy_proc",
         "   :             ^^^^^^^^^^^^^^^^^^^^",
-        " 6 |         end",
-        "   `----"
+        " 6 |         end"
     );
 }
 
@@ -1039,6 +1026,11 @@ fn test_diagnostic_procedure_not_found_join() {
     let library = Assembler::new(source_manager.clone())
         .assemble_library("library", lib_module, None::<Box<Module>>)
         .unwrap();
+    let missing_root = library
+        .mast_forest()
+        .procedure_digests()
+        .next()
+        .expect("library must contain dummy_proc");
 
     let package = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
@@ -1050,23 +1042,27 @@ fn test_diagnostic_procedure_not_found_join() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits");
-    let err = processor
-        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+    let err = Processor::new(&program)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
+            &debug_info,
+            None,
+        )))
+        .execute()
+        .run_sync(&mut host)
         .unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
-        regex!(r#",-\[.*:4:9\]"#),
+        format!("procedure with root digest {missing_root} could not be found"),
+        regex!(r#"(?m)--> .*:4:9$"#),
         " 3 |",
-        " 4 | ,->         begin",
-        " 5 | |               exec.bar::dummy_proc",
-        " 6 | |               call.bar::dummy_proc",
-        " 7 | `->         end",
-        " 8 |",
-        "   `----"
+        " 4 |         begin",
+        "   :         ^^^^^",
+        " 5 |             exec.bar::dummy_proc",
+        "   : ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+        " 6 |             call.bar::dummy_proc",
+        " 7 |         end",
+        "   : ^^^^^^^^^^^",
+        " 8 |"
     );
 }
 
@@ -1098,6 +1094,11 @@ fn test_diagnostic_procedure_not_found_loop() {
     let library = Assembler::new(source_manager.clone())
         .assemble_library("library", lib_module, None::<Box<Module>>)
         .unwrap();
+    let missing_root = library
+        .mast_forest()
+        .procedure_digests()
+        .next()
+        .expect("library must contain dummy_proc");
 
     let package = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
@@ -1109,22 +1110,25 @@ fn test_diagnostic_procedure_not_found_loop() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits");
-    let err = processor
-        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+    let err = Processor::new(&program)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
+            &debug_info,
+            None,
+        )))
+        .execute()
+        .run_sync(&mut host)
         .unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
-        regex!(r#",-\[.*:6:13\]"#),
-        "  5 |                 push.1",
-        "  6 | ,->             while.true",
-        "  7 | |                   exec.bar::dummy_proc",
-        "  8 | `->             end",
-        "  9 |             end",
-        "    `----"
+        format!("procedure with root digest {missing_root} could not be found"),
+        regex!(r#"(?m)--> .*:6:13$"#),
+        " 5 |             push.1",
+        " 6 |             while.true",
+        "   :             ^^^^^^^^^^",
+        " 7 |                 exec.bar::dummy_proc",
+        " 8 |             end",
+        "   : ^^^^^^^^^^^^^^^",
+        " 9 |         end"
     );
 }
 
@@ -1158,6 +1162,11 @@ fn test_diagnostic_procedure_not_found_split() {
     let library = Assembler::new(source_manager.clone())
         .assemble_library("library", lib_module, None::<Box<Module>>)
         .unwrap();
+    let missing_root = library
+        .mast_forest()
+        .procedure_digests()
+        .next()
+        .expect("library must contain dummy_proc");
 
     let package = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
@@ -1169,24 +1178,27 @@ fn test_diagnostic_procedure_not_found_split() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits");
-    let err = processor
-        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+    let err = Processor::new(&program)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
+            &debug_info,
+            None,
+        )))
+        .execute()
+        .run_sync(&mut host)
         .unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
-        regex!(r#",-\[.*:6:13\]"#),
-        "  5 |                 push.1",
-        "  6 | ,->             if.true",
-        "  7 | |                   exec.bar::dummy_proc",
-        "  8 | |               else",
-        "  9 | |                   push.2",
-        " 10 | `->             end",
-        " 11 |             end",
-        "    `----"
+        format!("procedure with root digest {missing_root} could not be found"),
+        regex!(r#"(?m)--> .*:6:13$"#),
+        "  5 |             push.1",
+        "  6 |             if.true",
+        "    :             ^^^^^^^",
+        "  7 |                 exec.bar::dummy_proc",
+        "  8 |             else",
+        "  9 |                 push.2",
+        " 10 |             end",
+        "    : ^^^^^^^^^^^^^^^",
+        " 11 |         end"
     );
 }
 
@@ -1216,20 +1228,23 @@ fn test_diagnostic_malformed_mast_forest_in_host() {
         mast_forest: malformed_forest.into(),
     };
 
-    let processor = FastProcessor::new(StackInputs::default());
-    let err = processor
-        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+    let err = Processor::new(&program)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(
+            &debug_info,
+            None,
+        )))
+        .execute()
+        .run_sync(&mut host)
         .unwrap_err();
 
     assert_diagnostic_lines!(
         err,
-        "  x MAST forest in host indexed by procedure root 0x0000000000000000000000000000000000000000000000000000000000000000 doesn't contain that root",
-        regex!(r#",-\[.*:3:17\]"#),
+        "error: MAST forest in host indexed by procedure root 0x0000000000000000000000000000000000000000000000000000000000000000 doesn't contain that root",
+        regex!(r#"(?m)--> .*:3:17$"#),
         " 2 |             begin",
         " 3 |                 dyncall",
         "   :                 ^^^^^^^",
-        " 4 |             end",
-        "   `----"
+        " 4 |             end"
     );
 }
 
@@ -1247,13 +1262,12 @@ fn test_diagnostic_not_binary_value_split_node() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x if statement expected a binary value on top of the stack, but got 2",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        "error: if statement expected a binary value on top of the stack, but got 2",
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             if.true swap else dup end",
         "   :             ^^^^^^^^^^^^^^^^^^^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -1273,13 +1287,12 @@ fn test_diagnostic_not_binary_value_loop_node() {
     // masm_errors_consistency case_2 for that path.
     assert_diagnostic_lines!(
         err,
-        "  x if statement expected a binary value on top of the stack, but got 2",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        "error: if statement expected a binary value on top of the stack, but got 2",
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             while.true swap dup end",
         "   :             ^^^^^^^^^^^^^^^^^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -1295,13 +1308,12 @@ fn test_diagnostic_not_binary_value_cswap_cswapw() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x operation expected a binary value, but got 2",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        "error: operation expected a binary value, but got 2",
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             cswap",
         "   :             ^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 
     // cswapw
@@ -1314,13 +1326,12 @@ fn test_diagnostic_not_binary_value_cswap_cswapw() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x operation expected a binary value, but got 2",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        "error: operation expected a binary value, but got 2",
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             cswapw",
         "   :             ^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -1336,13 +1347,12 @@ fn test_diagnostic_not_binary_value_binary_ops() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x operation expected a binary value, but got 2",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        "error: operation expected a binary value, but got 2",
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             and",
         "   :             ^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 
     // or
@@ -1355,13 +1365,12 @@ fn test_diagnostic_not_binary_value_binary_ops() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x operation expected a binary value, but got 2",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        "error: operation expected a binary value, but got 2",
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             or",
         "   :             ^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -1381,13 +1390,12 @@ fn test_diagnostic_not_u32_value() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x operation expected u32 values, but got values: [4294967296]",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        "error: operation expected u32 values, but got values: [4294967296]",
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             u32and",
         "   :             ^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 
     // u32madd
@@ -1401,13 +1409,12 @@ fn test_diagnostic_not_u32_value() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x operation expected u32 values, but got values: [4294967296]",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        "error: operation expected u32 values, but got values: [4294967296]",
+        regex!(r#"(?m)--> test[\d]+:3:13$"#),
         " 2 |         begin",
         " 3 |             u32overflowing_add3",
         "   :             ^^^^^^^^^^^^^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -1434,6 +1441,11 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
     let kernel_library = Assembler::new(source_manager.clone())
         .assemble_kernel("kernel", kernel, None)
         .unwrap();
+    let missing_root = kernel_library
+        .mast_forest()
+        .procedure_digests()
+        .next()
+        .expect("kernel must contain dummy_proc");
 
     let program = {
         let package = Assembler::with_kernel(source_manager.clone(), kernel_library.into())
@@ -1456,21 +1468,19 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits");
-    let err = processor
-        .execute_with_package_debug_info_sync(&program.0, &program.1, &mut host)
+    let err = Processor::new(&program.0)
+        .with_source_context(Some(crate::PackageSourceDebugContext::new_optional(&program.1, None)))
+        .execute()
+        .run_sync(&mut host)
         .unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "syscall failed: procedure with root 0xcf69b6e65f586c6957de45a4a4188a9582251aca77a7d441cd040bfbcdfb192a was not found in the kernel",
-        regex!(r#",-\[.*:3:13\]"#),
+        format!("syscall failed: procedure with root {missing_root} was not found in the kernel"),
+        regex!(r#"(?m)--> .*:3:13$"#),
         " 2 |         begin",
         " 3 |             syscall.dummy_proc",
         "   :             ^^^^^^^^^^^^^^^^^^",
-        " 4 |         end",
-        "   `----"
+        " 4 |         end"
     );
 }
 
@@ -1490,7 +1500,7 @@ fn test_assert_message_without_debug_info_reports_error_code() {
     assert_diagnostic_lines!(
         err,
         format!(
-            "  x assertion failed with error code: {}",
+            "error: assertion failed with error code: {}",
             error_code_from_msg("Value is not zero")
         )
     );

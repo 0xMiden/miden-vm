@@ -33,6 +33,10 @@ use crate::{
 /// Forest sizes are capped at [`Forest::MAX_LEAVES`]. Use [`Forest::new`] or
 /// [`Forest::append_leaf`] to enforce the limit.
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct Forest(usize);
 
 impl Forest {
@@ -114,7 +118,7 @@ impl Forest {
     /// This relies on the `Forest` invariant that `num_leaves() <= Forest::MAX_LEAVES`.
     /// The internal assertion is a defensive check and should be unreachable for values created
     /// through validated constructors/deserializers.
-    pub const fn num_nodes(self) -> usize {
+    pub(crate) const fn num_nodes(self) -> usize {
         assert!(self.0 <= Self::MAX_LEAVES);
         if self.0 <= usize::MAX / 2 {
             self.0 * 2 - self.num_trees()
@@ -135,17 +139,13 @@ impl Forest {
     /// # Panics
     ///
     /// This will panic if the forest is empty.
-    pub fn largest_tree_height_unchecked(self) -> usize {
+    pub(crate) fn largest_tree_height_unchecked(self) -> usize {
         // ilog2 is computed with leading zeros, which itself is computed with the intrinsic ctlz.
         // [Rust 1.67.0] x86 uses the `bsr` instruction. AArch64 uses the `clz` instruction.
         self.0.ilog2() as usize
     }
 
     /// Returns the height (bit position) of the largest tree in the forest.
-    ///
-    /// If the forest cannot be empty, use [`largest_tree_height_unchecked`] for performance.
-    ///
-    /// [`largest_tree_height_unchecked`]: Self::largest_tree_height_unchecked
     pub fn largest_tree_height(self) -> Option<usize> {
         if self.is_empty() {
             return None;
@@ -159,7 +159,7 @@ impl Forest {
     /// # Panics
     ///
     /// This will panic if the forest is empty.
-    pub fn largest_tree_unchecked(self) -> Self {
+    pub(crate) fn largest_tree_unchecked(self) -> Self {
         Self::with_height(self.largest_tree_height_unchecked())
     }
 
@@ -179,18 +179,13 @@ impl Forest {
     /// # Panics
     ///
     /// This will panic if the forest is empty.
-    pub fn smallest_tree_height_unchecked(self) -> usize {
+    pub(crate) fn smallest_tree_height_unchecked(self) -> usize {
         // Trailing_zeros is computed with the intrinsic cttz. [Rust 1.67.0] x86 uses the `bsf`
         // instruction. AArch64 uses the `rbit clz` instructions.
         self.0.trailing_zeros() as usize
     }
 
     /// Returns the height (bit position) of the smallest tree in the forest.
-    ///
-    /// If the forest cannot be empty, use [`smallest_tree_height_unchecked`] for better
-    /// performance.
-    ///
-    /// [`smallest_tree_height_unchecked`]: Self::smallest_tree_height_unchecked
     pub fn smallest_tree_height(self) -> Option<usize> {
         if self.is_empty() {
             return None;
@@ -204,7 +199,7 @@ impl Forest {
     /// # Panics
     ///
     /// This will panic if the forest is empty.
-    pub fn smallest_tree_unchecked(self) -> Self {
+    pub(crate) fn smallest_tree_unchecked(self) -> Self {
         Self::with_height(self.smallest_tree_height_unchecked())
     }
 
@@ -237,7 +232,7 @@ impl Forest {
     /// assert_eq!(range.trees_larger_than(1), Forest::new(0b0101_0100).unwrap());
     /// ```
     pub fn trees_larger_than(self, tree_idx: u32) -> Self {
-        let mask = high_bitmask(tree_idx + 1);
+        let mask = high_bitmask(tree_idx.saturating_add(1));
         Self::new(self.0 & mask).expect("forest size exceeds maximum")
     }
 
@@ -251,7 +246,7 @@ impl Forest {
     /// exactly one tree.
     ///
     /// For a non-panicking version of this function, see [`Forest::all_smaller_trees()`].
-    pub fn all_smaller_trees_unchecked(self) -> Self {
+    pub(crate) fn all_smaller_trees_unchecked(self) -> Self {
         debug_assert_eq!(self.num_trees(), 1);
         Self::new(self.0 - 1).expect("forest size exceeds maximum")
     }
@@ -261,7 +256,8 @@ impl Forest {
     ///
     /// If the forest cannot have more or less than one tree, use
     /// [`Forest::all_smaller_trees_unchecked()`] for performance.
-    pub fn all_smaller_trees(self) -> Option<Forest> {
+    #[cfg(test)]
+    pub(crate) fn all_smaller_trees(self) -> Option<Forest> {
         if self.num_trees() != 1 {
             return None;
         }
@@ -293,7 +289,7 @@ impl Forest {
     }
 
     /// Remove the single-node tree if present in the forest.
-    pub fn without_single_leaf(self) -> Self {
+    pub(crate) fn without_single_leaf(self) -> Self {
         // Clearing the lowest bit does not add leaves.
         Self(self.0 & (usize::MAX - 1))
     }
@@ -305,13 +301,13 @@ impl Forest {
     }
 
     /// Returns index of the forest tree for a specified leaf index.
-    pub fn tree_index(&self, leaf_idx: usize) -> usize {
+    pub(crate) fn tree_index(self, leaf_idx: usize) -> usize {
         let root = self
             .leaf_to_corresponding_tree(leaf_idx)
             .expect("position must be part of the forest");
         let smaller_tree_mask =
             Self::new(2_usize.pow(root) - 1).expect("forest size exceeds maximum");
-        let num_smaller_trees = (*self & smaller_tree_mask).num_trees();
+        let num_smaller_trees = (self & smaller_tree_mask).num_trees();
         self.num_trees() - num_smaller_trees - 1
     }
 
@@ -320,10 +316,6 @@ impl Forest {
     /// This function takes the smallest tree in this forest, "pretends" that it is a subtree of a
     /// fully balanced binary tree, and returns the in-order index of that balanced tree's root
     /// node.
-    ///
-    /// If the forest cannot be empty, use [`root_in_order_index_unchecked`] for performance.
-    ///
-    /// [`root_in_order_index_unchecked`]: Self::root_in_order_index_unchecked
     pub fn root_in_order_index(&self) -> Option<InOrderIndex> {
         if self.is_empty() {
             return None;
@@ -339,7 +331,7 @@ impl Forest {
     /// # Panics
     ///
     /// This will panic if the forest is empty, which has no trees and therefore no root index.
-    pub fn root_in_order_index_unchecked(&self) -> InOrderIndex {
+    pub(crate) fn root_in_order_index_unchecked(self) -> InOrderIndex {
         assert!(!self.is_empty(), "the empty forest has no root in-order index");
 
         // Count total size of all trees in the forest.
@@ -359,10 +351,6 @@ impl Forest {
     }
 
     /// Returns the in-order index of the rightmost element (the smallest tree).
-    ///
-    /// If the forest cannot be empty, use [`rightmost_in_order_index_unchecked`] for performance.
-    ///
-    /// [`rightmost_in_order_index_unchecked`]: Self::rightmost_in_order_index_unchecked
     pub fn rightmost_in_order_index(&self) -> Option<InOrderIndex> {
         if self.is_empty() {
             return None;
@@ -377,7 +365,7 @@ impl Forest {
     ///
     /// This will panic if the forest is empty, which has no elements and therefore no rightmost
     /// index.
-    pub fn rightmost_in_order_index_unchecked(&self) -> InOrderIndex {
+    pub(crate) fn rightmost_in_order_index_unchecked(self) -> InOrderIndex {
         assert!(!self.is_empty(), "the empty forest has no rightmost in-order index");
 
         // Count total size of all trees in the forest.
@@ -575,6 +563,30 @@ pub(crate) fn high_bitmask(bit: u32) -> usize {
 // SERIALIZATION
 // ================================================================================================
 
+#[cfg(any(test, feature = "arbitrary"))]
+mod forest_arbitrary {
+    use proptest::prelude::*;
+
+    use super::Forest;
+
+    impl Arbitrary for Forest {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader rejects sizes above MAX_LEAVES; bound by construction with the 0 and
+            // MAX_LEAVES edges represented.
+            prop_oneof![
+                Just(0usize),
+                Just(Forest::MAX_LEAVES),
+                any::<usize>().prop_map(|v| v % (Forest::MAX_LEAVES + 1))
+            ]
+            .prop_map(|num_leaves| Forest::new(num_leaves).expect("size is within the cap"))
+            .boxed()
+        }
+    }
+}
+
 impl Serializable for Forest {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.0.write_into(target);
@@ -667,5 +679,12 @@ mod tests {
     #[should_panic(expected = "no rightmost in-order index")]
     fn rightmost_in_order_index_unchecked_panics_on_the_empty_forest() {
         let _ = Forest::empty().rightmost_in_order_index_unchecked();
+    }
+
+    #[test]
+    fn trees_larger_than_max_returns_the_empty_forest() {
+        // No tree has an index larger than u32::MAX, so nothing survives the filter.
+        assert_eq!(Forest::new(5).unwrap().trees_larger_than(u32::MAX), Forest::new(0).unwrap());
+        assert_eq!(Forest::new(5).unwrap().trees_larger_than(1), Forest::new(0b100).unwrap());
     }
 }

@@ -686,16 +686,20 @@ fn test_ast_parsing_deferred_advice() -> Result<(), Report> {
     let context = SyntaxTestContext::new();
     let source = source_file!(
         &context,
-        "begin adv.register_deferred adv.register_deferred_data adv.evaluate_deferred adv.evaluate_deferred_tag adv.evaluate_deferred_payload end"
+        "begin adv.push_deferred_root adv.register_deferred adv.register_deferred_data adv.evaluate_deferred adv.evaluate_deferred_frame adv.evaluate_deferred_payload adv.export_deferred_witness end"
     );
     let forms = module!(begin!(
+        inst!(SysEvent(PushDeferredRoot)),
         inst!(SysEvent(DeferredRegister)),
         inst!(SysEvent(DeferredRegisterData)),
         inst!(SysEvent(DeferredEvaluate)),
-        inst!(SysEvent(DeferredEvaluateTag)),
-        inst!(SysEvent(DeferredEvaluatePayload))
+        inst!(SysEvent(DeferredEvaluateFrame)),
+        inst!(SysEvent(DeferredEvaluatePayload)),
+        inst!(SysEvent(DeferredExportWitness))
     ));
     assert_eq!(context.parse_forms(source)?, forms);
+    assert_eq!(PushDeferredRoot.to_string(), "push_deferred_root");
+    assert_eq!(DeferredExportWitness.to_string(), "export_deferred_witness");
     Ok(())
 }
 
@@ -953,11 +957,9 @@ fn test_unterminated_proc() {
     assert_parse_diagnostic_lines!(
         source,
         "syntax error",
-        regex!(r#",-\[test[\d]+:1:18\]"#),
+        regex!(r#"--> test[\d]+:1:18$"#),
         "1 | proc foo add mul begin push.1 end",
-        "  :                  ^^|^^",
-        "  :                    `-- expected `end` to close procedure before top-level item",
-        "`----"
+        "  :                  ^^^^^ expected `end` to close procedure before top-level item"
     );
 }
 
@@ -970,18 +972,14 @@ fn test_unterminated_if() {
         source,
         "invalid syntax",
         "help: Multiple syntax errors were identified, see diagnostics for more details",
-        "Error:   x syntax error",
-        regex!(r#",-\[test[\d]+:1:32\]"#),
+        "error: syntax error",
+        regex!(r#"--> test[\d]+:1:32$"#),
         "1 | proc foo add mul if.true add.2 begin push.1 end",
-        "  :                                ^^|^^",
-        "  :                                  `-- expected `end` to close `if` before top-level item",
-        "`----",
-        "Error:   x syntax error",
-        regex!(r#",-\[test[\d]+:1:32\]"#),
+        "  :                                ^^^^^ expected `end` to close `if` before top-level item",
+        "error: syntax error",
+        regex!(r#"--> test[\d]+:1:32$"#),
         "1 | proc foo add mul if.true add.2 begin push.1 end",
-        "  :                                ^^|^^",
-        "  :                                  `-- expected `end` to close procedure before top-level item",
-        "`----"
+        "  :                                ^^^^^ expected `end` to close procedure before top-level item"
     );
 }
 
@@ -993,10 +991,9 @@ fn test_invalid_mapvaln_pad() {
     assert_parse_diagnostic_lines!(
         source,
         "invalid padding value for the `adv.push_mapvaln` instruction: 3",
-        regex!(r#",-\[test[\d]+:1:24\]"#),
+        regex!(r#"--> test[\d]+:1:24$"#),
         "1 | begin adv.push_mapvaln.3 end",
         "  :                        ^",
-        "`----",
         "help: valid padding values are 0, 4, and 8"
     );
 }
@@ -1152,7 +1149,7 @@ fn test_ast_parsing_module_docs_fail() {
         .expect_err("expected docs-only source to produce an unused-docstring warning");
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(error));
-    assert!(rendered.contains("Warning:   ! unused docstring"), "{rendered}");
+    assert!(rendered.contains("warning: unused docstring"), "{rendered}");
     assert!(rendered.contains("#! orphaned module doc"), "{rendered}");
 
     let source = source_file!(
@@ -1174,13 +1171,12 @@ fn test_ast_parsing_module_docs_fail() {
         source,
         "syntax error",
         "help: see emitted diagnostics for details",
-        "Warning:   ! unused docstring",
-        regex!(r#",-\[test[\d]+:4:5\]"#),
+        "warning: unused docstring",
+        regex!(r#"--> test[\d]+:4:5$"#),
         " 3 |",
         " 4 |     #! orphaned doc",
         "   :     ^^^^^^^^^^^^^^^",
         " 5 |",
-        "   `----",
         "help: this docstring is immediately followed by at least one empty line, then another docstring, if you intended these to be a single docstring, you should remove the empty lines"
     );
     let source = source_file!(
@@ -1199,13 +1195,12 @@ fn test_ast_parsing_module_docs_fail() {
         source,
         "syntax error",
         "help: see emitted diagnostics for details",
-        "Warning:   ! unused docstring",
-        regex!(r#",-\[test[\d]+:6:5\]"#),
+        "warning: unused docstring",
+        regex!(r#"--> test[\d]+:6:5$"#),
         " 5 |",
         " 6 |     #! trailing doc",
         "   :     ^^^^^^^^^^^^^^^",
         " 7 |",
-        "   `----",
         "help: trailing docstrings are useless"
     );
 
@@ -1229,13 +1224,12 @@ fn test_ast_parsing_module_docs_fail() {
         source,
         "syntax error",
         "help: see emitted diagnostics for details",
-        "Warning:   ! unused docstring",
-        regex!(r#",-\[test[\d]+:10:5\]"#),
+        "warning: unused docstring",
+        regex!(r#"--> test[\d]+:10:5$"#),
         " 9 |",
         "10 |     #! malformed doc",
         "   :     ^^^^^^^^^^^^^^^^",
         "11 |",
-        "   `----",
         "help: trailing docstrings are useless"
     );
 
@@ -1257,13 +1251,12 @@ fn test_ast_parsing_module_docs_fail() {
         source,
         "syntax error",
         "help: see emitted diagnostics for details",
-        "Warning:   ! unused docstring",
-        regex!(r#",-\[test[\d]+:8:5\]"#),
+        "warning: unused docstring",
+        regex!(r#"--> test[\d]+:8:5$"#),
         "7 |",
         "8 |     #! malformed doc",
         "  :     ^^^^^^^^^^^^^^^^",
         "9 |",
-        "  `----",
         "help: trailing docstrings are useless"
     );
 
@@ -1300,13 +1293,12 @@ fn test_ast_parsing_module_docs_fail() {
         source,
         "syntax error",
         "help: see emitted diagnostics for details",
-        "Warning:   ! unused docstring",
-        regex!(r#",-\[test[\d]+:7:5\]"#),
+        "warning: unused docstring",
+        regex!(r#"--> test[\d]+:7:5$"#),
         "6 |",
         "7 |     #! malformed doc",
         "  :     ^^^^^^^^^^^^^^^^",
         "8 |",
-        "  `----",
         "help: trailing docstrings are useless"
     );
 
@@ -1329,13 +1321,12 @@ fn test_ast_parsing_module_docs_fail() {
         source,
         "syntax error",
         "help: see emitted diagnostics for details",
-        "Warning:   ! unused docstring",
-        regex!(r#",-\[test[\d]+:9:5\]"#),
+        "warning: unused docstring",
+        regex!(r#"--> test[\d]+:9:5$"#),
         "8 |",
         "9 |     #! malformed doc",
         "  :     ^^^^^^^^^^^^^^^^",
         "10 |",
-        "  `----",
         "help: trailing docstrings are useless"
     );
 
@@ -1355,13 +1346,11 @@ fn test_ast_parsing_module_docs_fail() {
         context,
         source,
         "syntax error",
-        regex!(r#",-\[test[\d]+:5:9\]"#),
+        regex!(r#"--> test[\d]+:5:9$"#),
         "4 |     pub proc foo",
         "5 |         #! malformed doc",
-        "  :         ^^^^^^^^|^^^^^^^",
-        "  :                 `-- doc comments are only allowed before module-level items",
-        "6 |         loc_load.0",
-        "  `----"
+        "  :         ^^^^^^^^^^^^^^^^ doc comments are only allowed before module-level items",
+        "6 |         loc_load.0"
     );
 }
 
@@ -1579,7 +1568,7 @@ end
 }
 
 #[test]
-fn test_constant_expr_parentheses_roundtrip_formatting() {
+fn test_constant_expr_roundtrip_formatting() {
     let source = "\
 namespace test::formatting
 
@@ -1588,6 +1577,7 @@ use {N} from dep
 const LOWER_PRECEDENCE_LHS = (N + 1) * 3
 const LOWER_PRECEDENCE_RHS = 3 * (N + 1)
 const SAME_PRECEDENCE_RHS = N - (N - 1)
+const LONG_EXPRESSION = LOWER_PRECEDENCE_LHS + LOWER_PRECEDENCE_RHS + SAME_PRECEDENCE_RHS
 ";
 
     let context = SyntaxTestContext::default();
@@ -1735,13 +1725,11 @@ end"#
         "syntax error",
         "help: see emitted diagnostics for details",
         "invalid constant",
-        regex!(r#",-\[test[\d]+:6:15\]"#),
+        regex!(r#"--> test[\d]+:6:15$"#),
         "5 | begin",
         "6 |     mem_store.A",
-        "  :               |",
-        "  :               `-- expected u32",
+        "  :               ^ expected u32",
         "7 | end",
-        "  `----",
         r#" help: this constant does not resolve to a value of the right type"#
     );
 }
@@ -2024,16 +2012,16 @@ end
     assert_diagnostic_lines!(
         error,
         "conflicting attributes for procedure definition",
-        regex!(r#",-\[test[\d]+:2:1\]"#),
+        regex!(r#"--> test[\d]+:3:1$"#),
+        "2 | @account_procedure",
+        "3 | @callconv(\"C\")",
+        "  : ^^^^^^^^^^^^^^ conflict occurs because @callconv conflicts with convention implied by other attribute",
+        "4 | proc foo() -> i1",
+        regex!(r#"--> test[\d]+:2:1$"#),
         "1 |",
         "2 | @account_procedure",
-        "  : ^^^^^^^^^|^^^^^^^^",
-        "  :          `-- this attribute implies @callconv(\"component-model\")",
-        "3 | @callconv(\"C\")",
-        "  : ^^^^^^^|^^^^^^",
-        "  :        `-- conflict occurs because @callconv conflicts with convention implied by other attribute",
-        "4 | proc foo() -> i1",
-        "  `----"
+        "  : ^^^^^^^^^^^^^^^^^^ this attribute implies @callconv(\"component-model\")",
+        "3 | @callconv(\"C\")"
     );
 }
 
@@ -2062,16 +2050,16 @@ end
     assert_diagnostic_lines!(
         error,
         "conflicting attributes for procedure definition",
-        regex!(r#",-\[test[\d]+:2:1\]"#),
+        regex!(r#"--> test[\d]+:3:1$"#),
+        "2 | @account_procedure",
+        "3 | @note_script",
+        "  : ^^^^^^^^^^^^ this attribute specifies the protocol ABI of this procedure, but a different ABI was previously specified",
+        "4 | proc foo() -> i1",
+        regex!(r#"--> test[\d]+:2:1$"#),
         "1 |",
         "2 | @account_procedure",
-        "  : ^^^^^^^^^|^^^^^^^^",
-        "  :          `-- this attribute already specifies the protocol ABI for this procedure",
-        "3 | @note_script",
-        "  : ^^^^^^|^^^^^",
-        "  :       `-- this attribute specifies the protocol ABI of this procedure, but a different ABI was previously specified",
-        "4 | proc foo() -> i1",
-        "  `----"
+        "  : ^^^^^^^^^^^^^^^^^^ this attribute already specifies the protocol ABI for this procedure",
+        "3 | @note_script"
     );
 }
 
@@ -2121,7 +2109,7 @@ fn test_parameter_names_roundtrip_formatting() {
             signature.to_pretty_string()
         );
 
-        let source = source_file!(&context, expected.clone());
+        let source = source_file!(&context, expected);
         let module = context
             .parse_program_source_file(source)
             .unwrap_or_else(|err| panic!("{name}: {err}"));

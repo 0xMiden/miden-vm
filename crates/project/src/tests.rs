@@ -3,12 +3,12 @@ use std::{boxed::Box, fs, path::Path, sync::Arc};
 
 use miden_assembly_syntax::{
     Path as MasmPath,
-    debuginfo::{DefaultSourceManager, SourceManager, SourceManagerExt},
+    debuginfo::{DefaultSourceManager, SourceLanguage, SourceManager, SourceManagerExt, Uri},
     diagnostics::Report,
 };
 use tempfile::TempDir;
 
-use crate::{DependencyVersionScheme, Linkage, Project, TargetType, Workspace};
+use crate::{DependencyVersionScheme, Linkage, Project, TargetType, Workspace, ast::ProjectFile};
 
 struct TestContext {
     pub source_manager: Arc<dyn SourceManager>,
@@ -23,11 +23,42 @@ impl Default for TestContext {
 }
 
 impl TestContext {
-    pub fn load_workspace(&self, path: impl AsRef<Path>) -> Result<Box<Workspace>, Report> {
+    pub(crate) fn load_workspace(&self, path: impl AsRef<Path>) -> Result<Box<Workspace>, Report> {
         let path = path.as_ref();
         let source_file = self.source_manager.load_file(path).map_err(Report::msg)?;
         Workspace::load(source_file, &self.source_manager)
     }
+}
+
+#[test]
+fn conflicting_build_targets_label_both_declarations() {
+    let manifest = r#"[package]
+name = "example"
+version = "1.0.0"
+
+[[bin]]
+name = "entry"
+path = "main.masm"
+
+[[bin]]
+name = "entry"
+path = "main.masm"
+"#;
+    let context = TestContext::default();
+    let source = context.source_manager.load(
+        SourceLanguage::Other("toml"),
+        Uri::new("miden-project.toml"),
+        manifest.into(),
+    );
+    let report = ProjectFile::parse(source).expect_err("duplicate build targets must fail");
+    let rendered = format!("{report:?}");
+
+    assert!(
+        rendered.contains("the path for this target, `main.masm`, conflicts"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("the name for this target, `entry`, conflicts"), "{rendered}");
+    assert_eq!(rendered.matches("conflict occurs here").count(), 2, "{rendered}");
 }
 
 #[test]

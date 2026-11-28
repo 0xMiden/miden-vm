@@ -1,6 +1,7 @@
 #[cfg(any(test, feature = "arbitrary"))]
 pub mod arbitrary;
 mod error;
+mod event_handlers;
 mod id;
 mod manifest;
 mod section;
@@ -29,14 +30,18 @@ use miden_core::serde::DeserializationError;
 use miden_core::{
     Word,
     advice::AdviceMap,
-    crypto::hash::Poseidon2,
+    chiplets::hasher,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     program::KernelDescriptor,
-    serde::{ByteReader, ByteWriter, Deserializable, Serializable, SliceReader},
+    serde::{ByteWriter, Deserializable, Serializable},
 };
 
 pub use self::{
     error::{PackageDebugInfoError, PackageStripError},
+    event_handlers::{
+        EventHandlerManifestEntry, EventHandlerSection, EventHandlerSectionError, MAX_HANDLERS,
+        MAX_MODULE_BYTES, MAX_NAME_BYTES, MIN_ABI_VERSION, validate_manifest_entries,
+    },
     id::PackageId,
     manifest::{
         ConstantExport, ManifestValidationError, PackageExport, PackageManifest, PackageModule,
@@ -51,6 +56,7 @@ use crate::{
         DebugFunctionIdx, DebugFunctionInfo, DebugSourceNode, DebugSourceNodeId, DebugStringIdx,
         DebugTypeIdx, DebugTypeInfo, PackageDebugInfo,
     },
+    serde_helpers::{PayloadError, read_payload_with_budget},
 };
 
 // PACKAGE
@@ -80,8 +86,6 @@ pub struct Package {
     pub name: PackageId,
     /// An optional semantic version for the package
     pub version: Version,
-    /// The commitment to the underlying MAST forest.
-    mast_forest_commitment: Word,
     /// An optional description of the package
     pub description: Option<String>,
     /// The project target type which produced this package
@@ -100,6 +104,111 @@ pub struct Package {
     /// sections before marking them trusted. Trusted local/cache readers and in-process package
     /// construction may defer debug validation until [`Package::debug_info`] is called.
     debug_sections_trusted: bool,
+}
+
+struct PackageCommitment<'a> {
+    package: &'a Package,
+}
+
+impl<'a> PackageCommitment<'a> {
+    fn new(package: &'a Package) -> Self {
+        Self { package }
+    }
+
+    fn interface_commitment(&self) -> Result<Word, ManifestValidationError> {
+        let mut node_ids = Vec::with_capacity(self.package.manifest.num_exports());
+        for export in self.package.manifest.exports() {
+            if let PackageExport::Procedure(export) = export {
+                if let Some(node_id) = export.node {
+                    node_ids.push(node_id);
+                } else {
+                    node_ids.push(
+                        self.package.mast.find_procedure_root(export.digest).ok_or_else(|| {
+                            ManifestValidationError::MissingProcedureMast {
+                                path: export.path.clone(),
+                                digest: export.digest,
+                            }
+                        })?,
+                    );
+                }
+            }
+        }
+
+        Ok(self.package.mast.compute_nodes_commitment(node_ids.iter()))
+    }
+
+    fn mast_forest_commitment(&self) -> Word {
+        self.package.mast.commitment()
+    }
+
+    fn code_commitment(&self) -> Word {
+        let interface_commitment =
+            self.interface_commitment().expect("package manifest exports were validated");
+        Self::merge_commitments(
+            b"miden.package.code.v1",
+            interface_commitment,
+            self.mast_forest_commitment(),
+        )
+    }
+
+    fn dependency_commitment(&self) -> Word {
+        let mut bytes = Vec::new();
+        bytes.write_bytes(b"miden.package.dependency.v1");
+        self.code_commitment().write_into(&mut bytes);
+        self.package.name.write_into(&mut bytes);
+        self.package.version.to_string().write_into(&mut bytes);
+        bytes.write_u8(self.package.kind.into());
+        self.package.manifest.write_into(&mut bytes);
+        self.write_dependency_commitment_sections(&mut bytes);
+        hasher::hash(&bytes)
+    }
+
+    fn write_dependency_commitment_sections<W: ByteWriter>(&self, target: &mut W) {
+        // Handler code affects the advice a program receives and therefore its identity.
+        let mut sections = self
+            .package
+            .sections
+            .iter()
+            .filter(|section| {
+                section.id == SectionId::ACCOUNT_COMPONENT_METADATA
+                    || section.id == SectionId::EVENT_HANDLERS
+            })
+            .collect::<Vec<_>>();
+        // Attachment order must not affect the dependency commitment.
+        sections.sort_by(|a, b| {
+            a.id.as_str()
+                .cmp(b.id.as_str())
+                .then_with(|| a.data.as_ref().cmp(b.data.as_ref()))
+        });
+        target.write_usize(sections.len());
+        for section in sections {
+            section.write_into(target);
+        }
+    }
+
+    fn artifacts_commitment(&self) -> Word {
+        let mut bytes = Vec::new();
+        bytes.write_bytes(b"miden.package.artifacts.v1");
+        self.package.write_header_into(&mut bytes);
+        self.package.write_trailer_into(&mut bytes);
+        hasher::hash(&bytes)
+    }
+
+    fn commitment(&self) -> Word {
+        Self::merge_commitments(
+            b"miden.package.v1",
+            self.code_commitment(),
+            self.artifacts_commitment(),
+        )
+    }
+
+    fn merge_commitments(domain: &[u8], left: Word, right: Word) -> Word {
+        let mut bytes = Vec::new();
+        bytes.write_bytes(domain);
+        left.write_into(&mut bytes);
+        right.write_into(&mut bytes);
+        hasher::hash(&bytes)
+    }
 }
 
 /// Construction
@@ -146,10 +255,9 @@ impl Package {
             }
         }
 
-        let mut package = Self {
+        let package = Self {
             name,
             version,
-            mast_forest_commitment: Default::default(),
             description: None,
             kind,
             mast,
@@ -158,34 +266,9 @@ impl Package {
             debug_sections_trusted: true,
         };
 
-        package.compute_interface_commitment()?;
-        package.recompute_mast_commitment();
+        package.interface_commitment()?;
 
         Ok(package)
-    }
-
-    fn compute_interface_commitment(&self) -> Result<Word, ManifestValidationError> {
-        let mut node_ids = Vec::with_capacity(self.manifest.num_exports());
-        for export in self.manifest.exports() {
-            if let PackageExport::Procedure(export) = export {
-                if let Some(node_id) = export.node {
-                    node_ids.push(node_id);
-                } else {
-                    node_ids.push(self.mast.find_procedure_root(export.digest).ok_or_else(
-                        || ManifestValidationError::MissingProcedureMast {
-                            path: export.path.clone(),
-                            digest: export.digest,
-                        },
-                    )?);
-                }
-            }
-        }
-
-        Ok(self.mast.compute_nodes_commitment(node_ids.iter()))
-    }
-
-    fn recompute_mast_commitment(&mut self) {
-        self.mast_forest_commitment = self.mast.commitment();
     }
 
     /// Produces a new library with the existing [`MastForest`] and where all key/values in the
@@ -198,20 +281,28 @@ impl Package {
     /// Extends the advice map of this library
     pub fn extend_advice_map(&mut self, advice_map: AdviceMap) {
         self.mast = Arc::new(self.mast.as_ref().clone().with_advice_map(advice_map));
-        self.recompute_mast_commitment();
     }
 
     /// Removes all package-owned debug information from this package.
     ///
-    /// This removes well-known package debug sections and recursively strips an embedded kernel
+    /// This removes well-known package debug sections and also strips them from an embedded kernel
     /// package if one is present.
+    ///
+    /// # Errors
+    /// Returns an error if an embedded kernel package cannot be decoded, or if it embeds another
+    /// kernel package.
     pub fn strip_debug_info(&mut self) -> Result<(), PackageStripError> {
         for section in self.sections.iter_mut().filter(|section| section.id == SectionId::KERNEL) {
             // Debug metadata is about to be removed, so validate the nested MAST while deferring
             // debug validation that could otherwise prevent stripping malformed metadata.
             let mut kernel_package = Self::read_from_bytes_trusted(section.data.as_ref())
                 .map_err(|source| PackageStripError::DecodeEmbeddedKernel { source })?;
-            kernel_package.strip_debug_info()?;
+            // The assembler never embeds a kernel in a kernel, so strip one level only instead of
+            // recursing into attacker-controlled nesting.
+            if kernel_package.sections.iter().any(|section| section.id == SectionId::KERNEL) {
+                return Err(PackageStripError::NestedEmbeddedKernel);
+            }
+            kernel_package.sections.retain(|section| !section.id.is_debug());
             section.data = Cow::Owned(kernel_package.to_bytes());
         }
 
@@ -239,80 +330,39 @@ impl Package {
 
     /// Returns the commitment to the exported procedure roots used by the linker.
     pub fn interface_commitment(&self) -> Result<Word, ManifestValidationError> {
-        self.compute_interface_commitment()
+        PackageCommitment::new(self).interface_commitment()
     }
 
     /// Returns the commitment to the package's MAST forest.
     #[inline]
     pub fn mast_forest_commitment(&self) -> Word {
-        self.mast_forest_commitment
+        PackageCommitment::new(self).mast_forest_commitment()
     }
 
     /// Returns the commitment to the package's code.
     ///
     /// This binds the public interface to the complete MAST forest which implements it.
     pub fn code_commitment(&self) -> Word {
-        let interface_commitment =
-            self.interface_commitment().expect("package manifest exports were validated");
-        Self::merge_commitments(
-            b"miden.package.code.v1",
-            interface_commitment,
-            self.mast_forest_commitment(),
-        )
+        PackageCommitment::new(self).code_commitment()
     }
 
     /// Returns the commitment used to identify this package during dependency resolution.
     ///
-    /// This binds the package code, identity, manifest, and sections which affect package use.
-    /// Optional debug data, descriptions, and opaque custom sections are excluded.
+    /// This binds the package code, identity, manifest, and sections which affect package use
+    /// (account component metadata and event handlers). Optional debug data, descriptions, and
+    /// opaque custom sections are excluded.
     pub fn dependency_commitment(&self) -> Word {
-        let mut bytes = Vec::new();
-        bytes.write_bytes(b"miden.package.dependency.v1");
-        self.code_commitment().write_into(&mut bytes);
-        self.name.write_into(&mut bytes);
-        self.version.to_string().write_into(&mut bytes);
-        bytes.write_u8(self.kind.into());
-        self.manifest.write_into(&mut bytes);
-        self.write_dependency_commitment_sections(&mut bytes);
-        Poseidon2::hash(&bytes)
-    }
-
-    fn write_dependency_commitment_sections<W: ByteWriter>(&self, target: &mut W) {
-        let sections = self
-            .sections
-            .iter()
-            .filter(|section| section.id == SectionId::ACCOUNT_COMPONENT_METADATA)
-            .collect::<Vec<_>>();
-        target.write_usize(sections.len());
-        for section in sections {
-            section.write_into(target);
-        }
+        PackageCommitment::new(self).dependency_commitment()
     }
 
     /// Returns the commitment to all serialized package data outside the MAST forest.
     pub fn artifacts_commitment(&self) -> Word {
-        let mut bytes = Vec::new();
-        bytes.write_bytes(b"miden.package.artifacts.v1");
-        self.write_header_into(&mut bytes);
-        self.write_trailer_into(&mut bytes);
-        Poseidon2::hash(&bytes)
+        PackageCommitment::new(self).artifacts_commitment()
     }
 
     /// Returns the commitment to the complete package.
     pub fn commitment(&self) -> Word {
-        Self::merge_commitments(
-            b"miden.package.v1",
-            self.code_commitment(),
-            self.artifacts_commitment(),
-        )
-    }
-
-    fn merge_commitments(domain: &[u8], left: Word, right: Word) -> Word {
-        let mut bytes = Vec::new();
-        bytes.write_bytes(domain);
-        left.write_into(&mut bytes);
-        right.write_into(&mut bytes);
-        Poseidon2::hash(&bytes)
+        PackageCommitment::new(self).commitment()
     }
 
     /// Returns true if this package was produced for an executable target
@@ -644,17 +694,31 @@ impl Package {
         Ok(modules_by_path.into_values().collect())
     }
 
+    /// Returns the section with `id`, or `None` when the package has no section with that ID.
+    ///
+    /// # Errors
+    /// Returns an error when the package has more than one section with `id`. Every accessor of
+    /// a well-known section applies this rule: a second section with the same ID makes the
+    /// content of the package ambiguous.
+    fn single_section(&self, id: &SectionId) -> Result<Option<&Section>, DuplicateSectionError> {
+        let mut sections = self.sections.iter().filter(|section| &section.id == id);
+        let section = sections.next();
+        if sections.next().is_some() {
+            return Err(DuplicateSectionError);
+        }
+        Ok(section)
+    }
+
     fn read_debug_section<T>(&self, id: SectionId) -> Result<Option<T>, PackageDebugInfoError>
     where
         T: Deserializable,
     {
-        let mut sections = self.sections.iter().filter(|section| section.id == id);
-        let Some(section) = sections.next() else {
+        let section = self
+            .single_section(&id)
+            .map_err(|_| PackageDebugInfoError::DuplicateSection { id: id.clone() })?;
+        let Some(section) = section else {
             return Ok(None);
         };
-        if sections.next().is_some() {
-            return Err(PackageDebugInfoError::DuplicateSection { id });
-        }
 
         read_section_payload(&id, section.data.as_ref()).map(Some)
     }
@@ -786,7 +850,8 @@ impl Package {
             for row in source_node.inline_calls.iter() {
                 let is_external_boundary = exec_node.is_external()
                     && source_node.op_start == source_node.op_end
-                    && row.op_idx == source_node.op_start;
+                    && row.op_idx == source_node.op_start
+                    && row.op_end == source_node.op_end;
                 if !is_external_boundary {
                     self.validate_source_map_row(
                         source_id,
@@ -794,6 +859,14 @@ impl Package {
                         row.op_idx,
                         "inline call",
                     )?;
+                    if row.op_end <= row.op_idx || row.op_end > source_node.op_end {
+                        return Err(PackageDebugInfoError::InvalidValue {
+                            message: format!(
+                                "debug inline-call range {}..{} is outside source node range {}..{}",
+                                row.op_idx, row.op_end, source_node.op_start, source_node.op_end,
+                            ),
+                        });
+                    }
                 }
                 if debug_info.get_function(row.callee_idx).is_none() {
                     return Err(PackageDebugInfoError::InvalidReference {
@@ -1118,17 +1191,20 @@ impl Package {
     }
 }
 
+/// The package has more than one section with a given ID.
+struct DuplicateSectionError;
+
+/// Decodes the payload of a well-known package section under a byte budget.
 fn read_section_payload<T>(id: &SectionId, bytes: &[u8]) -> Result<T, PackageDebugInfoError>
 where
     T: Deserializable,
 {
-    let mut reader = SliceReader::new(bytes);
-    let section = T::read_from(&mut reader)
-        .map_err(|source| PackageDebugInfoError::DecodeSection { id: id.clone(), source })?;
-    if reader.has_more_bytes() {
-        return Err(PackageDebugInfoError::TrailingBytes { id: id.clone() });
-    }
-    Ok(section)
+    read_payload_with_budget(bytes).map_err(|err| match err {
+        PayloadError::Decode(source) => {
+            PackageDebugInfoError::DecodeSection { id: id.clone(), source }
+        },
+        PayloadError::TrailingBytes => PackageDebugInfoError::TrailingBytes { id: id.clone() },
+    })
 }
 
 /// Conversions
@@ -1204,6 +1280,61 @@ impl Package {
         self.try_into_program().unwrap_or_else(|err| panic!("{err}"))
     }
 
+    /// Decodes the [`EventHandlerSection`] of this package, if present.
+    ///
+    /// Returns `Ok(None)` when the package has no `event_handlers` section.
+    ///
+    /// # Errors
+    /// Returns an error when the package contains more than one `event_handlers` section, when
+    /// the section payload fails to decode (including size-cap violations), when bytes follow
+    /// the encoded section, or when the decoded section fails
+    /// [`EventHandlerSection::validate`].
+    pub fn event_handlers(&self) -> Result<Option<EventHandlerSection>, EventHandlerSectionError> {
+        let section = self
+            .single_section(&SectionId::EVENT_HANDLERS)
+            .map_err(|_| EventHandlerSectionError::DuplicateSection)?;
+        let Some(section) = section else {
+            return Ok(None);
+        };
+        EventHandlerSection::from_payload(section.data.as_ref()).map(Some)
+    }
+
+    /// Attaches an [`EventHandlerSection`] to this package.
+    ///
+    /// The section is semantic package content: it becomes part of
+    /// [`Self::dependency_commitment`], and the manifest order inside the section is canonical.
+    ///
+    /// # Errors
+    /// Returns an error when the package already has an `event_handlers` section, or when the
+    /// section fails [`EventHandlerSection::validate`].
+    pub fn with_event_handlers(
+        mut self,
+        section: &EventHandlerSection,
+    ) -> Result<Self, EventHandlerSectionError> {
+        self.attach_event_handlers(section)?;
+        Ok(self)
+    }
+
+    /// Attaches an [`EventHandlerSection`] to this package in place.
+    ///
+    /// The same operation as [`Self::with_event_handlers`], for callers that hold the package by
+    /// mutable reference. On error the package is unchanged.
+    ///
+    /// # Errors
+    /// Returns an error when the package already has an `event_handlers` section, or when the
+    /// section fails [`EventHandlerSection::validate`].
+    pub fn attach_event_handlers(
+        &mut self,
+        section: &EventHandlerSection,
+    ) -> Result<(), EventHandlerSectionError> {
+        if self.sections.iter().any(|existing| existing.id == SectionId::EVENT_HANDLERS) {
+            return Err(EventHandlerSectionError::AlreadyPresent);
+        }
+        section.validate()?;
+        self.sections.push(Section::new(SectionId::EVENT_HANDLERS, section.to_bytes()));
+        Ok(())
+    }
+
     /// Extract the embedded kernel package from this package.
     ///
     /// Returns `Ok(None)` if the kernel custom section is not present.
@@ -1229,7 +1360,14 @@ impl Package {
     /// * There are duplicate KERNEL sections
     /// * Deserialization of a package from the KERNEL section fails
     fn embedded_kernel_package(&self) -> Result<Option<Box<Self>>, Report> {
-        let Some(section) = self.embedded_kernel_section()? else {
+        let section = self.single_section(&SectionId::KERNEL).map_err(|_| {
+            Report::msg(format!(
+                "package '{}' contains multiple '{}' sections",
+                self.name,
+                SectionId::KERNEL
+            ))
+        })?;
+        let Some(section) = section else {
             return Ok(None);
         };
 
@@ -1242,21 +1380,6 @@ impl Package {
                     self.name
                 ))
             })
-    }
-
-    fn embedded_kernel_section(&self) -> Result<Option<&Section>, Report> {
-        let mut sections = self.sections.iter().filter(|section| section.id == SectionId::KERNEL);
-        let Some(section) = sections.next() else {
-            return Ok(None);
-        };
-        if sections.next().is_some() {
-            return Err(Report::msg(format!(
-                "package '{}' contains multiple '{}' sections",
-                self.name,
-                SectionId::KERNEL
-            )));
-        }
-        Ok(Some(section))
     }
 
     fn validate_embedded_kernel_dependency(&self, kernel_package: &Self) -> Result<(), Report> {
@@ -1294,6 +1417,11 @@ impl Package {
     }
 
     /// Get a [Dependency] that represents this package
+    ///
+    /// The dependency digest is [`Self::dependency_commitment`], which binds the package code,
+    /// identity, manifest, and the sections that affect package use — the `event_handlers`
+    /// section included: two packages that differ only in handler code have different
+    /// dependency digests.
     pub fn to_dependency(&self) -> Dependency {
         Dependency {
             name: self.name.clone(),
@@ -1367,6 +1495,9 @@ impl Package {
 
 /// Serialization
 impl Package {
+    /// Maximum size of a package read from a file, in bytes (512 MiB).
+    pub const MAX_FILE_SIZE: usize = 512 * 1024 * 1024;
+
     /// Write this package to `path`
     #[cfg(feature = "std")]
     pub fn write_to_file(&self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
@@ -1394,7 +1525,9 @@ impl Package {
     #[cfg(feature = "std")]
     /// Reads a package file from an untrusted path.
     ///
-    /// This validates the embedded MAST forest and discards package-owned debug sections before
+    /// Accepts regular files (including symlink targets) up to [`Self::MAX_FILE_SIZE`] bytes.
+    ///
+    /// This validates the embedded MAST forest and package-owned debug sections before
     /// returning the package. Use this for user-provided paths or bytes received across a trust
     /// boundary.
     pub fn deserialize_from_file(
@@ -1406,6 +1539,8 @@ impl Package {
 
     #[cfg(feature = "std")]
     /// Reads a trusted local package file.
+    ///
+    /// Applies the same file type and size limits as [`Self::deserialize_from_file`].
     ///
     /// This skips embedded MAST and manifest cross-check validation, preserves package-owned debug
     /// sections, and should be used only for files/cache entries controlled by the same trusted
@@ -1422,7 +1557,7 @@ impl Package {
 #[cfg(feature = "std")]
 fn read_package_file(path: impl AsRef<std::path::Path>) -> Result<Vec<u8>, DeserializationError> {
     let path = path.as_ref();
-    std::fs::read(path).map_err(|err| {
+    miden_core::serde::read_file_bounded(path, Package::MAX_FILE_SIZE).map_err(|err| {
         DeserializationError::InvalidValue(format!(
             "failed to open file at {}: {err}",
             path.to_string_lossy()
@@ -1645,6 +1780,8 @@ mod tests {
     #[test]
     fn package_commitment_layers_handle_advice_map_changes() {
         let package = build_kernel_package("kernel");
+        assert_eq!(package.mast_forest_commitment(), package.mast_forest().commitment());
+
         let package_commitment = package.commitment();
         let interface_commitment = package.interface_commitment().unwrap();
         let code_commitment = package.code_commitment();
@@ -1662,6 +1799,221 @@ mod tests {
         assert_ne!(code_commitment, with_advice.code_commitment());
         assert_eq!(artifacts_commitment, with_advice.artifacts_commitment());
         assert_ne!(package_commitment, with_advice.commitment());
+    }
+
+    /// Returns a valid `event_handlers` section with one manifest entry, for the tests that
+    /// attach a section to a package.
+    fn sample_event_handlers() -> EventHandlerSection {
+        EventHandlerSection {
+            abi_version: 1,
+            // The 8-byte header of an empty Wasm module.
+            module: vec![0, 97, 115, 109, 1, 0, 0, 0],
+            handlers: vec![EventHandlerManifestEntry::new(
+                miden_core::events::EventName::new("test::wasm::handler"),
+                "handler",
+            )],
+        }
+    }
+
+    #[test]
+    fn event_handler_section_roundtrips_through_package_serialization() {
+        let section = sample_event_handlers();
+        let package = build_kernel_package("kernel").with_event_handlers(&section).unwrap();
+
+        let bytes = package.to_bytes();
+        let decoded = Package::read_from_bytes(&bytes).unwrap();
+        assert_eq!(decoded.event_handlers().unwrap(), Some(section));
+    }
+
+    #[test]
+    fn event_handler_section_binds_the_dependency_commitment() {
+        let package = build_kernel_package("kernel");
+        let without = package.dependency_commitment();
+
+        let with_handlers = package.clone().with_event_handlers(&sample_event_handlers()).unwrap();
+        let with_digest = with_handlers.dependency_commitment();
+        assert_ne!(without, with_digest, "attaching handlers must change the identity");
+
+        // A change in only the handler bytes must change the identity.
+        let mut other_section = sample_event_handlers();
+        other_section.module.push(0);
+        let other = package.with_event_handlers(&other_section).unwrap();
+        assert_ne!(with_digest, other.dependency_commitment());
+
+        // The identity is stable across serialization roundtrips.
+        let decoded = Package::read_from_bytes(&with_handlers.to_bytes()).unwrap();
+        assert_eq!(with_digest, decoded.dependency_commitment());
+    }
+
+    #[test]
+    fn dependency_commitment_does_not_depend_on_the_semantic_section_order() {
+        let metadata = Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![7, 8, 9]);
+        let handlers = Section::new(SectionId::EVENT_HANDLERS, sample_event_handlers().to_bytes());
+
+        let mut metadata_first = build_kernel_package("kernel");
+        metadata_first.sections.push(metadata.clone());
+        metadata_first.sections.push(handlers.clone());
+
+        let mut handlers_first = build_kernel_package("kernel");
+        handlers_first.sections.push(handlers);
+        handlers_first.sections.push(metadata);
+
+        assert_eq!(metadata_first.dependency_commitment(), handlers_first.dependency_commitment());
+    }
+
+    #[test]
+    fn dependency_digest_binds_the_event_handlers_section() {
+        // Handler code decides the advice a program receives, so it affects package use: two
+        // packages that differ only in handler code must not resolve as one dependency.
+        let package = build_kernel_package("kernel");
+        let with_handlers = package.clone().with_event_handlers(&sample_event_handlers()).unwrap();
+
+        let mut other_section = sample_event_handlers();
+        other_section.module.push(0);
+        let with_other_handlers = package.with_event_handlers(&other_section).unwrap();
+
+        assert_ne!(
+            with_handlers.to_dependency().digest,
+            with_other_handlers.to_dependency().digest
+        );
+    }
+
+    #[test]
+    fn event_handler_section_with_trailing_bytes_is_rejected() {
+        let mut package = build_kernel_package("kernel");
+        let mut data = sample_event_handlers().to_bytes();
+        data.extend_from_slice(&[0xde, 0xad]);
+        package.sections.push(Section::new(SectionId::EVENT_HANDLERS, data));
+
+        assert!(matches!(package.event_handlers(), Err(EventHandlerSectionError::TrailingBytes)));
+    }
+
+    #[test]
+    fn duplicate_event_handler_sections_are_rejected() {
+        let section = sample_event_handlers();
+        let package = build_kernel_package("kernel").with_event_handlers(&section).unwrap();
+
+        // A second attach is rejected.
+        assert!(matches!(
+            package.clone().with_event_handlers(&section),
+            Err(EventHandlerSectionError::AlreadyPresent)
+        ));
+
+        // A manually duplicated section is rejected on access.
+        let mut broken = package;
+        broken
+            .sections
+            .push(Section::new(SectionId::EVENT_HANDLERS, section.to_bytes()));
+        assert!(matches!(
+            broken.event_handlers(),
+            Err(EventHandlerSectionError::DuplicateSection)
+        ));
+    }
+
+    #[test]
+    fn oversized_event_handler_section_is_rejected_on_attach() {
+        let mut section = sample_event_handlers();
+        // The names are zero-padded, so the manifest is in the canonical order and the count is
+        // the only rule it breaks.
+        section.handlers = (0..=MAX_HANDLERS)
+            .map(|idx| {
+                EventHandlerManifestEntry::new(
+                    miden_core::events::EventName::from_string(format!("test::wasm::h{idx:03}")),
+                    format!("h{idx}"),
+                )
+            })
+            .collect();
+        assert!(matches!(
+            build_kernel_package("kernel").with_event_handlers(&section),
+            Err(EventHandlerSectionError::TooManyHandlers { max: MAX_HANDLERS })
+        ));
+    }
+
+    #[test]
+    fn invalid_event_handler_section_is_rejected_on_attach() {
+        use miden_core::events::EventName;
+
+        let with_handlers = |handlers| {
+            let mut section = sample_event_handlers();
+            section.handlers = handlers;
+            build_kernel_package("kernel").with_event_handlers(&section)
+        };
+
+        // An empty export name names no export.
+        assert!(matches!(
+            with_handlers(vec![EventHandlerManifestEntry::new(
+                EventName::new("test::wasm::handler"),
+                "",
+            )]),
+            Err(EventHandlerSectionError::EmptyName { field: "export name" })
+        ));
+
+        // An empty event name names no event.
+        assert!(matches!(
+            with_handlers(vec![EventHandlerManifestEntry::new(
+                EventName::from_string(String::new()),
+                "handler",
+            )]),
+            Err(EventHandlerSectionError::EmptyName { field: "event name" })
+        ));
+
+        // Two handlers for one event cannot both register.
+        assert!(matches!(
+            with_handlers(vec![
+                EventHandlerManifestEntry::new(EventName::new("test::wasm::handler"), "a"),
+                EventHandlerManifestEntry::new(EventName::new("test::wasm::handler"), "b"),
+            ]),
+            Err(EventHandlerSectionError::DuplicateEvent { .. })
+        ));
+
+        // The reserved namespace belongs to the VM.
+        assert!(matches!(
+            with_handlers(vec![EventHandlerManifestEntry::new(
+                EventName::new("sys::handler"),
+                "handler",
+            )]),
+            Err(EventHandlerSectionError::ReservedEventName { .. })
+        ));
+
+        // Version 0 names no ABI contract.
+        let mut section = sample_event_handlers();
+        section.abi_version = 0;
+        assert!(matches!(
+            build_kernel_package("kernel").with_event_handlers(&section),
+            Err(EventHandlerSectionError::InvalidAbiVersion { version: 0 })
+        ));
+    }
+
+    #[test]
+    fn invalid_event_handler_section_is_rejected_on_access() {
+        // A section can reach a package without the attach path, for example over the wire.
+        let mut section = sample_event_handlers();
+        section.abi_version = 0;
+        let mut package = build_kernel_package("kernel");
+        package
+            .sections
+            .push(Section::new(SectionId::EVENT_HANDLERS, section.to_bytes()));
+
+        assert!(matches!(
+            package.event_handlers(),
+            Err(EventHandlerSectionError::InvalidAbiVersion { version: 0 })
+        ));
+    }
+
+    #[test]
+    fn dependency_commitment_does_not_depend_on_the_order_of_same_id_sections() {
+        let first = Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![1, 2, 3]);
+        let second = Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![4, 5, 6]);
+
+        let mut first_package = build_kernel_package("kernel");
+        first_package.sections.push(first.clone());
+        first_package.sections.push(second.clone());
+
+        let mut second_package = build_kernel_package("kernel");
+        second_package.sections.push(second);
+        second_package.sections.push(first);
+
+        assert_eq!(first_package.dependency_commitment(), second_package.dependency_commitment());
     }
 
     fn build_debug_package(name: &str, kind: TargetType, export: &str, context: &str) -> Package {
@@ -1911,6 +2263,7 @@ mod tests {
         let mut node = debug_source_node(exec_node, Vec::new(), 0, 1);
         node.inline_calls.push(DebugSourceInlineCall {
             op_idx: 0,
+            op_end: 1,
             callee_idx: DebugFunctionIdx::from(1),
             loc_idx: DebugLocIdx::from(0),
         });
@@ -1935,6 +2288,7 @@ mod tests {
         let mut node = debug_source_node(exec_node, Vec::new(), 0, 1);
         node.inline_calls.push(DebugSourceInlineCall {
             op_idx: 0,
+            op_end: 1,
             callee_idx: function_idx,
             loc_idx: DebugLocIdx::from(99),
         });
@@ -1944,6 +2298,30 @@ mod tests {
 
         let err = package.debug_info().expect_err("bad inline call location should be rejected");
         assert!(matches!(err, PackageDebugInfoError::InvalidReference { .. }));
+    }
+
+    #[test]
+    fn package_debug_info_rejects_inline_ranges_outside_the_source_occurrence() {
+        let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+        let exec_node = package.get_export_node_id("app::entry");
+        for (op_idx, op_end) in [(0, 0), (0, 2), (1, 2)] {
+            let mut builder = PackageDebugInfoBuilder::default();
+            let mut node = debug_source_node(exec_node, Vec::new(), 0, 1);
+            node.inline_calls.push(DebugSourceInlineCall {
+                op_idx,
+                op_end,
+                callee_idx: DebugFunctionIdx::from(0),
+                loc_idx: DebugLocIdx::from(0),
+            });
+            builder.add_node(node).unwrap();
+            package.sections = vec![debug_info_section(builder.build().as_ref())];
+            let error = package.debug_info().unwrap_err();
+            if op_idx == 0 {
+                assert!(matches!(error, PackageDebugInfoError::InvalidValue { .. }), "{error}");
+            } else {
+                assert!(matches!(error, PackageDebugInfoError::InvalidReference { .. }), "{error}",);
+            }
+        }
     }
 
     #[test]
@@ -2166,6 +2544,23 @@ mod tests {
             "untrusted embedded-kernel decode should retain validated nested debug sections"
         );
         assert!(untrusted_kernel.debug_info().unwrap().is_some());
+    }
+
+    #[test]
+    fn strip_debug_info_rejects_nested_embedded_kernel() {
+        let inner = build_debug_package("inner", TargetType::Kernel, "inner::boot", "inner_ctx");
+        let mut kernel =
+            build_debug_package("kernel", TargetType::Kernel, "kernel::boot", "kernel_ctx");
+        kernel.sections.push(Section::new(SectionId::KERNEL, inner.to_bytes()));
+
+        let mut package =
+            build_debug_package("app", TargetType::Executable, "app::entry", "app_ctx");
+        package.sections.push(Section::new(SectionId::KERNEL, kernel.to_bytes()));
+
+        assert!(matches!(
+            package.strip_debug_info(),
+            Err(PackageStripError::NestedEmbeddedKernel)
+        ));
     }
 
     #[test]

@@ -8,11 +8,11 @@ use super::{
     SymbolResolutionError, Visibility, types,
 };
 
-/// Maximum allowed nesting depth of type expressions during resolution.
+/// Maximum allowed nesting depth of type expressions during parsing and resolution.
 ///
 /// This limit is intended to prevent stack overflows from maliciously deep type expressions while
 /// remaining far above typical type nesting in real programs.
-const MAX_TYPE_EXPR_NESTING: usize = 256;
+pub(crate) const MAX_TYPE_EXPR_NESTING: usize = 256;
 
 /// Abstracts over resolving an item to a concrete [Type], using one of:
 ///
@@ -156,7 +156,7 @@ pub struct FunctionType {
     pub cc: types::CallConv,
     pub args: Vec<TypeExpr>,
     /// Parameter names, where known. Like `span`, equality and hashing ignore them.
-    pub arg_names: Vec<Option<Ident>>,
+    pub(crate) arg_names: Vec<Option<Ident>>,
     pub results: Vec<TypeExpr>,
 }
 
@@ -870,13 +870,13 @@ impl TypeAlias {
     }
 
     /// Get the name of this type alias
-    pub fn name(&self) -> &Ident {
+    pub(crate) fn name(&self) -> &Ident {
         &self.name
     }
 
     /// Get the visibility of this type alias
     #[inline]
-    pub const fn visibility(&self) -> Visibility {
+    pub(crate) const fn visibility(&self) -> Visibility {
         self.visibility
     }
 }

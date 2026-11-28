@@ -13,6 +13,8 @@ pub enum PackageStripError {
         #[source]
         source: DeserializationError,
     },
+    #[error("embedded kernel package contains its own kernel section")]
+    NestedEmbeddedKernel,
 }
 
 /// Errors raised while decoding trusted package-owned debug information.

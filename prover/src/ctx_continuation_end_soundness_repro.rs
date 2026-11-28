@@ -1,7 +1,7 @@
 //! Regression tests: `ctx` and `fn_hash` are preserved across a continuation END.
 //!
-//! `air/src/constraints/system/mod.rs` used to gate the preservation of both columns on the
-//! *coarse* END flag:
+//! `crates/air/source/src/vm/constraints/system/mod.rs` used to gate the preservation of both
+//! columns on the *coarse* END flag:
 //!
 //! ```ignore
 //! let change_ctx_flag = f_call + f_syscall + f_dyncall + f_end;
@@ -29,19 +29,16 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_air::trace::RowIndex;
+use miden_air_definitions::vm::trace::RowIndex;
 use miden_core::{
     Felt,
     mast::{BasicBlockNodeBuilder, MastForest},
     operations::{Operation, opcodes},
     program::Program,
 };
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use miden_processor::{DefaultHost, Processor, StackInputs, WitnessOutput};
 
-use crate::{
-    Prover,
-    repro_harness::{ReproTrace, core_row_mut},
-};
+use crate::repro_harness::{ReproTrace, core_row_mut};
 
 // HARNESS
 // ================================================================================================
@@ -94,10 +91,12 @@ fn build_basic_harness() -> (ReproTrace, BasicRows) {
     let stack_values = (1..17).rev().map(Felt::new_unchecked).collect::<Vec<_>>();
     let stack_inputs = StackInputs::new(&stack_values).unwrap();
     let mut host = DefaultHost::default();
-    let (trace, precompile_witness) = FastProcessor::new(stack_inputs)
-        .execute_and_build_trace_sync(&program, &mut host, Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES)
+    let WitnessOutput { witness, .. } = Processor::new(&program)
+        .with_stack_inputs(stack_inputs)
+        .record_witness()
+        .run_sync(&mut host)
         .unwrap();
-    assert!(precompile_witness.is_none());
+    let trace = crate::repro_harness::materialize_vm_trace(witness);
 
     let main = trace.main_trace();
     let height = main.core_height();
@@ -224,10 +223,9 @@ fn build_call_harness() -> (ReproTrace, CallRows) {
         .unwrap_program();
 
     let mut host = DefaultHost::default();
-    let (trace, precompile_witness) = FastProcessor::new(StackInputs::default())
-        .execute_and_build_trace_sync(&program, &mut host, Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES)
-        .unwrap();
-    assert!(precompile_witness.is_none());
+    let WitnessOutput { witness, .. } =
+        Processor::new(&program).record_witness().run_sync(&mut host).unwrap();
+    let trace = crate::repro_harness::materialize_vm_trace(witness);
 
     let main = trace.main_trace();
     let height = main.core_height();

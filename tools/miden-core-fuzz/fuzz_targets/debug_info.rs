@@ -9,7 +9,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use miden_assembly_syntax::ast::types::Type;
-use miden_core::serde::{ByteReader, Deserializable, SliceReader};
+use miden_core::serde::{ByteReader, Deserializable, Serializable, SliceReader};
 use miden_mast_package::{
     Package,
     debug_info::{
@@ -85,7 +85,12 @@ fn assert_valid_package_type_alignments(package: &Package) {
 fn assert_valid_debug_policy(debug_info: &PackageDebugInfo) {
     for string in debug_info.strings() {
         assert!(string.len() <= MAX_DEBUG_INFO_STRING_SIZE);
-        assert!(!string.chars().any(char::is_control));
+        // NOTE (the reported assertion issue,): the former is_control assertion here was REMOVED —
+        // it asserted a non-invariant. The builder accepts control chars (add_string does
+        // not sanitize) and the writer emits them, so trusted-path debug info can carry
+        // them legitimately; the pinned fixture control_chars_round_trip_through_debug_
+        // info in mast-package documents the behavior. Corpus churn from a probe run
+        // surfaced the mismatch.
     }
     for location in debug_info.locations() {
         assert!(location.start.to_usize() <= location.end.to_usize());
@@ -121,5 +126,14 @@ fuzz_target!(|data: &[u8]| {
             assert!(source_node.asm_ops.windows(2).all(|rows| rows[0].op_idx < rows[1].op_idx));
         }
         exercise_debug_info(&debug_info);
+
+        // STABILITY ORACLE (upgraded from crash-only): PackageDebugInfo has Eq, so the
+        // oracle is VALUE-level — a successful decode must re-encode and decode again to
+        // an EQUAL value. Corpus reachability measured per the reachability rule ().
+        let canonical = debug_info.to_bytes();
+        let mut re_reader = SliceReader::new(&canonical);
+        let redecoded = PackageDebugInfo::read_from(&mut re_reader)
+            .expect("canonical encoding must decode");
+        assert_eq!(redecoded, debug_info, "canonical re-encoding must decode identically");
     }
 });

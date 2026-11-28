@@ -1,10 +1,7 @@
-// Allow unused assignments - required by miette::Diagnostic derive macro
-#![allow(unused_assignments)]
-
 use alloc::vec::Vec;
 
 use miden_core::deferred::PrecompileError;
-use miden_utils_diagnostics::{Diagnostic, miette};
+use miden_utils_diagnostics::Diagnostic;
 
 use crate::{Felt, Word, crypto::merkle::MerkleError};
 
@@ -27,8 +24,8 @@ pub enum AdviceError {
         "advice provider size budget exceeded: adding {added} bytes to the current {current} bytes would exceed the maximum of {max} bytes"
     )]
     SizeBudgetExceeded { current: usize, added: usize, max: usize },
-    #[error("failed to initialize deferred state with the built-in precompile registry")]
-    DeferredStateInitializationFailed(#[source] PrecompileError),
+    #[error("failed to configure deferred state with the built-in precompile registry or limits")]
+    DeferredStateConfigurationFailed(#[source] PrecompileError),
     #[error(
         "provided merkle tree {depth} is out of bounds and cannot be represented as an unsigned 8-bit integer"
     )]

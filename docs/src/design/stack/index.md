@@ -27,12 +27,16 @@ The meaning of the above columns is as follows:
 
 * $s_0 ... s_{15}$ are the columns representing the top $16$ slots of the stack.
 * Column $b_0$ contains the number of items on the stack (i.e., the stack depth). In the above picture, there are 16 items on the stacks, so $b_0 = 16$.
-* Column $b_1$ contains an address of a row in the "overflow table" in which we'll store the data that doesn't fit into the top $16$ slots. When $b_1 = 0$, it means that all stack data fits into the top $16$ slots of the stack.
+* Column $b_1$ contains the address of the top row in the overflow table, which stores data beyond
+  the directly accessible $16$ stack slots. A zero value indicates an empty overflow table.
 * Helper column $h_0$ is used to ensure that stack depth does not drop below $16$. Values in this column are set by the prover non-deterministically to $\frac{1}{b_0-16}$ when $b_0 \neq 16$, and to any other value otherwise.
 
 ### Overflow table
 
-To track data outside the top 16 stack slots, the VM uses the stack-overflow virtual relation.
+The overflow table stores operand-stack values beyond the $16$ directly accessible slots. It is a
+virtual table implemented by typed [LogUp](../lookups/logup.md) messages. An insertion contributes
+multiplicity $+1$ and a removal contributes multiplicity $-1$; lookup closure requires the two
+multisets to match.
 
 The table itself can be thought of as having 3 columns as illustrated below.
 
@@ -44,22 +48,22 @@ The meaning of the columns is as follows:
 * Column $t_1$ contains the value that overflowed the stack.
 * Column $t_2$ contains the address of the row containing the value that overflowed the stack right before the value in the current row. For example, in the picture above, first value $a$ overflowed the stack, then $b$ overflowed the stack, and then value $c$ overflowed the stack. Thus, row with value $b$ points back to the row with value $a$, and row with value $c$ points back to the row with value $b$.
 
-For lookup purposes, a row is encoded using the stack-overflow bus prefix $\alpha_{overflow}$ and
-lookup challenge $\beta$:
+Each row is encoded as a domain-separated `StackOverflowTable` message with payload
+$(t_0,t_1,t_2)$:
 
 $$
-d_i = \alpha_{overflow} + t_{0,i} + \beta t_{1,i} + \beta^2 t_{2,i}.
+S(t_0,t_1,t_2) = P_{stack\_overflow} + t_0 + \beta t_1 + \beta^2 t_2.
 $$
 
-The lookup argument balances insertions and removals of these encoded rows. By the end of
-execution, every row inserted into the overflow relation must have a matching removal.
+Here $P_{stack\_overflow}$ is the fixed bus prefix for this relation. The table satisfies two
+invariants:
 
-There are a couple of other rules we'll need to enforce:
+* A row is removed only after it has been inserted.
+* Each insertion uses a distinct row address.
 
-* We can delete a row only after the row has been inserted into the table.
-* We can't insert a row with the same address twice into the table (even if the row was inserted and then deleted).
-
-How these are enforced will be described a bit later.
+The [overflow-table constraints](#overflow-table-constraints) assign the current VM clock as each
+inserted row's address and carry its predecessor through $b_1$; the shared LogUp argument binds
+each removal to the corresponding inserted row.
 
 ## Right shift
 
@@ -157,13 +161,13 @@ The above constraint can be satisfied only when either of the following holds:
 ### Stack depth constraints
 To make sure stack depth column $b_0$ is updated correctly, we need to impose the following constraints:
 
-| Condition                   | Constraint__      | Description                                                                                   |
-| --------------------------- | ----------------- | --------------------------------------------------------------------------------------------- |
-| $f_{shr}=1$                 | $b'_0 = b_0 + 1$  | A one-element right shift adds one row to the overflow table.                                  |
-| $f_{shl}=1$ <br /> $f_{ov}=1$ | $b'_0 = b_0 - 1$ | A one-element left shift removes one row when the overflow table is not empty.                 |
-| $f_{enter}=1$               | $b'_0 = 16$       | On CALL/SYSCALL/DYNCALL entry, the stack depth resets to the accessible top 16 positions.      |
-| $f_{restore}=1$             | from caller frame | A caller-frame END restores the authenticated saved depth through the block-stack relation.    |
-| otherwise                   | $b'_0 = b_0$      | In all other cases, stack depth should not change.                                             |
+| Condition                     | Constraint__      | Description                                                                                 |
+| ----------------------------- | ----------------- | ------------------------------------------------------------------------------------------- |
+| $f_{shr}=1$                   | $b'_0 = b_0 + 1$  | A one-element right shift adds one row to the overflow table.                               |
+| $f_{shl}=1$ <br /> $f_{ov}=1$ | $b'_0 = b_0 - 1$  | A one-element left shift removes one row when the overflow table is not empty.              |
+| $f_{enter}=1$                 | $b'_0 = 16$       | On CALL/SYSCALL/DYNCALL entry, the stack depth resets to the accessible top 16 positions.   |
+| $f_{restore}=1$               | from caller frame | A caller-frame END restores the authenticated saved depth through the block-stack relation. |
+| otherwise                     | $b'_0 = b_0$      | In all other cases, stack depth should not change.                                          |
 
 For rows with $f_{enter}=f_{restore}=0$, we can combine the shift
 constraints into a single expression as follows:
@@ -177,25 +181,17 @@ END depth updates are handled by the block-stack relation.
 
 ### Overflow table constraints
 
-On a right shift, tuple $(clk, s_{15}, b_1)$ is added to the overflow relation. Its denominator is:
+When the stack is shifted to the right, the message $S(clk,s_{15},b_1)$ is added to the overflow
+table with multiplicity $+1$.
 
-$$
-d_{push} = \alpha_{overflow} + clk + \beta s_{15} + \beta^2 b_1.
-$$
+When the stack is shifted to the left and the overflow table is non-empty,
+$S(b_1,s'_{15},b'_1)$ is removed with multiplicity $-1$. A `DYNCALL` with a non-empty overflow
+table instead removes $S(b_1,s'_{15},h_5)$, because the restored predecessor is staged in decoder
+hasher register $h_5$ while $b'_1$ is reset for the new context. Operations that do not add or
+remove an overflow entry make no `StackOverflowTable` interaction.
 
-On a left shift with non-empty overflow, tuple $(b_1, s'_{15}, b'_1)$ is removed. Its denominator is:
-
-$$
-d_{pop} = \alpha_{overflow} + b_1 + \beta s'_{15} + \beta^2 b'_1.
-$$
-
-When DYNCALL executes with non-empty overflow, it removes
-$(b_1, s'_{15}, h_5)$ instead; $h_5$ holds the saved caller overflow address because $b'_1$ is reset
-on call entry. Its denominator is:
-
-$$
-d_{dyncall} = \alpha_{overflow} + b_1 + \beta s'_{15} + \beta^2 h_5.
-$$
+Let $d_{push}=S(clk,s_{15},b_1)$, $d_{pop}=S(b_1,s'_{15},b'_1)$, and
+$d_{dyncall}=S(b_1,s'_{15},h_5)$ denote the message encodings above.
 
 The row contribution to the LogUp sum is:
 
@@ -251,3 +247,6 @@ $$
 In addition to the constraints described above, we also need to enforce the following boundary constraints:
 * $b_0 = 16$ at the first and at the last row of execution trace.
 * $b_1 = 0$ at the first and at the last row of execution trace.
+
+The LogUp closure additionally requires every inserted overflow message to have a matching
+removal.

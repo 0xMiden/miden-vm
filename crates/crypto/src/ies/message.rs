@@ -7,12 +7,24 @@ use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError,
 // SEALED MESSAGE
 // ================================================================================================
 
-/// A sealed message containing encrypted data
+/// A sealed message containing encrypted data.
+///
+/// For untrusted encodings, use [`Deserializable::read_from_bytes_with_budget`] with an
+/// application-chosen size limit. This method permits trailing bytes. To require exactly one sealed
+/// message, first reject inputs longer than the size limit. Then decode using
+/// [`Deserializable::read_from`] through a [`BudgetedReader`](crate::utils::BudgetedReader) over a
+/// [`SliceReader`](crate::utils::SliceReader) with the budget set to the input length, and reject
+/// remaining bytes using [`ByteReader::has_more_bytes`]. With a smaller budget, trailing bytes can
+/// go undetected because the reader reports no remaining bytes once its budget is exhausted.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct SealedMessage {
     /// Ephemeral public key (determines scheme and provides key material)
     pub(super) ephemeral_key: EphemeralPublicKey,
-    /// Encrypted ciphertext with authentication tag and nonce
+    /// Scheme-specific ciphertext encoding, including its authentication tag.
     pub(super) ciphertext: Vec<u8>,
 }
 
@@ -30,6 +42,27 @@ impl SealedMessage {
     /// Returns the byte representation of this sealed message.
     pub fn to_bytes(&self) -> Vec<u8> {
         <Self as Serializable>::to_bytes(self)
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+mod sealed_message_arbitrary {
+    use proptest::prelude::*;
+
+    use super::SealedMessage;
+    use crate::ies::keys::EphemeralPublicKey;
+
+    impl Arbitrary for SealedMessage {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // The reader re-parses the ephemeral key under the scheme byte, so use a valid
+            // key (its own covered strategy); the ciphertext payload is any-valid bytes.
+            (any::<EphemeralPublicKey>(), proptest::collection::vec(any::<u8>(), 0..=32))
+                .prop_map(|(ephemeral_key, ciphertext)| Self { ephemeral_key, ciphertext })
+                .boxed()
+        }
     }
 }
 

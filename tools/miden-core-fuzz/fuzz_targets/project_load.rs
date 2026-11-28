@@ -156,6 +156,7 @@ fn load_inherited_workspace_member(
     } else {
         let _ = Project::load(&member_manifest, source_manager);
     }
+    check_inheritance_ground_truth(tree, source_manager);
 }
 
 fn load_project_reference(
@@ -204,7 +205,59 @@ shared = { version = "1.0.0" }
 end
 "#,
     )?;
+    // GROUND-TRUTH MEMBER (writer-produced, run-#241 pattern): a fixed manifest that
+    // inherits BOTH version and description from the workspace, whose resolved values are
+    // known exactly — the inheritance oracle's fixture.
+    write_file(
+        &tree.path("inherited-workspace/gt/miden-project.toml"),
+        r#"[package]
+name = "gt-member"
+version = { workspace = true }
+description = { workspace = true }
+"#,
+    )?;
     Ok(member_manifest)
+}
+
+/// INHERITANCE ORACLE: the ground-truth member declares `{ workspace = true }` for version
+/// and description, so the ONLY source of the workspace's known values ("1.0.0",
+/// "workspace defaults") in the loaded package is the inheritance path. A regression that
+/// drops inheritance, resolves the wrong field, or substitutes a default fails here.
+fn check_inheritance_ground_truth(
+    tree: &TempProjectTree,
+    source_manager: &DefaultSourceManager,
+) {
+    let gt_manifest = tree.path("inherited-workspace/gt/miden-project.toml");
+    let source = source_manager.load_file(&gt_manifest).unwrap_or_else(|e| {
+        panic!("loading the ground-truth member manifest {gt_manifest:?} failed: {e:?}")
+    });
+    let workspace_manifest = tree.path("inherited-workspace/miden-project.toml");
+    let workspace_source = source_manager.load_file(&workspace_manifest).unwrap_or_else(|e| {
+        panic!("loading the workspace manifest {workspace_manifest:?} failed: {e:?}")
+    });
+    let workspace_ast = miden_project::ast::WorkspaceFile::parse(workspace_source)
+        .expect("the known workspace manifest must parse");
+    let package = miden_project::Package::load_from_workspace(source, &workspace_ast)
+        .expect("the ground-truth member must load within its workspace");
+    // EXACT accessors, not Debug substring search: containment would accept a near-miss
+    // description ("workspace defaults WRONG") or a prerelease version.
+    assert!(
+        *package.name().inner() == *"gt-member",
+        "the member name must be exact"
+    );
+    let expected_version: miden_project::SemVer = "1.0.0"
+        .parse()
+        .expect("the expected version literal must parse");
+    assert_eq!(
+        *package.version().inner(),
+        &expected_version,
+        "the inherited version must equal the workspace value exactly (prereleases rejected)"
+    );
+    assert_eq!(
+        package.description().as_deref(),
+        Some("workspace defaults"),
+        "the inherited description must equal the workspace value exactly"
+    );
 }
 
 fn scenario_index(data: &[u8], count: usize) -> usize {

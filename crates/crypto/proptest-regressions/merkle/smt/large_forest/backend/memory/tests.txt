@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 4f501cb40156239101721a7027830f7abc50625db402f98be662e91bce0d29b2 # shrinks to (version, lineage_1, lineage_2, kvs_1, kvs_2, absent) = (0, LineageId([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 66, 102, 249, 26, 18, 35, 219, 50, 62, 103, 94, 210, 29, 120, 112, 103, 7, 36, 227, 216, 90]), LineageId([191, 211, 200, 204, 135, 151, 67, 89, 23, 194, 32, 238, 173, 118, 226, 161, 226, 24, 139, 103, 189, 212, 164, 154, 215, 251, 169, 87, 65, 195, 18, 120]), [(Word([1, 0, 11745105439013454189, 0]), Word([0, 1, 8830915385646994234, 1])), (Word([0, 0, 0, 0]), Word([0, 0, 0, 0]))], [(Word([0, 1, 14897106737087670841, 1]), Word([0, 0, 0, 0])), (Word([1, 0, 13094485820935886368, 2981115348070783453]), Word([0, 0, 8055763962153661607, 1]))], Word([0, 0, 0, 0]))

@@ -716,7 +716,7 @@ pub(crate) fn bump_major(v: &Version) -> Bound<Version> {
     }
 }
 
-pub(crate) fn bump_minor(v: &Version) -> Bound<Version> {
+fn bump_minor(v: &Version) -> Bound<Version> {
     match v.minor.checked_add(1) {
         Some(new) => Bound::Excluded(Version {
             major: v.major,
@@ -729,7 +729,7 @@ pub(crate) fn bump_minor(v: &Version) -> Bound<Version> {
     }
 }
 
-pub(crate) fn bump_patch(v: &Version) -> Bound<Version> {
+fn bump_patch(v: &Version) -> Bound<Version> {
     match v.patch.checked_add(1) {
         Some(new) => Bound::Excluded(Version {
             major: v.major,
@@ -742,7 +742,7 @@ pub(crate) fn bump_patch(v: &Version) -> Bound<Version> {
     }
 }
 
-pub(crate) fn bump_pre(v: &Version) -> Bound<Version> {
+fn bump_pre(v: &Version) -> Bound<Version> {
     if !v.pre.is_empty() {
         Bound::Excluded(Version {
             major: v.major,
@@ -775,7 +775,7 @@ fn bump_up_to_normal(v: &Version) -> Option<Version> {
     }
 }
 
-pub(crate) fn simplified_bounds_to_normal(
+fn simplified_bounds_to_normal(
     bounds: (Bound<Version>, Bound<Version>),
 ) -> (Bound<Version>, Bound<Version>) {
     let (mut from, mut to) = bounds;

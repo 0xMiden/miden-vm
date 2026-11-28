@@ -31,7 +31,7 @@ fn program_with_invalid_mast_root_chars() {
 }
 
 #[test]
-fn program_with_invalid_rpo_digest_call() {
+fn program_with_invalid_mast_digest_call() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -40,7 +40,7 @@ fn program_with_invalid_rpo_digest_call() {
 
     let err = context
         .assemble(source)
-        .expect_err("expected invalid RPO digest call to be rejected");
+        .expect_err("expected invalid MAST digest call to be rejected");
     assert_diagnostic!(&err, "invalid literal: value overflowed the field modulus");
     assert_diagnostic!(
         &err,
@@ -55,7 +55,7 @@ fn program_with_phantom_mast_call() -> TestResult {
         &context,
         "begin call.0xc2545da99d3a1f3f38d957c7893c44d78998d8ea8b11aba7e22c8c2b2a213dae end"
     );
-    let ast = context.parse_program(source)?;
+    let ast = context.parse_module(source)?;
 
     let assembler = Assembler::new(context.source_manager());
     assembler.assemble_program("test", ast)?;

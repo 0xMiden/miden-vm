@@ -3,7 +3,10 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
-use miden_core::{mast::MastForest, program::KernelDescriptor};
+use miden_core::{
+    mast::MastForest,
+    program::{KernelDescriptor, StackOutputs},
+};
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
@@ -55,6 +58,7 @@ impl ResumeContext {
             self.inline_call_contexts.len(),
             |depth, continuation| match continuation {
                 Continuation::EnterForest { inline_context_depth, .. } => *inline_context_depth,
+                Continuation::FinishDyn(_) => depth.saturating_sub(1),
                 _ => depth,
             },
         );
@@ -67,6 +71,23 @@ impl ResumeContext {
     /// Returns a reference to the kernel being currently executed.
     pub fn kernel(&self) -> &KernelDescriptor {
         &self.kernel
+    }
+}
+
+pub(crate) enum ResumeOutcome {
+    Suspended(ResumeContext),
+    Halted {
+        stack: StackOutputs,
+        kernel: KernelDescriptor,
+    },
+}
+
+impl ResumeOutcome {
+    pub(super) fn into_resume_context(self) -> Option<ResumeContext> {
+        match self {
+            Self::Suspended(context) => Some(context),
+            Self::Halted { .. } => None,
+        }
     }
 }
 
@@ -154,7 +175,7 @@ fn check_if_continuation_stack_too_large<F>(
 
 /// The reason why execution was interrupted.
 #[derive(Debug)]
-pub enum BreakReason<F> {
+pub(crate) enum BreakReason<F> {
     /// An execution error occurred
     Err(ExecutionError),
     /// Execution was stopped by a [`Stopper`]. Provides the continuation to add to the continuation

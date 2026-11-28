@@ -1,4 +1,4 @@
-use miden_air::trace::{RowIndex, chiplets::hasher::HasherState};
+use miden_air_definitions::vm::trace::{RowIndex, chiplets::hasher::HasherState};
 use miden_core::deferred::Digest;
 
 use crate::{
@@ -83,6 +83,12 @@ pub(crate) trait SystemInterface {
         expected_new_root: Word,
     ) -> Result<(), OperationError>;
 
+    /// Clears the deferred root only if it matches `expected_previous_root`.
+    ///
+    /// The operation must check the root context before calling this method. A mismatch leaves
+    /// the deferred state unchanged.
+    fn clear_deferred(&mut self, expected_previous_root: Word) -> Result<(), OperationError>;
+
     // CALL STATE
     // --------------------------------------------------------------------------------------------
 
@@ -121,8 +127,10 @@ pub(crate) trait StackInterface {
 
     /// Returns the word on the stack starting at index `start_idx` in "stack order".
     ///
-    /// That is, for `start_idx=0` the top element of the stack will be at the last position in the
-    /// word.
+    /// That is, the stack element at index `start_idx` lands in `Word[0]` and the next three
+    /// follow it, so for `start_idx=0` the top of the stack is `Word[0]`. The four selected
+    /// elements appear in the reverse of their order in [`Self::top()`], which keeps the top of
+    /// the stack at its last index: `get_word(1)` corresponds to `top()[11..15]` reversed.
     ///
     /// For example, if the stack looks like this:
     ///
@@ -131,11 +139,9 @@ pub(crate) trait StackInterface {
     /// a | b | c | d | e | f | g | h | i | j | k | l | m | n | o | p
     ///
     /// Then
-    /// - `stack_get_word(0)` returns `[a, b, c, d]`,
-    /// - `stack_get_word(1)` returns `[b, c, d, e]`,
+    /// - `get_word(0)` returns `[a, b, c, d]`,
+    /// - `get_word(1)` returns `[b, c, d, e]`,
     /// - etc.
-    ///
-    /// Word\[0\] corresponds to the top of stack.
     ///
     /// `start_idx` must be less than or equal to 12.
     fn get_word(&self, start_idx: usize) -> Word;
@@ -325,15 +331,19 @@ pub(crate) trait MemoryInterface {
 
 /// Trait representing the hasher subsystem of the processor.
 pub(crate) trait HasherInterface {
-    /// Applies a single permutation of the hash function to the provided state and records the
-    /// execution trace of this computation.
+    /// Applies one COMPRESS request and records the chaining-value response.
     ///
-    /// The returned tuple contains the hasher state after the permutation and the row address of
-    /// the execution trace at which the permutation started.
-    ///
-    /// The address is only needed for operation helpers in trace generation, and thus an
-    /// implementation might choose to return a default/invalid address if it is not needed.
-    fn permute(&mut self, state: HasherState) -> Result<(Felt, HasherState), OperationError>;
+    /// The returned state has the 12-lane Eidos compression shape. The hasher chiplet response
+    /// carries the resulting 4-felt chaining value from `state[8..12]`.
+    fn compress(&mut self, state: HasherState) -> Result<(Felt, HasherState), OperationError>;
+
+    /// Applies one Eidos compression and returns all 16 raw XOF lanes.
+    fn compress_aead_xof(
+        &mut self,
+        ctx: ContextId,
+        clk: RowIndex,
+        state: HasherState,
+    ) -> Result<[Felt; 16], OperationError>;
 
     /// Verifies that the `claimed_root` is indeed the root of a Merkle tree containing `value` at
     /// the specified `index`.

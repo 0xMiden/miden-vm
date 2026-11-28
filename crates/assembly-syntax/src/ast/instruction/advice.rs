@@ -19,16 +19,17 @@ pub enum SystemEventNode {
     PushMapValN8,
     HasMapKey,
     PushMtNode,
+    PushDeferredRoot,
     InsertMem,
     InsertHdword,
-    InsertHdwordWithDomain,
     InsertHqword,
-    InsertHperm,
+    InsertCompress,
     DeferredRegister,
     DeferredRegisterData,
     DeferredEvaluate,
-    DeferredEvaluateTag,
+    DeferredEvaluateFrame,
     DeferredEvaluatePayload,
+    DeferredExportWitness,
 }
 
 impl From<&SystemEventNode> for SystemEvent {
@@ -42,16 +43,17 @@ impl From<&SystemEventNode> for SystemEvent {
             PushMapValN8 => Self::MapValueToStackN8,
             HasMapKey => Self::HasMapKey,
             PushMtNode => Self::MerkleNodeToStack,
+            PushDeferredRoot => Self::DeferredRootToStack,
             InsertMem => Self::MemToMap,
             InsertHdword => Self::HdwordToMap,
-            InsertHdwordWithDomain => Self::HdwordToMapWithDomain,
             InsertHqword => Self::HqwordToMap,
-            InsertHperm => Self::HpermToMap,
+            InsertCompress => Self::CompressToMap,
             DeferredRegister => Self::DeferredRegister,
             DeferredRegisterData => Self::DeferredRegisterData,
             DeferredEvaluate => Self::DeferredEvaluate,
-            DeferredEvaluateTag => Self::DeferredEvaluateTag,
+            DeferredEvaluateFrame => Self::DeferredEvaluateFrame,
             DeferredEvaluatePayload => Self::DeferredEvaluatePayload,
+            DeferredExportWitness => Self::DeferredExportWitness,
         }
     }
 }
@@ -72,16 +74,17 @@ impl fmt::Display for SystemEventNode {
             Self::PushMapValN8 => write!(f, "push_mapvaln.8"),
             Self::HasMapKey => write!(f, "has_mapkey"),
             Self::PushMtNode => write!(f, "push_mtnode"),
+            Self::PushDeferredRoot => write!(f, "push_deferred_root"),
             Self::InsertMem => write!(f, "insert_mem"),
             Self::InsertHdword => write!(f, "insert_hdword"),
-            Self::InsertHdwordWithDomain => write!(f, "insert_hdword_d"),
             Self::InsertHqword => write!(f, "insert_hqword"),
-            Self::InsertHperm => writeln!(f, "insert_hperm"),
+            Self::InsertCompress => write!(f, "insert_compress"),
             Self::DeferredRegister => write!(f, "register_deferred"),
             Self::DeferredRegisterData => write!(f, "register_deferred_data"),
             Self::DeferredEvaluate => write!(f, "evaluate_deferred"),
-            Self::DeferredEvaluateTag => write!(f, "evaluate_deferred_tag"),
+            Self::DeferredEvaluateFrame => write!(f, "evaluate_deferred_frame"),
             Self::DeferredEvaluatePayload => write!(f, "evaluate_deferred_payload"),
+            Self::DeferredExportWitness => write!(f, "export_deferred_witness"),
         }
     }
 }

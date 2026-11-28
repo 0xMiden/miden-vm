@@ -1,10 +1,17 @@
 #[cfg(test)]
+mod ed25519_masm;
+#[cfg(test)]
+mod p256_masm;
+
+#[cfg(test)]
 mod tests {
-    use ed25519_dalek::Verifier;
     use k256::{elliptic_curve::sec1::ToSec1Point, pkcs8::DecodePublicKey};
     use miden_crypto::{
         Word,
-        dsa::{ecdsa_k256_keccak, eddsa_25519_sha512},
+        dsa::{
+            ecdsa_k256_keccak::{self, PublicKey},
+            eddsa_25519_sha512,
+        },
         ecdh::{k256 as miden_k256, x25519 as miden_x25519},
         ies::{IesError, IesScheme, SealedMessage, UnsealingKey},
         utils::{Deserializable, Serializable},
@@ -148,8 +155,9 @@ mod tests {
                     continue;
                 },
             };
-            let public_key = eddsa_25519_sha512::PublicKey::read_from_bytes(&public_key_bytes)
-                .expect("valid Ed25519 public key should parse");
+            let public_key = eddsa_25519_sha512::PublicKey::read_from_bytes(&public_key_bytes);
+            let canonical_key = miden_precompiles::ed25519_decompress_x(public_key_bytes).is_ok();
+            assert_eq!(public_key.is_ok(), canonical_key, "public key encoding policy");
 
             for test in group.tests {
                 let id = test.tc_id;
@@ -158,7 +166,8 @@ mod tests {
                     continue;
                 };
                 let signature = ed25519_dalek::Signature::from_bytes(&signature_bytes);
-                let verified = verifying_key.verify(test.msg.as_ref(), &signature).is_ok();
+                let verified = canonical_key
+                    && verifying_key.verify_strict(test.msg.as_ref(), &signature).is_ok();
 
                 if is_invalid(test.result) {
                     assert!(!verified, "tcId {id}: invalid signature verified");
@@ -175,8 +184,79 @@ mod tests {
                     };
                     let signature = eddsa_25519_sha512::Signature::from_der(&signature_bytes)
                         .expect("raw Ed25519 signature should parse");
-                    let wrapper_verified = public_key.verify(message, &signature);
+                    let wrapper_verified =
+                        public_key.as_ref().is_ok_and(|key| key.verify(message, &signature));
                     assert_eq!(wrapper_verified, verified, "tcId {id}: wrapper verification");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn secp256k1_ecdsa_public_key_parsing() {
+        use wycheproof_ng_ecdsa::TestName;
+        const COMPRESSED_PUBLIC_KEY_BYTES: usize = 33;
+
+        let test_names = [
+            TestName::EcdsaSecp256k1Sha256,
+            TestName::EcdsaSecp256k1Sha256P1363,
+            TestName::EcdsaSecp256k1Sha256Bitcoin,
+            TestName::EcdsaSecp256k1Sha3_256,
+            TestName::EcdsaSecp256k1Sha3_512,
+            TestName::EcdsaSecp256k1Sha512,
+            TestName::EcdsaSecp256k1Sha512P1363,
+            TestName::EcdsaSecp256k1Shake128,
+            TestName::EcdsaSecp256k1Shake128P1363,
+            TestName::EcdsaSecp256k1Shake256,
+            TestName::EcdsaSecp256k1Shake256P1363,
+        ];
+
+        for test_name in test_names {
+            let test_set = wycheproof_ng_ecdsa::TestSet::load(test_name)
+                .expect("secp256k1 ECDSA Wycheproof vectors should load");
+
+            for group in test_set.test_groups {
+                let uncompressed_public_key: &[u8] = group.key.key.as_ref();
+                let compressed_public_key =
+                    k256::PublicKey::from_sec1_bytes(uncompressed_public_key)
+                        .expect("Wycheproof uncompressed public key should parse with k256")
+                        .to_sec1_point(true)
+                        .as_bytes()
+                        .to_vec();
+                assert_eq!(
+                    compressed_public_key.len(),
+                    COMPRESSED_PUBLIC_KEY_BYTES,
+                    "{test_name:?}: unexpected compressed public key length"
+                );
+
+                let from_uncompressed_bytes = PublicKey::from_sec1_bytes(uncompressed_public_key)
+                    .expect("Wycheproof uncompressed public key should parse");
+                let from_compressed_bytes = PublicKey::from_sec1_bytes(&compressed_public_key)
+                    .expect("compressed public key should parse");
+                let from_uncompressed_hex =
+                    PublicKey::from_hex(&format!("0x{}", hex::encode(uncompressed_public_key)))
+                        .expect("hex uncompressed public key should parse");
+                let from_compressed_hex =
+                    PublicKey::from_hex(&format!("0x{}", hex::encode(&compressed_public_key)))
+                        .expect("hex compressed public key should parse");
+                let from_der = PublicKey::from_der(group.der.as_ref())
+                    .expect("Wycheproof DER public key should parse");
+
+                let parsed_keys =
+                    [from_compressed_bytes, from_uncompressed_hex, from_compressed_hex, from_der];
+
+                assert_eq!(
+                    from_uncompressed_bytes.to_bytes(),
+                    compressed_public_key,
+                    "{test_name:?}"
+                );
+                for parsed_key in parsed_keys {
+                    assert_eq!(parsed_key, from_uncompressed_bytes, "{test_name:?}");
+                    assert_eq!(
+                        parsed_key.to_commitment(),
+                        from_uncompressed_bytes.to_commitment(),
+                        "{test_name:?}"
+                    );
                 }
             }
         }

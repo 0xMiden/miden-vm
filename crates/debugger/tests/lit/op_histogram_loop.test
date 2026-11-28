@@ -1,0 +1,25 @@
+# RUN: compile-masm %S/op_histogram_loop.masm -o %t.masp
+# RUN: (miden-debug \
+# RUN:   --profiling-reports-dir %t_reports \
+# RUN:   --profiling-instruments op-histogram-global \
+# RUN:   --commands %s %t.masp 2>&1; \
+# RUN:  cat %t_reports/op-histogram-global) | filecheck %s
+
+continue
+stack
+
+# CHECK: Program terminated successfully
+# CHECK: [0] 65
+# CHECK: total_cycles        100% 137
+# CHECK-NEXT: incr              16.79% 23
+# CHECK-NEXT: dup0              16.79% 23
+# CHECK-NEXT: push              10.95% 15
+# CHECK-NEXT: pad               10.22% 14
+# CHECK-NEXT: not                8.76% 12
+# CHECK-NEXT: eq                 8.76% 12
+# CHECK-NEXT: add                8.76% 12
+# CHECK-NEXT: swap               8.03% 11
+# CHECK-NEXT: movup2             8.03% 11
+# CHECK-NEXT: drop               1.46% 2
+# CHECK-NEXT: noop               0.73% 1
+# CHECK-NEXT: mstore             0.73% 1

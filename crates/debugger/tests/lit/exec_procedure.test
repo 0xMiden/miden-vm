@@ -1,0 +1,16 @@
+# Plain exec retains its caller and labels the recovered callee as inferred.
+#
+# RUN: compile-masm %S/op_histogram_proc.masm -o %t.masp
+# RUN: miden-debug --commands %s %t.masp 2>&1 | filecheck %s
+
+break op_histogram_proc.masm:4
+continue
+where
+backtrace
+
+# CHECK: Breakpoint 0 set: **/op_histogram_proc.masm:4
+# CHECK: at {{.*}}op_histogram_proc.masm:4:5 in [inferred] $exec::double
+# CHECK: {{.*}}op_histogram_proc.masm:4:5 in [inferred] $exec::double
+# CHECK: Backtrace (2 frames):
+# CHECK-NEXT: * #0 [inferred] $exec::double at {{.*}}op_histogram_proc.masm:4:5
+# CHECK-NEXT:   #1 $exec::$main at {{.*}}op_histogram_proc.masm:15:5

@@ -299,7 +299,7 @@ pub(crate) fn cmp(a: &[u32; 8], b: &[u32; 8]) -> Ordering {
 }
 
 /// Returns whether bit `bit` is set in a little-endian limb array.
-pub(crate) fn bit_is_set<const N: usize>(limbs: &[u32; N], bit: usize) -> bool {
+fn bit_is_set<const N: usize>(limbs: &[u32; N], bit: usize) -> bool {
     ((limbs[bit / 32] >> (bit % 32)) & 1) == 1
 }
 

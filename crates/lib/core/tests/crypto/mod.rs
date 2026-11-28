@@ -1,9 +1,14 @@
 mod dsa;
+mod ecdsa_p256;
+mod ecgfp5;
+mod eddsa;
 mod falcon;
 
-mod aead;
+mod aead_eidos;
 mod blake3;
 mod circuit_evaluation;
+mod eidos;
+mod eidos_domain_constants;
+mod eidos_hashes;
 mod hashes;
-mod poseidon2;
 mod sha256;

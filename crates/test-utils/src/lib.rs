@@ -12,9 +12,14 @@ use alloc::{
     vec,
     vec::Vec,
 };
+#[cfg(not(feature = "std"))]
+pub use core::{assert_eq, assert_eq as assert_str_eq, assert_ne};
 
-use miden_air::{CoreCols, DecoderCols, RangeCols, StackCols, SystemCols};
-use miden_assembly::{Linkage, diagnostics::reporting::PrintDiagnostic};
+pub use miden_air_definitions::vm::VmTrace;
+use miden_air_definitions::vm::{CoreCols, DecoderCols, StackCols, SystemCols};
+use miden_assembly::Linkage;
+#[cfg(not(target_family = "wasm"))]
+use miden_assembly::diagnostics::reporting::PrintDiagnostic;
 pub use miden_assembly::{
     Path,
     debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
@@ -27,27 +32,25 @@ pub use miden_core::{
     program::{ExecutionClaim, MIN_STACK_DEPTH, StackInputs, StackOutputs},
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
-use miden_core::{
-    chiplets::hasher::apply_permutation,
-    events::{EventName, SystemEvent},
-};
+use miden_core::{chiplets::hasher::compress_state, events::EventName};
 use miden_mast_package::{Package, debug_info::PackageDebugInfo};
-#[cfg(not(target_family = "wasm"))]
-use miden_processor::trace::build_trace;
 pub use miden_processor::{
     ContextId, ExecutionError, ProcessorState,
     advice::{AdviceInputs, AdviceProvider, AdviceStack},
-    trace::VmTrace,
 };
+#[cfg(not(target_family = "wasm"))]
+use miden_processor::{DefaultHost, ExecutionOptions, ExecutionOutput, Processor, WitnessOutput};
 use miden_processor::{
-    DefaultHost, ExecutionOptions, ExecutionOutput, ExecutionWitness, FastProcessor, Program,
+    Program,
     event::{EventHandler, TraceHandler},
 };
 pub use miden_prover::Prover;
 pub use miden_verifier::Verifier;
+#[cfg(feature = "std")]
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
 #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 use proptest::prelude::{Arbitrary, Strategy};
+#[cfg(feature = "std")]
 pub use test_case::test_case;
 
 pub mod math {
@@ -71,7 +74,7 @@ mod test_builders;
 pub use proptest;
 pub use test_builders::{IntoAdviceStackInput, advice_stack_from};
 
-pub fn module_source(path: impl AsRef<Path>, source: impl ToString) -> String {
+pub(crate) fn module_source(path: impl AsRef<Path>, source: impl ToString) -> String {
     let source = source.to_string();
     if source.trim_start().starts_with("namespace ") {
         source
@@ -80,17 +83,6 @@ pub fn module_source(path: impl AsRef<Path>, source: impl ToString) -> String {
         let namespace = path.strip_prefix("::").unwrap_or(&path);
         format!("namespace {namespace}\n\n{source}")
     }
-}
-
-#[cfg(not(target_family = "wasm"))]
-/// Constructs a processor with the default VM environment.
-fn new_vm_default_processor(
-    stack_inputs: StackInputs,
-    advice_inputs: AdviceInputs,
-    options: ExecutionOptions,
-) -> Result<FastProcessor, ExecutionError> {
-    FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
-        .map_err(ExecutionError::advice_error_no_context)
 }
 
 // CONSTANTS
@@ -289,7 +281,7 @@ impl Test {
     }
 
     /// Adds kernel source to this test so it is assembled and linked during compilation.
-    pub fn with_kernel_source(
+    pub(crate) fn with_kernel_source(
         mut self,
         kernel_name: impl Into<String>,
         kernel_source: impl ToString,
@@ -364,38 +356,24 @@ impl Test {
     }
 
     /// Add a handler for a specific event when running the `Host`.
-    pub fn add_event_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn EventHandler>)>) {
-        for (event, handler) in handlers {
-            let event_name = event.as_str();
-            if SystemEvent::from_name(event_name).is_some() {
-                panic!("tried to register handler for reserved system event: {event_name}")
-            }
-            let event_id = event.to_event_id();
-            if self.handlers.iter().any(|(e, _)| e.to_event_id() == event_id) {
-                panic!("handler for event '{event_name}' was already added")
-            }
-            self.handlers.push((event, handler));
-        }
+    ///
+    /// The host registry applies the event name rules (not empty, not reserved, not a duplicate)
+    /// when the test builds the host, so a rejected name panics there.
+    pub(crate) fn add_event_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn EventHandler>)>) {
+        self.handlers.extend(handlers);
     }
 
     /// Add a trace handler for a specific event when running the `Host`.
-    pub fn add_trace_handler(&mut self, event: EventName, handler: impl TraceHandler) {
+    pub(crate) fn add_trace_handler(&mut self, event: EventName, handler: impl TraceHandler) {
         self.add_trace_handlers(vec![(event, Arc::new(handler))]);
     }
 
     /// Add trace handlers for specific events when running the `Host`.
-    pub fn add_trace_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn TraceHandler>)>) {
-        for (event, handler) in handlers {
-            let event_name = event.as_str();
-            if SystemEvent::from_name(event_name).is_some() {
-                panic!("tried to register trace handler for reserved system event: {event_name}")
-            }
-            let event_id = event.to_event_id();
-            if self.trace_handlers.iter().any(|(e, _)| e.to_event_id() == event_id) {
-                panic!("trace handler for event '{event_name}' was already added")
-            }
-            self.trace_handlers.push((event, handler));
-        }
+    ///
+    /// The host registry applies the event name rules (not empty, not reserved, not a duplicate)
+    /// when the test builds the host, so a rejected name panics there.
+    pub(crate) fn add_trace_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn TraceHandler>)>) {
+        self.trace_handlers.extend(handlers);
     }
 
     // TEST METHODS
@@ -427,13 +405,12 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         // execute the test
-        let processor = new_vm_default_processor(
-            self.stack_inputs,
-            self.advice_inputs.clone(),
-            ExecutionOptions::default(),
-        )
-        .expect("test processor should initialize with default precompiles");
-        let execution_output = processor.execute_sync(&program, &mut host).unwrap();
+        let execution_output = Processor::new(&program)
+            .with_stack_inputs(self.stack_inputs)
+            .with_advice(self.advice_inputs.clone())
+            .execute()
+            .run_sync(&mut host)
+            .unwrap();
 
         // validate the memory state
         for (addr, mem_value) in ((mem_start_addr as usize)
@@ -476,20 +453,20 @@ impl Test {
 
     /// Executes the test with the provided stack inputs and asserts the final stack state.
     ///
-    /// This preserves the same execution coverage as [`expect_stack`](Self::expect_stack): traced
-    /// execution, step/resume execution comparison, and trace construction are all still run.
+    /// As in [`Self::expect_stack`], witness recording and step/resume execution must agree.
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
     pub fn expect_stack_with_inputs(&self, stack_inputs: &[u64], final_stack: &[u64]) {
-        let trace = self
-            .execute_with_stack_inputs(stack_inputs)
+        let inputs = stack_inputs_from_ints(stack_inputs.iter().copied());
+        let output = self
+            .record_with_stack_inputs(inputs)
             .inspect_err(|_err| {
                 #[cfg(feature = "std")]
                 std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
             })
             .expect("failed to execute");
 
-        let result = stack_outputs_as_int_vec(&trace.last_stack_state());
+        let result = stack_outputs_as_int_vec(output.claim.stack_outputs());
         let expected = resize_to_min_stack_depth(final_stack);
         assert_eq!(expected, result, "Expected stack to be {:?}, found {:?}", expected, result);
     }
@@ -521,7 +498,7 @@ impl Test {
         }
 
         // Enable debug tracing to stderr via the MIDEN_LOG environment variable, if present
-        #[cfg(not(target_family = "wasm"))]
+        #[cfg(all(feature = "std", not(target_family = "wasm")))]
         {
             let _ = env_logger::Builder::from_env("MIDEN_LOG").format_timestamp(None).try_init();
         }
@@ -570,37 +547,30 @@ impl Test {
         Ok(result)
     }
 
-    /// Compiles the test's source to a Program and executes it with the tests inputs. Returns a
-    /// resulting execution trace or error.
-    ///
-    /// Internally, this also checks that traced execution and step/resume execution agree on the
-    /// stack outputs.
+    /// Records the execution and compares its stack outputs with step/resume execution.
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
-    pub fn execute(&self) -> Result<VmTrace, ExecutionError> {
-        self.execute_with_stack_inputs_inner(self.stack_inputs)
+    pub fn execute(&self) -> Result<ExecutionClaim, ExecutionError> {
+        Ok(self.record_with_stack_inputs(self.stack_inputs)?.claim)
     }
 
-    /// Compiles the test's source and executes it with the provided stack inputs.
-    ///
-    /// This uses the same traced execution, step/resume comparison, and trace construction path as
-    /// [`execute`](Self::execute).
+    /// Builds a VM trace for AIR checks and assertions on trace rows.
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
-    pub fn execute_with_stack_inputs(
-        &self,
-        stack_inputs: &[u64],
-    ) -> Result<VmTrace, ExecutionError> {
-        let stack_inputs = stack_inputs_from_ints(stack_inputs.iter().copied());
-        self.execute_with_stack_inputs_inner(stack_inputs)
+    pub fn build_trace(&self) -> Result<VmTrace, ExecutionError> {
+        let output = self.record_with_stack_inputs(self.stack_inputs)?;
+        let (vm, _) = output.witness.into_parts();
+        let trace = vm.build_trace(&miden_vm_stark::memory::default_budget())?;
+        assert_eq!(output.claim.program_root(), *trace.program_hash(), "inconsistent program hash");
+        Ok(trace)
     }
 
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
-    fn execute_with_stack_inputs_inner(
+    fn record_with_stack_inputs(
         &self,
         stack_inputs: StackInputs,
-    ) -> Result<VmTrace, ExecutionError> {
+    ) -> Result<WitnessOutput, ExecutionError> {
         // Note: we fix a large fragment size here, as we're not testing the fragment boundaries
         // with these tests (which are tested separately), but rather only the per-fragment trace
         // generation logic - though not too big so as to over-allocate memory.
@@ -610,33 +580,25 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
 
-        let fast_stack_result = {
-            let fast_processor = new_vm_default_processor(
-                stack_inputs,
-                self.advice_inputs.clone(),
-                ExecutionOptions::default()
-                    .with_core_trace_fragment_size(FRAGMENT_SIZE)
-                    .unwrap(),
-            )?;
-            if let Some(debug_info) = debug_info.as_ref() {
-                fast_processor.execute_for_proving_with_package_debug_info_sync(
-                    &program, debug_info, &mut host,
-                )
-            } else {
-                fast_processor.execute_for_proving_sync(&program, &mut host)
-            }
-        };
-
-        // Compare traced full execution and step/resume execution stack outputs.
-        self.assert_result_with_step_execution(stack_inputs, &fast_stack_result);
-
-        fast_stack_result.and_then(|witness| {
-            let (vm_witness, _) = witness.into_parts();
-            let trace = build_trace(vm_witness)?;
-
-            assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
-            Ok(trace)
-        })
+        // Return advice initialization errors before replaying the program for comparison.
+        let options = ExecutionOptions::default()
+            .with_core_trace_fragment_size(FRAGMENT_SIZE)
+            .unwrap();
+        let execution = Processor::new(&program)
+            .with_stack_inputs(stack_inputs)
+            .with_advice(self.advice_inputs.clone())
+            .with_options(options)
+            .with_source_context(debug_info.as_ref().map(|debug_info| {
+                miden_processor::PackageSourceDebugContext::new_optional(debug_info, None)
+            }))
+            .record_witness()
+            .prepare()?;
+        let recorded = execution.run_sync(&mut host);
+        self.assert_result_with_step_execution(
+            stack_inputs,
+            recorded.as_ref().map(|output| *output.claim.stack_outputs()),
+        );
+        recorded
     }
 
     /// Compiles the test's source to a Program and executes it with the tests inputs.
@@ -648,19 +610,15 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
 
-        let processor = new_vm_default_processor(
-            self.stack_inputs,
-            self.advice_inputs.clone(),
-            ExecutionOptions::default(),
-        )?;
-
-        if let Some(debug_info) = debug_info.as_ref() {
-            processor
-                .execute_with_package_debug_info_sync(&program, debug_info, &mut host)
-                .map(|output| (output, host))
-        } else {
-            processor.execute_sync(&program, &mut host).map(|output| (output, host))
-        }
+        Processor::new(&program)
+            .with_stack_inputs(self.stack_inputs)
+            .with_advice(self.advice_inputs.clone())
+            .with_source_context(debug_info.as_ref().map(|debug_info| {
+                miden_processor::PackageSourceDebugContext::new_optional(debug_info, None)
+            }))
+            .execute()
+            .run_sync(&mut host)
+            .map(|output| (output, host))
     }
 
     /// Compiles the test's code into a program, then generates and verifies a STARK proof of
@@ -675,36 +633,23 @@ impl Test {
         let (program, mut host, debug_info) = self.get_program_and_host();
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
         let stack_inputs = stack_inputs_from_ints(pub_inputs);
-        let processor = new_vm_default_processor(
-            stack_inputs,
-            self.advice_inputs.clone(),
-            ExecutionOptions::default(),
-        )
-        .unwrap();
-        let witness = if let Some(debug_info) = debug_info.as_ref() {
-            processor
-                .execute_for_proving_with_package_debug_info_sync(&program, debug_info, &mut host)
-        } else {
-            processor.execute_for_proving_sync(&program, &mut host)
-        }
-        .unwrap();
-        let stack_outputs = *witness.claim().stack_outputs();
-        let proof = Prover::new()
-            .with_hash_fn(miden_core::proof::HashFunction::Blake3_256)
-            .prove_full(witness)
+        let WitnessOutput { claim, witness, .. } = Processor::new(&program)
+            .with_stack_inputs(stack_inputs)
+            .with_advice(self.advice_inputs.clone())
+            .with_source_context(debug_info.as_ref().map(|debug_info| {
+                miden_processor::PackageSourceDebugContext::new_optional(debug_info, None)
+            }))
+            .record_witness()
+            .run_sync(&mut host)
             .unwrap();
-        let claim =
-            ExecutionClaim::from_program_info(program.to_info(), stack_inputs, stack_outputs);
+        let proof = Prover::new().prove_full(witness).unwrap();
         if test_fail {
-            let mut elements = [ZERO; MIN_STACK_DEPTH];
-            elements.copy_from_slice(&*stack_outputs);
+            let mut elements = **claim.stack_outputs();
             elements[0] += ONE;
-            let stack_outputs =
-                StackOutputs::new(&elements).expect("stack outputs should fit the VM stack");
             let invalid_claim = ExecutionClaim::from_program_info(
                 claim.to_program_info(),
-                stack_inputs,
-                stack_outputs,
+                *claim.stack_inputs(),
+                StackOutputs::from(elements),
             );
             assert!(Verifier::new().verify(&invalid_claim, &proof).is_err());
         } else {
@@ -717,7 +662,7 @@ impl Test {
     /// Executes the test program and checks all AIR constraints without generating a STARK proof.
     ///
     /// This is the recommended way to validate constraints in tests. It delegates to
-    /// [`VmTrace::check_constraints`], which is much faster than the
+    /// [`miden_vm_stark::debug::check_constraints`], which is much faster than the
     /// full prove/verify pipeline and provides better error diagnostics. Use
     /// [`prove_and_verify`](Self::prove_and_verify) only when you need to exercise the
     /// complete STARK proof generation and verification flow.
@@ -729,20 +674,20 @@ impl Test {
     #[track_caller]
     pub fn check_constraints(&self) {
         let trace = self
-            .execute()
+            .build_trace()
             .inspect_err(|_err| {
                 #[cfg(feature = "std")]
                 std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
             })
             .expect("failed to execute");
-        trace.check_constraints();
+        miden_vm_stark::debug::check_constraints(&trace);
     }
 
     /// Returns the last state of the stack after executing a test.
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
     pub fn get_last_stack_state(&self) -> StackOutputs {
-        let trace = self
+        let claim = self
             .execute()
             .inspect_err(|_err| {
                 #[cfg(feature = "std")]
@@ -750,7 +695,7 @@ impl Test {
             })
             .expect("failed to execute");
 
-        trace.last_stack_state()
+        *claim.stack_outputs()
     }
 
     // HELPERS
@@ -771,10 +716,15 @@ impl Test {
             host.load_library(library.mast_forest()).unwrap();
         }
         for (event, handler) in &self.handlers {
-            host.register_handler(event.clone(), handler.clone()).unwrap();
+            host.register_handler(event.clone(), handler.clone()).unwrap_or_else(|err| {
+                panic!("Failed to register handler for event '{}': {err}", event.as_str())
+            });
         }
         for (event, handler) in &self.trace_handlers {
-            host.register_trace_handler(event.clone(), handler.clone()).unwrap();
+            host.register_trace_handler(event.clone(), handler.clone())
+                .unwrap_or_else(|err| {
+                    panic!("Failed to register trace handler for event '{}': {err}", event.as_str())
+                });
         }
 
         (program, host, debug_info)
@@ -784,7 +734,7 @@ impl Test {
     fn assert_result_with_step_execution(
         &self,
         stack_inputs: StackInputs,
-        fast_result: &Result<ExecutionWitness, ExecutionError>,
+        fast_result: Result<StackOutputs, &ExecutionError>,
     ) {
         fn compare_results(
             left_result: Result<StackOutputs, &ExecutionError>,
@@ -837,23 +787,24 @@ impl Test {
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
         let compare_error_diagnostics = debug_info.is_none();
 
-        let fast_result_by_step = {
-            let fast_process = new_vm_default_processor(
-                stack_inputs,
-                self.advice_inputs.clone(),
-                ExecutionOptions::default(),
-            )
-            .expect("test processor should initialize with default precompiles");
-            if let Some(debug_info) = debug_info.as_ref() {
-                fast_process
-                    .execute_by_step_with_package_debug_info_sync(&program, debug_info, &mut host)
-            } else {
-                fast_process.execute_by_step_sync(&program, &mut host)
-            }
-        };
+        let fast_result_by_step: Result<StackOutputs, ExecutionError> = (|| {
+            let mut session = Processor::new(&program)
+                .with_stack_inputs(stack_inputs)
+                .with_advice(self.advice_inputs.clone())
+                .with_source_context(debug_info.as_ref().map(|debug_info| {
+                    miden_processor::PackageSourceDebugContext::new_optional(debug_info, None)
+                }))
+                .execute()
+                .prepare()
+                .expect("test processor should initialize with default precompiles")
+                .start()?;
+            while !session.step_sync(&mut host)?.is_finished() {}
+            let completed = session.try_complete().break_value().expect("the session halted");
+            Ok(completed.finish()?.stack)
+        })();
 
         compare_results(
-            fast_result.as_ref().map(|witness| *witness.claim().stack_outputs()),
+            fast_result,
             &fast_result_by_step,
             "traced execution",
             "step/resume execution",
@@ -1001,11 +952,14 @@ pub fn stack_inputs_from_ints(values: impl IntoIterator<Item = u64>) -> StackInp
     StackInputs::new(&values).expect("stack inputs should fit the VM stack")
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn stack_outputs_as_int_vec(outputs: &StackOutputs) -> Vec<u64> {
     outputs.iter().map(Felt::as_canonical_u64).collect()
 }
 
-pub fn resize_to_min_stack_depth(values: &[u64]) -> Vec<u64> {
+/// Pads `values` with zeros up to the minimum stack depth.
+#[cfg(not(target_family = "wasm"))]
+pub(crate) fn resize_to_min_stack_depth(values: &[u64]) -> Vec<u64> {
     let mut result: Vec<u64> = values.to_vec();
     result.resize(MIN_STACK_DEPTH, 0);
     result
@@ -1018,25 +972,24 @@ pub fn prop_randw<T: Arbitrary>() -> impl Strategy<Value = Vec<T>> {
     prop::collection::vec(any::<T>(), 4)
 }
 
-/// Given a hasher state, perform one permutation.
+/// Computes one expected COMPRESS state transition.
 ///
-/// This helper reconstructs that state, applies a permutation, and returns the resulting
-/// `[RATE0',RATE1',CAP']` back in stack order.
-pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
-    assert!(values.len() >= STATE_WIDTH, "expected at least 12 values for hperm test");
+/// The block lanes are preserved and the chaining-value lanes are replaced with the
+/// Eidos compression output.
+pub fn build_expected_compress(values: &[u64]) -> [Felt; STATE_WIDTH] {
+    assert!(values.len() >= STATE_WIDTH, "expected at least 12 values for compress test");
 
-    // Reconstruct the internal Poseidon2 state from the initial stack:
+    // Reconstruct the internal VM hasher state from the initial stack:
     // stack[0..12] = [v0, ..., v11]
-    // => state[0..12] = stack[0..12] in [RATE0,RATE1,CAPACITY] layout.
+    // => state[0..12] = stack[0..12] in [BLOCK_LO, BLOCK_HI, CV] layout.
     let mut state = [ZERO; STATE_WIDTH];
     for i in 0..STATE_WIDTH {
         state[i] = Felt::new_unchecked(values[i]);
     }
 
-    // Apply the permutation
-    apply_permutation(&mut state);
+    compress_state(&mut state);
 
-    // Map internal state back to stack layout [RATE0', RATE1', CAP']
+    // Map internal state back to stack layout [BLOCK_LO, BLOCK_HI, CV'].
     let mut out = [ZERO; STATE_WIDTH];
     out[..STATE_WIDTH].copy_from_slice(&state[..STATE_WIDTH]);
 
@@ -1046,6 +999,14 @@ pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
 pub fn build_expected_hash(values: &[u64]) -> [Felt; 4] {
     let digest = hash_elements(&values.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>());
     digest.into()
+}
+
+/// Computes the generic eight-Felt hash used by `hdword`.
+pub fn build_expected_hdword(values: &[u64]) -> [Felt; 4] {
+    assert!(values.len() >= 2 * WORD_SIZE, "expected at least two words for hdword test");
+
+    let values = values.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
+    hash_elements(&values[..2 * WORD_SIZE]).into()
 }
 
 // Generates the MASM code which pushes the input values during the execution of the program.
@@ -1088,7 +1049,8 @@ const CORE_COL_NAMES: CoreCols<&'static str> = CoreCols {
         in_span: "in_span",
         group_count: "group_count",
         op_index: "op_index",
-        batch_flags: ["op_batch_flag[0]", "op_batch_flag[1]", "op_batch_flag[2]"],
+        full_batch: "full_batch",
+        batch_size_code: "batch_size_code",
         extra: ["op_bits_extra[0]", "op_bits_extra[1]"],
     },
     stack: StackCols {
@@ -1113,10 +1075,6 @@ const CORE_COL_NAMES: CoreCols<&'static str> = CoreCols {
         b0: "stack_b0",
         b1: "stack_b1",
         h0: "stack_h0",
-    },
-    range: RangeCols {
-        multiplicity: "range_check[0]",
-        value: "range_check[1]",
     },
 };
 

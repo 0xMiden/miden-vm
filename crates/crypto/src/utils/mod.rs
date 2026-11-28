@@ -20,8 +20,8 @@ use crate::{Felt, Word, field::QuotientMap};
 // CONSTANTS
 // ================================================================================================
 
-/// The number of byte chunks that can be safely embedded in a field element
-const BINARY_CHUNK_SIZE: usize = 7;
+/// Number of data bytes packed into each Felt by the padded byte encoding.
+pub(crate) const BINARY_CHUNK_SIZE: usize = 7;
 
 // RE-EXPORTS
 // ================================================================================================
@@ -47,7 +47,7 @@ pub fn word_to_hex(w: &Word) -> Result<String, fmt::Error> {
 /// Useful for `Display` implementations that want compact, canonical hex output (e.g. in `tracing`
 /// logs) without allocating an intermediate `String`. This mirrors the format produced by
 /// [`bytes_to_hex_string`], which only accepts fixed-size arrays.
-pub fn write_hex(f: &mut fmt::Formatter<'_>, bytes: &[u8]) -> fmt::Result {
+pub(crate) fn write_hex(f: &mut fmt::Formatter<'_>, bytes: &[u8]) -> fmt::Result {
     write!(f, "0x")?;
     for byte in bytes {
         write!(f, "{byte:02x}")?;
@@ -93,7 +93,9 @@ pub(crate) fn read_sensitive_array<const N: usize, R: ByteReader>(
 /// * `bytes` - Byte slice to encode
 ///
 /// # Returns
-/// Vector of `Felt` elements with the last element containing padding
+///
+/// Returns `bytes.len().div_ceil(BINARY_CHUNK_SIZE)` Felts. Empty input yields an empty vector.
+/// The padding marker fits in the final Felt, even when the final data chunk has seven bytes.
 pub fn bytes_to_elements_with_padding(bytes: &[u8]) -> Vec<Felt> {
     if bytes.is_empty() {
         return vec![];
