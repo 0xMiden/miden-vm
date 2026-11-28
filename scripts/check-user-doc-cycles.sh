@@ -8,6 +8,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
 echo "Regenerating core library docs..."
+# Force the build script to run even when the crate is warm-cached, so a stale or
+# incorrect committed docs/ tree cannot pass without being rewritten from MASM.
+touch "${ROOT}/crates/lib/core/build.rs"
 MIDEN_BUILD_LIB_DOCS=1 cargo check -p miden-core-lib
 
 if [ -n "$(git status --porcelain crates/lib/core/docs)" ]; then

@@ -1549,9 +1549,6 @@ fn test_assert_message_without_debug_info_reports_error_code() {
 fn user_doc_assembly_cycle_fixtures_match_documentation() {
     let workspace_root = workspace_docs_root();
     for case in load_assembly_cycle_fixtures() {
-        if !case.measured_here {
-            continue;
-        }
         let measured = measure_program_cycles(&case.program);
         let baseline = measure_program_cycles(&case.baseline_program);
         let delta = measured.saturating_sub(baseline);
@@ -1562,21 +1559,20 @@ fn user_doc_assembly_cycle_fixtures_match_documentation() {
         );
 
         if let Some(root) = workspace_root.as_ref() {
-            let doc = case.doc.as_deref().expect("measured fixtures declare doc");
-            let marker = case.marker.as_deref().expect("measured fixtures declare marker");
-            let content = std::fs::read_to_string(root.join(doc))
-                .unwrap_or_else(|err| panic!("failed to read {doc}: {err}"));
+            let content = std::fs::read_to_string(root.join(&case.doc))
+                .unwrap_or_else(|err| panic!("failed to read {}: {err}", case.doc));
             let actual =
-                extract_cycle_cell_from_marked_row(&content, marker).unwrap_or_else(|| {
+                extract_cycle_cell_from_marked_row(&content, &case.marker).unwrap_or_else(|| {
                     panic!(
-                        "{doc}: marker {marker:?} row has no cycle cell matching {}",
-                        case.expected_text
+                        "{}: marker {:?} row has no cycle cell matching {}",
+                        case.doc, case.marker, case.expected_text
                     )
                 });
             assert!(
                 fixture_expected_matches_cycles(&case.expected_text, &actual),
-                "{doc}: marker {:?} cycle cell is {actual:?}, expected {:?}",
-                marker,
+                "{}: marker {:?} cycle cell is {actual:?}, expected {:?}",
+                case.doc,
+                case.marker,
                 case.expected_text
             );
         }
@@ -1589,10 +1585,8 @@ struct AssemblyCycleFixture {
     baseline_program: String,
     expected_cycles: u32,
     expected_text: String,
-    doc: Option<String>,
-    marker: Option<String>,
-    /// `true` when this crate measures the case (assembly doc fixtures with `doc`+`marker`).
-    measured_here: bool,
+    doc: String,
+    marker: String,
 }
 
 fn load_assembly_cycle_fixtures() -> Vec<AssemblyCycleFixture> {
@@ -1620,9 +1614,6 @@ fn load_assembly_cycle_fixtures() -> Vec<AssemblyCycleFixture> {
                 .next()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or_else(|| panic!("could not parse cycle count from {expected:?}"));
-            let doc = case.get("doc").and_then(toml::Value::as_str).map(str::to_string);
-            let marker = case.get("marker").and_then(toml::Value::as_str).map(str::to_string);
-            let measured_here = doc.is_some() && marker.is_some();
 
             AssemblyCycleFixture {
                 id: case.get("id").and_then(toml::Value::as_str).expect("id").to_string(),
@@ -1638,9 +1629,16 @@ fn load_assembly_cycle_fixtures() -> Vec<AssemblyCycleFixture> {
                     .to_string(),
                 expected_cycles,
                 expected_text: expected,
-                doc,
-                marker,
-                measured_here,
+                doc: case
+                    .get("doc")
+                    .and_then(toml::Value::as_str)
+                    .expect("fixture should declare doc")
+                    .to_string(),
+                marker: case
+                    .get("marker")
+                    .and_then(toml::Value::as_str)
+                    .expect("fixture should declare marker")
+                    .to_string(),
             }
         })
         .collect()

@@ -95,7 +95,8 @@ jobs:
         run: make test NEXTEST_PROFILE=ci
       - name: Build core library and generate documentation
         run: |
-          # Build core library with documentation generation enabled
+          # Force the build script even when the crate is warm-cached.
+          touch crates/lib/core/build.rs
           MIDEN_BUILD_LIB_DOCS=1 cargo build -p miden-core-lib
       - name: Check for documentation changes in crates/lib/core/docs
         run: |
