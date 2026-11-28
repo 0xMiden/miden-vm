@@ -476,9 +476,7 @@ fn render_execution_error(
     execution_state: &DebugExecutor,
     source_manager: &dyn SourceManager,
 ) -> ! {
-    use miden_assembly_syntax::diagnostics::{
-        LabeledSpan, miette::miette, reporting::PrintDiagnostic,
-    };
+    use miden_assembly_syntax::diagnostics::{Label, report, reporting::PrintDiagnostic};
 
     let stacktrace = execution_state.callstack.stacktrace(&execution_state.recent, source_manager);
 
@@ -499,12 +497,9 @@ fn render_execution_error(
             .and_then(|frame| frame.location.as_ref())
             .map(|loc| loc.span)
         {
-            labels.push(LabeledSpan::new_with_span(
-                None,
-                span.start().to_usize()..span.end().to_usize(),
-            ));
+            labels.push(Label::underline(span));
         }
-        let report = miette!(
+        let report = report!(
             labels = labels,
             "program execution failed at step {step} (cycle {cycle}): {err}",
             step = execution_state.cycle,
@@ -534,9 +529,7 @@ fn render_execution_error(
 ) -> ! {
     use core::fmt::Write;
 
-    use miden_assembly_syntax::diagnostics::{
-        LabeledSpan, miette::miette, reporting::PrintDiagnostic,
-    };
+    use miden_assembly_syntax::diagnostics::{Label, report, reporting::PrintDiagnostic};
 
     let stacktrace = execution_state.callstack.stacktrace(&execution_state.recent, source_manager);
 
@@ -560,12 +553,9 @@ fn render_execution_error(
             .and_then(|frame| frame.location.as_ref())
             .map(|loc| loc.span)
         {
-            labels.push(LabeledSpan::new_with_span(
-                None,
-                span.start().to_usize()..span.end().to_usize(),
-            ));
+            labels.push(Label::underline(span));
         }
-        let report = miette!(
+        let report = report!(
             labels = labels,
             "program execution failed at step {step} (cycle {cycle}): {err}",
             step = execution_state.cycle,

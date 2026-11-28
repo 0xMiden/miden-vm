@@ -328,18 +328,15 @@ test-wasm-simd: ## Runs the packed Goldilocks/Eidos vs scalar tests under WASM S
 	RUSTFLAGS="-C target-feature=+simd128" \
 	cargo test -p miden-field -p miden-crypto --no-default-features --lib --target wasm32-wasip1 -- packed
 
-# wasm32-wasip1 refuses to spawn at runtime, so this runs the compact fallback for real. Only the
-# span test is skipped -- it asserts a Rayon worker ran, which cannot hold where threads are
-# unavailable -- so equality tests added later are covered here without touching this target. A
-# passing run is not enough to trust: libtest exits 0 when a filter selects nothing, so a zero-test
-# run would otherwise leave this green while guarding nothing.
+# Exercise witness recording and trace construction on a target without threads.
+# Require a passing test because libtest exits successfully when zero tests run.
 .PHONY: test-wasm-threadless
-test-wasm-threadless: ## Runs the overlapped trace-build tests on a threadless wasm target (requires wasmtime)
+test-wasm-threadless: ## Runs the witness trace-size tests on a threadless wasm target (requires wasmtime)
 	@dir=$$(mktemp -d) || exit 1; \
 	trap 'rm -rf "$$dir"' EXIT INT TERM; \
 	{ CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime run --dir=." \
-		cargo test -p miden-processor --test streamed_hasher --target wasm32-wasip1 \
-		-- --skip overlap_builder_thread_enters_the_instrument_span 2>&1; \
+		cargo test -p miden-processor --test witness_trace_sizes --target wasm32-wasip1 \
+		-- --test-threads=1 2>&1; \
 	  echo $$? >"$$dir/status"; } | tee "$$dir/log"; \
 	status=$$(cat "$$dir/status" 2>/dev/null); \
 	case "$$status" in ''|*[!0-9]*) status=1;; esac; \

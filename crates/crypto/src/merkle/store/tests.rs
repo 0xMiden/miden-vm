@@ -596,6 +596,37 @@ fn test_set_node() -> Result<(), MerkleError> {
 }
 
 #[test]
+fn add_merkle_path_agrees_with_compute_root_on_an_empty_path() -> Result<(), MerkleError> {
+    let node = int_to_node(42);
+    let path = MerklePath::default();
+    let expected_root = path.compute_root(0, node)?;
+
+    let mut store = MerkleStore::new();
+    let node_count = store.num_internal_nodes();
+    assert_eq!(store.add_merkle_path(0, node, path)?, expected_root);
+    assert_eq!(store.num_internal_nodes(), node_count);
+
+    Ok(())
+}
+
+#[test]
+fn set_node_at_the_root_index_returns_the_new_value_as_root() -> Result<(), MerkleError> {
+    let mtree = MerkleTree::new(VALUES4)?;
+    let mut store = MerkleStore::from(&mtree);
+    let value = int_to_node(42);
+
+    let updated = store.set_node(mtree.root(), NodeIndex::root(), value)?;
+    assert_eq!(updated.root, value);
+    assert!(updated.path.is_empty());
+    assert!(matches!(
+        store.get_path(updated.root, NodeIndex::root()),
+        Err(MerkleError::RootNotInStore(root)) if root == value
+    ));
+
+    Ok(())
+}
+
+#[test]
 fn test_constructors() -> Result<(), MerkleError> {
     let mtree = MerkleTree::new(VALUES4)?;
     let store = MerkleStore::from(&mtree);

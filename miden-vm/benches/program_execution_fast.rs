@@ -1,6 +1,6 @@
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{FastProcessor, advice::AdviceInputs};
+use miden_processor::{Processor, advice::AdviceInputs};
 use miden_vm::{Assembler, DefaultHost, StackInputs, internal::InputFile};
 use tokio::runtime::Runtime;
 use walkdir::WalkDir;
@@ -60,14 +60,17 @@ fn program_execution_fast(c: &mut Criterion) {
                                 .with_library(&CoreLibrary::default())
                                 .unwrap();
 
-                            let processor = FastProcessor::new(stack_inputs)
+                            let execution = Processor::new(&program)
+                                .with_stack_inputs(stack_inputs)
                                 .with_advice(advice_inputs.clone())
+                                .execute()
+                                .prepare()
                                 .expect("advice inputs should fit advice map limits");
 
-                            (host, program.clone(), processor)
+                            (host, execution)
                         },
-                        |(mut host, program, processor)| async move {
-                            processor.execute(&program, &mut host).await.unwrap();
+                        |(mut host, execution)| async move {
+                            execution.run(&mut host).await.unwrap();
                         },
                         BatchSize::SmallInput,
                     );

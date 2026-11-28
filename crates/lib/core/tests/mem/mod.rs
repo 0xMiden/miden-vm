@@ -1,7 +1,7 @@
 use miden_assembly::Linkage;
 use miden_processor::{
-    ContextId, DefaultHost, ExecutionError, FastProcessor, Felt, ONE, Program, StackInputs, Word,
-    ZERO, operation::OperationError, trace::RowIndex,
+    ContextId, DefaultHost, ExecutionError, Felt, ONE, Processor, Program, Word, ZERO,
+    operation::OperationError, trace::RowIndex,
 };
 use miden_utils_testing::{
     AdviceStack, build_expected_compress, build_expected_hash, expect_exec_error_matches,
@@ -81,8 +81,7 @@ fn test_memcopy_words() {
 
     let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
 
-    let processor = FastProcessor::new(StackInputs::default());
-    let exec_output = processor.execute_sync(&program, &mut host).unwrap();
+    let exec_output = Processor::new(&program).execute().run_sync(&mut host).unwrap();
 
     let dummy_clk = RowIndex::from(0_usize);
 
@@ -199,8 +198,7 @@ fn test_memcopy_elements() {
 
     let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
 
-    let processor = FastProcessor::new(StackInputs::default());
-    let exec_output = processor.execute_sync(&program, &mut host).unwrap();
+    let exec_output = Processor::new(&program).execute().run_sync(&mut host).unwrap();
 
     for addr in 2002_u32..2020_u32 {
         assert_eq!(

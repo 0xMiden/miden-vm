@@ -1,82 +1,275 @@
-//! Rendering and error reporting implementation details.
-use core::fmt;
+//! Plain-text rendering for library reports and command-line tools.
 
-pub use miette::{
-    DebugReportHandler, JSONReportHandler, NarratableReportHandler, ReportHandler, set_hook,
-};
-#[cfg(feature = "std")]
-pub use miette::{GraphicalReportHandler, GraphicalTheme};
+use core::fmt::{self, Write};
 
-// set_panic_hook is only available with fancy or fancy-no-backtrace features,
-// not with fancy-no-syscall. Since we use fancy-no-syscall to avoid syscall
-// dependencies, we provide a no-op stub for compatibility.
-#[cfg(feature = "std")]
-pub fn set_panic_hook() {
-    // No-op when using fancy-no-syscall feature
-    // The fancy-no-syscall feature doesn't include panic hook support
-}
+use miden_debug_types::{ByteIndex, SourceFile};
+use unicode_width::UnicodeWidthChar;
 
-#[cfg(feature = "std")]
-pub type ReportHandlerOpts = miette::MietteHandlerOpts;
+use crate::{Diagnostic, Label};
 
-#[cfg(feature = "std")]
-pub type DefaultReportHandler = GraphicalReportHandler;
+/// Renders a diagnostic via [fmt::Display].
+pub struct PrintDiagnostic<D>(D);
 
-#[cfg(not(feature = "std"))]
-pub type DefaultReportHandler = miette::DebugReportHandler;
-
-/// A type that can be used to render a [super::Diagnostic] via [core::fmt::Display]
-pub struct PrintDiagnostic<D, R = DefaultReportHandler> {
-    handler: R,
-    diag: D,
-}
-
-impl<D: AsRef<dyn super::Diagnostic>> PrintDiagnostic<D> {
-    pub fn new(diag: D) -> Self {
-        Self { handler: Default::default(), diag }
+impl<D: AsRef<dyn Diagnostic>> PrintDiagnostic<D> {
+    pub fn new(diagnostic: D) -> Self {
+        Self(diagnostic)
     }
-    #[cfg(feature = "std")]
-    pub fn new_without_color(diag: D) -> Self {
-        Self {
-            handler: DefaultReportHandler::new_themed(GraphicalTheme::none()),
-            diag,
+
+    pub fn new_without_color(diagnostic: D) -> Self {
+        Self::new(diagnostic)
+    }
+}
+
+impl<D: AsRef<dyn Diagnostic>> fmt::Display for PrintDiagnostic<D> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        render(f, self.0.as_ref())
+    }
+}
+
+pub(crate) fn render(out: &mut impl Write, diagnostic: &dyn Diagnostic) -> fmt::Result {
+    render_diagnostic(&mut PlainText { out, allow_newlines: true }, diagnostic, None, 0)
+}
+
+struct PlainText<'a, W> {
+    out: &'a mut W,
+    allow_newlines: bool,
+}
+
+impl<W: Write> Write for PlainText<'_, W> {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        let mut start = 0;
+        for (index, ch) in text.char_indices() {
+            if !ch.is_control() || (ch == '\n' && self.allow_newlines) {
+                continue;
+            }
+            self.out.write_str(&text[start..index])?;
+            for escaped in ch.escape_debug() {
+                self.out.write_char(escaped)?;
+            }
+            start = index + ch.len_utf8();
+        }
+        self.out.write_str(&text[start..])
+    }
+}
+
+// Structural fields must stay on one line even when they contain arbitrary input.
+fn write_inline(out: &mut impl Write, text: fmt::Arguments<'_>) -> fmt::Result {
+    PlainText { out, allow_newlines: false }.write_fmt(text)
+}
+
+fn render_diagnostic(
+    out: &mut impl Write,
+    diagnostic: &dyn Diagnostic,
+    inherited_source: Option<&SourceFile>,
+    depth: usize,
+) -> fmt::Result {
+    const MAX_DEPTH: usize = 32;
+    if depth == MAX_DEPTH {
+        return writeln!(out, "  ...");
+    }
+
+    let details = diagnostic.details();
+    write!(out, "{}", diagnostic.severity())?;
+    if let Some(code) = details.code {
+        write_inline(out, format_args!("[{code}]"))?;
+    }
+    writeln!(out, ": {diagnostic}")?;
+
+    let mut cause = diagnostic.source();
+    for _ in depth..MAX_DEPTH {
+        let Some(error) = cause else { break };
+        writeln!(out, "  caused by: {error}")?;
+        cause = error.source();
+    }
+
+    let source = details.source.or(inherited_source);
+    let has_primary_label = details.labels.iter().any(|label| label.primary);
+    for label in details.labels.iter() {
+        if let Some(source) = source.filter(|_| label.has_source_range()) {
+            match Excerpt::new(source, label) {
+                Ok(excerpt) => {
+                    let marker = if has_primary_label && !label.primary { '-' } else { '^' };
+                    excerpt.render(out, label, marker)?;
+                    continue;
+                },
+                Err(reason) => {
+                    let range = label.span.into_range();
+                    write_inline(
+                        out,
+                        format_args!(
+                            "  = source label unavailable (bytes {}..{} in {}): {reason}",
+                            range.start,
+                            range.end,
+                            source.uri(),
+                        ),
+                    )?;
+                    out.write_char('\n')?;
+                },
+            }
+        }
+        if let Some(message) = label.label() {
+            write_inline(out, format_args!("  = {message}"))?;
+            out.write_char('\n')?;
         }
     }
-    #[cfg(not(feature = "std"))]
-    pub fn new_without_color(diag: D) -> Self {
-        Self::new(diag)
+    if let Some(help) = details.help {
+        writeln!(out, "  help: {help}")?;
     }
+
+    for related in details.related {
+        render_diagnostic(out, related, source, depth + 1)?;
+    }
+    Ok(())
 }
 
-impl<D: AsRef<dyn super::Diagnostic>> PrintDiagnostic<D, NarratableReportHandler> {
-    pub fn narrated(diag: D) -> Self {
-        Self {
-            handler: NarratableReportHandler::default(),
-            diag,
+/// A validated byte range into the source file, with its line bounds.
+struct Excerpt<'a> {
+    source: &'a SourceFile,
+    first_line: miden_debug_types::LineIndex,
+    last_line: miden_debug_types::LineIndex,
+}
+
+impl<'a> Excerpt<'a> {
+    fn new(source: &'a SourceFile, label: &Label) -> Result<Self, &'static str> {
+        let span = label.span;
+        if !span.source_id().is_unknown() && span.source_id() != source.id() {
+            return Err("span belongs to another source file");
         }
+        let range = span.into_slice_index();
+        if range.start > range.end || range.end > source.len() {
+            return Err("range is out of bounds");
+        }
+        if source.source_slice(range).is_none() {
+            return Err("range splits a UTF-8 character");
+        }
+        let content = source.content();
+        let first_line = content.line_index(span.start());
+        let last_byte = span.end().to_u32().saturating_sub(1).max(span.start().to_u32());
+        let last_line = content.line_index(ByteIndex::new(last_byte));
+        Ok(Self { source, first_line, last_line })
+    }
+
+    fn render(&self, out: &mut impl Write, label: &Label, marker: char) -> fmt::Result {
+        const MAX_EXCERPT_WIDTH: usize = 200;
+
+        let content = self.source.content();
+        let span = label.span.into_slice_index();
+        let first = self.first_line.to_usize();
+        let last = self.last_line.to_usize();
+
+        // An anchor inside CRLF is displayed at the end of the line's content.
+        let mut location_start = label.span.start();
+        let bytes = self.source.as_bytes();
+        if bytes.get(span.start) == Some(&b'\n')
+            && bytes.get(span.start.saturating_sub(1)) == Some(&b'\r')
+        {
+            location_start = ByteIndex::new(location_start.to_u32() - 1);
+        }
+        if let Some(location) = content.location(location_start) {
+            write_inline(
+                out,
+                format_args!("  --> {}:{}:{}", location.uri, location.line, location.column),
+            )?;
+            out.write_char('\n')?;
+        }
+
+        let context_start = first.saturating_sub(1);
+        let context_end = (last + 1).min(content.last_line_index().to_usize());
+        let too_wide = (context_start..=context_end).any(|index| {
+            content
+                .line_range((index as u32).into())
+                .and_then(|range| {
+                    self.source.as_str().get(range.start.to_usize()..range.end.to_usize())
+                })
+                .is_some_and(|text| {
+                    let text = text
+                        .strip_suffix("\r\n")
+                        .or_else(|| text.strip_suffix('\n'))
+                        .unwrap_or(text);
+                    // Combining characters can occupy bytes without adding display cells.
+                    text.len() > MAX_EXCERPT_WIDTH * 4
+                        || display_column(text, 0) > MAX_EXCERPT_WIDTH
+                })
+        });
+        if too_wide {
+            write_inline(out, format_args!("  = bytes {}..{}", span.start, span.end))?;
+            if let Some(message) = label.label() {
+                write_inline(out, format_args!(": {message}"))?;
+            }
+            out.write_char('\n')?;
+            return Ok(());
+        }
+        let gutter = (context_end + 1).ilog10() as usize + 1;
+        for index in context_start..=context_end {
+            let Some(range) = content.line_range((index as u32).into()) else {
+                continue;
+            };
+            let start = range.start.to_usize();
+            let Some(text) = self.source.as_str().get(start..range.end.to_usize()) else {
+                continue;
+            };
+            let text =
+                text.strip_suffix("\r\n").or_else(|| text.strip_suffix('\n')).unwrap_or(text);
+            write!(out, " {:>gutter$} | ", index + 1)?;
+            write_source_line(out, text)?;
+            out.write_char('\n')?;
+            if index < first || index > last {
+                continue;
+            }
+
+            let label_start = span.start.saturating_sub(start).min(text.len());
+            let label_end = span.end.saturating_sub(start).min(text.len());
+            let Some(prefix) = text.get(..label_start) else {
+                continue;
+            };
+            let Some(marked) = text.get(label_start..label_end) else {
+                continue;
+            };
+            // Source locations count Unicode scalars. Underlines count terminal display cells.
+            let column = display_column(prefix, 0);
+            let width = (display_column(marked, column) - column).max(1);
+
+            write!(out, " {:gutter$} : {:column$}", "", "")?;
+            for _ in 0..width {
+                out.write_char(marker)?;
+            }
+            if index == last
+                && let Some(message) = label.label()
+            {
+                write_inline(out, format_args!(" {message}"))?;
+            }
+            out.write_char('\n')?;
+        }
+
+        Ok(())
     }
 }
 
-impl<D: AsRef<dyn super::Diagnostic>> PrintDiagnostic<D, JSONReportHandler> {
-    pub fn json(diag: D) -> Self {
-        Self { handler: JSONReportHandler, diag }
+fn display_column(text: &str, column: usize) -> usize {
+    text.chars().fold(column, |column, ch| column + display_width(ch, column))
+}
+
+fn display_width(ch: char, column: usize) -> usize {
+    const TAB_WIDTH: usize = 4;
+    if ch == '\t' {
+        TAB_WIDTH - (column % TAB_WIDTH)
+    } else {
+        ch.width().unwrap_or(1)
     }
 }
 
-impl<D: AsRef<dyn super::Diagnostic>> fmt::Display for PrintDiagnostic<D> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.handler.render_report(f, self.diag.as_ref())
+fn write_source_line(out: &mut impl Write, line: &str) -> fmt::Result {
+    let mut column = 0;
+    for ch in line.chars() {
+        let width = display_width(ch, column);
+        if ch == '\t' {
+            write!(out, "{:width$}", "")?;
+        } else if ch.is_control() {
+            out.write_char('\u{fffd}')?;
+        } else {
+            out.write_char(ch)?;
+        }
+        column += width;
     }
-}
-
-impl<D: AsRef<dyn super::Diagnostic>> fmt::Display for PrintDiagnostic<D, NarratableReportHandler> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.handler.render_report(f, self.diag.as_ref())
-    }
-}
-
-impl<D: AsRef<dyn super::Diagnostic>> fmt::Display for PrintDiagnostic<D, JSONReportHandler> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.handler.render_report(f, self.diag.as_ref())
-    }
+    Ok(())
 }

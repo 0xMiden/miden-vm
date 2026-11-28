@@ -24,6 +24,7 @@ fn instruction_cycle_costs_match_docs() {
         ("sub", 2),
         ("sub.2", 2),
         ("mul", 1),
+        ("mul.0", 2),
         ("mul.2", 2),
         ("div", 2),
         ("div.2", 2),

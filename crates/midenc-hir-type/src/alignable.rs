@@ -17,7 +17,7 @@ pub trait Alignable {
     /// * `self` + `align` must be less than `Self::MAX`
     fn align_up(self, align: Self) -> Self;
 
-    /// Compute the nearest power of two less than or equal to `self`
+    /// Returns the largest power of two at most `self`, or `1` if `self` is zero.
     fn prev_power_of_two(self) -> Self;
 }
 
@@ -47,11 +47,7 @@ macro_rules! alignable_impl {
 
             #[inline]
             fn prev_power_of_two(self) -> Self {
-                if self.is_power_of_two() {
-                    self
-                } else {
-                    core::cmp::max(self.next_power_of_two() / 2, 1)
-                }
+                self.checked_ilog2().map_or(1, |exponent| 1 << exponent)
             }
         }
     };
@@ -214,5 +210,23 @@ mod tests {
         assert_eq!(addr.align_up(8), 136);
         assert_eq!(addr.align_up(16), 144);
         assert_eq!(addr.align_up(32), 160);
+    }
+
+    #[test]
+    fn prev_power_of_two_rounds_down() {
+        for value in 1..=u16::MAX {
+            let power = value.prev_power_of_two();
+            // Subtraction checks the upper bound even when doubling the power would overflow.
+            assert!(
+                power.is_power_of_two() && power <= value && value - power < power,
+                "expected the largest power of two at most {value}, got {power}"
+            );
+        }
+        assert_eq!(0u16.prev_power_of_two(), 1);
+
+        assert_eq!(u8::MAX.prev_power_of_two(), 1 << 7);
+        assert_eq!(u32::MAX.prev_power_of_two(), 1 << 31);
+        assert_eq!(u64::MAX.prev_power_of_two(), 1 << 63);
+        assert_eq!(usize::MAX.prev_power_of_two(), 1 << (usize::BITS - 1));
     }
 }

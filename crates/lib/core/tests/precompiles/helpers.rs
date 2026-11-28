@@ -1,9 +1,8 @@
 use miden_assembly::{Assembler, Linkage};
-use miden_core::{Felt, deferred::TRUE_DIGEST};
+use miden_core::{Felt, deferred::TRUE_DIGEST, program::MIN_STACK_DEPTH};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    ContextId, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
-    StackInputs, advice::AdviceInputs,
+    ContextId, DefaultHost, ExecutionError, ExecutionOutput, Processor, StackInputs,
 };
 
 pub use crate::helpers::assert_precompile_witness_round_trips;
@@ -46,13 +45,12 @@ pub fn run_precompile_program_with_stack(
         .with_library(&core_lib)
         .expect("failed to load CoreLibrary into the host");
 
-    let output = FastProcessor::new_with_options(
-        stack_inputs,
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    )
-    .expect("processor construction")
-    .execute_sync(&program, &mut host);
+    let output = Processor::new(&program)
+        .with_stack_inputs(stack_inputs)
+        .execute()
+        .prepare()
+        .expect("processor construction")
+        .run_sync(&mut host);
 
     if let Ok(output) = &output {
         assert!(output.advice.stack().is_empty(), "precompile wrappers must consume advice");
@@ -93,7 +91,9 @@ pub fn expect_precompile_trap(source: &str) -> ExecutionError {
     run_precompile_program(source).expect_err("expected precompile program to trap")
 }
 
-pub fn expect_precompile_trap_with_processor(source: &str) -> (ExecutionError, FastProcessor) {
+pub fn expect_precompile_trap_with_stack(
+    source: &str,
+) -> (ExecutionError, [Felt; MIN_STACK_DEPTH]) {
     let core_lib = CoreLibrary::default();
     let mut assembler = Assembler::default();
     assembler
@@ -107,16 +107,13 @@ pub fn expect_precompile_trap_with_processor(source: &str) -> (ExecutionError, F
     let mut host = DefaultHost::default()
         .with_library(&core_lib)
         .expect("failed to load CoreLibrary into the host");
-    let mut processor = FastProcessor::new_with_options(
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    )
-    .expect("processor construction");
-    let error = processor
-        .execute_mut_sync(&program, &mut host)
+    let mut session =
+        Processor::new(&program).execute().start().expect("precompile session starts");
+    let error = session
+        .run_until_halt_sync(&mut host)
         .expect_err("expected precompile program to trap");
-    (error, processor)
+    let stack = core::array::from_fn(|index| session.state().get_stack_item(index));
+    (error, stack)
 }
 
 pub fn read_stack_felts(output: &ExecutionOutput, len: usize) -> Vec<Felt> {

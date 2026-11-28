@@ -403,9 +403,7 @@ impl AnalysisContext {
         if self.warnings_as_errors() {
             return !self.errors.is_empty();
         }
-        self.errors
-            .iter()
-            .any(|err| matches!(err.severity().unwrap_or(Severity::Error), Severity::Error))
+        self.errors.iter().any(|err| err.severity() == Severity::Error)
     }
 
     pub(crate) fn has_failed(&mut self) -> Result<(), SyntaxError> {

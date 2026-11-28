@@ -23,7 +23,7 @@ use alloc::{format, vec, vec::Vec};
 
 use miden_air_definitions::vm::trace::RowIndex;
 use miden_core::{Felt, Word, field::Field, operations::opcodes, utils::RowMajorMatrix};
-use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+use miden_processor::{DefaultHost, Processor, StackInputs, WitnessOutput};
 
 use crate::repro_harness::{ReproTrace, core_row_mut};
 
@@ -81,14 +81,12 @@ fn build_fixture_with_setup(dyncall_setup: &str, pre_dyncall_depth: u64) -> Fixt
     let stack_inputs = StackInputs::new(&stack_values).unwrap();
 
     let mut host = DefaultHost::default();
-    let (trace, precompile_witness) = FastProcessor::new(stack_inputs)
-        .execute_and_build_trace_sync(
-            &program,
-            &mut host,
-            &miden_vm_stark::memory::default_budget(),
-        )
+    let WitnessOutput { witness, .. } = Processor::new(&program)
+        .with_stack_inputs(stack_inputs)
+        .record_witness()
+        .run_sync(&mut host)
         .unwrap();
-    assert!(precompile_witness.is_none());
+    let trace = crate::repro_harness::materialize_vm_trace(witness);
 
     let main = trace.main_trace();
     let height = main.core_height();

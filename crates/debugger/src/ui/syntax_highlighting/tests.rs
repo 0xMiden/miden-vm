@@ -1,13 +1,15 @@
 use std::string::String;
 
-use miden_assembly_syntax::diagnostics::miette::MietteSpanContents;
-
 use super::*;
 
 #[test]
 fn fallback_selection_preserves_utf8_and_excludes_trailing_newlines() {
-    let source = MietteSpanContents::new(b"text", (0, 4).into(), 0, 0, 1);
-    let mut state = NoopHighlighter.start_highlighter_state(&source);
+    let source = HighlightSource {
+        data: b"text",
+        name: None,
+        language: None,
+    };
+    let mut state = NoopHighlighter.start_highlighter_state(source);
     assert_eq!(state.highlight_line(Cow::Borrowed("text")), vec![Span::raw("text")]);
     let style = Style::new().fg(Color::Red).add_modifier(Modifier::BOLD);
     for (line, selection, expected) in [
@@ -27,20 +29,34 @@ fn fallback_selection_preserves_utf8_and_excludes_trailing_newlines() {
 #[test]
 fn syntax_detection_uses_language_extension_and_shebang() {
     let highlighter = SyntectHighlighter::default();
-    let source =
-        MietteSpanContents::new(b"fn main() {}", (0, 12).into(), 0, 0, 1).with_language("Rust");
-    assert_eq!(highlighter.detect_syntax(&source).unwrap().name, "Rust");
-    let named =
-        MietteSpanContents::new_named("main.rs".into(), b"fn main() {}", (0, 12).into(), 0, 0, 1);
-    assert_eq!(highlighter.detect_syntax(&named).unwrap().name, "Rust");
-    let shebang = MietteSpanContents::new(b"#!/usr/bin/env python\n", (0, 22).into(), 0, 0, 1);
-    assert_eq!(highlighter.detect_syntax(&shebang).unwrap().name, "Python");
-    let invalid = MietteSpanContents::new(&[255], (0, 1).into(), 0, 0, 1);
-    assert!(highlighter.detect_syntax(&invalid).is_none());
-    let unknown = MietteSpanContents::new(b"text", (0, 4).into(), 0, 0, 1).with_language("unknown");
-    let mut fallback = highlighter.start_highlighter_state(&unknown);
+    let source = HighlightSource {
+        data: b"fn main() {}",
+        name: None,
+        language: Some("Rust"),
+    };
+    assert_eq!(highlighter.detect_syntax(source).unwrap().name, "Rust");
+    let named = HighlightSource {
+        data: b"fn main() {}",
+        name: Some("main.rs"),
+        language: None,
+    };
+    assert_eq!(highlighter.detect_syntax(named).unwrap().name, "Rust");
+    let shebang = HighlightSource {
+        data: b"#!/usr/bin/env python\n",
+        name: None,
+        language: None,
+    };
+    assert_eq!(highlighter.detect_syntax(shebang).unwrap().name, "Python");
+    let invalid = HighlightSource { data: &[255], name: None, language: None };
+    assert!(highlighter.detect_syntax(invalid).is_none());
+    let unknown = HighlightSource {
+        data: b"text",
+        name: None,
+        language: Some("unknown"),
+    };
+    let mut fallback = highlighter.start_highlighter_state(unknown);
     assert_eq!(fallback.highlight_line(Cow::Borrowed("text")), vec![Span::raw("text")]);
-    let mut state = highlighter.start_highlighter_state(&source);
+    let mut state = highlighter.start_highlighter_state(source);
     let line = "fn main() { let answer = 42; }";
     let spans = state.highlight_line(Cow::Borrowed(line));
     assert_eq!(spans.iter().map(|span| span.content.as_ref()).collect::<String>(), line);

@@ -384,7 +384,8 @@ impl Smt {
     ///
     /// - [`MerkleError::DuplicateValuesForIndex`] if `kv_pairs` contains the same key more than
     ///   once.
-    /// - [`MerkleError::TooManyLeafEntries`] if mutations would exceed 1024 entries in a leaf.
+    /// - [`MerkleError::TooManyLeafEntries`] if a leaf would contain more than [`MAX_LEAF_ENTRIES`]
+    ///   after the changes.
     ///
     /// # Example
     ///
@@ -415,10 +416,12 @@ impl Smt {
     /// Applies the prospective mutations computed with [`Smt::compute_mutations()`] to this tree.
     ///
     /// # Errors
-    /// If `mutations` was computed on a tree with a different root than this one, returns
-    /// [`MerkleError::ConflictingRoots`] with a two-item [`Vec`]. The first item is the root hash
-    /// the `mutations` were computed against, and the second item is the actual current root of
-    /// this tree.
+    /// - [`MerkleError::ConflictingRoots`] if the mutation set's old root differs from the current
+    ///   tree root.
+    /// - [`MerkleError::TooManyLeafEntries`] if a leaf would contain more than [`MAX_LEAF_ENTRIES`]
+    ///   after applying the set.
+    ///
+    /// If an error is returned, the tree is unchanged.
     pub fn apply_mutations(
         &mut self,
         mutations: MutationSet<SMT_DEPTH, Word, Word>,
@@ -429,13 +432,11 @@ impl Smt {
     /// Applies the prospective mutations computed with [`Smt::compute_mutations()`] to this tree
     /// and returns the reverse mutation set.
     ///
-    /// Applying the reverse mutation sets to the updated tree will revert the changes.
+    /// Applying the reverse set to the updated tree reverts the changes.
     ///
     /// # Errors
-    /// If `mutations` was computed on a tree with a different root than this one, returns
-    /// [`MerkleError::ConflictingRoots`] with a two-item [`Vec`]. The first item is the root hash
-    /// the `mutations` were computed against, and the second item is the actual current root of
-    /// this tree.
+    /// Returns the same errors as [`Self::apply_mutations()`]. If an error is returned, the tree is
+    /// unchanged.
     pub fn apply_mutations_with_reversion(
         &mut self,
         mutations: MutationSet<SMT_DEPTH, Word, Word>,
@@ -704,6 +705,13 @@ mod arbitrary {
         Smt::with_entries(entries).expect("keys are distinct")
     }
 
+    fn absent_key(smt: &Smt, mut key: Word) -> Word {
+        while smt.get_value(&key) != Smt::EMPTY_VALUE {
+            key[0] += crate::ONE;
+        }
+        key
+    }
+
     /// Uniform-random entries. Collisions into the same leaf are practically impossible, so this
     /// branch is mixed with deliberately colliding entries below.
     pub(super) fn random_pairs(
@@ -783,9 +791,8 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            // Sound by construction: open a proof against a real Smt, either for a present key
-            // (inclusion proof) or a fresh key (exclusion proof; absent with overwhelming
-            // probability). Path and leaf are consistent because they come from the same open.
+            // Open a proof against a real Smt for a present key (inclusion proof) or an absent
+            // key (exclusion proof). Path and leaf are consistent because they share an open.
             prop_oneof![
                 // Inclusion proof for a present key of a tree with independent keys.
                 random_pairs(1usize..=6)
@@ -805,15 +812,28 @@ mod arbitrary {
                         smt.open(k)
                     })
                     .boxed(),
-                // Exclusion proof for a fresh key (absent with overwhelming probability).
+                // Exclusion proof for a key guaranteed to be absent.
                 (random_pairs(1usize..=6), any::<Word>())
                     .prop_map(|(pairs, fresh_key)| {
                         let smt = smt_from_pairs(pairs);
+                        let fresh_key = absent_key(&smt, fresh_key);
                         smt.open(&fresh_key)
                     })
                     .boxed(),
             ]
             .boxed()
+        }
+    }
+
+    #[test]
+    fn absent_key_skips_consecutive_stored_keys() {
+        let keys = [Word::empty(), Word::from([1u32, 0, 0, 0])];
+        let smt = smt_from_pairs(keys.map(|key| (key, Word::from([1u32; 4]))).to_vec());
+
+        for key in keys {
+            let key = absent_key(&smt, key);
+            assert_eq!(smt.get_value(&key), Smt::EMPTY_VALUE);
+            smt.open(&key).verify_unset(&key, &smt.root()).unwrap();
         }
     }
 }

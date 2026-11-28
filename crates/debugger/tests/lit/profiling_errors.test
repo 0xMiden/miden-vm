@@ -30,7 +30,7 @@
 
 continue
 
-# ERR-FILE: x invalid profiling reports directory
-# ERR-NO-INSTR: x profiling requires at least one instrument
-# ERR-NO-DIR: x profiling instruments require --profiling-reports-dir
-# ERR-UNKNOWN: x unknown profiling instrument 'bogus-instrument'
+# ERR-FILE: error: invalid profiling reports directory
+# ERR-NO-INSTR: error: profiling requires at least one instrument
+# ERR-NO-DIR: error: profiling instruments require --profiling-reports-dir
+# ERR-UNKNOWN: error: unknown profiling instrument 'bogus-instrument'

@@ -17,6 +17,7 @@ use crate::{
             SUBTREE_DEPTH, SubtreeLeaf, SubtreeLeavesIter, fetch_sibling_pair,
             process_sorted_pairs_to_leaves,
         },
+        removals_first, sort_removals_first,
     },
 };
 
@@ -138,7 +139,8 @@ impl<S: SmtStorage> LargeSmt<S> {
         let mut leaf_count_delta = 0isize;
         let mut entry_count_delta = 0isize;
 
-        let accumulator = process_sorted_pairs_to_leaves(pairs, |leaf_pairs| {
+        let accumulator = process_sorted_pairs_to_leaves(pairs, |mut leaf_pairs| {
+            sort_removals_first(&mut leaf_pairs, &LargeSmt::<S>::EMPTY_VALUE);
             let leaf_index = LeafIndex::<SMT_DEPTH>::from(leaf_pairs[0].0);
             let old_leaf_opt = leaf_map.get(&leaf_index.position()).and_then(|opt| opt.as_ref());
             let old_entry_count = old_leaf_opt.map(|leaf| leaf.entries().len()).unwrap_or(0);
@@ -149,14 +151,7 @@ impl<S: SmtStorage> LargeSmt<S> {
 
             let mut leaf_changed = false;
             for (key, value) in leaf_pairs {
-                // Check if the value has changed
-                let old_value = new_pairs.get(&key).cloned().unwrap_or_else(|| {
-                    // Safe to unwrap: `leaf_pairs` contains keys all belonging to this leaf.
-                    // `SmtLeaf::get_value()` only returns `None` if the key does not belong to the
-                    // leaf, which cannot happen due to the sorting/grouping
-                    // logic in `process_sorted_pairs_to_leaves()`.
-                    leaf.get_value(&key).unwrap()
-                });
+                let old_value = leaf.get_value(&key).expect("key belongs to the leaf");
 
                 if value != old_value {
                     // Update the leaf and track the new key-value pair
@@ -620,7 +615,7 @@ impl<S: SmtStorage> LargeSmt<S> {
         let mut leaf_count_delta = 0isize;
         let mut entry_count_delta = 0isize;
 
-        for (key, value) in new_pairs {
+        for (key, value) in removals_first(new_pairs, &Self::EMPTY_VALUE) {
             let idx = LargeSmt::<S>::key_to_leaf_index(&key).position();
             let entry = leaf_map.entry(idx).or_insert(None);
 
@@ -794,10 +789,9 @@ impl<S: SmtStorage> LargeSmt<S> {
     /// tree.
     ///
     /// # Errors
-    /// If `mutations` was computed on a tree with a different root than this one, returns
-    /// [`MerkleError::ConflictingRoots`] with a two-item [`Vec`]. The first item is the root hash
-    /// the `mutations` were computed against, and the second item is the actual current root of
-    /// this tree.
+    /// - [`MerkleError::ConflictingRoots`] if the mutation set's old root differs from the current
+    ///   tree root. The error is wrapped in [`LargeSmtError::Merkle`].
+    /// - [`LargeSmtError::Storage`] if a storage operation fails.
     pub fn apply_mutations(
         &mut self,
         mutations: MutationSet<SMT_DEPTH, Word, Word>,
@@ -810,13 +804,10 @@ impl<S: SmtStorage> LargeSmt<S> {
     /// Applies the prospective mutations computed with [`LargeSmt::compute_mutations()`] to this
     /// tree and returns the reverse mutation set.
     ///
-    /// Applying the reverse mutation sets to the updated tree will revert the changes.
+    /// Applying the reverse set to the updated tree reverts the changes.
     ///
     /// # Errors
-    /// If `mutations` was computed on a tree with a different root than this one, returns
-    /// [`MerkleError::ConflictingRoots`] with a two-item [`Vec`]. The first item is the root hash
-    /// the `mutations` were computed against, and the second item is the actual current root of
-    /// this tree.
+    /// See [`Self::apply_mutations()`] for the errors this method can return.
     pub fn apply_mutations_with_reversion(
         &mut self,
         mutations: MutationSet<SMT_DEPTH, Word, Word>,

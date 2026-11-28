@@ -27,10 +27,7 @@ use miden_precompiles_stark::{
     prover::prove_precompiles,
     recursive::{PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError},
 };
-use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, StackInputs,
-    operation::OperationError,
-};
+use miden_processor::{DefaultHost, ExecutionError, Processor, operation::OperationError};
 
 use super::verifier_stack::{CALLER_WORD, VERIFIER_RETURN, VerifierStack};
 use crate::{
@@ -64,7 +61,7 @@ fn pvm_keccak_only_recursive_verifier_cost_is_bounded() {
     let initial_stack: [u64; 4] = inputs.claim_commitment().into();
     let mut test = build_test!(SOURCE, initial_stack);
     test.advice_inputs = inputs.advice().clone();
-    let trace = test.execute().expect("Keccak-only PVM proof must verify");
+    let trace = test.build_trace().expect("Keccak-only PVM proof must verify");
     let summary = trace.trace_len_summary();
     eprintln!("Keccak-only PVM recursive trace: {summary:?}");
     assert!(
@@ -199,14 +196,11 @@ fn pvm_verifies_a_session_mixing_every_precompile() {
     advice.append_elements(eddsa_25519_sha512::sign(&ed25519_key, k256.message));
     advice.append_elements(ecdsa_p256_sha256::sign(&p256_key, k256.message));
     let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
-    let output = FastProcessor::new_with_options(
-        StackInputs::default(),
-        AdviceInputs::default().with_stack(advice),
-        ExecutionOptions::default(),
-    )
-    .unwrap()
-    .execute_sync(&program, &mut host)
-    .expect("the mixed execution must succeed");
+    let output = Processor::new(&program)
+        .with_advice(AdviceInputs::default().with_stack(advice))
+        .execute()
+        .run_sync(&mut host)
+        .expect("the mixed execution must succeed");
     assert!(output.advice.stack().is_empty(), "the execution must consume its advice");
 
     let proof = prove_precompiles(

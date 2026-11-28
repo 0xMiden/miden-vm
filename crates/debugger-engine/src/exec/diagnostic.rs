@@ -2,8 +2,8 @@ use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{Word, events::EventId, program::Program};
 use miden_processor::{
-    BaseHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, Felt,
-    FutureMaybeSend, Host, LoadedMastForest, MastForestLoadError, ProcessorState, StackInputs,
+    BaseHost, ExecutionError, ExecutionOptions, ExecutionOutput, Felt, FutureMaybeSend, Host,
+    LoadedMastForest, MastForestLoadError, Processor, ProcessorState, StackInputs,
     advice::{AdviceInputs, AdviceMutation},
     event::{EventError, TraceError},
     trace::RowIndex,
@@ -114,7 +114,7 @@ impl<H: Host> Host for DiagnosticHostWrapper<'_, H> {
 // DIAGNOSTIC EXECUTOR
 // ================================================================================================
 
-/// Wraps [`FastProcessor`] with diagnostic capabilities.
+/// Executes a program while collecting diagnostic information from the host callbacks.
 ///
 /// When execution fails, it captures and reports rich diagnostic information including:
 /// - The clock cycle at failure
@@ -127,13 +127,11 @@ impl<H: Host> Host for DiagnosticHostWrapper<'_, H> {
 /// # Usage
 ///
 /// ```ignore
-/// use miden_tx::TransactionExecutor;
 /// use miden_debug::DiagnosticExecutor;
 ///
-/// let executor = TransactionExecutor::new(&store)
-///     .with_program_executor::<DiagnosticExecutor>()
-///     .execute_transaction(account_id, block_num, notes, tx_args)
-///     .await;
+/// let output = DiagnosticExecutor::new(stack_inputs, advice_inputs, options)
+///     .execute_async(program, host)
+///     .await?;
 /// ```
 pub struct DiagnosticExecutor {
     stack_inputs: StackInputs,
@@ -156,23 +154,15 @@ impl DiagnosticExecutor {
         host: &mut H,
     ) -> impl FutureMaybeSend<Result<ExecutionOutput, ExecutionError>> {
         async move {
-            // Enable debugging and tracing for richer diagnostics.
-            let processor = FastProcessor::new_with_options(
-                self.stack_inputs,
-                self.advice_inputs,
-                self.options,
-            )
-            .expect("advice inputs should fit advice map limits");
-
             let mut wrapper = DiagnosticHostWrapper::new(host);
-
-            match processor.execute(program, &mut wrapper).await {
-                Ok(output) => Ok(output),
-                Err(err) => {
-                    wrapper.report_diagnostics(&err);
-                    Err(err)
-                },
-            }
+            Processor::new(program)
+                .with_stack_inputs(self.stack_inputs)
+                .with_advice(self.advice_inputs)
+                .with_options(self.options)
+                .execute()
+                .run(&mut wrapper)
+                .await
+                .inspect_err(|err| wrapper.report_diagnostics(err))
         }
     }
 }

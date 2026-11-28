@@ -144,9 +144,10 @@ Each RPC accepts exactly one gRPC request message. Extra messages and trailing
 data are rejected before proving. The aggregate upload is bounded by its message
 limit plus the five-byte gRPC header, including fragmented HTTP/2 uploads.
 
-Use `FastProcessor::execute_for_proving_with_advice` or its sync variant to keep
-the final advice needed to build transaction outputs. Send only the witness to
-the service and retain the advice locally.
+Start with `Processor::new(&program)`, then select `record_witness()` and run it with
+`.run(&mut host).await` or `.run_sync(&mut host)` to obtain `WitnessOutput { claim, witness, advice }`.
+Send only the witness to the service and retain the final advice locally to
+build transaction outputs.
 
 This function submits a witness and verifies the returned proof against a claim
 chosen by the caller. Its client limits match the 8 MiB server example above.

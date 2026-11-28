@@ -68,12 +68,13 @@ pub fn sub_imm(span_builder: &mut BasicBlockBuilder, imm: Felt) {
 
 /// Appends a sequence of operations to multiply the value at the top of the stack by an immediate
 /// value. Specifically, the sequences are:
-/// - if imm = 0: DROP PAD
+/// - if imm = 0: PAD MUL
 /// - else if imm = 1: NOOP
 /// - otherwise: PUSH(imm) MUL
 pub fn mul_imm(span_builder: &mut BasicBlockBuilder, imm: Felt) {
     if imm == ZERO {
-        span_builder.push_ops([Drop, Pad]);
+        // Push before consuming the operand to preserve the minimum stack depth.
+        span_builder.push_ops([Pad, Mul]);
     } else if imm == ONE {
         span_builder.push_op(Noop);
     } else {
@@ -232,11 +233,8 @@ fn append_exp(span_builder: &mut BasicBlockBuilder, num_pow_bits: u8) {
 /// - pow = 16: 8 cycles
 fn perform_exp_for_small_power(span_builder: &mut BasicBlockBuilder, pow: u64) {
     match pow {
-        0 => {
-            span_builder.push_op(Drop);
-            span_builder.push_op(Pad);
-            span_builder.push_op(Incr);
-        },
+        // Push before consuming the operand to preserve the minimum stack depth.
+        0 => span_builder.push_ops([Pad, Mul, Incr]),
         1 => span_builder.push_op(Noop), // TODO: show warning?
         2 => {
             span_builder.push_op(Dup0);

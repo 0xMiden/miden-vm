@@ -73,8 +73,13 @@ fn round_trips_exact_lengths_and_full_field_values() {
         let plaintext: Vec<_> = (0..len).map(|i| -Felt::from_u32(i + 1)).collect();
         let context: Vec<_> = (0..17 - len).map(|i| Felt::from_u32(i * 19)).collect();
         let sealed = seal_with_scalar(&public_key, &plaintext, &context, &ephemeral).unwrap();
-        assert_eq!(sealed.to_elements().len(), 8 + 2 * plaintext.len());
-        let decoded = Envelope::from_elements(&sealed.to_elements()).unwrap();
+        let elements = sealed.to_elements();
+        assert_eq!(elements.len(), 8 + 2 * plaintext.len());
+        assert_eq!(
+            sealed.to_commitment(),
+            Eidos::hash_elements_in_domain(&elements, ECGFP5_ENVELOPE)
+        );
+        let decoded = Envelope::from_elements(&elements).unwrap();
         assert_eq!(decoded, sealed);
         assert_eq!(open(&recipient, &context, &decoded).unwrap(), plaintext);
         assert_eq!(
@@ -277,5 +282,55 @@ fn common_api_rejects_malformed_payloads_and_keys() {
     let message = SealingKey::X25519AeadEidos(other.public_key())
         .seal_bytes(&mut rng, b"")
         .unwrap();
+    assert!(matches!(Envelope::try_from(message.clone()), Err(IesError::SchemeMismatch)));
     assert!(matches!(unsealing_key.unseal_bytes(message), Err(IesError::SchemeMismatch)));
+}
+
+#[test]
+fn envelope_commitment_matches_wire_vectors() {
+    let mut recipient = [0; 40];
+    recipient[0] = 7;
+    let recipient = SecretKey::from_bytes(&recipient).unwrap();
+    let mut ephemeral = [0; 40];
+    ephemeral[0] = 11;
+    let ephemeral = SecretKey::from_bytes(&ephemeral).unwrap();
+    let context = [Felt::ONE, -Felt::ONE, Felt::ZERO];
+
+    // Envelopes of 8, 10, and 16 Felts hash one full block, a partial block, and two full blocks.
+    for (len, commitment) in [
+        (
+            0,
+            [
+                1323360137736756305,
+                6567547346883825420,
+                5848813066080227624,
+                8329411256574516913,
+            ],
+        ),
+        (
+            1,
+            [
+                1837408710633817624,
+                6047893048013499352,
+                6321076268458660717,
+                5813719577586248379,
+            ],
+        ),
+        (
+            4,
+            [
+                3335744050054067432,
+                2836741115428609876,
+                5637227018704807387,
+                4172122578530142463,
+            ],
+        ),
+    ] {
+        let plaintext: Vec<_> = (0..len).map(|i| -Felt::from_u32(i + 1)).collect();
+        let sealed =
+            seal_with_scalar(&recipient.public_key(), &plaintext, &context, &ephemeral).unwrap();
+        let bytes = SealedMessage::from(sealed).to_bytes();
+        let decoded = Envelope::try_from(SealedMessage::read_from_bytes(&bytes).unwrap()).unwrap();
+        assert_eq!(decoded.to_commitment().map(|x| x.as_canonical_u64()), commitment);
+    }
 }

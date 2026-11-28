@@ -243,12 +243,6 @@ impl FromStr for Ident {
     }
 }
 
-impl From<Ident> for miden_utils_diagnostics::miette::SourceSpan {
-    fn from(value: Ident) -> Self {
-        value.span.into()
-    }
-}
-
 impl Serializable for Ident {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_usize(self.len());
