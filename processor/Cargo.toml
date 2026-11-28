@@ -62,6 +62,7 @@ miden-assembly = { workspace = true, features = ["testing"] }
 miden-test-serialization-macros.workspace = true
 miden-core = { workspace = true, features = ["arbitrary"] }
 miden-utils-testing.workspace = true
+toml = { workspace = true, features = ["parse"] }
 insta.workspace = true
 pretty_assertions = { workspace = true, features = ["std"] }
 proptest.workspace = true

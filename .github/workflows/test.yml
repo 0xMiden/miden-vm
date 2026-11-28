@@ -95,7 +95,8 @@ jobs:
         run: make test NEXTEST_PROFILE=ci
       - name: Build core library and generate documentation
         run: |
-          # Build core library with documentation generation enabled
+          # Force the build script even when the crate is warm-cached.
+          touch crates/lib/core/build.rs
           MIDEN_BUILD_LIB_DOCS=1 cargo build -p miden-core-lib
       - name: Check for documentation changes in crates/lib/core/docs
         run: |
@@ -412,6 +413,23 @@ jobs:
           ALL_TARGETS_RESULT: ${{ needs.check-features.result }}
           LIBRARIES_RESULT: ${{ needs.check-library-features.result }}
         run: test "$ALL_TARGETS_RESULT" = success && test "$LIBRARIES_RESULT" = success
+
+  check-user-doc-cycles:
+    name: check generated core-lib docs and clk cycle fixtures
+    runs-on: warp-ubuntu-latest-x64-8x
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Diff generated core-lib docs and run clk cycle fixtures
+        run: make check-user-doc-cycles
 
   wasm-handlers-host:
     name: wasm event handlers on a wasm32 host

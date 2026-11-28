@@ -124,9 +124,10 @@ end
 #!
 #! Input: [num_leaves, ...]
 #! Output: [num_peaks, ...]
-#! Cycles: 32
+#! Cycles: 46
 pub proc num_leaves_to_num_peaks(num_leaves: u32) -> u8
-  # count number of peaks (32 cycles)
+  # Packaged-exec cost matches `#! Cycles:` above (core-lib harness measures against it).
+  # Body is u32popcnt (38); remaining cycles are call-boundary overhead.
   u32popcnt
   # => [count, ...]
 end
@@ -155,16 +156,18 @@ end
 #! Output: [...]
 #!
 #! Where:
-#!  - HASH binds `num_leaves` in the `MMR_PEAKS` initial chaining word and hashes `padded_peaks`.
-#!  - The advice map must contain a key with HASH, and its value is
-#!    `[num_leaves, 0, 0 , 0] || padded_peaks`.
+#!  - HASH binds `num_leaves` in the domain-separated `MMR_PEAKS` initial chaining word and
+#!    hashes only `padded_peaks`.
+#!  - The advice map must contain a key with HASH, and its value is the serialized
+#!    header-plus-peaks `[num_leaves, 0, 0, 0] || padded_peaks`.
 #!  - mmr_ptr: the memory location where the MMR data will be written to,
 #!    starting with the MMR forest (its total leaves count) followed by its peaks.
 #!    The address is expected to be word-aligned.
 #!
 #! Cycles: 215 + 9 * extra_peak_pair cycles
-#!    where `extra_peak_pair` is the number of peak pairs in addition to the
-#!    first 16 peaks, i.e. `round_up((num_of_peaks - 16) / 2)`
+#!    where `extra_peak_pair` is the number of peak pairs beyond the first 16
+#!    peaks (zero when `num_of_peaks <= 16`), i.e.
+#!    `round_up(max(num_of_peaks - 16, 0) / 2)`
 pub proc unpack(hash: eidos::Digest, mmr_ptr: MmrPtr)
   # load the preimage and its size to the advice_stack (0 cycles)
   adv.push_mapvaln adv_push
@@ -220,13 +223,22 @@ pub proc unpack(hash: eidos::Digest, mmr_ptr: MmrPtr)
   drop drop
 end
 
-#! Computes the hash of the given MMR and copies it to the Advice Map using its hash as a key.
+#! Computes a commitment to the given MMR and copies the MMR to the Advice Map using the
+#! commitment as a key.
 #!
 #! Input: [mmr_ptr, ...]
 #! Output: [HASH, ...]
+#!
+#! Where:
+#!  - HASH binds `num_leaves` in the domain-separated `MMR_PEAKS` initial chaining word and
+#!    hashes only `padded_peaks`.
+#!  - The advice map stores the serialized header-plus-peaks value
+#!    `[num_leaves, 0, 0, 0] || padded_peaks` under key HASH.
+#!
 #! Cycles: 198 + 6 * extra_peak_pair cycles
-#!    where `extra_peak_pair` is the number of peak pairs in addition to the
-#!    first 16 peaks, i.e. `round_up((num_of_peaks - 16) / 2)`
+#!    where `extra_peak_pair` is the number of peak pairs beyond the first 16
+#!    peaks (zero when `num_of_peaks <= 16`), i.e.
+#!    `round_up(max(num_of_peaks - 16, 0) / 2)`
 pub proc pack(mmr_ptr: MmrPtr) -> eidos::Digest
   # load num_leaves (2 cycles)
   dup mem_load

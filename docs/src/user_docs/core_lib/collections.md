@@ -13,16 +13,9 @@ Namespace `miden::core::collections` contains modules for commonly-used authenti
 ## Merkle Mountain Range
 Module `miden::core::collections::mmr` contains procedures for manipulating [Merkle Mountain Range](https://github.com/opentimestamps/opentimestamps-server/blob/master/doc/merkle-mountain-range.md) data structure which can be used as an append-only log.
 
-The following procedures are available to read data from and make updates to a Merkle Mountain Range.
+Procedure signatures, cycle counts, and detailed stack notes are generated from the MASM comments and kept in sync by CI:
 
-| Procedure                    | Description   |
-| ---------------------------- | ------------- |
-| get                          | Loads the element at the absolute position `pos` in the MMR onto the stack. Valid range for `pos` is between $0$ and $2^{32} - 1$ (both inclusive), and `pos` must refer to an existing leaf: `pos < num_leaves`, where `num_leaves` is stored at `mmr_ptr[0]`. The procedure fails instead of returning an empty or sentinel word when `pos` is outside the current MMR. Inputs: `[pos, mmr_ptr, ...]`. Output: `[EL, ...]`. Where `EL` is the element loaded from the MMR whose memory location starts at `mmr_ptr`. |
-| add                          | Adds a new element to the MMR. This will update the MMR peaks in the VM's memory and the advice provider with any merged nodes. Inputs: `[EL, mmr_ptr, ...]`. Outputs: `[...]`. Where `EL` is the element added to the MMR whose memory location starts at `mmr_ptr`.<br /><br />Cycles: `145 + 39 * peak_merges` |
-| pack                         | Computes a commitment to the given MMR and copies the MMR to the Advice Map using the commitment as a key. Inputs: `[mmr_ptr, ...]`. Outputs: `[HASH, ...]`.<br /><br />Cycles: `128 + 3 * num_peaks` |
-| unpack                       | Writes the MMR whose peaks hash to `HASH` to the memory location pointed to by `mmr_ptr`. Inputs: `[HASH, mmr_ptr, ...]`. Outputs: `[...]`. Where: `HASH` is the MMR peak hash, the hash is expected to be padded to an even length and to have a minimum size of 16 elements. The advice map must contain a key with `HASH`, and its value is `[num_leaves, 0, 0, 0] \|\| hash_data`, and hash_data is the data used to compute `HASH`. `mmr_ptr` is the memory location where the MMR data will be written, starting with the MMR forest (the total count of its leaves) followed by its peaks. The memory location must be word-aligned.<br /><br />Cycles: `162 + 9 * extra_peak_pair` |
-| num_leaves_to_num_peaks      | Given the number of leaves in an MMR, computes the number of peaks (i.e. the number of set bits in `num_leaves`).<br /><br />Inputs: `[num_leaves, ...]`<br />Outputs: `[num_peaks, ...]`<br /><br />Cycles: 67 |
-| num_peaks_to_message_size    | Given the number of peaks, computes the size of the hashing message used when computing the MMR commitment (rounded up to the next even length, with a minimum of 16).<br /><br />Inputs: `[num_peaks, ...]`<br />Outputs: `[message_size, ...]`<br /><br />Cycles: 19 |
+- [`crates/lib/core/docs/collections/mmr.md`](https://github.com/0xMiden/miden-vm/blob/next/crates/lib/core/docs/collections/mmr.md)
 
 `mmr_ptr` is a pointer to the `mmr` data structure, which is defined as:
 1. `mmr_ptr[0]` contains the number of leaves in the MMR
@@ -45,10 +38,6 @@ The following procedures are available to read data from and make updates to a S
 
 Module `miden::core::collections::sorted_array` contains procedures for searching in sorted arrays of words. These procedures use non-deterministic advice to efficiently find values or keys in sorted data structures.
 
-The following procedures are available:
+Procedure signatures, cycle counts, and detailed stack notes are generated from the MASM comments and kept in sync by CI:
 
-| Procedure          | Description |
-|--------------------|-------------|
-| find_word          | Finds a value in a sorted array of words.<br/><br/>**Inputs:** `[VALUE, start_ptr, end_ptr, ...]`<br/>**Outputs:** `[is_value_found, value_ptr, start_ptr, end_ptr, ...]`<br/><br/>Where `VALUE` is the word to search for, `start_ptr` and `end_ptr` define the array bounds (word-aligned), `is_value_found` is 1 if found and 0 otherwise, and `value_ptr` points to the found value or the insertion point.<br/><br/>**Requirements:**<br/>- Words must be sorted in non-decreasing order<br/>- `start_ptr` and `end_ptr` must be word-aligned<br/>- `start_ptr <= end_ptr`<br/><br/>**Cycles:** 25-286 depending on case |
-| find_key_value     | Finds a key in a sorted array of (key, value) word tuples.<br/><br/>**Inputs:** `[KEY, start_ptr, end_ptr, ...]`<br/>**Outputs:** `[is_key_found, key_ptr, start_ptr, end_ptr, ...]`<br/><br/>Where `KEY` is the 4-element key to search for. The array contains pairs of words where each pair is (key, value).<br/><br/>**Requirements:**<br/>- Keys must be sorted in non-decreasing order<br/>- `start_ptr` must be word-aligned<br/>- `(end_ptr - start_ptr)` must be divisible by 8 (double-word aligned)<br/>- `start_ptr <= end_ptr`<br/><br/>**Cycles:** 25-322 depending on case |
-| find_half_key_value | Finds a half-key in a sorted array of (key, value) word tuples. Only the two most significant elements of the key need to match.<br/><br/>**Inputs:** `[key_suffix, key_prefix, start_ptr, end_ptr, ...]`<br/>**Outputs:** `[is_key_found, key_ptr, start_ptr, end_ptr, ...]`<br/><br/>Where `key_prefix` is the most significant element and `key_suffix` is the second most significant element of the key to match.<br/><br/>Same requirements as `find_key_value`. |
+- [`crates/lib/core/docs/collections/sorted_array.md`](https://github.com/0xMiden/miden-vm/blob/next/crates/lib/core/docs/collections/sorted_array.md)

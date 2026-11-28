@@ -38,6 +38,90 @@ fn test_num_leaves_to_num_peaks() {
     build_test!(hash_size, &[0b0001_1111_1111_1111_1111]).expect_stack(&[17]);
 }
 
+/// Reads the `#! Cycles: N` annotation immediately above `pub proc {proc_name}` in local MASM.
+///
+/// Generated docs under `crates/lib/core/docs/` come from these annotations, so measuring against
+/// them keeps the published cycle count tied to the same source of truth.
+fn masm_annotated_cycles(proc_name: &str) -> u64 {
+    // Packaged with miden-core-lib (not the processor crate).
+    const MASM: &str = include_str!("../../asm/collections/mmr.masm");
+
+    let proc_marker = format!("pub proc {proc_name}");
+    let proc_at = MASM
+        .find(&proc_marker)
+        .unwrap_or_else(|| panic!("procedure {proc_name:?} not found in mmr.masm"));
+
+    for line in MASM[..proc_at].lines().rev() {
+        let trimmed = line.trim();
+        if let Some(raw) = trimmed.strip_prefix("#! Cycles:") {
+            let text = raw.trim();
+            return text
+                .split_whitespace()
+                .next()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or_else(|| {
+                    panic!("could not parse cycle count for {proc_name:?} from {trimmed:?}")
+                });
+        }
+        // Stop at the previous procedure so we do not pick up an unrelated Cycles line.
+        if trimmed.starts_with("pub proc ") {
+            break;
+        }
+    }
+    panic!("no `#! Cycles:` annotation found above {proc_name:?} in mmr.masm");
+}
+
+/// Measures `mmr::num_leaves_to_num_peaks` via the core-library harness (real packaged exec).
+///
+/// Expected count is the `#! Cycles:` annotation on that procedure in
+/// `asm/collections/mmr.masm` (also the source for generated docs).
+#[test]
+fn test_num_leaves_to_num_peaks_cycle_count() {
+    let expected_cycles = masm_annotated_cycles("num_leaves_to_num_peaks");
+
+    // Same wrap as processor `measure_program_cycles`: clk leaves one stack value,
+    // so truncate to stay within the 16-element end-of-program limit.
+    let program = format!(
+        "
+    use miden::core::collections::mmr
+
+    {TRUNCATE_STACK_PROC}
+    begin
+      clk push.7 exec.mmr::num_leaves_to_num_peaks drop clk swap sub
+      exec.truncate_stack
+    end
+    "
+    );
+    let baseline = format!(
+        "
+    {TRUNCATE_STACK_PROC}
+    begin
+      clk push.7 drop clk swap sub
+      exec.truncate_stack
+    end
+    "
+    );
+
+    let measured = build_test!(&program)
+        .get_last_stack_state()
+        .iter()
+        .next()
+        .expect("program should leave a cycle delta on the stack")
+        .as_canonical_u64();
+    let base = build_test!(&baseline)
+        .get_last_stack_state()
+        .iter()
+        .next()
+        .expect("baseline should leave a cycle delta on the stack")
+        .as_canonical_u64();
+    let delta = measured.saturating_sub(base);
+    assert_eq!(
+        delta, expected_cycles,
+        "num_leaves_to_num_peaks cycle count changed (measured {measured}, baseline {base}); \
+         update the `#! Cycles:` annotation in asm/collections/mmr.masm (then regenerate docs)"
+    );
+}
+
 #[test]
 fn test_num_peaks_to_message_size() {
     let hash_size = "
